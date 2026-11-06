@@ -53,4 +53,5 @@ Release builds are unsigned for now.
 
 ## License
 
-PolyForm Shield 1.0.0, source-available, not open source. Copyright Nguyen Van Long. See [LICENSE](LICENSE).
+PolyForm Shield 1.0.0, source-available, not open source. Copyright Nguyen Van Long. See [LICENSE](LICENSE). Third-party credits are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
