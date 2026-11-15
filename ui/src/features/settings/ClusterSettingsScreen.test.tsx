@@ -47,6 +47,8 @@ const SAVED_PROMETHEUS = clusterSettings({
     port: 80,
     scheme: "https",
     pathPrefix: "/prom",
+    tenant: null,
+    matcher: null,
   },
 });
 
@@ -315,6 +317,8 @@ test("a saved Prometheus shows its fields in the mono font and keeps its scheme 
     port: 9091,
     scheme: "https",
     pathPrefix: "/prom",
+    tenant: null,
+    matcher: null,
   });
 });
 
@@ -344,6 +348,8 @@ test("picking Prometheus fills the fields from the detected Prometheus, without 
     port: 9090,
     scheme: null,
     pathPrefix: null,
+    tenant: null,
+    matcher: null,
   });
 });
 

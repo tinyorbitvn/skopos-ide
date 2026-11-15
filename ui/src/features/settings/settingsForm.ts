@@ -159,7 +159,7 @@ function providerSetting(
 ): MetricsProviderSetting {
   switch (draft.provider) {
     case "prometheus": {
-      // scheme and pathPrefix have no field: a saved Prometheus keeps them.
+      // These fields have no input yet: a saved Prometheus keeps them.
       const kept = saved.kind === "prometheus" ? saved : null;
       return {
         kind: "prometheus",
@@ -168,6 +168,8 @@ function providerSetting(
         port: Number(draft.promPort.trim()),
         scheme: kept?.scheme ?? null,
         pathPrefix: kept?.pathPrefix ?? null,
+        tenant: kept?.tenant ?? null,
+        matcher: kept?.matcher ?? null,
       };
     }
     case "auto":
