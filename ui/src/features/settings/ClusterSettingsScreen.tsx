@@ -7,6 +7,7 @@ import {
   Input,
   RadioGroup,
   type RadioOption,
+  Segmented,
   Select,
   Spinner,
   toast,
@@ -27,6 +28,7 @@ import {
   emptyDraft,
   type ProviderKind,
   prometheusPrefill,
+  type SchemeChoice,
   type SettingsDraft,
   sameDraft,
   settingsFrom,
@@ -46,7 +48,7 @@ const PROVIDERS: RadioOption<ProviderKind>[] = [
   },
   {
     value: "prometheus",
-    label: "Prometheus",
+    label: "Prometheus or Mimir in the cluster",
     description: "A Service you name, queried through the API server proxy",
   },
   {
@@ -55,6 +57,11 @@ const PROVIDERS: RadioOption<ProviderKind>[] = [
     description: "Current CPU and memory, no history",
   },
   { value: "none", label: "None", description: "No metrics for this cluster" },
+];
+
+const SCHEMES: { value: SchemeChoice; label: string }[] = [
+  { value: "http", label: "HTTP" },
+  { value: "https", label: "HTTPS" },
 ];
 
 function SettingsForm(props: {
@@ -254,6 +261,68 @@ function SettingsForm(props: {
               onChange={(e) => update({ promPort: e.target.value })}
               data-testid="settings-prom-port"
             />
+            <div className={styles.schemeField}>
+              <span className={styles.fieldLabel} aria-hidden="true">
+                Scheme
+              </span>
+              <Segmented
+                label="Scheme"
+                value={draft.promScheme}
+                options={SCHEMES}
+                onChange={(promScheme) => update({ promScheme })}
+                testId="settings-prom-scheme"
+              />
+            </div>
+            <Input
+              label="Path prefix"
+              placeholder="/prometheus for Mimir"
+              className={styles.mono}
+              value={draft.promPrefix}
+              error={errors.promPrefix}
+              onChange={(e) => update({ promPrefix: e.target.value })}
+              data-testid="settings-prom-prefix"
+            />
+            <Input
+              label="Tenant"
+              placeholder="X-Scope-OrgID, empty for none"
+              className={styles.mono}
+              value={draft.promTenant}
+              error={errors.promTenant}
+              onChange={(e) => update({ promTenant: e.target.value })}
+              data-testid="settings-prom-tenant"
+            />
+            <fieldset className={styles.labelPair}>
+              <legend className={`${styles.fieldLabel} ${styles.legend}`}>
+                Cluster label
+              </legend>
+              <div className={styles.labelRow}>
+                <div className={styles.labelPart}>
+                  <Input
+                    aria-label="Cluster label name"
+                    placeholder="cluster"
+                    className={styles.mono}
+                    value={draft.promLabelName}
+                    error={errors.promLabelName}
+                    onChange={(e) => update({ promLabelName: e.target.value })}
+                    data-testid="settings-prom-label-name"
+                  />
+                </div>
+                <span className={styles.equals} aria-hidden="true">
+                  =
+                </span>
+                <div className={styles.labelPart}>
+                  <Input
+                    aria-label="Cluster label value"
+                    placeholder="prod"
+                    className={styles.mono}
+                    value={draft.promLabelValue}
+                    error={errors.promLabelValue}
+                    onChange={(e) => update({ promLabelValue: e.target.value })}
+                    data-testid="settings-prom-label-value"
+                  />
+                </div>
+              </div>
+            </fieldset>
           </div>
         ) : null}
       </section>
