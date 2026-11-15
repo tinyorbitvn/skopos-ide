@@ -14,6 +14,11 @@ start: number, end: number,
  */
 step: number, series: { [key in MetricName]?: Array<[number, number]> }, 
 /**
- * Asked for this target, but no data: the query failed or returned no samples.
+ * Asked for this target, and answered with no samples.
  */
-missing: Array<MetricName>, };
+missing: Array<MetricName>, 
+/**
+ * Asked for this target, and the query failed. A metric is in `missing` or in `failed`,
+ * never in both.
+ */
+failed: Array<MetricName>, };

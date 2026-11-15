@@ -82,7 +82,15 @@ export function metricsResult(
   series: MetricsResult["series"],
   over: Partial<MetricsResult> = {},
 ): MetricsResult {
-  return { start: T0, end: T0 + 3600, step: 60, series, missing: [], ...over };
+  return {
+    start: T0,
+    end: T0 + 3600,
+    step: 60,
+    series,
+    missing: [],
+    failed: [],
+    ...over,
+  };
 }
 
 export function usageItem(
