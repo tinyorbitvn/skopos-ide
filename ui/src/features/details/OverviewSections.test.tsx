@@ -91,13 +91,13 @@ test("summaryStats keeps the columns but Name, Namespace, Age and Actions", () =
   ]);
 });
 
-test("a kind without hooks shows Summary, Relations, Conditions, Fields and Metadata", () => {
+test("a kind without hooks shows Summary, Metadata, Relations, Conditions and Fields", () => {
   show({});
   expect(sectionIds()).toEqual([
     "detail-summary",
+    "detail-metadata",
     "detail-relations",
     "detail-conditions",
-    "detail-metadata",
   ]);
   expect(screen.getByTestId("detail-section-toggle-fields")).toBeTruthy();
   expect(screen.getByTestId("detail-stat-status").textContent).toBe(
