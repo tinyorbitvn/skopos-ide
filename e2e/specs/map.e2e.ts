@@ -85,22 +85,49 @@ async function stopped(element: WebdriverIO.Element): Promise<void> {
   );
 }
 
+/** Whether the point `pointerClick` aims at, the ring's centre, hits the ring's own node. */
+async function onTop(ring: WebdriverIO.Element): Promise<boolean> {
+  return browser.execute((el: Element) => {
+    const box = el.getBoundingClientRect();
+    const x = Math.round(box.x + box.width / 2);
+    const y = Math.round(box.y + box.height / 2);
+    const own = el.closest('[data-testid="map-node"]');
+    const hit = document
+      .elementFromPoint(x, y)
+      ?.closest('[data-testid="map-node"]');
+    return own !== null && hit === own;
+  }, ring as unknown as Element);
+}
+
 /**
  * Clicks a node's ring, so the click lands on the node and not between its parts,
  * and waits for the details pane of "‹Kind› ‹name›".
+ *
+ * The pane narrows the canvas and the view refits when its ResizeObserver reports, which
+ * WebKit can deliver a second late. Until then a node by the right edge lies under the
+ * pane, so the click waits for the ring to be on top; and a refit landing during the
+ * click moves the node away, so the click is tried again. Selecting a selected node
+ * changes nothing.
  */
 async function select(id: string, label: string): Promise<void> {
   await node(id).waitForExist({ timeout: 30000 });
-  const ring = await node(id).$("circle");
-  await stopped(ring);
-  await pointerClick(ring);
+  const shows = async () => {
+    const details = byTestId("map-details");
+    return (
+      (await details.isExisting()) &&
+      (await details.getAttribute("aria-label")) === label
+    );
+  };
   await until(
     async () => {
-      const details = byTestId("map-details");
-      return (
-        (await details.isExisting()) &&
-        (await details.getAttribute("aria-label")) === label
-      );
+      const ring = await node(id).$("circle");
+      if (!(await onTop(ring))) return false;
+      await stopped(ring);
+      if (!(await onTop(ring))) return false;
+      await pointerClick(ring);
+      return browser
+        .waitUntil(shows, { timeout: 3000, interval: 250 })
+        .catch(() => false);
     },
     `selecting ${id} never showed the details of ${label}`,
   );
