@@ -1,0 +1,146 @@
+# Grafana Mimir 3.2.5 in monolithic mode for `make test-metrics` and `make e2e` (spec I65):
+# one replica, filesystem storage on an emptyDir, every ring in memory, multi-tenancy on.
+# Prometheus writes to it as tenant skopos-tenant-a (crates/skopos-core/tests/metrics_kind.rs
+# and e2e/fixtures/prometheus-values.yaml). scripts/metrics-down.sh deletes the namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skopos-e2e-mimir
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mimir-config
+  namespace: skopos-e2e-mimir
+data:
+  mimir.yaml: |
+    multitenancy_enabled: true
+    usage_stats:
+      enabled: false
+    server:
+      http_listen_port: 8080
+      grpc_listen_port: 9095
+      log_level: warn
+    activity_tracker:
+      filepath: /data/metrics-activity.log
+    distributor:
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+    ingester:
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+        replication_factor: 1
+    compactor:
+      data_dir: /data/compactor
+      sharding_ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+    store_gateway:
+      sharding_ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+        replication_factor: 1
+    ruler:
+      rule_path: /data/ruler
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+    ruler_storage:
+      backend: filesystem
+      filesystem:
+        dir: /data/rules
+    blocks_storage:
+      backend: filesystem
+      filesystem:
+        dir: /data/blocks
+      tsdb:
+        dir: /data/tsdb
+      bucket_store:
+        sync_dir: /data/tsdb-sync
+    # Two Prometheus servers may write to tenant a: the core tests' and the e2e one.
+    limits:
+      ingestion_rate: 100000
+      max_global_series_per_user: 1000000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mimir
+  namespace: skopos-e2e-mimir
+  labels:
+    app.kubernetes.io/name: mimir
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mimir
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mimir
+    spec:
+      # The drain tests need the worker to hold only their pods.
+      nodeSelector:
+        kubernetes.io/hostname: skopos-e2e-control-plane
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: mimir
+          image: grafana/mimir:3.2.5
+          args:
+            - -target=all
+            - -config.file=/etc/mimir/mimir.yaml
+          # Relative default paths land on the emptyDir too.
+          workingDir: /data
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9095
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mimir
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: mimir-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mimir
+  namespace: skopos-e2e-mimir
+  labels:
+    app.kubernetes.io/name: mimir
+spec:
+  selector:
+    app.kubernetes.io/name: mimir
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

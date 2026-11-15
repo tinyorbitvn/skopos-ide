@@ -10,17 +10,19 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{Pod, Service};
 use k8s_openapi::jiff::Timestamp;
 use kube::api::{ListParams, PostParams};
+use kube::client::Body;
 use kube::{Api, Client};
-use serde_json::json;
+use serde_json::{json, Value};
 use skopos_core::app_core::AppCore;
+use skopos_core::error::ErrorCode;
 use skopos_core::helm::{ChartRef, HelmHomes, HelmInstallRequest, HelmRepoAdd};
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::metrics::{
-    MetricName, MetricsProvider, MetricsRange, MetricsResult, MetricsTarget, PrometheusChoice,
-    UsageOf, UsageSnapshot, WorkloadKind,
+    LabelMatcher, MetricName, MetricsProvider, MetricsProviderSetting, MetricsRange, MetricsResult,
+    MetricsTarget, PrometheusChoice, UsageOf, UsageSnapshot, WorkloadKind,
 };
 use skopos_core::paths::AppPaths;
 use skopos_core::sessions::{SessionEvent, SessionOutput};
@@ -35,13 +37,23 @@ const RELEASE_NAMESPACE: &str = "skopos-metrics";
 /// scripts/metrics-down.sh deletes these namespaces too.
 const QUERY_NAMESPACE: &str = "skopos-metrics-query";
 const USAGE_NAMESPACE: &str = "skopos-metrics-usage";
+/// The Mimir fixture of e2e/fixtures/mimir.yaml, which scripts/metrics-up.sh applies.
+const MIMIR_NAMESPACE: &str = "skopos-e2e-mimir";
+const MIMIR_SERVICE: &str = "mimir";
+const MIMIR_PORT: u16 = 8080;
+/// The tenant and the cluster label Prometheus writes with (VALUES).
+const TENANT_A: &str = "skopos-tenant-a";
+const TENANT_B: &str = "skopos-tenant-b";
+const CLUSTER_LABEL: &str = "skopos-e2e";
 const NODES: [&str; 2] = ["skopos-e2e-control-plane", "skopos-e2e-worker"];
 /// helm waits on image pulls.
 const INSTALL_WAIT: Duration = Duration::from_secs(600);
 /// A few scrapes, and two for a rate.
 const DATA_WAIT: Duration = Duration::from_secs(300);
 /// No PersistentVolume, alertmanager or pushgateway; a scrape every 15 s; the server and
-/// kube-state-metrics on the control-plane node.
+/// kube-state-metrics on the control-plane node. Every sample also goes to the Mimir
+/// fixture as tenant skopos-tenant-a, labelled cluster="skopos-e2e" and with this
+/// Prometheus's own name, so the e2e Prometheus's samples stay apart (spec I65).
 const VALUES: &str = r#"alertmanager:
   enabled: false
 prometheus-pushgateway:
@@ -49,6 +61,13 @@ prometheus-pushgateway:
 server:
   global:
     scrape_interval: 15s
+    external_labels:
+      cluster: skopos-e2e
+      prometheus: skopos-metrics/skopos-prometheus
+  remoteWrite:
+    - url: http://mimir.skopos-e2e-mimir.svc:8080/api/v1/push
+      headers:
+        X-Scope-OrgID: skopos-tenant-a
   persistentVolume:
     enabled: false
   nodeSelector:
@@ -162,6 +181,20 @@ async fn install_prometheus(core: &AppCore, id: &ClusterId, root: &Path) {
     );
 }
 
+/// Installs the community chart unless an earlier test of this run already did. libtest runs
+/// the Mimir test before `prometheus_from_the_community_chart_answers_every_target`.
+async fn ensure_prometheus(core: &AppCore, id: &ClusterId, root: &Path) {
+    let client = core.cluster_client(id).unwrap();
+    let installed = Api::<Service>::namespaced(client, RELEASE_NAMESPACE)
+        .get_opt(&format!("{RELEASE}-server"))
+        .await
+        .unwrap()
+        .is_some();
+    if !installed {
+        install_prometheus(core, id, root).await;
+    }
+}
+
 /// Deployment `web`: two pods asking for 50m and 32 MiB each, limited to 200m and 64 MiB.
 async fn create_web(client: &Client, namespace: &str) {
     let deployment: Deployment = serde_json::from_value(json!({
@@ -247,9 +280,11 @@ async fn answer_when(
     }
 }
 
-/// Every metric in `present` has data, and exactly `missing` has none.
+/// Every metric in `present` has data, exactly `missing` has none, and no query failed.
 fn has(result: &MetricsResult, present: &[MetricName], missing: &[MetricName]) -> bool {
-    present.iter().all(|name| result.series.contains_key(name)) && result.missing == missing
+    present.iter().all(|name| result.series.contains_key(name))
+        && result.missing == missing
+        && result.failed.is_empty()
 }
 
 fn last(result: &MetricsResult, name: MetricName) -> Option<f64> {
@@ -323,7 +358,7 @@ async fn metrics_server_measures_both_nodes_and_the_test_pods() {
 async fn prometheus_from_the_community_chart_answers_every_target() {
     use MetricName::*;
     let (core, id, root) = connected_kind().await;
-    install_prometheus(&core, &id, root.path()).await;
+    ensure_prometheus(&core, &id, root.path()).await;
     assert_eq!(
         core.metrics_provider(&id, true).await.unwrap(),
         MetricsProvider::Prometheus {
@@ -414,4 +449,117 @@ async fn prometheus_from_the_community_chart_answers_every_target() {
         .await;
     })
     .await;
+}
+
+fn pin(core: &AppCore, id: &ClusterId, setting: MetricsProviderSetting) {
+    let mut settings = core.cluster_settings_get(id);
+    settings.metrics_provider = setting;
+    core.cluster_settings_set(id, settings).unwrap();
+}
+
+/// The Mimir fixture under `/prometheus`, with `tenant` and `cluster="‹cluster›"`.
+fn mimir(tenant: Option<&str>, cluster: &str) -> MetricsProviderSetting {
+    MetricsProviderSetting::Prometheus {
+        namespace: MIMIR_NAMESPACE.to_owned(),
+        service: MIMIR_SERVICE.to_owned(),
+        port: MIMIR_PORT,
+        scheme: None,
+        path_prefix: Some("/prometheus".to_owned()),
+        tenant: tenant.map(str::to_owned),
+        matcher: Some(LabelMatcher {
+            name: "cluster".to_owned(),
+            value: cluster.to_owned(),
+        }),
+    }
+}
+
+/// Waits until Mimir holds `up{cluster="skopos-e2e"}` for tenant a. It asks through the
+/// service proxy with its own header, so it proves Prometheus's remote write arrived.
+async fn wait_for_mimir_samples(client: &Client) {
+    let query: String = url::form_urlencoded::byte_serialize(
+        format!(r#"up{{cluster="{CLUSTER_LABEL}"}}"#).as_bytes(),
+    )
+    .collect();
+    let path = format!(
+        "/api/v1/namespaces/{MIMIR_NAMESPACE}/services/{MIMIR_SERVICE}:{MIMIR_PORT}/proxy/prometheus/api/v1/query?query={query}"
+    );
+    let started = Instant::now();
+    loop {
+        let request = http::Request::get(path.as_str())
+            .header("X-Scope-OrgID", TENANT_A)
+            .body(Vec::new())
+            .unwrap();
+        let samples = match client.send(request.map(Body::from)).await {
+            Ok(response) => {
+                let body = response
+                    .into_body()
+                    .collect_bytes()
+                    .await
+                    .unwrap_or_default();
+                serde_json::from_slice::<Value>(&body)
+                    .ok()
+                    .and_then(|v| v["data"]["result"].as_array().map(Vec::len))
+                    .unwrap_or(0)
+            }
+            Err(_) => 0,
+        };
+        if samples > 0 {
+            return;
+        }
+        assert!(
+            started.elapsed() < DATA_WAIT,
+            "Mimir never held up for tenant {TENANT_A} and cluster {CLUSTER_LABEL}"
+        );
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs make test-metrics: Prometheus and metrics-server on the skopos-e2e kind cluster"]
+async fn mimir_through_the_service_proxy_keeps_to_one_tenant_and_one_cluster() {
+    use MetricName::*;
+    let (core, id, root) = connected_kind().await;
+    let client = core.cluster_client(&id).unwrap();
+    Api::<Service>::namespaced(client.clone(), MIMIR_NAMESPACE)
+        .get(MIMIR_SERVICE)
+        .await
+        .expect("scripts/metrics-up.sh applies e2e/fixtures/mimir.yaml");
+    ensure_prometheus(&core, &id, root.path()).await;
+    wait_for_mimir_samples(&client).await;
+
+    // Tenant a and its cluster: the header arrives through the API server (I9).
+    pin(&core, &id, mimir(Some(TENANT_A), CLUSTER_LABEL));
+    answer_when(&core, &id, &MetricsTarget::Cluster, |r| {
+        r.series.contains_key(&CpuUsage)
+            && r.series.contains_key(&MemoryUsage)
+            && r.failed.is_empty()
+    })
+    .await;
+
+    // No tenant: Mimir's 401 names the setting (I10).
+    pin(&core, &id, mimir(None, CLUSTER_LABEL));
+    let err = core
+        .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Unauthorized, "{err:?}");
+    assert_eq!(
+        err.message,
+        "Mimir needs a tenant: set Tenant in this cluster's metrics settings."
+    );
+
+    // An unknown tenant, or another cluster: empty answers, not errors (I17).
+    for setting in [
+        mimir(Some(TENANT_B), CLUSTER_LABEL),
+        mimir(Some(TENANT_A), "other"),
+    ] {
+        pin(&core, &id, setting.clone());
+        let result = core
+            .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+            .await
+            .unwrap();
+        assert!(result.series.is_empty(), "{setting:?}: {result:?}");
+        assert_eq!(result.missing.len(), 15, "{setting:?}: {result:?}");
+        assert!(result.failed.is_empty(), "{setting:?}: {result:?}");
+    }
 }

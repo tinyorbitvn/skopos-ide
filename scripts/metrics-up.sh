@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Installs metrics-server v0.9.1 on the skopos-e2e kind cluster, for `make test-metrics`. Needs
-# the network. The Prometheus chart is installed by the tests, with the app's own Helm code.
+# Installs metrics-server v0.9.1 and the Grafana Mimir fixture (e2e/fixtures/mimir.yaml) on the
+# skopos-e2e kind cluster, for `make test-metrics`. Needs the network. The Prometheus chart is
+# installed by the tests, with the app's own Helm code.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 config=e2e/.tmp/kubeconfig
@@ -25,3 +26,7 @@ kubectl --kubeconfig "$config" -n kube-system rollout status deployment/metrics-
   --timeout=300s >/dev/null
 kubectl --kubeconfig "$config" wait --for=condition=Available \
   apiservice/v1beta1.metrics.k8s.io --timeout=300s >/dev/null
+# Mimir, which the tests' Prometheus writes to as tenant skopos-tenant-a (spec I65).
+kubectl --kubeconfig "$config" apply -f e2e/fixtures/mimir.yaml >/dev/null
+kubectl --kubeconfig "$config" -n skopos-e2e-mimir rollout status deployment/mimir \
+  --timeout=600s >/dev/null
