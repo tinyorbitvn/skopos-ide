@@ -866,7 +866,7 @@ async fn without_services_proxy_rights_the_query_is_forbidden_and_names_the_perm
 }
 
 #[tokio::test]
-async fn a_query_that_times_out_is_missing_and_when_all_do_the_call_is_unreachable() {
+async fn a_query_that_times_out_is_failed_and_when_all_do_the_call_is_unreachable() {
     let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
     core.set_metrics_limits_for_test(MetricsLimits {
         query: Duration::from_millis(300),
@@ -888,7 +888,8 @@ async fn a_query_that_times_out_is_missing_and_when_all_do_the_call_is_unreachab
         .metrics_query(&id, &web_pod(), MetricsRange::OneHour)
         .await
         .unwrap();
-    assert_eq!(result.missing, [MetricName::CpuUsage]);
+    assert_eq!(result.failed, [MetricName::CpuUsage]);
+    assert!(result.missing.is_empty());
     assert_eq!(result.series.len(), 10);
 
     fake.serve_proxy(
@@ -947,7 +948,8 @@ async fn a_not_found_from_prometheus_keeps_the_answers_and_drops_the_detection()
         .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
         .await
         .unwrap();
-    assert_eq!(result.missing, [MetricName::CpuUsage]);
+    assert_eq!(result.failed, [MetricName::CpuUsage]);
+    assert!(result.missing.is_empty());
     assert_eq!(fake.request_count("/api/v1/services"), 1);
     core.metrics_provider(&id, false).await.unwrap();
     assert_eq!(fake.request_count("/api/v1/services"), 2);
@@ -1097,4 +1099,40 @@ async fn a_pinned_cluster_label_reaches_every_query() {
     }
     assert!(requests.iter().any(|request| request.params["query"]
         .contains(r#"node_uname_info{nodename="worker", cluster="prod"}"#)));
+}
+
+#[tokio::test]
+async fn a_failed_query_is_in_failed_and_an_empty_one_in_missing() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    community_chart(
+        &fake,
+        prometheus(|request| {
+            let query = &request.params["query"];
+            if query.contains("node_cpu_seconds_total") {
+                ProxyReply::json(
+                    500,
+                    json!({ "status": "error", "errorType": "internal", "error": "boom" }),
+                )
+            } else if query.contains("kube_node_status_capacity") {
+                no_samples(request)
+            } else {
+                matrix(request, &[1.0])
+            }
+        }),
+    );
+
+    let result = core
+        .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert_eq!(result.failed, [MetricName::CpuUsage]);
+    assert_eq!(
+        result.missing,
+        [
+            MetricName::CpuCapacity,
+            MetricName::MemoryCapacity,
+            MetricName::PodCapacity
+        ]
+    );
+    assert_eq!(result.series.len(), 11);
 }

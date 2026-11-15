@@ -299,8 +299,11 @@ pub struct MetricsResult {
     #[ts(type = "number")]
     pub step: i64,
     pub series: BTreeMap<MetricName, Vec<(f64, f64)>>,
-    /// Asked for this target, but no data: the query failed or returned no samples.
+    /// Asked for this target, and answered with no samples.
     pub missing: Vec<MetricName>,
+    /// Asked for this target, and the query failed. A metric is in `missing` or in `failed`,
+    /// never in both.
+    pub failed: Vec<MetricName>,
 }
 
 /// Where this cluster's metrics come from, and why.
@@ -481,6 +484,7 @@ mod tests {
             step: 60,
             series: BTreeMap::from([(MetricName::CpuUsage, vec![(60.0, 0.5)])]),
             missing: vec![MetricName::FsUsage],
+            failed: vec![MetricName::FsReads],
         };
         assert_eq!(
             serde_json::to_value(&result).unwrap(),
@@ -490,6 +494,7 @@ mod tests {
                 "step": 60,
                 "series": { "cpuUsage": [[60.0, 0.5]] },
                 "missing": ["fsUsage"],
+                "failed": ["fsReads"],
             })
         );
     }

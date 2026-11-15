@@ -25,8 +25,9 @@ const PARALLEL_QUERIES: usize = 6;
 type Points = Vec<(f64, f64)>;
 
 impl AppCore {
-    /// The target's metrics over `range`. A metric whose query fails or returns no samples is
-    /// in `missing`; the call rejects only when every query failed.
+    /// The target's metrics over `range`. A metric whose query returns no samples is in
+    /// `missing`, one whose query fails is in `failed`; the call rejects only when every
+    /// query failed.
     pub async fn metrics_query(
         &self,
         id: &ClusterId,
@@ -71,6 +72,7 @@ impl AppCore {
             step: window.step,
             series: BTreeMap::new(),
             missing: Vec::new(),
+            failed: Vec::new(),
         };
         if matches!(scope, Scope::Pods { pods: [], .. }) {
             // A workload with no pod right now: nothing to ask.
@@ -105,7 +107,7 @@ impl AppCore {
                 Err(err) => {
                     service_gone |= err.code == ErrorCode::NotFound;
                     first_error.get_or_insert(err);
-                    result.missing.push(name);
+                    result.failed.push(name);
                 }
             }
         }
