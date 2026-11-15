@@ -2,6 +2,8 @@ import { replaceText } from "../helpers/helm";
 import { kubectl } from "../helpers/kube";
 import {
   ensureMetricsProviders,
+  MIMIR,
+  MIMIR_TENANT,
   PROMETHEUS_SERVER_SELECTOR,
   type PrometheusService,
 } from "../helpers/metrics";
@@ -23,7 +25,8 @@ const PODS = "nav-item-core-pods";
 const SAMPLES_TIMEOUT = 5 * 60_000;
 /** metrics-server is read every 15 s; its own scrape adds up to a minute on a new install. */
 const USAGE_TIMEOUT = 45_000;
-const SAVED = "Saved. Changes apply at once; the proxy applies on the next connect.";
+const SAVED =
+  "Saved. Changes apply at once; the proxy applies on the next connect.";
 
 let prometheus: PrometheusService = { namespace: "", service: "", port: 0 };
 
@@ -38,7 +41,11 @@ async function until(
   message: string,
   timeout = 60_000,
 ): Promise<void> {
-  await browser.waitUntil(check, { timeout, interval: 1000, timeoutMsg: message });
+  await browser.waitUntil(check, {
+    timeout,
+    interval: 1000,
+    timeoutMsg: message,
+  });
 }
 
 /**
@@ -88,6 +95,29 @@ async function saveProvider(
   );
 }
 
+/** Pins the Mimir fixture under /prometheus with `tenant` and the kind cluster's label, and saves. */
+async function saveMimir(tenant: string): Promise<void> {
+  await clickWhenShown("header-cluster-settings");
+  await shown("cluster-settings", 30_000);
+  await shown("settings-save", 30_000);
+  await clickWhenShown("settings-metrics-prometheus");
+  await replaceText("settings-prom-namespace", MIMIR.namespace);
+  await replaceText("settings-prom-service", MIMIR.service);
+  await replaceText("settings-prom-port", String(MIMIR.port));
+  await clickWhenShown("settings-prom-scheme-http");
+  await replaceText("settings-prom-prefix", "/prometheus");
+  await replaceText("settings-prom-tenant", tenant);
+  await replaceText("settings-prom-label-name", "cluster");
+  await replaceText("settings-prom-label-value", "skopos-e2e");
+  const save = byTestId("settings-save");
+  await save.waitForEnabled({ timeout: 15_000 });
+  await save.click();
+  await until(
+    async () => (await text("settings-status")) === SAVED,
+    `the Mimir setting with tenant ${tenant} was never saved`,
+  );
+}
+
 async function openOverview(): Promise<void> {
   await clickWhenShown("nav-overview");
   await shown("overview-metrics", 30_000);
@@ -95,8 +125,9 @@ async function openOverview(): Promise<void> {
 
 describe("metrics", () => {
   before(async function () {
-    // A new kind cluster pulls metrics-server and the Prometheus chart's images.
-    this.timeout(900_000);
+    // A new kind cluster pulls metrics-server, Mimir and the Prometheus chart's images,
+    // and an older release is upgraded to write to Mimir.
+    this.timeout(1_500_000);
     prometheus = await ensureMetricsProviders();
     await openCluster(KIND);
   });
@@ -118,7 +149,9 @@ describe("metrics", () => {
       async () => (await usageCells("usage-cpu")).length > 0,
       "the Pods table never showed its CPU cells",
     );
-    expect((await usageCells("usage-cpu")).every((cell) => cell === "—")).toBe(true);
+    expect((await usageCells("usage-cpu")).every((cell) => cell === "—")).toBe(
+      true,
+    );
   });
 
   it("a pinned Prometheus fills the gauges and charts, reads 6h, shows a table and moves the readout", async function () {
@@ -146,9 +179,9 @@ describe("metrics", () => {
         ),
       "the gauges never showed numbers",
     );
-    expect(await byTestId("overview-gauge-cpu").getAttribute("aria-valuenow")).toMatch(
-      /^\d+$/,
-    );
+    expect(
+      await byTestId("overview-gauge-cpu").getAttribute("aria-valuenow"),
+    ).toMatch(/^\d+$/);
 
     await clickWhenShown("metrics-view-table");
     const table = await shown("metrics-table-cpu");
@@ -164,7 +197,9 @@ describe("metrics", () => {
     await until(
       async () =>
         (
-          (await byTestId("metrics-chart-cpu-plot").getAttribute("aria-label")) ?? ""
+          (await byTestId("metrics-chart-cpu-plot").getAttribute(
+            "aria-label",
+          )) ?? ""
         ).startsWith("CPU over the last 6 hours: "),
       "the CPU chart never answered for the last 6 hours",
       120_000,
@@ -217,6 +252,44 @@ describe("metrics", () => {
     );
     await clickWhenShown("detail-close");
     await gone("detail-drawer");
+  });
+
+  it("Mimir in the cluster: a tenant and a cluster label fill the Overview, and an unknown tenant shows the note", async function () {
+    this.timeout(SAMPLES_TIMEOUT + 4 * 60_000);
+    await saveMimir(MIMIR_TENANT);
+    await openOverview();
+    await until(
+      async () =>
+        (await text("metrics-source")) ===
+        `Prometheus ${MIMIR.namespace}/${MIMIR.service}:${MIMIR.port}, pinned in the cluster settings, through the API server proxy, tenant ${MIMIR_TENANT}, label cluster="skopos-e2e"`,
+      "the source line never named the tenant and the label",
+    );
+    await until(
+      () => chartsHaveData(["cpu", "memory", "pods", "disk"]),
+      "the CPU, Memory, Pods and Disk charts never showed Mimir's data",
+      SAMPLES_TIMEOUT,
+    );
+    await until(
+      async () =>
+        /^\d+(\.\d)? of \d+(\.\d)? cores · Prometheus$/.test(
+          await text("overview-gauge-cpu-caption"),
+        ) &&
+        /^\d+(\.\d)? of \d+(\.\d)? GiB · Prometheus$/.test(
+          await text("overview-gauge-memory-caption"),
+        ),
+      "the gauges never showed Mimir's numbers",
+    );
+
+    await saveMimir("skopos-tenant-b");
+    await openOverview();
+    await until(
+      async () =>
+        (await text("metrics-note")).startsWith(
+          'No samples for tenant skopos-tenant-b with cluster="skopos-e2e": check the tenant and the cluster label in the cluster settings.',
+        ),
+      "the note for an unknown tenant never showed",
+    );
+    expect(await text("metrics-note-action")).toBe("Cluster settings");
   });
 
   it("Detect finds a Prometheus Service by itself", async () => {

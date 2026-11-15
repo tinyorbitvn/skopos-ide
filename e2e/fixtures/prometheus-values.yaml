@@ -11,6 +11,15 @@ prometheus-node-exporter:
 server:
   global:
     scrape_interval: 15s
+    # Mimir's tenant tests (spec I65). The `prometheus` label keeps these samples apart from
+    # the core tests' Prometheus, which writes to the same tenant.
+    external_labels:
+      cluster: skopos-e2e
+      prometheus: skopos-e2e-metrics/skopos-e2e-prometheus
+  remoteWrite:
+    - url: http://mimir.skopos-e2e-mimir.svc:8080/api/v1/push
+      headers:
+        X-Scope-OrgID: skopos-tenant-a
   persistentVolume:
     enabled: false
   nodeSelector:
