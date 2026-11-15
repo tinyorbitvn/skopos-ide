@@ -147,6 +147,7 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
             port,
             scheme,
             path_prefix,
+            ..
         } => Chosen {
             provider: MetricsProvider::Prometheus {
                 namespace: namespace.clone(),

@@ -38,6 +38,10 @@ pub enum MetricsProviderSetting {
         scheme: Option<PrometheusScheme>,
         /// Where Prometheus serves its API when it runs under a path, such as `/prometheus`.
         path_prefix: Option<String>,
+        /// Sent as `X-Scope-OrgID`, for Mimir and other multi-tenant APIs.
+        tenant: Option<String>,
+        /// A label every query also matches, for a tenant that holds several clusters.
+        matcher: Option<LabelMatcher>,
     },
     MetricsServer,
     /// `none` on the wire. A variant named `None` would read as `Option::None` in patterns.
@@ -53,9 +57,28 @@ pub enum PrometheusScheme {
     Https,
 }
 
+/// `name="value"`: a label every query also matches, such as `cluster="prod"`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LabelMatcher {
+    pub name: String,
+    pub value: String,
+}
+
+const PATH_PREFIX_ERROR: &str = "The path prefix must be a path such as /prometheus.";
+const TENANT_ERROR: &str =
+    "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.";
+const LABEL_NAME_ERROR: &str = "A label name is letters, digits and _, and does not start with __.";
+const LABEL_PAIR_ERROR: &str = "A cluster label needs a name and a value.";
+const LABEL_VALUE_ERROR: &str = "A label value is at most 1024 characters.";
+/// Mimir's longest tenant ID.
+const TENANT_MAX: usize = 150;
+const LABEL_VALUE_MAX: usize = 1024;
+
 impl MetricsProviderSetting {
-    /// The setting as it is saved. A pinned Service has its names checked and its path
-    /// prefix trimmed to `/a/b` form, or `None`. Anything else is `InvalidInput`.
+    /// The setting as it is saved. A pinned Service has its names checked, its path prefix
+    /// trimmed to `/a/b` form or `None`, its tenant and cluster label checked (spec I2, I3).
+    /// Anything else is `InvalidInput`.
     pub(crate) fn normalized(self) -> CoreResult<Self> {
         let Self::Prometheus {
             namespace,
@@ -63,6 +86,8 @@ impl MetricsProviderSetting {
             port,
             scheme,
             path_prefix,
+            tenant,
+            matcher,
         } = self
         else {
             return Ok(self);
@@ -88,6 +113,8 @@ impl MetricsProviderSetting {
             port,
             scheme,
             path_prefix: path_prefix_of(path_prefix)?,
+            tenant: tenant_of(tenant)?,
+            matcher: matcher_of(matcher)?,
         })
     }
 }
@@ -120,11 +147,63 @@ fn path_prefix_of(prefix: Option<String>) -> CoreResult<Option<String>> {
             .split('/')
             .any(|segment| segment == "." || segment == "..");
     if unusable {
-        return Err(invalid(
-            "the Prometheus path prefix must be a path such as /prometheus",
-        ));
+        return Err(invalid(PATH_PREFIX_ERROR));
     }
     Ok(Some(prefix.to_owned()))
+}
+
+/// Mimir's tenant ID rules (spec I2): trimmed, `None` when empty, else 1 to 150 ASCII
+/// letters, digits and `! - _ . * ' ( )`, and not `.`, `..` or `__mimir_cluster`.
+fn tenant_of(tenant: Option<String>) -> CoreResult<Option<String>> {
+    let Some(tenant) = tenant else {
+        return Ok(None);
+    };
+    let tenant = tenant.trim();
+    if tenant.is_empty() {
+        return Ok(None);
+    }
+    // Only ASCII passes, so bytes are characters.
+    let usable = tenant.len() <= TENANT_MAX
+        && tenant
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"!-_.*'()".contains(&b))
+        && !matches!(tenant, "." | ".." | "__mimir_cluster");
+    if !usable {
+        return Err(invalid(TENANT_ERROR));
+    }
+    Ok(Some(tenant.to_owned()))
+}
+
+/// The cluster label (spec I3): the name trimmed, the value as typed; `None` when both are
+/// empty.
+fn matcher_of(matcher: Option<LabelMatcher>) -> CoreResult<Option<LabelMatcher>> {
+    let Some(LabelMatcher { name, value }) = matcher else {
+        return Ok(None);
+    };
+    let name = name.trim().to_owned();
+    if name.is_empty() && value.is_empty() {
+        return Ok(None);
+    }
+    if name.is_empty() || value.is_empty() {
+        return Err(invalid(LABEL_PAIR_ERROR));
+    }
+    if !is_label_name(&name) {
+        return Err(invalid(LABEL_NAME_ERROR));
+    }
+    if value.chars().count() > LABEL_VALUE_MAX {
+        return Err(invalid(LABEL_VALUE_ERROR));
+    }
+    Ok(Some(LabelMatcher { name, value }))
+}
+
+/// `[a-zA-Z_][a-zA-Z0-9_]*`, without the `__` prefix Prometheus reserves.
+fn is_label_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && !name.starts_with("__")
 }
 
 /// What `metrics_query` reads.
@@ -298,7 +377,32 @@ mod tests {
             port,
             scheme: None,
             path_prefix: prefix.map(str::to_owned),
+            tenant: None,
+            matcher: None,
         }
+    }
+
+    /// A Mimir gateway pinned with `tenant` and `matcher` as typed.
+    fn mimir(tenant: Option<&str>, matcher: Option<(&str, &str)>) -> MetricsProviderSetting {
+        MetricsProviderSetting::Prometheus {
+            namespace: "mimir".to_owned(),
+            service: "mimir-gateway".to_owned(),
+            port: 80,
+            scheme: None,
+            path_prefix: Some("/prometheus".to_owned()),
+            tenant: tenant.map(str::to_owned),
+            matcher: matcher.map(|(name, value)| LabelMatcher {
+                name: name.to_owned(),
+                value: value.to_owned(),
+            }),
+        }
+    }
+
+    /// The message of an `InvalidInput` refusal.
+    fn refusal(setting: MetricsProviderSetting) -> String {
+        let err = setting.normalized().unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidInput);
+        err.message
     }
 
     #[test]
@@ -315,6 +419,8 @@ mod tests {
                 "port": 9090,
                 "scheme": null,
                 "pathPrefix": "/prom",
+                "tenant": null,
+                "matcher": null,
             })
         );
         let https: MetricsProviderSetting = serde_json::from_value(json!({
@@ -426,5 +532,121 @@ mod tests {
             let err = setting.clone().normalized().unwrap_err();
             assert_eq!(err.code, ErrorCode::InvalidInput, "{setting:?}");
         }
+        assert_eq!(
+            refusal(pinned("monitoring", "prom", 9090, Some("prom"))),
+            "The path prefix must be a path such as /prometheus."
+        );
+    }
+
+    #[test]
+    fn a_setting_saved_by_0_5_0_loads_with_no_tenant_or_matcher() {
+        let old: MetricsProviderSetting = serde_json::from_value(json!({
+            "kind": "prometheus",
+            "namespace": "m",
+            "service": "p",
+            "port": 9090,
+            "scheme": null,
+            "pathPrefix": null,
+        }))
+        .unwrap();
+        assert!(matches!(
+            old,
+            MetricsProviderSetting::Prometheus {
+                tenant: None,
+                matcher: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(mimir(Some("team-a"), Some(("cluster", "prod")))).unwrap(),
+            json!({
+                "kind": "prometheus",
+                "namespace": "mimir",
+                "service": "mimir-gateway",
+                "port": 80,
+                "scheme": null,
+                "pathPrefix": "/prometheus",
+                "tenant": "team-a",
+                "matcher": { "name": "cluster", "value": "prod" },
+            })
+        );
+    }
+
+    #[test]
+    fn a_tenant_is_trimmed_and_follows_mimir_rules() {
+        let tenant_of = |tenant: &str| match mimir(Some(tenant), None).normalized().unwrap() {
+            MetricsProviderSetting::Prometheus { tenant, .. } => tenant,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(tenant_of(" team-a "), Some("team-a".to_owned()));
+        assert_eq!(tenant_of("   "), None);
+        assert_eq!(tenant_of(""), None);
+        let every_kind = "aZ09!-_.*'()";
+        assert_eq!(tenant_of(every_kind), Some(every_kind.to_owned()));
+        let longest = "t".repeat(150);
+        assert_eq!(tenant_of(&longest), Some(longest.clone()));
+
+        let text =
+            "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.";
+        let too_long = "t".repeat(151);
+        for bad in [
+            "a|b",
+            "team a",
+            "team/a",
+            "é",
+            ".",
+            " .. ",
+            "__mimir_cluster",
+            too_long.as_str(),
+        ] {
+            assert_eq!(refusal(mimir(Some(bad), None)), text, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_cluster_label_needs_a_prometheus_name_and_a_value_up_to_1024_characters() {
+        let matcher_of = |name: &str, value: &str| match mimir(None, Some((name, value)))
+            .normalized()
+            .unwrap()
+        {
+            MetricsProviderSetting::Prometheus { matcher, .. } => matcher,
+            other => panic!("{other:?}"),
+        };
+        let pair = |name: &str, value: &str| {
+            Some(LabelMatcher {
+                name: name.to_owned(),
+                value: value.to_owned(),
+            })
+        };
+        assert_eq!(matcher_of(" cluster ", "prod"), pair("cluster", "prod"));
+        // The value is kept as typed: spaces, quotes and backslashes included.
+        assert_eq!(
+            matcher_of("cluster", r#" eu "west" \1 "#),
+            pair("cluster", r#" eu "west" \1 "#)
+        );
+        assert_eq!(matcher_of("_x9", "1"), pair("_x9", "1"));
+        assert_eq!(matcher_of("  ", ""), None);
+        assert_eq!(matcher_of("", ""), None);
+        // 1024 characters of four UTF-8 bytes and two UTF-16 units each.
+        let longest = "😀".repeat(1024);
+        assert_eq!(matcher_of("cluster", &longest), pair("cluster", &longest));
+
+        let name_text = "A label name is letters, digits and _, and does not start with __.";
+        for bad in ["9cluster", "clus-ter", "__name__", "__x", "é"] {
+            assert_eq!(
+                refusal(mimir(None, Some((bad, "prod")))),
+                name_text,
+                "{bad:?}"
+            );
+        }
+        let pair_text = "A cluster label needs a name and a value.";
+        assert_eq!(refusal(mimir(None, Some(("cluster", "")))), pair_text);
+        assert_eq!(refusal(mimir(None, Some(("", "prod")))), pair_text);
+        assert_eq!(refusal(mimir(None, Some((" ", "prod")))), pair_text);
+        let too_long = "v".repeat(1025);
+        assert_eq!(
+            refusal(mimir(None, Some(("cluster", too_long.as_str())))),
+            "A label value is at most 1024 characters."
+        );
     }
 }

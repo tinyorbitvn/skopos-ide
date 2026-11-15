@@ -175,6 +175,8 @@ fn pinned_prometheus(
         port: 9090,
         scheme,
         path_prefix: path_prefix.map(str::to_owned),
+        tenant: None,
+        matcher: None,
     }
 }
 
@@ -224,6 +226,8 @@ async fn a_pinned_prometheus_is_saved_tidied_and_a_bad_one_is_refused() {
         port: 9090,
         scheme: Some(PrometheusScheme::Https),
         path_prefix: prefix.map(str::to_owned),
+        tenant: None,
+        matcher: None,
     };
     save_provider(&core, &id, pinned(Some(" /prometheus/ "))).unwrap();
     assert_eq!(
@@ -499,6 +503,8 @@ async fn a_setting_is_used_as_is_without_detection() {
             port: 9090,
             scheme: None,
             path_prefix: None,
+            tenant: None,
+            matcher: None,
         },
     )
     .unwrap();

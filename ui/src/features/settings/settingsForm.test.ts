@@ -62,6 +62,8 @@ test("a saved Prometheus fills the three fields", () => {
         port: 80,
         scheme: null,
         pathPrefix: null,
+        tenant: null,
+        matcher: null,
       },
     }),
   );
@@ -211,6 +213,8 @@ test("a saved Prometheus keeps its scheme and path prefix; a new one saves null 
       port: 80,
       scheme: "https",
       pathPrefix: "/prom",
+      tenant: null,
+      matcher: null,
     },
   });
   const edited = { ...draftFrom(saved), promPort: "9091" };
@@ -221,6 +225,8 @@ test("a saved Prometheus keeps its scheme and path prefix; a new one saves null 
     port: 9091,
     scheme: "https",
     pathPrefix: "/prom",
+    tenant: null,
+    matcher: null,
   });
   const fresh = draft({
     provider: "prometheus",
@@ -235,6 +241,8 @@ test("a saved Prometheus keeps its scheme and path prefix; a new one saves null 
     port: 9090,
     scheme: null,
     pathPrefix: null,
+    tenant: null,
+    matcher: null,
   });
 });
 
