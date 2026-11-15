@@ -13,6 +13,7 @@ import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { resetMetricsForTest, useMetrics } from "../../stores/metrics";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { clusterSettings, prometheus } from "../../test/metrics";
 import { CONNECTED } from "../../test/terminal";
@@ -105,6 +106,29 @@ const PROM_FIELDS = [
   "settings-prom-port",
 ];
 const promFields = () => PROM_FIELDS.map((id) => input(id).value);
+const SAVED_MIMIR = clusterSettings({
+  metricsProvider: {
+    kind: "prometheus",
+    namespace: "mimir",
+    service: "mimir-gateway",
+    port: 80,
+    scheme: "https",
+    pathPrefix: "/prometheus",
+    tenant: "team-a",
+    matcher: { name: "cluster", value: "prod" },
+  },
+});
+const MIMIR_FIELDS = [
+  "settings-prom-prefix",
+  "settings-prom-tenant",
+  "settings-prom-label-name",
+  "settings-prom-label-value",
+];
+const mimirFields = () => MIMIR_FIELDS.map((id) => input(id).value);
+const scheme = (value: "http" | "https") =>
+  screen
+    .getByTestId(`settings-prom-scheme-${value}`)
+    .querySelector("input") as HTMLInputElement;
 
 function type(id: string, value: string): void {
   fireEvent.change(input(id), { target: { value } });
@@ -210,7 +234,7 @@ test("each field carries its label and help, and the provider options their desc
     ),
   ).toEqual([
     "DetectLook for a Prometheus Service across namespaces, then fall back to metrics-server",
-    "PrometheusA Service you name, queried through the API server proxy",
+    "Prometheus or Mimir in the clusterA Service you name, queried through the API server proxy",
     "metrics-server onlyCurrent CPU and memory, no history",
     "NoneNo metrics for this cluster",
   ]);
@@ -527,4 +551,149 @@ test("the back button opens the cluster's Overview", async () => {
   await show();
   fireEvent.click(button("settings-back"));
   expect(screen.getByText("overview page")).toBeTruthy();
+});
+
+test("Prometheus or Mimir shows Scheme, Path prefix, Tenant and the Cluster label after Port, mono, with their placeholders", async () => {
+  await show({ saved: SAVED_MIMIR });
+  const order = [...PROM_FIELDS, "settings-prom-scheme", ...MIMIR_FIELDS];
+  const inPage = Array.from(document.querySelectorAll("[data-testid]"))
+    .map((e) => e.getAttribute("data-testid") ?? "")
+    .filter((id) => order.includes(id));
+  expect(inPage).toEqual(order);
+
+  expect(screen.getByRole("radiogroup", { name: "Scheme" })).toBe(
+    screen.getByTestId("settings-prom-scheme"),
+  );
+  expect(screen.getByTestId("settings-prom-scheme").textContent).toBe(
+    "HTTPHTTPS",
+  );
+  expect(screen.getByText("Scheme").classList.contains("fieldLabel")).toBe(
+    true,
+  );
+  expect(input("settings-prom-prefix").parentElement?.textContent).toBe(
+    "Path prefix",
+  );
+  expect(input("settings-prom-tenant").parentElement?.textContent).toBe(
+    "Tenant",
+  );
+  expect(MIMIR_FIELDS.map((id) => input(id).placeholder)).toEqual([
+    "/prometheus for Mimir",
+    "X-Scope-OrgID, empty for none",
+    "cluster",
+    "prod",
+  ]);
+  for (const id of MIMIR_FIELDS) {
+    expect([id, input(id).classList.contains("mono")]).toEqual([id, true]);
+  }
+  const pair = screen.getByRole("group", { name: "Cluster label" });
+  expect(pair.textContent).toBe("Cluster label=");
+  expect(
+    within(pair).getByRole("textbox", { name: "Cluster label name" }),
+  ).toBe(input("settings-prom-label-name"));
+  expect(
+    within(pair).getByRole("textbox", { name: "Cluster label value" }),
+  ).toBe(input("settings-prom-label-value"));
+});
+
+test("a saved Mimir fills every field and selects HTTPS", async () => {
+  await show({ saved: SAVED_MIMIR });
+  expect(promFields()).toEqual(["mimir", "mimir-gateway", "80"]);
+  expect(scheme("https").checked).toBe(true);
+  expect(scheme("http").checked).toBe(false);
+  expect(mimirFields()).toEqual(["/prometheus", "team-a", "cluster", "prod"]);
+  expect(status()).toBe("");
+});
+
+test("picking Prometheus or Mimir from another provider starts at HTTP with the new fields empty", async () => {
+  await show({ saved: FULL });
+  pickProvider("prometheus");
+  expect(promFields()).toEqual([
+    "observability",
+    "prometheus-operated",
+    "9090",
+  ]);
+  expect(scheme("http").checked).toBe(true);
+  expect(mimirFields()).toEqual(["", "", "", ""]);
+});
+
+test("the path prefix, tenant and label show the core's errors under them and block Save", async () => {
+  await show({ saved: SAVED_MIMIR });
+  type("settings-prom-prefix", "prometheus");
+  type("settings-prom-tenant", "team|b");
+  type("settings-prom-label-name", "__name__");
+  expect(errorOf("settings-prom-prefix")).toBe(
+    "The path prefix must be a path such as /prometheus.",
+  );
+  expect(errorOf("settings-prom-tenant")).toBe(
+    "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.",
+  );
+  expect(errorOf("settings-prom-label-name")).toBe(
+    "A label name is letters, digits and _, and does not start with __.",
+  );
+  expect(errorOf("settings-prom-label-value")).toBeNull();
+  expect(status()).toBe("Fix the fields marked in red to save.");
+  expect(button("settings-save").disabled).toBe(true);
+
+  type("settings-prom-label-name", "cluster");
+  type("settings-prom-label-value", "");
+  expect(errorOf("settings-prom-label-name")).toBeNull();
+  expect(errorOf("settings-prom-label-value")).toBe(
+    "A cluster label needs a name and a value.",
+  );
+  type("settings-prom-label-value", "v".repeat(1025));
+  expect(errorOf("settings-prom-label-value")).toBe(
+    "A label value is at most 1024 characters.",
+  );
+});
+
+test("Restore defaults empties the scheme, path prefix, tenant and label too", async () => {
+  await show({ saved: SAVED_MIMIR });
+  fireEvent.click(button("settings-restore"));
+  expect(radio("auto").checked).toBe(true);
+  pickProvider("prometheus");
+  expect(scheme("http").checked).toBe(true);
+  expect(promFields()).toEqual(["", "", ""]);
+  expect(mimirFields()).toEqual(["", "", "", ""]);
+});
+
+test("Save sends the scheme, path prefix, tenant and label as the core saves them", async () => {
+  const backend = await show({ saved: FULL });
+  pickProvider("prometheus");
+  type("settings-prom-namespace", "mimir");
+  type("settings-prom-service", "mimir-gateway");
+  type("settings-prom-port", "80");
+  fireEvent.click(scheme("https"));
+  type("settings-prom-prefix", " /prometheus/ ");
+  type("settings-prom-tenant", " team-a ");
+  type("settings-prom-label-name", " cluster ");
+  type("settings-prom-label-value", "prod");
+  await save();
+  expect(savedPayload(backend)?.metricsProvider).toEqual(
+    SAVED_MIMIR.metricsProvider,
+  );
+});
+
+test("the new fields are labelled and spaced like the others, and the label pair wraps under a narrow window", () => {
+  const decls = (file: string, selector: string) =>
+    cssRules(CSS_FILES[file] ?? "").find((r) => r.selector === selector)
+      ?.decls ?? [];
+  const screenCss = "/src/features/settings/ClusterSettingsScreen.module.css";
+  const inputCss = "/src/design/Input.module.css";
+  expect(decls(screenCss, ".fieldLabel")).toEqual(decls(inputCss, ".label"));
+  expect(decls(screenCss, ".schemeField")).toEqual(decls(inputCss, ".field"));
+  expect(Object.fromEntries(decls(screenCss, ".labelPair"))).toMatchObject({
+    "grid-column": "1 / -1",
+    "min-width": "0",
+  });
+  expect(Object.fromEntries(decls(screenCss, ".labelRow"))).toMatchObject({
+    display: "flex",
+    "flex-wrap": "wrap",
+  });
+  expect(Object.fromEntries(decls(screenCss, ".labelPart"))).toEqual({
+    flex: "1 1 160px",
+    "min-width": "0",
+  });
+  expect(
+    Object.fromEntries(decls(screenCss, ".promGrid"))["grid-template-columns"],
+  ).toBe("repeat(auto-fit, minmax(160px, 1fr))");
 });
