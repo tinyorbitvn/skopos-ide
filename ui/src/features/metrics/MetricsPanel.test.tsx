@@ -8,6 +8,7 @@ import type { MetricsResult } from "../../ipc/generated/MetricsResult";
 import type { MetricsTarget } from "../../ipc/generated/MetricsTarget";
 import { resetCatalogForTest } from "../../stores/catalog";
 import { askQuery, resetMetricsForTest } from "../../stores/metrics";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { flush, mockBackend } from "../../test/ipc";
 import {
   FORBIDDEN,
@@ -191,6 +192,22 @@ test.each([
   [
     prometheus({ chosenBy: "setting" }),
     "Prometheus monitoring/prometheus-server:80, pinned in the cluster settings, through the API server proxy",
+  ],
+  [
+    prometheus({
+      chosenBy: "setting",
+      tenant: "team-a",
+      matcher: { name: "cluster", value: "prod" },
+    }),
+    'Prometheus monitoring/prometheus-server:80, pinned in the cluster settings, through the API server proxy, tenant team-a, label cluster="prod"',
+  ],
+  [
+    prometheus({ chosenBy: "setting", tenant: "team-a" }),
+    "Prometheus monitoring/prometheus-server:80, pinned in the cluster settings, through the API server proxy, tenant team-a",
+  ],
+  [
+    prometheus({ matcher: { name: "cluster", value: "prod" } }),
+    'Prometheus monitoring/prometheus-server:80, autodetected, through the API server proxy, label cluster="prod"',
   ],
   [
     metricsServer("fallback"),
@@ -550,4 +567,67 @@ test("metrics-server: a failed snapshot shows its error block, and Retry asks ag
   expect(backend.callsTo("metrics_usage")).toHaveLength(2);
   expect(screen.queryByTestId("metrics-error")).toBeNull();
   expect(text("metrics-chart-cpu-now")).toBe("250m");
+});
+
+const MIMIR = prometheus({
+  chosenBy: "setting",
+  tenant: "team-a",
+  matcher: { name: "cluster", value: "prod" },
+});
+const NO_SAMPLES = metricsResult(
+  {},
+  { missing: ["cpuUsage", "memoryUsage", "podUsage", "diskUsage"] },
+);
+
+test("no samples at all under a tenant and a label: the note with Cluster settings, over the charts' own empty text", async () => {
+  await show({
+    metrics_provider: () => MIMIR,
+    metrics_query: () => NO_SAMPLES,
+  });
+  const note = screen.getByTestId("metrics-note");
+  expect(note.querySelector("p")?.textContent).toBe(
+    'No samples for tenant team-a with cluster="prod": check the tenant and the cluster label in the cluster settings.',
+  );
+  expect(text("metrics-chart-cpu-empty")).toBe("No samples in this range.");
+  expect(text("metrics-note-action")).toBe("Cluster settings");
+  fireEvent.click(screen.getByTestId("metrics-note-action"));
+  expect(text("location")).toBe("/cluster/c1/settings");
+});
+
+const QUIET: [string, MetricsResult, MetricsPanelProps["objectEmpty"]][] = [
+  [
+    "a query failed",
+    metricsResult({}, { missing: ["memoryUsage"], failed: ["cpuUsage"] }),
+    undefined,
+  ],
+  [
+    "a metric has samples",
+    metricsResult({ cpuUsage: points([1.2]) }, { missing: ["memoryUsage"] }),
+    undefined,
+  ],
+  [
+    "the object explains its own gap",
+    NO_SAMPLES,
+    () => "No samples: web has no Pods.",
+  ],
+];
+
+test.each(QUIET)("no tenant note when %s", async (_, result, objectEmpty) => {
+  await show(
+    { metrics_provider: () => MIMIR, metrics_query: () => result },
+    objectEmpty ? { objectEmpty } : {},
+  );
+  expect(screen.queryByTestId("metrics-note")).toBeNull();
+});
+
+test("a long tenant or label wraps in the source line and the note", () => {
+  const rules = cssRules(
+    CSS_FILES["/src/features/metrics/MetricsPanel.module.css"] ?? "",
+  );
+  for (const selector of [".source", ".noteText"]) {
+    const decls = Object.fromEntries(
+      rules.find((r) => r.selector === selector)?.decls ?? [],
+    );
+    expect([selector, decls["overflow-wrap"]]).toEqual([selector, "anywhere"]);
+  }
 });

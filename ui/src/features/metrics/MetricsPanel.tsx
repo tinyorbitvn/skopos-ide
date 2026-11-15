@@ -24,8 +24,10 @@ import {
   type ChartDef,
   chartsFor,
   factsFromResult,
+  labelText,
   type MetricsSource,
   mergeFacts,
+  noSamplesNote,
   RANGE_PERIOD,
   serverNote,
   type TargetFacts,
@@ -88,7 +90,12 @@ function sourceText(provider: PrometheusProvider | ServerProvider): string {
       provider.chosenBy === "setting"
         ? "pinned in the cluster settings"
         : "autodetected";
-    return `Prometheus ${provider.namespace}/${provider.service}:${provider.port}, ${how}, through the API server proxy`;
+    // Only the Service, the tenant and the label: nothing that identifies the user (I21).
+    const tenant =
+      provider.tenant === null ? "" : `, tenant ${provider.tenant}`;
+    const label =
+      provider.matcher === null ? "" : `, label ${labelText(provider.matcher)}`;
+    return `Prometheus ${provider.namespace}/${provider.service}:${provider.port}, ${how}, through the API server proxy${tenant}${label}`;
   }
   const how =
     provider.chosenBy === "setting"
@@ -290,9 +297,25 @@ function PrometheusMetrics(
       : null;
 
   const status = busy ? (error ? "Retrying" : `Loading ${range}`) : null;
+  // An answer with no samples under a tenant or a label (spec I17), unless the object's
+  // own empty text already explains it (D2 §10.4).
+  const objectText =
+    result === null
+      ? null
+      : (props.objectEmpty?.("prometheus", result.start) ?? null);
+  const note =
+    result !== null && error === null && objectText === null
+      ? noSamplesNote(provider, result)
+      : null;
   return (
     <>
       <Toolbar provider={provider} status={status} live={null} />
+      {note ? (
+        <Note
+          text={note}
+          action={{ label: "Cluster settings", to: settingsPath(clusterId) }}
+        />
+      ) : null}
       {error ? (
         <ErrorBlock
           clusterId={clusterId}

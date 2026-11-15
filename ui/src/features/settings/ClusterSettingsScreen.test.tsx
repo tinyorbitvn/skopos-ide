@@ -12,10 +12,14 @@ import { toast } from "../../design";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
-import { resetMetricsForTest, useMetrics } from "../../stores/metrics";
+import {
+  queryKey,
+  resetMetricsForTest,
+  useMetrics,
+} from "../../stores/metrics";
 import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, clusterEntry, flush, mockBackend } from "../../test/ipc";
-import { clusterSettings, prometheus } from "../../test/metrics";
+import { clusterSettings, metricsResult, prometheus } from "../../test/metrics";
 import { CONNECTED } from "../../test/terminal";
 import { ClusterSettingsRoute } from "./ClusterSettingsScreen";
 import { keptDraft, resetDraftsForTest } from "./drafts";
@@ -696,4 +700,17 @@ test("the new fields are labelled and spaced like the others, and the label pair
   expect(
     Object.fromEntries(decls(screenCss, ".promGrid"))["grid-template-columns"],
   ).toBe("repeat(auto-fit, minmax(160px, 1fr))");
+});
+
+test("Save drops the answers read under the old settings", async () => {
+  const key = queryKey("id-x", { kind: "cluster" }, "1h");
+  useMetrics.setState({
+    queries: {
+      [key]: { value: metricsResult({}), error: null, loading: false },
+    },
+  });
+  await show();
+  type("settings-terminal-cwd", "/srv");
+  await save();
+  expect(useMetrics.getState().queries[key]).toBeUndefined();
 });

@@ -17,7 +17,11 @@ import { failureMessage } from "../../ipc/client";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import { useCatalog } from "../../stores/catalog";
 import { useClusterState } from "../../stores/clusters";
-import { forgetProvider, useMetrics } from "../../stores/metrics";
+import {
+  forgetProvider,
+  forgetQueries,
+  useMetrics,
+} from "../../stores/metrics";
 import { useFetch } from "../helm/useFetch";
 import styles from "./ClusterSettingsScreen.module.css";
 import { dropDraft, keepDraft, keptDraft } from "./drafts";
@@ -123,6 +127,7 @@ function SettingsForm(props: {
           : "Reconnect to use the new proxy.",
       );
       forgetProvider(clusterId);
+      forgetQueries(clusterId);
       setSaved(next);
       setDraft(draftFrom(next));
       setJustSaved(true);
