@@ -116,6 +116,10 @@ fn chart_provider() -> MetricsProvider {
         namespace: "metrics".to_owned(),
         service: "prometheus-server".to_owned(),
         port: 80,
+        scheme: None,
+        path_prefix: None,
+        tenant: None,
+        matcher: None,
         chosen_by: PrometheusChoice::CommunityChart,
     }
 }
@@ -530,6 +534,10 @@ async fn a_setting_is_used_as_is_without_detection() {
             namespace: "monitoring".to_owned(),
             service: "prom".to_owned(),
             port: 9090,
+            scheme: None,
+            path_prefix: None,
+            tenant: None,
+            matcher: None,
             chosen_by: PrometheusChoice::Setting,
         }
     );
@@ -1135,4 +1143,38 @@ async fn a_failed_query_is_in_failed_and_an_empty_one_in_missing() {
         ]
     );
     assert_eq!(result.series.len(), 11);
+}
+
+#[tokio::test]
+async fn the_provider_names_the_pinned_prefix_tenant_and_label_and_a_detected_one_none() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    save_provider(
+        &core,
+        &id,
+        pinned_mimir(Some("team-a"), Some(("cluster", "prod"))),
+    )
+    .unwrap();
+    assert_eq!(
+        core.metrics_provider(&id, false).await.unwrap(),
+        MetricsProvider::Prometheus {
+            namespace: "monitoring".to_owned(),
+            service: "mimir".to_owned(),
+            port: 8080,
+            scheme: None,
+            path_prefix: Some("/prometheus".to_owned()),
+            tenant: Some("team-a".to_owned()),
+            matcher: Some(LabelMatcher {
+                name: "cluster".to_owned(),
+                value: "prod".to_owned(),
+            }),
+            chosen_by: PrometheusChoice::Setting,
+        }
+    );
+
+    community_chart(&fake, up);
+    save_provider(&core, &id, MetricsProviderSetting::Auto).unwrap();
+    assert_eq!(
+        core.metrics_provider(&id, false).await.unwrap(),
+        chart_provider()
+    );
 }

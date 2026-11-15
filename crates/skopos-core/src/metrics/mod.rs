@@ -319,6 +319,11 @@ pub enum MetricsProvider {
         namespace: String,
         service: String,
         port: u16,
+        /// As the Endpoint has them; `null` for a detected Prometheus.
+        scheme: Option<PrometheusScheme>,
+        path_prefix: Option<String>,
+        tenant: Option<String>,
+        matcher: Option<LabelMatcher>,
         chosen_by: PrometheusChoice,
     },
     MetricsServer {
@@ -449,6 +454,33 @@ mod tests {
         assert_eq!(
             serde_json::to_value(MetricsProviderSetting::Off).unwrap(),
             json!({ "kind": "none" })
+        );
+        let provider = MetricsProvider::Prometheus {
+            namespace: "mimir".to_owned(),
+            service: "mimir-gateway".to_owned(),
+            port: 80,
+            scheme: Some(PrometheusScheme::Https),
+            path_prefix: Some("/prometheus".to_owned()),
+            tenant: Some("team-a".to_owned()),
+            matcher: Some(LabelMatcher {
+                name: "cluster".to_owned(),
+                value: "prod".to_owned(),
+            }),
+            chosen_by: PrometheusChoice::Setting,
+        };
+        assert_eq!(
+            serde_json::to_value(&provider).unwrap(),
+            json!({
+                "kind": "prometheus",
+                "namespace": "mimir",
+                "service": "mimir-gateway",
+                "port": 80,
+                "scheme": "https",
+                "pathPrefix": "/prometheus",
+                "tenant": "team-a",
+                "matcher": { "name": "cluster", "value": "prod" },
+                "chosenBy": "setting",
+            })
         );
 
         let target: MetricsTarget = serde_json::from_value(json!({

@@ -149,14 +149,8 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
             path_prefix,
             tenant,
             matcher,
-        } => Chosen {
-            provider: MetricsProvider::Prometheus {
-                namespace: namespace.clone(),
-                service: service.clone(),
-                port: *port,
-                chosen_by: PrometheusChoice::Setting,
-            },
-            endpoint: Some(Endpoint {
+        } => {
+            let endpoint = Endpoint {
                 namespace: namespace.clone(),
                 service: service.clone(),
                 port: *port,
@@ -164,8 +158,12 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
                 path_prefix: path_prefix.clone(),
                 tenant: tenant.clone(),
                 matcher: matcher.clone(),
-            }),
-        },
+            };
+            Chosen {
+                provider: prometheus_provider(&endpoint, PrometheusChoice::Setting),
+                endpoint: Some(endpoint),
+            }
+        }
         MetricsProviderSetting::MetricsServer => Chosen {
             provider: MetricsProvider::MetricsServer {
                 chosen_by: MetricsServerChoice::Setting,
@@ -221,20 +219,23 @@ async fn detect(
 }
 
 fn prometheus_chosen(candidate: Candidate) -> Chosen {
-    let Endpoint {
-        namespace,
-        service,
-        port,
-        ..
-    } = candidate.endpoint.clone();
     Chosen {
-        provider: MetricsProvider::Prometheus {
-            namespace,
-            service,
-            port,
-            chosen_by: candidate.tier,
-        },
+        provider: prometheus_provider(&candidate.endpoint, candidate.tier),
         endpoint: Some(candidate.endpoint),
+    }
+}
+
+/// The provider the interface shows for this Endpoint (spec I19).
+fn prometheus_provider(endpoint: &Endpoint, chosen_by: PrometheusChoice) -> MetricsProvider {
+    MetricsProvider::Prometheus {
+        namespace: endpoint.namespace.clone(),
+        service: endpoint.service.clone(),
+        port: endpoint.port,
+        scheme: endpoint.scheme,
+        path_prefix: endpoint.path_prefix.clone(),
+        tenant: endpoint.tenant.clone(),
+        matcher: endpoint.matcher.clone(),
+        chosen_by,
     }
 }
 

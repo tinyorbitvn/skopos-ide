@@ -2,7 +2,6 @@ import type { ClusterSettings } from "../ipc/generated/ClusterSettings";
 import type { IpcError } from "../ipc/generated/IpcError";
 import type { MetricsProvider } from "../ipc/generated/MetricsProvider";
 import type { MetricsResult } from "../ipc/generated/MetricsResult";
-import type { PrometheusChoice } from "../ipc/generated/PrometheusChoice";
 import type { UsageItem } from "../ipc/generated/UsageItem";
 import type { UsageSnapshot } from "../ipc/generated/UsageSnapshot";
 
@@ -35,19 +34,20 @@ export const PROMETHEUS_DOWN: IpcError = {
   details: null,
 };
 
+type PrometheusProvider = Extract<MetricsProvider, { kind: "prometheus" }>;
+
 export function prometheus(
-  over: {
-    namespace?: string;
-    service?: string;
-    port?: number;
-    chosenBy?: PrometheusChoice;
-  } = {},
+  over: Partial<Omit<PrometheusProvider, "kind">> = {},
 ): MetricsProvider {
   return {
     kind: "prometheus",
     namespace: "monitoring",
     service: "prometheus-server",
     port: 80,
+    scheme: null,
+    pathPrefix: null,
+    tenant: null,
+    matcher: null,
     chosenBy: "communityChart",
     ...over,
   };

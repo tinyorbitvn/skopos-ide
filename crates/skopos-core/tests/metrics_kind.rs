@@ -330,6 +330,10 @@ async fn prometheus_from_the_community_chart_answers_every_target() {
             namespace: RELEASE_NAMESPACE.to_owned(),
             service: format!("{RELEASE}-server"),
             port: 80,
+            scheme: None,
+            path_prefix: None,
+            tenant: None,
+            matcher: None,
             chosen_by: PrometheusChoice::CommunityChart,
         }
     );
