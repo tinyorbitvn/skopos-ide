@@ -28,10 +28,18 @@ server:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+# Only this release's own job scrapes its kube-state-metrics, as the core tests' release does
+# with its own; otherwise each Prometheus counts both and every request and limit doubles.
 kube-state-metrics:
+  prometheusScrape: false
   nodeSelector:
     kubernetes.io/hostname: skopos-e2e-control-plane
   tolerations:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+extraScrapeConfigs: |
+  - job_name: kube-state-metrics
+    honor_labels: true
+    static_configs:
+      - targets: [skopos-e2e-prometheus-kube-state-metrics.skopos-e2e-metrics.svc:8080]

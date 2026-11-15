@@ -122,8 +122,11 @@ async function releaseStatus(helm: string): Promise<string | null> {
   }
 }
 
-/** Whether the release's values send every sample to Mimir. A release from before the Mimir fixture does not. */
-async function writesToMimir(helm: string): Promise<boolean> {
+/**
+ * Whether the release has the values fixture's settings: every sample goes to Mimir, and only
+ * its own job scrapes its kube-state-metrics. A release from older values does not.
+ */
+async function valuesCurrent(helm: string): Promise<boolean> {
   const out = await run(
     helm,
     [
@@ -141,9 +144,12 @@ async function writesToMimir(helm: string): Promise<boolean> {
   );
   const values = JSON.parse(out) as {
     server?: { remoteWrite?: { url?: string }[] };
+    "kube-state-metrics"?: { prometheusScrape?: boolean };
   };
-  return (values.server?.remoteWrite ?? []).some(
-    (write) => write.url === MIMIR_PUSH_URL,
+  return (
+    (values.server?.remoteWrite ?? []).some(
+      (write) => write.url === MIMIR_PUSH_URL,
+    ) && values["kube-state-metrics"]?.prometheusScrape === false
   );
 }
 
@@ -168,8 +174,8 @@ async function ensurePrometheus(): Promise<void> {
     KIND_KUBECONFIG,
   ];
   if (status === "deployed") {
-    // A release installed before the Mimir fixture: give it the remote write in place.
-    if (!(await writesToMimir(helm))) {
+    // A release installed from older values: give it the current ones in place.
+    if (!(await valuesCurrent(helm))) {
       await run(helm, ["upgrade", PROMETHEUS_RELEASE, ...chart], helmEnv());
     }
     return;
@@ -255,9 +261,9 @@ export async function ensureMetricsProviders(): Promise<PrometheusService> {
   if (!(await metricsServerServed())) await run("bash", [METRICS_UP]);
   await ensureMimir();
   await ensurePrometheus();
-  if (!(await writesToMimir(findHelm().path))) {
+  if (!(await valuesCurrent(findHelm().path))) {
     throw new Error(
-      `${PROMETHEUS_RELEASE} does not write to ${MIMIR_PUSH_URL}`,
+      `${PROMETHEUS_RELEASE} does not have the values in ${VALUES}`,
     );
   }
   await kubectl([
