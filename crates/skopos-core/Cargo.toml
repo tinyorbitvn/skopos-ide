@@ -39,3 +39,4 @@ libc = "0.2"
 [dev-dependencies]
 axum.workspace = true
 skopos-fakekube = { path = "../skopos-fakekube" }
+promql-parser = "0.11"

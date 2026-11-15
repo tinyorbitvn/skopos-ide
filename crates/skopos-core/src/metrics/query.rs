@@ -64,7 +64,7 @@ impl AppCore {
             }
             MetricsTarget::Pvc { namespace, name } => Scope::Pvc { namespace, name },
         };
-        let planned = queries(&scope, window.step);
+        let planned = queries(&scope, window.step, endpoint.matcher.as_ref());
         let mut result = MetricsResult {
             start: window.start,
             end: window.end,

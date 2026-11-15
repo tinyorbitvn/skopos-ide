@@ -9,8 +9,8 @@ use kube::client::Body;
 use kube::Client;
 use serde_json::Value;
 
-use super::templates::Window;
-use super::PrometheusScheme;
+use super::templates::{up_query, Window};
+use super::{LabelMatcher, PrometheusScheme};
 use crate::error::{CoreResult, ErrorCode, IpcError};
 
 /// A query string up to this many bytes goes as GET; a longer one as a form POST.
@@ -32,6 +32,8 @@ pub(crate) struct Endpoint {
     pub(crate) path_prefix: Option<String>,
     /// Sent as [`TENANT_HEADER`] with every request. A detected Service has none.
     pub(crate) tenant: Option<String>,
+    /// Added to every selector of every query. A detected Service has none.
+    pub(crate) matcher: Option<LabelMatcher>,
 }
 
 impl Endpoint {
@@ -82,9 +84,14 @@ pub(crate) fn build_request(
     })
 }
 
-/// The detection probe: `/api/v1/query` for `up`.
+/// The detection probe: `/api/v1/query` for `up`, with the cluster label when there is one
+/// (spec I15).
 fn probe_request(endpoint: &Endpoint) -> CoreResult<Request<Vec<u8>>> {
-    build_request(endpoint, "/api/v1/query", &[("query", "up".to_owned())])
+    build_request(
+        endpoint,
+        "/api/v1/query",
+        &[("query", up_query(endpoint.matcher.as_ref()))],
+    )
 }
 
 /// One range query over `window`.
@@ -258,6 +265,7 @@ mod tests {
             scheme: None,
             path_prefix: None,
             tenant: None,
+            matcher: None,
         }
     }
 
@@ -478,5 +486,24 @@ mod tests {
             "get",
         );
         assert_eq!(status.message, "Unauthorized");
+    }
+
+    #[test]
+    fn the_probe_asks_up_with_the_cluster_label() {
+        let labelled = Endpoint {
+            matcher: Some(LabelMatcher {
+                name: "cluster".to_owned(),
+                value: "prod".to_owned(),
+            }),
+            ..endpoint()
+        };
+        assert_eq!(
+            probe_request(&labelled).unwrap().uri().query(),
+            Some("query=up%7Bcluster%3D%22prod%22%7D")
+        );
+        assert_eq!(
+            probe_request(&endpoint()).unwrap().uri().query(),
+            Some("query=up")
+        );
     }
 }

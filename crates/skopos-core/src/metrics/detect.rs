@@ -148,7 +148,7 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
             scheme,
             path_prefix,
             tenant,
-            ..
+            matcher,
         } => Chosen {
             provider: MetricsProvider::Prometheus {
                 namespace: namespace.clone(),
@@ -163,6 +163,7 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
                 scheme: *scheme,
                 path_prefix: path_prefix.clone(),
                 tenant: tenant.clone(),
+                matcher: matcher.clone(),
             }),
         },
         MetricsProviderSetting::MetricsServer => Chosen {
@@ -286,6 +287,7 @@ fn candidates(services: &[Service]) -> Vec<Candidate> {
                     scheme: None,
                     path_prefix: None,
                     tenant: None,
+                    matcher: None,
                 },
             })
         })
