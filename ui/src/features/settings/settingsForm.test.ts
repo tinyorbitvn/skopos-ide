@@ -9,6 +9,10 @@ import {
   ICON_MAX_BYTES,
   isDns1035Label,
   isDnsLabel,
+  LABEL_NAME_ERROR,
+  LABEL_PAIR_ERROR,
+  LABEL_VALUE_ERROR,
+  PATH_PREFIX_ERROR,
   PROMETHEUS_DEFAULTS,
   prometheusPrefill,
   type SettingsDraft,
@@ -16,6 +20,7 @@ import {
   settingsFrom,
   splitNamespaces,
   statusText,
+  TENANT_ERROR,
   validate,
 } from "./settingsForm";
 
@@ -29,6 +34,30 @@ const SAVED: ClusterSettings = clusterSettings({
   nodeShellImage: "alpine:3.22",
   metricsProvider: { kind: "metricsServer" },
 });
+
+const SAVED_MIMIR: ClusterSettings = clusterSettings({
+  metricsProvider: {
+    kind: "prometheus",
+    namespace: "mimir",
+    service: "mimir-gateway",
+    port: 80,
+    scheme: "https",
+    pathPrefix: "/prometheus",
+    tenant: "team-a",
+    matcher: { name: "cluster", value: "prod" },
+  },
+});
+
+/** A draft with a valid Prometheus picked, plus `over`. */
+function prom(over: Partial<SettingsDraft> = {}): SettingsDraft {
+  return draft({
+    provider: "prometheus",
+    promNamespace: "mimir",
+    promService: "mimir-gateway",
+    promPort: "80",
+    ...over,
+  });
+}
 
 function draft(over: Partial<SettingsDraft> = {}): SettingsDraft {
   return { ...emptyDraft(), ...over };
@@ -48,8 +77,13 @@ test("a draft shows the saved settings as text, and saving it gives them back", 
     promNamespace: "",
     promService: "",
     promPort: "",
+    promScheme: "http",
+    promPrefix: "",
+    promTenant: "",
+    promLabelName: "",
+    promLabelValue: "",
   });
-  expect(settingsFrom(d, SAVED)).toEqual(SAVED);
+  expect(settingsFrom(d)).toEqual(SAVED);
 });
 
 test("a saved Prometheus fills the three fields", () => {
@@ -83,7 +117,6 @@ test("empty and blank fields save null, and text is trimmed", () => {
       nodeShellImage: " alpine:3.22 ",
       proxyUrl: " ",
     }),
-    SAVED,
   );
   expect(out.displayName).toBeNull();
   expect(out.terminalCwd).toBeNull();
@@ -104,8 +137,13 @@ test("Restore defaults is an empty draft with no icon, no namespaces and Detect"
     promNamespace: "",
     promService: "",
     promPort: "",
+    promScheme: "http",
+    promPrefix: "",
+    promTenant: "",
+    promLabelName: "",
+    promLabelValue: "",
   });
-  expect(settingsFrom(emptyDraft(), SAVED)).toEqual(clusterSettings());
+  expect(settingsFrom(emptyDraft())).toEqual(clusterSettings());
 });
 
 test("accessible namespaces split on commas and spaces, de-duplicate, and name every bad entry", () => {
@@ -129,7 +167,7 @@ test("accessible namespaces split on commas and spaces, de-duplicate, and name e
       .accessibleNamespaces,
   ).toBeUndefined();
   expect(
-    settingsFrom(draft({ accessibleNamespaces: "shop, default shop" }), SAVED)
+    settingsFrom(draft({ accessibleNamespaces: "shop, default shop" }))
       .accessibleNamespaces,
   ).toEqual(["shop", "default"]);
 });
@@ -204,41 +242,61 @@ test("the Prometheus fields are checked only while Prometheus is picked", () => 
   expect(validate(emptyDraft())).toEqual({});
 });
 
-test("a saved Prometheus keeps its scheme and path prefix; a new one saves null for both", () => {
-  const saved = clusterSettings({
-    metricsProvider: {
-      kind: "prometheus",
-      namespace: "monitoring",
-      service: "prometheus-server",
-      port: 80,
-      scheme: "https",
-      pathPrefix: "/prom",
-      tenant: null,
-      matcher: null,
-    },
+test("a saved Mimir fills every field, HTTPS stays HTTPS, and saving gives the setting back", () => {
+  const d = draftFrom(SAVED_MIMIR);
+  expect(d).toMatchObject({
+    provider: "prometheus",
+    promNamespace: "mimir",
+    promService: "mimir-gateway",
+    promPort: "80",
+    promScheme: "https",
+    promPrefix: "/prometheus",
+    promTenant: "team-a",
+    promLabelName: "cluster",
+    promLabelValue: "prod",
   });
-  const edited = { ...draftFrom(saved), promPort: "9091" };
-  expect(settingsFrom(edited, saved).metricsProvider).toEqual({
+  expect(settingsFrom(d)).toEqual(SAVED_MIMIR);
+});
+
+test("the Prometheus payload holds each field normalised, filled or empty", () => {
+  expect(
+    settingsFrom(prom({ promNamespace: " mimir " })).metricsProvider,
+  ).toEqual({
     kind: "prometheus",
-    namespace: "monitoring",
-    service: "prometheus-server",
-    port: 9091,
-    scheme: "https",
-    pathPrefix: "/prom",
+    namespace: "mimir",
+    service: "mimir-gateway",
+    port: 80,
+    scheme: null,
+    pathPrefix: null,
     tenant: null,
     matcher: null,
   });
-  const fresh = draft({
-    provider: "prometheus",
-    promNamespace: " observability ",
-    promService: "prometheus-operated",
-    promPort: "9090",
-  });
-  expect(settingsFrom(fresh, clusterSettings()).metricsProvider).toEqual({
+  expect(
+    settingsFrom(
+      prom({
+        promScheme: "https",
+        promPrefix: " /prometheus/ ",
+        promTenant: " team-a ",
+        promLabelName: " cluster ",
+        promLabelValue: " prod ",
+      }),
+    ).metricsProvider,
+  ).toEqual({
     kind: "prometheus",
-    namespace: "observability",
-    service: "prometheus-operated",
-    port: 9090,
+    namespace: "mimir",
+    service: "mimir-gateway",
+    port: 80,
+    scheme: "https",
+    pathPrefix: "/prometheus",
+    tenant: "team-a",
+    // The value is kept as typed.
+    matcher: { name: "cluster", value: " prod " },
+  });
+  expect(
+    settingsFrom(
+      prom({ promPrefix: " / ", promTenant: "   ", promLabelName: "  " }),
+    ).metricsProvider,
+  ).toMatchObject({
     scheme: null,
     pathPrefix: null,
     tenant: null,
@@ -246,11 +304,102 @@ test("a saved Prometheus keeps its scheme and path prefix; a new one saves null 
   });
 });
 
+test("path prefix, tenant and cluster label are checked as the core checks them", () => {
+  expect([
+    PATH_PREFIX_ERROR,
+    TENANT_ERROR,
+    LABEL_NAME_ERROR,
+    LABEL_PAIR_ERROR,
+    LABEL_VALUE_ERROR,
+  ]).toEqual([
+    "The path prefix must be a path such as /prometheus.",
+    "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.",
+    "A label name is letters, digits and _, and does not start with __.",
+    "A cluster label needs a name and a value.",
+    "A label value is at most 1024 characters.",
+  ]);
+  expect(validate(prom())).toEqual({});
+
+  for (const ok of ["", " / ", "/prometheus", " /a/b-c_d.e~f/ "]) {
+    expect([ok, validate(prom({ promPrefix: ok })).promPrefix]).toEqual([
+      ok,
+      undefined,
+    ]);
+  }
+  for (const bad of [
+    "prometheus",
+    "/a/../b",
+    "/a/./b",
+    "/a?b=1",
+    "/a%2fb",
+    "/a b",
+    "/é",
+  ]) {
+    expect([bad, validate(prom({ promPrefix: bad })).promPrefix]).toEqual([
+      bad,
+      PATH_PREFIX_ERROR,
+    ]);
+  }
+
+  for (const ok of ["", "   ", " team-a ", "aZ09!-_.*'()", "t".repeat(150)]) {
+    expect([ok, validate(prom({ promTenant: ok })).promTenant]).toEqual([
+      ok,
+      undefined,
+    ]);
+  }
+  for (const bad of [
+    "a|b",
+    "team a",
+    "team/a",
+    "é",
+    ".",
+    " .. ",
+    "__mimir_cluster",
+    "t".repeat(151),
+  ]) {
+    expect([bad, validate(prom({ promTenant: bad })).promTenant]).toEqual([
+      bad,
+      TENANT_ERROR,
+    ]);
+  }
+
+  const label = (promLabelName: string, promLabelValue: string) =>
+    validate(prom({ promLabelName, promLabelValue }));
+  expect(label(" cluster ", " prod ")).toEqual({});
+  expect(label("  ", "")).toEqual({});
+  expect(label("_x9", "1")).toEqual({});
+  // 1024 characters, though each emoji is two UTF-16 units.
+  expect(label("cluster", "😀".repeat(1024))).toEqual({});
+  expect(label("cluster", "")).toEqual({ promLabelValue: LABEL_PAIR_ERROR });
+  expect(label("", "prod")).toEqual({ promLabelName: LABEL_PAIR_ERROR });
+  expect(label(" ", "prod")).toEqual({ promLabelName: LABEL_PAIR_ERROR });
+  for (const bad of ["9cluster", "clus-ter", "__name__", "__x", "é"]) {
+    expect([bad, label(bad, "prod")]).toEqual([
+      bad,
+      { promLabelName: LABEL_NAME_ERROR },
+    ]);
+  }
+  expect(label("cluster", "v".repeat(1025))).toEqual({
+    promLabelValue: LABEL_VALUE_ERROR,
+  });
+
+  // Only while Prometheus is picked.
+  expect(
+    validate(
+      draft({
+        provider: "auto",
+        promPrefix: "x",
+        promTenant: "a|b",
+        promLabelName: "9",
+      }),
+    ),
+  ).toEqual({});
+});
+
 test("the other providers save their kind alone", () => {
   for (const kind of ["auto", "metricsServer", "none"] as const) {
     expect(
-      settingsFrom(draft({ provider: kind, promPort: "9090" }), SAVED)
-        .metricsProvider,
+      settingsFrom(draft({ provider: kind, promPort: "9090" })).metricsProvider,
     ).toEqual({ kind });
   }
 });
@@ -303,6 +452,11 @@ test("drafts are the same only when every field is", () => {
     { promNamespace: "x" },
     { promService: "x" },
     { promPort: "x" },
+    { promScheme: "https" },
+    { promPrefix: "x" },
+    { promTenant: "x" },
+    { promLabelName: "x" },
+    { promLabelValue: "x" },
   ];
   // One change per field.
   expect(changes).toHaveLength(Object.keys(emptyDraft()).length);

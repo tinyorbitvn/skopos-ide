@@ -105,7 +105,7 @@ function SettingsForm(props: {
   async function save(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (!canSave) return;
-    const next = settingsFrom(draft, saved);
+    const next = settingsFrom(draft);
     setSaving(true);
     try {
       await api.clusterSettingsSet(clusterId, next);

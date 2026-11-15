@@ -5,6 +5,9 @@ import type { MetricsProviderSetting } from "../../ipc/generated/MetricsProvider
 /** Detect, Prometheus, metrics-server only or None. */
 export type ProviderKind = MetricsProviderSetting["kind"];
 
+/** HTTP saves no scheme; HTTPS saves "https". */
+export type SchemeChoice = "http" | "https";
+
 /** The Settings page's fields as the user types them. */
 export interface SettingsDraft {
   displayName: string;
@@ -19,6 +22,12 @@ export interface SettingsDraft {
   promNamespace: string;
   promService: string;
   promPort: string;
+  promScheme: SchemeChoice;
+  promPrefix: string;
+  promTenant: string;
+  /** The cluster label `name="value"`: the name is trimmed, the value kept as typed. */
+  promLabelName: string;
+  promLabelValue: string;
 }
 
 export type DraftField =
@@ -27,12 +36,26 @@ export type DraftField =
   | "proxyUrl"
   | "promNamespace"
   | "promService"
-  | "promPort";
+  | "promPort"
+  | "promPrefix"
+  | "promTenant"
+  | "promLabelName"
+  | "promLabelValue";
 
 export type DraftErrors = Partial<Record<DraftField, string>>;
 
 export const ICON_MAX_BYTES = 262_144;
 export const ICON_ERROR = "Pick a PNG or SVG image up to 256 KB";
+
+/** The core's own texts for the fields it checks (spec I2, I3, I25). */
+export const PATH_PREFIX_ERROR =
+  "The path prefix must be a path such as /prometheus.";
+export const TENANT_ERROR =
+  "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.";
+export const LABEL_NAME_ERROR =
+  "A label name is letters, digits and _, and does not start with __.";
+export const LABEL_PAIR_ERROR = "A cluster label needs a name and a value.";
+export const LABEL_VALUE_ERROR = "A label value is at most 1024 characters.";
 
 /** The Prometheus fields when nothing better is known: the operator's governing Service. */
 export const PROMETHEUS_DEFAULTS: Readonly<
@@ -50,6 +73,14 @@ const DNS_1035_LABEL = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
 const PROXY_PROTOCOLS = ["http:", "https:", "socks5:"];
 const PROXY_ERROR =
   "Use http://, https:// or socks5:// with a host and an optional port";
+/** A path prefix character other than `/`: one that needs no escaping in a URL path. */
+const PATH_CHAR = /^[A-Za-z0-9._~-]$/;
+/** Mimir's tenant ID characters. */
+const TENANT_CHARS = /^[A-Za-z0-9!_.*'()-]+$/;
+const RESERVED_TENANTS = [".", "..", "__mimir_cluster"];
+const TENANT_MAX = 150;
+const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+const LABEL_VALUE_MAX = 1024;
 
 export function draftFrom(settings: ClusterSettings): SettingsDraft {
   const provider = settings.metricsProvider;
@@ -66,10 +97,15 @@ export function draftFrom(settings: ClusterSettings): SettingsDraft {
     promNamespace: prom?.namespace ?? "",
     promService: prom?.service ?? "",
     promPort: prom ? String(prom.port) : "",
+    promScheme: prom?.scheme === "https" ? "https" : "http",
+    promPrefix: prom?.pathPrefix ?? "",
+    promTenant: prom?.tenant ?? "",
+    promLabelName: prom?.matcher?.name ?? "",
+    promLabelValue: prom?.matcher?.value ?? "",
   };
 }
 
-/** Restore defaults: empty fields, no icon, no accessible namespaces and Detect. */
+/** Restore defaults: empty fields, no icon, no accessible namespaces, Detect and HTTP. */
 export function emptyDraft(): SettingsDraft {
   return {
     displayName: "",
@@ -83,6 +119,11 @@ export function emptyDraft(): SettingsDraft {
     promNamespace: "",
     promService: "",
     promPort: "",
+    promScheme: "http",
+    promPrefix: "",
+    promTenant: "",
+    promLabelName: "",
+    promLabelValue: "",
   };
 }
 
@@ -121,6 +162,48 @@ function isProxyUrl(text: string): boolean {
   return PROXY_PROTOCOLS.includes(url.protocol) && url.hostname !== "";
 }
 
+/** The path prefix as the core saves it: trimmed, without trailing `/`; null when empty. */
+function pathPrefixOf(text: string): string | null {
+  const prefix = text.trim().replace(/\/+$/, "");
+  return prefix === "" ? null : prefix;
+}
+
+/** The core's `path_prefix_of` rule. */
+function isPathPrefix(prefix: string): boolean {
+  return (
+    prefix.startsWith("/") &&
+    Array.from(prefix).every((c) => c === "/" || PATH_CHAR.test(c)) &&
+    !prefix.split("/").some((segment) => segment === "." || segment === "..")
+  );
+}
+
+/** Mimir's tenant ID rules (spec I2), on a trimmed, non-empty tenant. */
+function isTenant(tenant: string): boolean {
+  return (
+    tenant.length <= TENANT_MAX &&
+    TENANT_CHARS.test(tenant) &&
+    !RESERVED_TENANTS.includes(tenant)
+  );
+}
+
+/** A Prometheus label name that is not reserved (spec I3). */
+function isLabelName(name: string): boolean {
+  return LABEL_NAME.test(name) && !name.startsWith("__");
+}
+
+/** The cluster label's error, under the field that has to change, in the core's order. */
+function labelErrors(name: string, value: string): DraftErrors {
+  if (name === "" && value === "") return {};
+  if (name === "") return { promLabelName: LABEL_PAIR_ERROR };
+  if (value === "") return { promLabelValue: LABEL_PAIR_ERROR };
+  if (!isLabelName(name)) return { promLabelName: LABEL_NAME_ERROR };
+  // Characters as the core counts them: an emoji is one, not two UTF-16 units.
+  if (Array.from(value).length > LABEL_VALUE_MAX) {
+    return { promLabelValue: LABEL_VALUE_ERROR };
+  }
+  return {};
+}
+
 export function validate(draft: SettingsDraft): DraftErrors {
   const errors: DraftErrors = {};
   const bad = splitNamespaces(draft.accessibleNamespaces).filter(
@@ -144,6 +227,16 @@ export function validate(draft: SettingsDraft): DraftErrors {
     if (!isPort(draft.promPort.trim())) {
       errors.promPort = "A port from 1 to 65535";
     }
+    const prefix = pathPrefixOf(draft.promPrefix);
+    if (prefix !== null && !isPathPrefix(prefix)) {
+      errors.promPrefix = PATH_PREFIX_ERROR;
+    }
+    const tenant = draft.promTenant.trim();
+    if (tenant !== "" && !isTenant(tenant)) errors.promTenant = TENANT_ERROR;
+    Object.assign(
+      errors,
+      labelErrors(draft.promLabelName.trim(), draft.promLabelValue),
+    );
   }
   return errors;
 }
@@ -153,23 +246,22 @@ function textOrNull(text: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-function providerSetting(
-  draft: SettingsDraft,
-  saved: MetricsProviderSetting,
-): MetricsProviderSetting {
+function providerSetting(draft: SettingsDraft): MetricsProviderSetting {
   switch (draft.provider) {
     case "prometheus": {
-      // These fields have no input yet: a saved Prometheus keeps them.
-      const kept = saved.kind === "prometheus" ? saved : null;
+      const labelName = draft.promLabelName.trim();
       return {
         kind: "prometheus",
         namespace: draft.promNamespace.trim(),
         service: draft.promService.trim(),
         port: Number(draft.promPort.trim()),
-        scheme: kept?.scheme ?? null,
-        pathPrefix: kept?.pathPrefix ?? null,
-        tenant: kept?.tenant ?? null,
-        matcher: kept?.matcher ?? null,
+        scheme: draft.promScheme === "https" ? "https" : null,
+        pathPrefix: pathPrefixOf(draft.promPrefix),
+        tenant: textOrNull(draft.promTenant),
+        matcher:
+          labelName === "" && draft.promLabelValue === ""
+            ? null
+            : { name: labelName, value: draft.promLabelValue },
       };
     }
     case "auto":
@@ -181,11 +273,8 @@ function providerSetting(
   }
 }
 
-/** The settings to save: trimmed, with empty text as null. */
-export function settingsFrom(
-  draft: SettingsDraft,
-  saved: ClusterSettings,
-): ClusterSettings {
+/** The settings to save, normalised as the core saves them: trimmed, empty text as null. */
+export function settingsFrom(draft: SettingsDraft): ClusterSettings {
   return {
     displayName: textOrNull(draft.displayName),
     icon: draft.icon,
@@ -194,7 +283,7 @@ export function settingsFrom(
     terminalCwd: textOrNull(draft.terminalCwd),
     proxyUrl: textOrNull(draft.proxyUrl),
     nodeShellImage: textOrNull(draft.nodeShellImage),
-    metricsProvider: providerSetting(draft, saved.metricsProvider),
+    metricsProvider: providerSetting(draft),
   };
 }
 
