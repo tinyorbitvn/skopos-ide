@@ -33,7 +33,9 @@ use tokio::sync::mpsc;
 const CHART_REPO: &str = "https://prometheus-community.github.io/helm-charts";
 const CHART_VERSION: &str = "29.45.1";
 const RELEASE: &str = "skopos-prometheus";
-const RELEASE_NAMESPACE: &str = "skopos-metrics";
+/// `monitoring`, which detection probes first within a tier (F16), so this release is
+/// chosen even while `make e2e` keeps its own community chart in `skopos-e2e-metrics`.
+const RELEASE_NAMESPACE: &str = "monitoring";
 /// scripts/metrics-down.sh deletes these namespaces too.
 const QUERY_NAMESPACE: &str = "skopos-metrics-query";
 const USAGE_NAMESPACE: &str = "skopos-metrics-usage";
@@ -63,7 +65,7 @@ server:
     scrape_interval: 15s
     external_labels:
       cluster: skopos-e2e
-      prometheus: skopos-metrics/skopos-prometheus
+      prometheus: monitoring/skopos-prometheus
   remoteWrite:
     - url: http://mimir.skopos-e2e-mimir.svc:8080/api/v1/push
       headers:
@@ -76,13 +78,21 @@ server:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+# Only this release's own job scrapes its kube-state-metrics, as the e2e release does with
+# its own; otherwise each Prometheus counts both and every request and limit doubles.
 kube-state-metrics:
+  prometheusScrape: false
   nodeSelector:
     kubernetes.io/hostname: skopos-e2e-control-plane
   tolerations:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+extraScrapeConfigs: |
+  - job_name: kube-state-metrics
+    honor_labels: true
+    static_configs:
+      - targets: [skopos-prometheus-kube-state-metrics.monitoring.svc:8080]
 "#;
 /// Writes and reads 20 MiB so the filesystem counters move, then serves HTTP.
 const WEB_SCRIPT: &str = "dd if=/dev/zero of=/scratch/f bs=1M count=20 conv=fsync \
