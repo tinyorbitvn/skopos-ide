@@ -19,6 +19,7 @@ import {
   askQuery,
   ensureProvider,
   forgetProvider,
+  forgetQueries,
   QUERY_STEP_MS,
   queryKey,
   refreshProvider,
@@ -403,4 +404,47 @@ test("NotFound noPrometheus reads the provider again once and shows no error", a
   expect(metrics().providers.c1?.value).toEqual(metricsServer());
   expect(metrics().queries[KEY]?.error).toBeNull();
   expect(metrics().queries[queryKey("c1", POD, "1h")]?.error).toBeNull();
+});
+
+test("forgetQueries drops the cluster's answers, ignores one still on its way, and asks again", async () => {
+  pollTimers();
+  const resolvers: ((r: MetricsResult) => void)[] = [];
+  const backend = mockBackend({
+    metrics_query: () =>
+      new Promise<MetricsResult>((resolve) => {
+        resolvers.push(resolve);
+      }),
+  });
+  const OTHER = queryKey("c2", CLUSTER, "1h");
+  useMetrics.setState({
+    queries: { [OTHER]: { value: RESULT, error: null, loading: false } },
+  });
+  const stop = watchQuery("c1", CLUSTER, "1h");
+  await flush();
+  expect(backend.callsTo("metrics_query")).toHaveLength(1);
+
+  forgetQueries("c1");
+  await flush();
+  expect(backend.callsTo("metrics_query")).toHaveLength(2);
+  expect(metrics().queries[KEY]).toEqual({
+    value: null,
+    error: null,
+    loading: true,
+  });
+
+  // The answer read under the old settings arrives late and is dropped.
+  resolvers[0]?.(RESULT);
+  await flush();
+  expect(metrics().queries[KEY]?.value).toBeNull();
+
+  const NEWER = metricsResult({ cpuUsage: points([0.9]) });
+  resolvers[1]?.(NEWER);
+  await flush();
+  expect(metrics().queries[KEY]).toEqual({
+    value: NEWER,
+    error: null,
+    loading: false,
+  });
+  expect(metrics().queries[OTHER]?.value).toEqual(RESULT);
+  stop();
 });

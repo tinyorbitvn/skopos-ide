@@ -1,4 +1,6 @@
+import type { LabelMatcher } from "../../ipc/generated/LabelMatcher";
 import type { MetricName } from "../../ipc/generated/MetricName";
+import type { MetricsProvider } from "../../ipc/generated/MetricsProvider";
 import type { MetricsRange } from "../../ipc/generated/MetricsRange";
 import type { MetricsResult } from "../../ipc/generated/MetricsResult";
 import type { MetricsTarget } from "../../ipc/generated/MetricsTarget";
@@ -306,4 +308,37 @@ export function serverNote(target: MetricsTarget): string {
     case "pvc":
       return "Volume usage needs Prometheus: kubelet exports it as kubelet_volume_stats_used_bytes, which metrics-server does not serve.";
   }
+}
+
+/** A cluster label as the user typed it: `name="value"`. */
+export function labelText(matcher: LabelMatcher): string {
+  return `${matcher.name}="${matcher.value}"`;
+}
+
+/**
+ * The note for an answer with no samples at all under a tenant or a cluster label
+ * (spec I17): Mimir answers an unknown tenant with an empty result, not an error.
+ * Null when a metric has samples, a query failed, or the provider has neither.
+ */
+export function noSamplesNote(
+  provider: MetricsProvider,
+  result: MetricsResult,
+): string | null {
+  if (provider.kind !== "prometheus") return null;
+  const empty =
+    result.missing.length > 0 &&
+    result.failed.length === 0 &&
+    Object.keys(result.series).length === 0;
+  if (!empty) return null;
+  const { tenant, matcher } = provider;
+  if (tenant !== null && matcher !== null) {
+    return `No samples for tenant ${tenant} with ${labelText(matcher)}: check the tenant and the cluster label in the cluster settings.`;
+  }
+  if (tenant !== null) {
+    return `No samples for tenant ${tenant}: check the tenant in the cluster settings.`;
+  }
+  if (matcher !== null) {
+    return `No samples with ${labelText(matcher)}: check the cluster label in the cluster settings.`;
+  }
+  return null;
 }

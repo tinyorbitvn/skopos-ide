@@ -1,13 +1,20 @@
 import { expect, test } from "vitest";
 import type { MetricsTarget } from "../../ipc/generated/MetricsTarget";
-import { metricsResult, points } from "../../test/metrics";
+import {
+  metricsResult,
+  metricsServer,
+  points,
+  prometheus,
+} from "../../test/metrics";
 import {
   type ChartDef,
   chartsFor,
   factsFromResult,
+  labelText,
   lastValue,
   mergeFacts,
   NO_FACTS,
+  noSamplesNote,
   plural,
   RANGE_PERIOD,
   serverNote,
@@ -316,4 +323,38 @@ test("periods and plurals", () => {
     "1 Pod",
     "2 Pods",
   ]);
+});
+
+test("the no-samples note names the tenant and the label, only when nothing answered and nothing failed", () => {
+  const empty = metricsResult({}, { missing: ["cpuUsage", "memoryUsage"] });
+  const label = { name: "cluster", value: "prod" };
+  expect(labelText(label)).toBe('cluster="prod"');
+  expect(
+    noSamplesNote(prometheus({ tenant: "team-a", matcher: label }), empty),
+  ).toBe(
+    'No samples for tenant team-a with cluster="prod": check the tenant and the cluster label in the cluster settings.',
+  );
+  expect(noSamplesNote(prometheus({ tenant: "team-a" }), empty)).toBe(
+    "No samples for tenant team-a: check the tenant in the cluster settings.",
+  );
+  expect(noSamplesNote(prometheus({ matcher: label }), empty)).toBe(
+    'No samples with cluster="prod": check the cluster label in the cluster settings.',
+  );
+  expect(noSamplesNote(prometheus(), empty)).toBeNull();
+  expect(noSamplesNote(metricsServer(), empty)).toBeNull();
+
+  const mimir = prometheus({ tenant: "team-a", matcher: label });
+  expect(
+    noSamplesNote(
+      mimir,
+      metricsResult({ cpuUsage: points([1]) }, { missing: ["memoryUsage"] }),
+    ),
+  ).toBeNull();
+  expect(
+    noSamplesNote(
+      mimir,
+      metricsResult({}, { missing: ["memoryUsage"], failed: ["cpuUsage"] }),
+    ),
+  ).toBeNull();
+  expect(noSamplesNote(mimir, metricsResult({}))).toBeNull();
 });

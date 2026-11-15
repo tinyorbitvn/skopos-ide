@@ -40,6 +40,7 @@
   margin: 0;
   font: var(--type-caption);
   color: var(--text-tertiary);
+  overflow-wrap: anywhere;
 }
 
 .note,
@@ -72,6 +73,7 @@
 .noteText {
   flex: 1;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .errorText {

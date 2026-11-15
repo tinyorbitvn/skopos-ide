@@ -340,6 +340,31 @@ export function forgetProvider(clusterId: string): void {
   askMissed(clusterId);
 }
 
+/**
+ * Drops the cluster's Prometheus answers after a save of its settings, so an answer read
+ * under the old tenant or label never drives the notes or the gauges. Answers still on
+ * their way are ignored, and every query poller of the cluster asks again.
+ */
+export function forgetQueries(clusterId: string): void {
+  const ofCluster = (key: string) =>
+    (JSON.parse(key) as unknown[])[0] === clusterId;
+  const keys = new Set(
+    Object.keys(useMetrics.getState().queries).filter(ofCluster),
+  );
+  for (const poller of pollers.values()) {
+    if (!poller.usage && poller.clusterId === clusterId) keys.add(poller.key);
+  }
+  for (const key of keys) nextSeq(key);
+  useMetrics.setState((s) => {
+    const queries = { ...s.queries };
+    for (const key of keys) delete queries[key];
+    return { queries };
+  });
+  for (const poller of pollers.values()) {
+    if (!poller.usage && poller.clusterId === clusterId) tick(poller);
+  }
+}
+
 /** Asks Prometheus now, whatever the poller's state (the error block's Retry). */
 export async function askQuery(
   clusterId: string,
