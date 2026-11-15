@@ -147,6 +147,7 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
             port,
             scheme,
             path_prefix,
+            tenant,
             ..
         } => Chosen {
             provider: MetricsProvider::Prometheus {
@@ -161,6 +162,7 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
                 port: *port,
                 scheme: *scheme,
                 path_prefix: path_prefix.clone(),
+                tenant: tenant.clone(),
             }),
         },
         MetricsProviderSetting::MetricsServer => Chosen {
@@ -283,6 +285,7 @@ fn candidates(services: &[Service]) -> Vec<Candidate> {
                     port: pick_port(ports, preferred)?,
                     scheme: None,
                     path_prefix: None,
+                    tenant: None,
                 },
             })
         })

@@ -151,6 +151,8 @@ pub struct ProxyRequest {
     /// The query string's parameters for a GET, the form body's otherwise.
     pub params: BTreeMap<String, String>,
     pub content_type: Option<String>,
+    /// The `X-Scope-OrgID` header, where Mimir reads the tenant.
+    pub tenant: Option<String>,
 }
 
 /// What the fake's metrics.k8s.io serves.
@@ -956,6 +958,10 @@ async fn service_proxy(
         params,
         content_type: headers
             .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        tenant: headers
+            .get("x-scope-orgid")
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned),
     };

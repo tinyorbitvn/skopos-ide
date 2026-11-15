@@ -15,6 +15,12 @@ use crate::error::{CoreResult, ErrorCode, IpcError};
 
 /// A query string up to this many bytes goes as GET; a longer one as a form POST.
 pub(crate) const GET_LIMIT: usize = 8 * 1024;
+/// The header Mimir, Cortex and other multi-tenant APIs read the tenant from (spec I8).
+pub(crate) const TENANT_HEADER: &str = "X-Scope-OrgID";
+/// What Mimir answers, with HTTP 401, to a request that names no tenant.
+const NO_TENANT_BODY: &str = "no org id";
+const NO_TENANT_MESSAGE: &str =
+    "Mimir needs a tenant: set Tenant in this cluster's metrics settings.";
 
 /// A Prometheus Service port, reached through the API server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +30,8 @@ pub(crate) struct Endpoint {
     pub(crate) port: u16,
     pub(crate) scheme: Option<PrometheusScheme>,
     pub(crate) path_prefix: Option<String>,
+    /// Sent as [`TENANT_HEADER`] with every request. A detected Service has none.
+    pub(crate) tenant: Option<String>,
 }
 
 impl Endpoint {
@@ -44,7 +52,8 @@ impl Endpoint {
     }
 }
 
-/// A GET when the encoded parameters fit in [`GET_LIMIT`], a form POST otherwise.
+/// A GET when the encoded parameters fit in [`GET_LIMIT`], a form POST otherwise, carrying
+/// the tenant header when the Endpoint has a tenant.
 pub(crate) fn build_request(
     endpoint: &Endpoint,
     api: &str,
@@ -54,14 +63,18 @@ pub(crate) fn build_request(
         .extend_pairs(params.iter().map(|(key, value)| (*key, value.as_str())))
         .finish();
     let path = endpoint.path(api);
-    let built = if encoded.len() <= GET_LIMIT {
-        Request::get(format!("{path}?{encoded}")).body(Vec::new())
+    let (mut builder, body) = if encoded.len() <= GET_LIMIT {
+        (Request::get(format!("{path}?{encoded}")), Vec::new())
     } else {
-        Request::post(path)
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(encoded.into_bytes())
+        (
+            Request::post(path).header(header::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+            encoded.into_bytes(),
+        )
     };
-    built.map_err(|e| {
+    if let Some(tenant) = &endpoint.tenant {
+        builder = builder.header(TENANT_HEADER, tenant.as_str());
+    }
+    builder.body(body).map_err(|e| {
         IpcError::new(
             ErrorCode::Internal,
             format!("could not build the Prometheus request: {e}"),
@@ -69,15 +82,32 @@ pub(crate) fn build_request(
     })
 }
 
+/// The detection probe: `/api/v1/query` for `up`.
+fn probe_request(endpoint: &Endpoint) -> CoreResult<Request<Vec<u8>>> {
+    build_request(endpoint, "/api/v1/query", &[("query", "up".to_owned())])
+}
+
+/// One range query over `window`.
+fn range_request(endpoint: &Endpoint, query: &str, window: Window) -> CoreResult<Request<Vec<u8>>> {
+    build_request(
+        endpoint,
+        "/api/v1/query_range",
+        &[
+            ("query", query.to_owned()),
+            ("start", window.start.to_string()),
+            ("end", window.end.to_string()),
+            ("step", window.step.to_string()),
+        ],
+    )
+}
+
 /// One request, without retry, given up after `limit`. Returns Prometheus's `data`.
 async fn call(
     client: &Client,
     endpoint: &Endpoint,
-    api: &str,
-    params: &[(&str, String)],
+    request: Request<Vec<u8>>,
     limit: Duration,
 ) -> CoreResult<Value> {
-    let request = build_request(endpoint, api, params)?;
     let verb = if request.method() == Method::GET {
         "get"
     } else {
@@ -138,6 +168,10 @@ fn answer(status: StatusCode, body: &[u8], endpoint: &Endpoint, verb: &str) -> C
                 endpoint.namespace
             ),
         ),
+        // Mimir with multi-tenancy on, asked without a tenant (spec I10).
+        401 if String::from_utf8_lossy(body).trim() == NO_TENANT_BODY => {
+            IpcError::new(ErrorCode::Unauthorized, NO_TENANT_MESSAGE)
+        }
         401 => IpcError::new(ErrorCode::Unauthorized, message),
         404 => IpcError::new(ErrorCode::NotFound, message),
         408 | 429 | 502 | 503 | 504 => IpcError::new(ErrorCode::Unreachable, message),
@@ -181,14 +215,7 @@ fn matrix_points(data: &Value) -> CoreResult<Vec<(f64, f64)>> {
 
 /// Whether `endpoint` answers like Prometheus: `/api/v1/query?query=up`.
 pub(crate) async fn probe(client: &Client, endpoint: &Endpoint, limit: Duration) -> CoreResult<()> {
-    let data = call(
-        client,
-        endpoint,
-        "/api/v1/query",
-        &[("query", "up".to_owned())],
-        limit,
-    )
-    .await?;
+    let data = call(client, endpoint, probe_request(endpoint)?, limit).await?;
     if data["resultType"].is_string() {
         Ok(())
     } else {
@@ -207,13 +234,13 @@ pub(crate) async fn query_range(
     window: Window,
     limit: Duration,
 ) -> CoreResult<Vec<(f64, f64)>> {
-    let params = [
-        ("query", query.to_owned()),
-        ("start", window.start.to_string()),
-        ("end", window.end.to_string()),
-        ("step", window.step.to_string()),
-    ];
-    let data = call(client, endpoint, "/api/v1/query_range", &params, limit).await?;
+    let data = call(
+        client,
+        endpoint,
+        range_request(endpoint, query, window)?,
+        limit,
+    )
+    .await?;
     matrix_points(&data)
 }
 
@@ -230,6 +257,7 @@ mod tests {
             port: 9090,
             scheme: None,
             path_prefix: None,
+            tenant: None,
         }
     }
 
@@ -388,5 +416,67 @@ mod tests {
     fn an_instant_answer_is_not_a_range() {
         let err = matrix_points(&json!({ "resultType": "vector", "result": [] })).unwrap_err();
         assert_eq!(err.code, ErrorCode::Internal);
+    }
+
+    #[test]
+    fn a_tenant_goes_in_the_header_of_the_probe_and_of_get_and_post_queries() {
+        let window = Window {
+            start: 0,
+            end: 3_600,
+            step: 60,
+        };
+        let long = "a".repeat(GET_LIMIT);
+        let built = |endpoint: &Endpoint| {
+            vec![
+                probe_request(endpoint).unwrap(),
+                range_request(endpoint, "up", window).unwrap(),
+                range_request(endpoint, &long, window).unwrap(),
+            ]
+        };
+        let tenant = Endpoint {
+            tenant: Some("team-a".to_owned()),
+            ..endpoint()
+        };
+        let with = built(&tenant);
+        assert_eq!(
+            with.iter().map(|r| r.method().clone()).collect::<Vec<_>>(),
+            [Method::GET, Method::GET, Method::POST]
+        );
+        for request in &with {
+            let values: Vec<&str> = request
+                .headers()
+                .get_all(TENANT_HEADER)
+                .iter()
+                .map(|value| value.to_str().unwrap())
+                .collect();
+            assert_eq!(values, ["team-a"], "{request:?}");
+        }
+        for request in built(&endpoint()) {
+            assert!(
+                request.headers().get(TENANT_HEADER).is_none(),
+                "{request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mimir_without_a_tenant_names_the_setting_and_another_401_keeps_its_text() {
+        let no_tenant = fail(401, "no org id\n", "get");
+        assert_eq!(no_tenant.code, ErrorCode::Unauthorized);
+        assert_eq!(
+            no_tenant.message,
+            "Mimir needs a tenant: set Tenant in this cluster's metrics settings."
+        );
+        assert_eq!(no_tenant.details.as_deref(), Some("HTTP 401"));
+
+        let other = fail(401, "invalid bearer token\n", "get");
+        assert_eq!(other.code, ErrorCode::Unauthorized);
+        assert_eq!(other.message, "invalid bearer token");
+        let status = fail(
+            401,
+            r#"{"kind":"Status","code":401,"message":"Unauthorized"}"#,
+            "get",
+        );
+        assert_eq!(status.message, "Unauthorized");
     }
 }

@@ -11,7 +11,7 @@ use skopos_core::app_core::AppCore;
 use skopos_core::error::{CoreResult, ErrorCode};
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::metrics::{
-    MetricName, MetricsLimits, MetricsProvider, MetricsProviderSetting, MetricsRange,
+    LabelMatcher, MetricName, MetricsLimits, MetricsProvider, MetricsProviderSetting, MetricsRange,
     MetricsServerChoice, MetricsTarget, NoProviderChoice, PrometheusChoice, PrometheusScheme,
     UsageItem, UsageOf, WorkloadKind,
 };
@@ -177,6 +177,22 @@ fn pinned_prometheus(
         path_prefix: path_prefix.map(str::to_owned),
         tenant: None,
         matcher: None,
+    }
+}
+
+/// A Mimir pinned as `monitoring/mimir:8080` under `/prometheus`.
+fn pinned_mimir(tenant: Option<&str>, matcher: Option<(&str, &str)>) -> MetricsProviderSetting {
+    MetricsProviderSetting::Prometheus {
+        namespace: "monitoring".to_owned(),
+        service: "mimir".to_owned(),
+        port: 8080,
+        scheme: None,
+        path_prefix: Some("/prometheus".to_owned()),
+        tenant: tenant.map(str::to_owned),
+        matcher: matcher.map(|(name, value)| LabelMatcher {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        }),
     }
 }
 
@@ -980,4 +996,74 @@ async fn an_unusable_target_is_refused_before_anything_is_read() {
         assert_eq!(err.code, ErrorCode::InvalidInput, "{target:?}");
     }
     assert_eq!(fake.request_count("/api/v1/services"), 0);
+}
+
+#[tokio::test]
+async fn a_pinned_tenant_goes_with_every_query_and_detection_sends_none() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    save_provider(&core, &id, pinned_mimir(Some("team-a"), None)).unwrap();
+    fake.serve_proxy("monitoring", "mimir:8080", |request| {
+        matrix(request, &[1.0])
+    });
+
+    let result = core
+        .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert_eq!(result.series.len(), 15);
+    let requests = fake.proxy_requests("monitoring", "mimir:8080");
+    assert_eq!(requests.len(), 15);
+    for request in &requests {
+        assert_eq!(request.path, "/prometheus/api/v1/query_range");
+        assert_eq!(request.tenant.as_deref(), Some("team-a"));
+    }
+
+    // Detection probes and queries without a tenant (I7).
+    community_chart(&fake, prometheus(|request| matrix(request, &[1.0])));
+    save_provider(&core, &id, MetricsProviderSetting::Auto).unwrap();
+    assert_eq!(
+        core.metrics_provider(&id, false).await.unwrap(),
+        chart_provider()
+    );
+    core.metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    let detected = fake.proxy_requests("metrics", "prometheus-server:80");
+    assert!(detected
+        .iter()
+        .any(|request| request.path == "/api/v1/query"));
+    assert!(detected
+        .iter()
+        .any(|request| request.path == "/api/v1/query_range"));
+    assert!(detected.iter().all(|request| request.tenant.is_none()));
+}
+
+#[tokio::test]
+async fn mimir_without_a_tenant_is_unauthorized_and_names_the_setting() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    save_provider(&core, &id, pinned_mimir(None, None)).unwrap();
+    fake.serve_proxy("monitoring", "mimir:8080", |request| {
+        if request.tenant.is_some() {
+            matrix(request, &[1.0])
+        } else {
+            ProxyReply::text(401, "no org id\n")
+        }
+    });
+
+    let err = core
+        .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Unauthorized);
+    assert_eq!(
+        err.message,
+        "Mimir needs a tenant: set Tenant in this cluster's metrics settings."
+    );
+
+    save_provider(&core, &id, pinned_mimir(Some("team-a"), None)).unwrap();
+    let result = core
+        .metrics_query(&id, &MetricsTarget::Cluster, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert_eq!(result.series.len(), 15);
 }
