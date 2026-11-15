@@ -1067,3 +1067,34 @@ async fn mimir_without_a_tenant_is_unauthorized_and_names_the_setting() {
         .unwrap();
     assert_eq!(result.series.len(), 15);
 }
+
+#[tokio::test]
+async fn a_pinned_cluster_label_reaches_every_query() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    save_provider(
+        &core,
+        &id,
+        pinned_mimir(Some("team-a"), Some(("cluster", "prod"))),
+    )
+    .unwrap();
+    fake.serve_proxy("monitoring", "mimir:8080", |request| {
+        matrix(request, &[1.0])
+    });
+
+    let node = MetricsTarget::Node {
+        name: "worker".to_owned(),
+    };
+    let result = core
+        .metrics_query(&id, &node, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert_eq!(result.series.len(), 15);
+    let requests = range_requests(&fake, "monitoring", "mimir:8080");
+    assert_eq!(requests.len(), 15);
+    for request in &requests {
+        let query = &request.params["query"];
+        assert!(query.contains(r#"cluster="prod""#), "{query}");
+    }
+    assert!(requests.iter().any(|request| request.params["query"]
+        .contains(r#"node_uname_info{nodename="worker", cluster="prod"}"#)));
+}
