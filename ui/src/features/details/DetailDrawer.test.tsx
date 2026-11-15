@@ -1093,10 +1093,10 @@ test("the overview shows its cards in order, and the controller as Controlled by
       .getAllByTestId(/^detail-section-toggle-/)
       .map((t) => t.getAttribute("data-testid")),
   ).toEqual([
+    "detail-section-toggle-metadata",
     "detail-section-toggle-relations",
     "detail-section-toggle-conditions",
     "detail-section-toggle-fields",
-    "detail-section-toggle-metadata",
   ]);
   const relations = screen.getByTestId("detail-relations");
   expect(within(relations).getByText("Controlled by")).toBeTruthy();

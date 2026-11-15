@@ -268,8 +268,9 @@ function VolumesSection(props: OverviewProps) {
 }
 
 /**
- * The Overview tab of every kind, in the order of spec H28: Summary, Relations,
- * Volumes, Conditions, the kind's own parts or Fields, then Metadata.
+ * The Overview tab of every kind: Summary, Metadata, Relations, Volumes, Conditions,
+ * then the kind's own parts or Fields. Spec H28 put Metadata last; the user moved it
+ * under Summary on 2026-11-15.
  */
 export function OverviewSections(props: OverviewProps): ReactElement {
   const { clusterId, resource, object, resources } = props;
@@ -279,6 +280,11 @@ export function OverviewSections(props: OverviewProps): ReactElement {
   return (
     <>
       <SummarySection {...props} />
+      <MetadataSection
+        object={object}
+        clusterId={clusterId}
+        resources={resources}
+      />
       <RelationsSection {...props} />
       <VolumesSection {...props} />
       {spec?.ownConditions ? null : (
@@ -296,11 +302,6 @@ export function OverviewSections(props: OverviewProps): ReactElement {
           <FieldTree value={rest} />
         </Part>
       )}
-      <MetadataSection
-        object={object}
-        clusterId={clusterId}
-        resources={resources}
-      />
     </>
   );
 }

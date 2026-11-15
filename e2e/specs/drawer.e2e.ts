@@ -165,11 +165,11 @@ describe("the details drawer on a real cluster", () => {
     await openPod(0);
     expect(await sectionToggles()).toEqual([
       "detail-section-toggle-summary",
+      "detail-section-toggle-metadata",
       "detail-section-toggle-relations",
       "detail-section-toggle-volumes",
       "detail-section-toggle-scheduling",
       "detail-section-toggle-containers",
-      "detail-section-toggle-metadata",
     ]);
     const expanded = () =>
       byTestId("detail-section-toggle-volumes").getAttribute("aria-expanded");

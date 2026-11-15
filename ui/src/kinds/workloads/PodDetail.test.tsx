@@ -179,11 +179,11 @@ test("a Pod's Overview has its six sections in order, with counts on Volumes and
   overview();
   expect(ids('[data-testid^="detail-section-toggle-"]')).toEqual([
     "detail-section-toggle-summary",
+    "detail-section-toggle-metadata",
     "detail-section-toggle-relations",
     "detail-section-toggle-volumes",
     "detail-section-toggle-scheduling",
     "detail-section-toggle-containers",
-    "detail-section-toggle-metadata",
   ]);
   expect(
     screen.getByTestId("detail-section-toggle-volumes").querySelector(".count")
