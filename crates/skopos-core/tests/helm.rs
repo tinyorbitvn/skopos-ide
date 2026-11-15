@@ -24,8 +24,10 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 
 /// A fake helm in its own folder. `helm version` prints `version`. Any other call appends
-/// its arguments to `calls`, one per line and then a line `--`, and runs `body`. Each call
-/// is appended with one write, so calls that run at once do not mix their lines.
+/// its arguments to `calls`, one per line and then a line `--`, and runs `body`. bash, which
+/// is `/bin/sh` on macOS, writes the record a line at a time, so a call appends while it
+/// holds the folder `calls.lock` (`mkdir` either makes it or fails) and calls that run at
+/// once do not mix their lines.
 struct FakeHelm {
     root: TempDir,
     calls: PathBuf,
@@ -40,7 +42,9 @@ impl FakeHelm {
              if [ \"$1\" = version ]; then printf '%s' '{version}'; exit 0; fi\n\
              record=''\n\
              for arg in \"$@\"; do record=\"$record$arg\n\"; done\n\
+             until mkdir '{calls}.lock' 2>/dev/null; do :; done\n\
              printf '%s--\\n' \"$record\" >> '{calls}'\n\
+             rmdir '{calls}.lock'\n\
              {body}\n",
             calls = calls.display(),
         );
@@ -84,6 +88,49 @@ impl FakeHelm {
             cache: self.path().join("helm/cache"),
             data: self.path().join("helm/data"),
         });
+    }
+}
+
+/// The core runs some helm calls at once (`status` and `history`, a list per namespace), so
+/// the fake must keep their records apart under any `/bin/sh`: dash, or bash on macOS.
+#[test]
+fn calls_that_run_at_once_keep_their_records_apart() {
+    let args: Vec<String> = (1..=300).map(|n| format!("arg{n}")).collect();
+    let mut expected: Vec<Vec<String>> = (0..32)
+        .map(|call| {
+            std::iter::once(format!("call{call}"))
+                .chain(args.iter().cloned())
+                .collect()
+        })
+        .collect();
+    expected.sort();
+    for shell in ["sh", "bash"] {
+        let helm = FakeHelm::new("v4.3.1", "exit 0");
+        let spawned: std::io::Result<Vec<_>> = expected
+            .iter()
+            .map(|call| {
+                std::process::Command::new(shell)
+                    .arg(helm.path().join("bin/helm"))
+                    .args(call)
+                    .spawn()
+            })
+            .collect();
+        let children = match spawned {
+            Ok(children) => children,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("{shell}: {error}"),
+        };
+        for mut child in children {
+            assert!(child.wait().unwrap().success(), "{shell}");
+        }
+        let mut calls = helm.calls();
+        calls.sort();
+        let mixed = calls.iter().filter(|call| !expected.contains(call)).count();
+        assert!(
+            calls == expected,
+            "{shell}: {} records, {mixed} of them mixed",
+            calls.len()
+        );
     }
 }
 
