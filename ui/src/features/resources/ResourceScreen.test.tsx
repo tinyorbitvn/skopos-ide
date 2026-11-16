@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { Circle } from "lucide-react";
-import { MemoryRouter, Outlet, Route, Routes } from "react-router";
+import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "../../design";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
@@ -15,10 +15,11 @@ import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
 import { type DeleteDialogProps, registerKind } from "../../kinds/registry";
-import { resetDockForTest, useDock } from "../../stores/dock";
+import { detailsTab, resetDockForTest, useDock } from "../../stores/dock";
 import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
 import { mockElementSize } from "../../test/size";
+import { Dock } from "../dock/Dock";
 import { ResourceRoute, ResourceScreen } from "./ResourceScreen";
 
 function info(
@@ -179,6 +180,7 @@ beforeEach(() => {
   mockElementSize();
 });
 afterEach(() => {
+  resetDockForTest();
   resetResourcesForTest();
   vi.restoreAllMocks();
 });
@@ -1193,4 +1195,92 @@ test("a drawer tab the object does not offer starts the drawer on Overview", asy
     screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
   ).toBe("true");
   expect(screen.queryByTestId("detail-tab-map")).toBeNull();
+});
+
+/** Where the router is. */
+function Where() {
+  const location = useLocation();
+  return (
+    <output data-testid="where">{`${location.pathname}${location.search}`}</output>
+  );
+}
+
+/** A screen of the cluster with its dock below, as ClusterLayout shows them. */
+async function showWithDock(
+  fake: Fake,
+  items: KubeObject[],
+  resource: ApiResourceInfo,
+  resources: ApiResourceInfo[] = [resource],
+) {
+  const { group, plural } = resource.resource;
+  render(
+    <MemoryRouter
+      initialEntries={[`/cluster/c1/r/${group || "core"}/${plural}`]}
+    >
+      <ResourceScreen
+        key="c1"
+        clusterId="c1"
+        info={resource}
+        resources={resources}
+      />
+      <Dock clusterId="c1" resources={resources} />
+      <Where />
+      <Toaster />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  await fake.send(plural, { type: "snapshot", items } as WatchEvent);
+  await fake.send(plural, { type: "status", status: "live", message: null });
+}
+
+test("Open as drawer replaces the open drawer's object, starts on the tab's drawer tab and takes focus", async () => {
+  const fake = fakeBackend();
+  const db = detailsTab("c1", DEPLOYMENTS.resource, "team-a", "db", "events");
+  useDock.getState().open(db);
+  await showWithDock(
+    fake,
+    [pod("web", "team-a"), pod("db", "team-a")],
+    DEPLOYMENTS,
+  );
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  expect(screen.getByTestId("detail-title").textContent).toBe("web");
+
+  fireEvent.click(
+    within(screen.getByTestId(`dock-panel-${db.id}`)).getByTestId(
+      "dock-details-pop",
+    ),
+  );
+  await act(flush);
+  expect(screen.getByTestId("where").textContent).toBe(
+    "/cluster/c1/r/apps/deployments?object=team-a%2Fdb",
+  );
+  const drawer = screen.getByTestId("detail-drawer");
+  expect(screen.getByTestId("detail-title").textContent).toBe("db");
+  expect(
+    within(drawer)
+      .getByTestId("detail-tab-events")
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(screen.queryByTestId("detail-back")).toBeNull();
+  expect(document.activeElement).toBe(drawer);
+  expect(useDock.getState().tabs).toEqual([]);
+});
+
+test("a drawer opened from the dock's strip gives focus back to its row on Close", async () => {
+  const fake = fakeBackend();
+  const db = detailsTab("c1", DEPLOYMENTS.resource, "team-a", "db", "overview");
+  useDock.getState().open(db);
+  await showWithDock(
+    fake,
+    [pod("web", "team-a"), pod("db", "team-a")],
+    DEPLOYMENTS,
+  );
+  fireEvent.click(screen.getByTestId(`dock-pop-${db.id}`));
+  await act(flush);
+  expect(document.activeElement).toBe(screen.getByTestId("detail-drawer"));
+
+  fireEvent.click(screen.getByTestId("detail-close"));
+  await act(flush);
+  expect(document.activeElement).toBe(row("team-a", "db"));
 });

@@ -78,8 +78,9 @@ function Body(props: {
   resources: ApiResourceInfo[];
   columns: readonly TableColumn<KubeObject>[];
   tab: string;
+  wide: boolean;
 }) {
-  const { clusterId, resource, object, resources, columns, tab } = props;
+  const { clusterId, resource, object, resources, columns, tab, wide } = props;
   // The overview stays mounted under the other tabs, so unsaved edits survive a
   // tab switch. The metrics panel polls and the map watches the cluster, so each is
   // mounted only while it is shown.
@@ -109,7 +110,10 @@ function Body(props: {
           />
         </section>
       ) : null}
-      <div hidden={tab !== OVERVIEW}>
+      <div
+        hidden={tab !== OVERVIEW}
+        className={wide ? styles.overviewColumns : undefined}
+      >
         <OverviewSections
           clusterId={clusterId}
           resource={resource}
@@ -269,6 +273,8 @@ export interface DetailsContentProps {
   /** Steps to the object a link names. */
   onOpen(target: DrawerTarget): void;
   onTabChange(tab: string): void;
+  /** The dock's layout: the Overview's sections flow into columns (spec K10). */
+  wide?: boolean;
 }
 
 /**
@@ -333,6 +339,7 @@ export function DetailsContent(props: DetailsContentProps): ReactElement {
                 resources={resources}
                 columns={columns}
                 tab={tab}
+                wide={props.wide ?? false}
               />
             </div>
           </DrawerKindContext.Provider>
