@@ -50,25 +50,28 @@ jobs:
         run: |
           tag="$GITHUB_REF_NAME"
           scripts/release.sh notes "${tag#v}" > "$RUNNER_TEMP/notes.md"
-          id_of() {
-            gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-              --jq ".[] | select(.tag_name == \"$tag\") | \"\(.id) \(.draft)\""
-          }
-          found="$(id_of)"
-          if [ -z "$found" ]; then
-            flags=()
-            if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
-            gh release create "$tag" --draft --verify-tag --title "SkoposIDE $tag" \
-              --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
-            found="$(id_of)"
-          elif [ "${found#* }" = true ]; then
-            # A rerun: keep the draft and its uploads, refresh the notes.
-            gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md"
-          else
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$tag\") | \"\(.id) \(.draft)\"")"
+          if grep -q ' false$' <<<"$releases"; then
             echo "::error::$tag is already published"
             exit 1
           fi
-          echo "release-id=${found%% *}" >> "$GITHUB_OUTPUT"
+          id="$(sed -n '1s/ true$//p' <<<"$releases")"
+          if [ -n "$id" ]; then
+            # A rerun: keep the draft and its uploads, refresh the notes.
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" \
+              -F body=@"$RUNNER_TEMP/notes.md" --silent
+          else
+            # Take the id from the create reply: the list lags behind a new draft.
+            id="$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$tag" -f name="SkoposIDE $tag" -F draft=true \
+              -F prerelease="$PRERELEASE" -F body=@"$RUNNER_TEMP/notes.md" --jq .id)"
+          fi
+          if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+            echo "::error::no release id for $tag (got '$id')"
+            exit 1
+          fi
+          echo "release-id=$id" >> "$GITHUB_OUTPUT"
 
   build:
     needs: draft
@@ -122,18 +125,30 @@ jobs:
           hdiutil detach "$mount_point"
 
   publish:
-    needs: [verify, build]
+    needs: [verify, draft, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
-      - name: Publish the draft
+      - name: Publish the draft once it holds every build
         env:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          RELEASE_ID: ${{ needs.draft.outputs.release-id }}
         run: |
-          if [ "$PRERELEASE" = true ]; then latest=--latest=false; else latest=--latest; fi
-          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false "$latest"
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json url,assets \
-            --jq '"\(.url) with \(.assets | length) assets"'
+          release="repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          version="${GITHUB_REF_NAME#v}"
+          names="$(gh api "$release" --jq '.assets[].name')"
+          missing=()
+          for suffix in amd64.AppImage amd64.deb aarch64.dmg x64.dmg x64-setup.exe; do
+            name="SkoposIDE_${version}_${suffix}"
+            grep -qxF "$name" <<<"$names" || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::the draft lacks ${missing[*]}"
+            exit 1
+          fi
+          if [ "$PRERELEASE" = true ]; then latest=false; else latest=true; fi
+          gh api -X PATCH "$release" -F draft=false -f make_latest="$latest" \
+            --jq '"\(.html_url) with \(.assets | length) assets"'

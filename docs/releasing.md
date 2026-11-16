@@ -39,7 +39,8 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
    3. **draft:** a draft release is made with those notes.
    4. **build:** Linux, macOS arm64, macOS x64 and Windows builds are added to the draft. The
       macOS signature is checked inside the dmg.
-   5. **publish:** once all four builds pass, the draft is published and marked Latest. A tag
+   5. **publish:** once all four builds pass, the draft must hold the five installers (AppImage,
+      deb, arm64 and x64 dmg, Windows setup exe); then it is published and marked Latest. A tag
       with a pre-release suffix, such as `v0.7.0-rc.1`, is published as a pre-release.
 
 ## When a release fails
