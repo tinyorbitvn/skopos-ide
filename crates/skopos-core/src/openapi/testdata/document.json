@@ -1,0 +1,125 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Test", "version": "v1" },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "io.example.gizmo.v2.Gizmo": {
+        "description": "The decoy in another version.",
+        "type": "object",
+        "properties": { "apiVersion": { "type": "string" } },
+        "x-kubernetes-group-version-kind": [{ "group": "gizmos.example.com", "kind": "Gizmo", "version": "v2" }]
+      },
+      "io.example.gizmo.v1.Gizmo": {
+        "description": "A Gizmo for tests.",
+        "type": "object",
+        "required": ["spec"],
+        "properties": {
+          "status": { "$ref": "#/components/schemas/io.example.gizmo.v1.GizmoStatus" },
+          "spec": {
+            "description": "What the Gizmo should be.",
+            "default": {},
+            "allOf": [{ "$ref": "#/components/schemas/io.example.gizmo.v1.GizmoSpec" }]
+          },
+          "metadata": {
+            "description": "Standard object metadata.",
+            "default": {},
+            "allOf": [{ "$ref": "#/components/schemas/io.example.meta.v1.ObjectMeta" }]
+          },
+          "kind": { "description": "Kind of the object.", "type": "string" },
+          "apiVersion": { "description": "APIVersion of the object.", "type": "string" }
+        },
+        "x-kubernetes-group-version-kind": [{ "group": "gizmos.example.com", "kind": "Gizmo", "version": "v1" }]
+      },
+      "io.example.core.v1.Thing": {
+        "description": "A core-group kind.",
+        "type": "object",
+        "properties": { "name": { "type": "string" } },
+        "x-kubernetes-group-version-kind": [{ "group": "", "kind": "Thing", "version": "v1" }]
+      },
+      "io.example.meta.v1.ObjectMeta": {
+        "description": "Metadata of every object.",
+        "type": "object",
+        "properties": {
+          "name": { "description": "Name of the object.", "type": "string" },
+          "labels": {
+            "description": "Map of string keys and values.",
+            "type": "object",
+            "additionalProperties": { "type": "string", "default": "" }
+          }
+        }
+      },
+      "io.example.gizmo.v1.GizmoStatus": {
+        "description": "What the Gizmo is.",
+        "type": "object",
+        "properties": { "ready": { "type": "boolean" } }
+      },
+      "io.example.gizmo.v1.GizmoSpec": {
+        "description": "The spec type's own words.",
+        "type": "object",
+        "required": ["size", "parts"],
+        "properties": {
+          "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "size": { "$ref": "#/components/schemas/io.example.api.resource.Quantity" },
+          "raw": { "type": "object", "x-kubernetes-preserve-unknown-fields": true, "properties": { "kept": { "type": "string" } } },
+          "ratio": { "type": "number", "format": "double" },
+          "port": { "$ref": "#/components/schemas/io.example.util.intstr.IntOrString" },
+          "policy": {
+            "description": "How to pull.\n\nPossible enum values:\n - `\"Always\"` pulls every time.",
+            "type": "string",
+            "enum": ["Always", "IfNotPresent", "Never"]
+          },
+          "parts": {
+            "type": "array",
+            "items": { "default": {}, "allOf": [{ "$ref": "#/components/schemas/io.example.gizmo.v1.Part" }] }
+          },
+          "parent": { "$ref": "#/components/schemas/io.example.gizmo.v1.Node" },
+          "note": { "type": "string", "default": "" },
+          "mixed": {
+            "description": "The property's words.",
+            "allOf": [{ "$ref": "#/components/schemas/io.example.gizmo.v1.Part" }],
+            "properties": { "extra": { "type": "string" } }
+          },
+          "loose": { "x-kubernetes-preserve-unknown-fields": true },
+          "levels": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+          "inline": { "type": "object", "properties": { "zeta": { "type": "string" }, "alpha": { "type": "string" } } },
+          "free": { "type": "object" },
+          "enabled": { "type": "boolean", "default": false },
+          "dangling": { "description": "Points at nothing.", "$ref": "#/components/schemas/io.example.gone.v1.Missing" },
+          "created": { "description": "When it was made.", "allOf": [{ "$ref": "#/components/schemas/io.example.meta.v1.Time" }] },
+          "crdPort": { "x-kubernetes-int-or-string": true, "anyOf": [{ "type": "integer" }, { "type": "string" }] },
+          "count": { "type": "integer", "format": "int32", "default": 1 },
+          "byName": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/io.example.gizmo.v1.Part" } },
+          "anything": { "description": "No type at all." }
+        }
+      },
+      "io.example.gizmo.v1.Part": {
+        "description": "One part.",
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "weight": { "description": "Weight from the type.", "type": "integer", "enum": [1, 2] },
+          "name": { "description": "The part's name.", "type": "string" }
+        }
+      },
+      "io.example.gizmo.v1.Node": {
+        "description": "A link in a chain.",
+        "type": "object",
+        "properties": {
+          "value": { "type": "string" },
+          "next": { "$ref": "#/components/schemas/io.example.gizmo.v1.Node" }
+        }
+      },
+      "io.example.meta.v1.Time": { "description": "Time is a wrapper.", "type": "string", "format": "date-time" },
+      "io.example.util.intstr.IntOrString": {
+        "description": "A number or a string.",
+        "format": "int-or-string",
+        "oneOf": [{ "type": "integer" }, { "type": "string" }]
+      },
+      "io.example.api.resource.Quantity": {
+        "description": "A quantity.",
+        "oneOf": [{ "type": "string" }, { "type": "number" }]
+      }
+    }
+  }
+}
