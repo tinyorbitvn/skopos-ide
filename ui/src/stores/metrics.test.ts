@@ -363,13 +363,41 @@ test("a failed ask keeps the last result with the error; the next answer clears 
   });
 });
 
-test("Unreachable shows no error, and the poller asks again when the cluster reconnects", async () => {
+test("Unreachable from a connected cluster is Prometheus not answering: the error shows and the poller keeps asking", async () => {
+  pollTimers();
+  let answering = false;
+  const backend = mockBackend({
+    metrics_query: () => {
+      if (!answering) throw UNREACHABLE;
+      return RESULT;
+    },
+  });
+  const stop = watchQuery("c1", CLUSTER, "1h");
+  await flush();
+  expect(metrics().queries[KEY]?.error?.code).toBe("Unreachable");
+  expect(metrics().queries[KEY]?.loading).toBe(false);
+
+  answering = true;
+  vi.advanceTimersByTime(QUERY_STEP_MS["1h"]);
+  await flush();
+  expect(backend.callsTo("metrics_query")).toHaveLength(2);
+  expect(metrics().queries[KEY]).toEqual({
+    value: RESULT,
+    error: null,
+    loading: false,
+  });
+  stop();
+});
+
+test("Unreachable once the cluster has disconnected shows no error, and the poller asks again when it reconnects", async () => {
   pollTimers();
   let reachable = false;
   const backend = mockBackend({
     metrics_query: () => {
-      if (!reachable) throw UNREACHABLE;
-      return RESULT;
+      if (reachable) return RESULT;
+      // The connection drops while the query is on its way.
+      setClusterState("c1", { status: "disconnected" });
+      throw UNREACHABLE;
     },
   });
   const stop = watchQuery("c1", CLUSTER, "1h");
@@ -381,7 +409,6 @@ test("Unreachable shows no error, and the poller asks again when the cluster rec
   });
 
   reachable = true;
-  setClusterState("c1", { status: "disconnected" });
   setClusterState("c1", CONNECTED);
   await flush();
   expect(backend.callsTo("metrics_query")).toHaveLength(2);
