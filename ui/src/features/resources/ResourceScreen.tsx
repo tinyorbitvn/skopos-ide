@@ -42,6 +42,7 @@ import { objectActions } from "./objectActions";
 import { PropertyFilter } from "./PropertyFilter";
 import { RowActions, useActionContext } from "./ResourceActions";
 import styles from "./ResourceScreen.module.css";
+import { useOwnedPods } from "./useOwnedPods";
 
 const ACTIONS_COLUMN = "actions";
 /** Always shown, so a row can always be told apart. */
@@ -169,10 +170,12 @@ export function ResourceScreen(props: {
 
   // CPU and Memory for Pods and Nodes; undefined for every other kind.
   const usage = useListUsage(clusterId, resource, namespaces);
+  // Each workload's Pods, for the workload kinds' Status (spec N3); undefined otherwise.
+  const owned = useOwnedPods(clusterId, info);
   const columns = useMemo<TableColumn<KubeObject>[]>(() => {
     const actions = kindSpec(resource.group, resource.plural)?.actions ?? [];
     return [
-      ...kindColumns(info, crd, usage),
+      ...kindColumns(info, crd, usage, owned),
       {
         id: ACTIONS_COLUMN,
         header: "Actions",
@@ -189,7 +192,7 @@ export function ResourceScreen(props: {
         ),
       },
     ];
-  }, [info, crd, resource, context, usage]);
+  }, [info, crd, resource, context, usage, owned]);
 
   // The table's Name column shows the match chips; the drawer's Summary gets `columns`.
   const tableColumns = useMemo(() => {

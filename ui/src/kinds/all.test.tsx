@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { OverviewSections } from "../features/details/OverviewSections";
@@ -111,6 +111,32 @@ describe.each(registeredKinds())(
             />
           </MemoryRouter>,
         );
+        await flush();
+      },
+    );
+
+    test.each(SPARSE)(
+      "Status cells survive a sparse object whose Pods are known (%#)",
+      async (object) => {
+        const owned = { podsOf: () => [object] };
+        const columns = spec.columns?.(
+          infoFor(group, plural),
+          undefined,
+          owned,
+        );
+        render(
+          <MemoryRouter>
+            {(columns ?? []).map((c) => {
+              c.sortValue?.(object);
+              return <div key={c.id}>{c.render(object)}</div>;
+            })}
+          </MemoryRouter>,
+        );
+        for (const cell of screen.queryAllByTestId("status-cell")) {
+          fireEvent.focus(cell);
+          await screen.findByTestId("status-card");
+          fireEvent.blur(cell);
+        }
         await flush();
       },
     );

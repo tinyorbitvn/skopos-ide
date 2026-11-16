@@ -5,7 +5,6 @@ import {
   baseColumns,
   numberColumn,
   type StatusInfo,
-  statusColumn,
   textColumn,
 } from "../columns";
 import { Chips, Facts, ObjectLink, Part } from "../detail/parts";
@@ -17,6 +16,7 @@ import {
   registerKind,
 } from "../registry";
 import { matchesSelector, selectorText } from "../selectors";
+import { workloadStatusColumn } from "../statusCells";
 import { workloadLogsAction } from "./logsAction";
 import { serviceAccountRelations } from "./PodDetail";
 import { PodList } from "./PodList";
@@ -208,11 +208,11 @@ export function CronJobDetail({ clusterId, object, resources }: DetailProps) {
 }
 
 registerKind("batch", "jobs", {
-  columns: (info) =>
+  columns: (info, _usage, owned) =>
     baseColumns(
       info.resource,
       textColumn("completions", "Completions", jobCompletions, { width: 110 }),
-      statusColumn(jobStatus),
+      workloadStatusColumn(info.resource.kind, jobStatus, owned),
       {
         id: "duration",
         header: "Duration",
@@ -228,7 +228,7 @@ registerKind("batch", "jobs", {
 });
 
 registerKind("batch", "cronjobs", {
-  columns: (info) =>
+  columns: (info, _usage, owned) =>
     baseColumns(
       info.resource,
       textColumn("schedule", "Schedule", (o) => o.spec?.schedule, {
@@ -237,7 +237,7 @@ registerKind("batch", "cronjobs", {
       textColumn("timeZone", "Time zone", (o) => o.spec?.timeZone, {
         defaultHidden: true,
       }),
-      statusColumn(cronStatus),
+      workloadStatusColumn(info.resource.kind, cronStatus, owned),
       numberColumn("active", "Active", (o) => (o.status?.active ?? []).length),
       {
         id: "lastSchedule",
