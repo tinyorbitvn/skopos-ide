@@ -11,8 +11,10 @@ import {
   editorContaining,
   editorText,
   gone,
+  inDockPanel,
   openCluster,
   openResource,
+  pointerClick,
   resourceRowMenu,
   rowId,
   searchResources,
@@ -102,6 +104,67 @@ async function clickSave(): Promise<void> {
   const save = await shown("yaml-save");
   await save.waitForEnabled({ timeout: 15000 });
   await save.click();
+}
+
+const PAUSE_IMAGE = "registry.k8s.io/pause:3.10";
+/** Ten presses of 24 px make the dock 240 px taller: room for the tree and the details. */
+const DOCK_STEPS = 10;
+
+async function until(
+  check: () => Promise<boolean>,
+  message: string,
+  timeout = 15000,
+): Promise<void> {
+  await browser.waitUntil(check, { timeout, timeoutMsg: message });
+}
+
+async function dockHeight(): Promise<number> {
+  return Number(await byTestId("dock-resize").getAttribute("aria-valuenow"));
+}
+
+/** Moves the dock's edge DOCK_STEPS times with `key` and waits for `height`. */
+async function resizeDock(
+  key: "ArrowUp" | "ArrowDown",
+  height: number,
+): Promise<void> {
+  await browser.execute(() =>
+    document.querySelector<HTMLElement>('[data-testid="dock-resize"]')?.focus(),
+  );
+  for (let step = 0; step < DOCK_STEPS; step += 1) await browser.keys(key);
+  await until(
+    async () => (await dockHeight()) === height,
+    `the dock never reached ${height} px`,
+  );
+}
+
+/** Waits for the API docs of the dock tab on screen to show `kind` of `apiVersion`. */
+async function expectApiDocs(kind: string, apiVersion: string): Promise<void> {
+  await until(
+    async () => {
+      const shownKind = inDockPanel("api-docs-kind");
+      return (
+        (await shownKind.isExisting()) &&
+        (await shownKind.getText()) === kind &&
+        (await inDockPanel("api-docs-version").getText()) === apiVersion
+      );
+    },
+    `the API docs never showed ${kind} ${apiVersion}`,
+    30000,
+  );
+}
+
+/** Opens a create tab, fills it from the template `id` and waits for `part` in the editor. */
+async function createFromTemplate(id: string, part: string): Promise<string> {
+  await clickWhenShown("create-resource");
+  await shown("create-apply");
+  await until(
+    async () => (await editorText()) !== null,
+    "the create tab's editor never loaded",
+  );
+  await pointerClick(await shown("create-template"));
+  await clickWhenShown(`menu-item-${id}`);
+  await gone(`menu-item-${id}`);
+  return editorContaining(part);
 }
 
 describe("YAML editor", () => {
@@ -249,5 +312,90 @@ describe("YAML editor", () => {
     await dialogButton("Discard").click();
     await close.waitForExist({ timeout: 15000, reverse: true });
     expect(await storedValue("dirty")).toBe("clean");
+  });
+
+  it("shows a Deployment's API docs beside its YAML", async () => {
+    await kubectl([
+      "-n",
+      NS,
+      "create",
+      "deployment",
+      "docs",
+      `--image=${PAUSE_IMAGE}`,
+      "--replicas=0",
+    ]);
+    await openResource("nav-item-apps-deployments", "Deployment");
+    await searchResources("docs");
+    await shown(rowId(NS, "docs"));
+    await resourceRowMenu("docs", "edit");
+    await editorContaining("name: docs");
+
+    const start = await dockHeight();
+    await resizeDock("ArrowUp", start + DOCK_STEPS * 24);
+    try {
+      await expectApiDocs("Deployment", "apps/v1");
+
+      await inDockPanel("api-docs-search").setValue("image");
+      await until(async () => {
+        const hits = /^(\d+) fields$/.exec(
+          await inDockPanel("api-docs-hits").getText(),
+        );
+        // containers, initContainers and ephemeralContainers each have image and
+        // imagePullPolicy, and the pod has imagePullSecrets.
+        return hits !== null && Number(hits[1]) >= 7;
+      }, "the search never counted the image fields");
+
+      const path = "spec.template.spec.containers[].image";
+      const row = await inDockPanel(`api-docs-field-${path}`);
+      await row.waitForExist({ timeout: 15000 });
+      await browser.execute(
+        (el: Element) => el.scrollIntoView({ block: "center" }),
+        row as unknown as Element,
+      );
+      await row.click();
+
+      await until(
+        async () => (await inDockPanel("api-docs-path").getText()) === path,
+        "the details never showed the image field",
+      );
+      expect(await inDockPanel("api-docs-facts").getText()).toContain("string");
+      expect(await inDockPanel("api-docs-description").getText()).toContain(
+        "Container image name",
+      );
+    } finally {
+      await resizeDock("ArrowDown", start);
+    }
+  });
+
+  it("a create tab shows the API docs of its document's kind", async () => {
+    await createFromTemplate("configmap", "kind: ConfigMap");
+
+    await expectApiDocs("ConfigMap", "v1");
+  });
+
+  it("the API docs toggle hides the panel in every tab and stays off", async () => {
+    await createFromTemplate("configmap", "kind: ConfigMap");
+    await expectApiDocs("ConfigMap", "v1");
+    const toggle = await inDockPanel("api-docs-toggle");
+    expect(await toggle.getAttribute("aria-pressed")).toBe("true");
+
+    await toggle.click();
+    await until(
+      async () => !(await inDockPanel("api-docs").isExisting()),
+      "the API docs never went away",
+    );
+    expect(await inDockPanel("api-docs-toggle").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+
+    await closeDockTabs();
+    await createFromTemplate("configmap", "kind: ConfigMap");
+    expect(await inDockPanel("api-docs-toggle").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(await inDockPanel("api-docs").isExisting()).toBe(false);
+
+    await inDockPanel("api-docs-toggle").click();
+    await expectApiDocs("ConfigMap", "v1");
   });
 });
