@@ -3,6 +3,8 @@
 // Until `api_schema` (spec L1) calls into this module, parts of it have no caller.
 #![allow(dead_code)]
 
+mod cache;
+mod fetch;
 mod tree;
 mod types;
 
