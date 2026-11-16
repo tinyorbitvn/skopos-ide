@@ -366,6 +366,23 @@ describe("PropertyFilter", () => {
     expect(box().getAttribute("aria-activedescendant")).toBe(first.id);
   });
 
+  test("an equal but new index keeps the active option; changed options reset it", () => {
+    const { rerender } = render(<Harness objects={[...OBJECTS]} />);
+    focusBox();
+    key("ArrowDown");
+    key("ArrowDown");
+    const active = () => box().getAttribute("aria-activedescendant");
+    const options = () => within(list() as HTMLElement).getAllByRole("option");
+    const before = optionTexts();
+    expect(active()).toBe(options()[2].id);
+    rerender(<Harness objects={[...OBJECTS]} />);
+    expect(optionTexts()).toEqual(before);
+    expect(active()).toBe(options()[2].id);
+    expect(options()[2].getAttribute("aria-selected")).toBe("true");
+    rerender(<Harness objects={OBJECTS.slice(0, 1)} />);
+    expect(active()).toBe(options()[0].id);
+  });
+
   test("Enter picks the active option", () => {
     render(<Harness />);
     focusBox();

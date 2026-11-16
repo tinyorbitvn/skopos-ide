@@ -50,12 +50,14 @@ export function PropertyFilter(props: PropertyFilterProps): ReactElement {
     () => new Map(options.map((option, at) => [option, at])),
     [options],
   );
-  // The first option is active whenever the options change (spec M16).
-  const [moved, setMoved] = useState<{
-    of: SuggestionOption[];
-    at: number;
-  } | null>(null);
-  const active = moved !== null && moved.of === options ? moved.at : 0;
+  // The first option is active whenever the options change (spec M16): a change of
+  // content, so the keys identify the list; a rebuilt index with the same options keeps it.
+  const optionKeys = useMemo(
+    () => options.map((option) => option.key).join("\n"),
+    [options],
+  );
+  const [moved, setMoved] = useState<{ keys: string; at: number } | null>(null);
+  const active = moved !== null && moved.keys === optionKeys ? moved.at : 0;
   const optionId = (at: number) => `${listId}-option-${at}`;
   const activeId = open && options.length > 0 ? optionId(active) : undefined;
 
@@ -92,7 +94,7 @@ export function PropertyFilter(props: PropertyFilterProps): ReactElement {
         }
         if (options.length === 0) return;
         const step = e.key === "ArrowDown" ? 1 : options.length - 1;
-        setMoved({ of: options, at: (active + step) % options.length });
+        setMoved({ keys: optionKeys, at: (active + step) % options.length });
         return;
       }
       case "Enter": {
