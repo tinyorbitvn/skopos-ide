@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createTestNamespace, deleteTestNamespace, kubectl } from "../helpers/kube";
 import {
-  byTestId, clickWhenShown, dialogButton, openCluster, openResource, resourceRowMenu,
+  byTestId, clickWhenShown, dialogButton, gone, openCluster, openResource, resourceRowMenu,
   rowId, searchResources, shown,
 } from "../helpers/ui";
 
@@ -54,6 +54,28 @@ describe("kinds on a real cluster", () => {
     await byTestId(rowId(NS, "steady")).click();
     await until(async () => (await (await shown("detail-pods")).getText()).includes("steady-"), "no pod listed");
     await clickWhenShown("detail-close");
+  });
+
+  it("shows a deployment's Pod states in its Status and names the Pods in a card", async () => {
+    const statusOf = (name: string) => browser.$(`[data-testid="${rowId(NS, name)}"] [data-testid="status-cell"]`);
+    const label = async (name: string) => (await statusOf(name).getAttribute("aria-label")) ?? "";
+    await until(async () => (await label("steady")).startsWith("Available"), "steady never showed Available");
+    await kubectl(["-n", NS, "create", "deployment", "stuck", "--image=registry.invalid/none:1", "--replicas=2"]);
+    try {
+      await searchResources("stuck");
+      await until(
+        async () => /^(ImagePullBackOff|ErrImagePull), [12] of 2 Pods/.test(await label("stuck")),
+        "stuck never showed its Pods' image pull state",
+      );
+      await browser.execute((el) => (el as unknown as HTMLElement).focus(), await statusOf("stuck"));
+      const card = await shown("status-card");
+      await until(async () => ((await card.getText()).match(/stuck-/g) ?? []).length === 2, "the card never named both Pods");
+      await browser.keys("Escape");
+      await gone("status-card");
+    } finally {
+      await kubectl(["-n", NS, "delete", "deployment", "stuck", "--wait=false"]);
+      await searchResources("steady");
+    }
   });
 
   it("scales a deployment", async () => {
