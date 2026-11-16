@@ -9,8 +9,10 @@ import {
   clickWhenShown,
   expectRows,
   gone,
+  inDockPanel,
   openCluster,
   openResource,
+  pointerClick,
   rowId,
   rowIds,
   searchResources,
@@ -74,6 +76,31 @@ function rect(testId: string) {
       ? { top: r.top, right: r.right, bottom: r.bottom, width: r.width }
       : null;
   }, testId);
+}
+
+/** True when a click at the element's centre reaches it: nothing covers it. */
+function uncovered(testId: string): Promise<boolean> {
+  return browser.execute((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    if (!element) return false;
+    const r = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      r.left + r.width / 2,
+      r.top + r.height / 2,
+    );
+    return hit !== null && element.contains(hit);
+  }, testId);
+}
+
+/** The shown details tab's kind and title, read in one script. */
+function dockedHeader(): Promise<(string | null)[]> {
+  return browser.execute(() => {
+    const text = (id: string) =>
+      document.querySelector(
+        `[data-testid="dock"] [role="tabpanel"]:not([hidden]) [data-testid="${id}"]`,
+      )?.textContent ?? null;
+    return [text("dock-details-kind"), text("dock-details-title")];
+  });
 }
 
 /** The drawer's section toggles, top to bottom. */
@@ -278,6 +305,43 @@ describe("the details drawer on a real cluster", () => {
     for (const part of ["linked-config", "linked-secret", "scratch"]) {
       expect(volumes).toContain(part);
     }
+    await closeDrawer();
+  });
+
+  it("minimizes a Deployment's drawer into the dock and opens it as a drawer again", async () => {
+    await openResource("nav-item-apps-deployments", "Deployment");
+    await searchResources("linked");
+    await byTestId(rowId(NS, "linked")).click();
+    await showing("Deployment", (t) => t === "linked", "the Deployment");
+    await pointerClick(await shown("detail-tab-events"));
+    await shown("detail-events");
+
+    await pointerClick(await shown("detail-minimize"));
+    await gone("detail-drawer");
+    // The list is in full view: a click on the row reaches it.
+    expect(await uncovered(rowId(NS, "linked"))).toBe(true);
+    await inDockPanel("detail-events").waitForDisplayed({ timeout: 15000 });
+    expect(await dockedHeader()).toEqual(["Deployment", "linked"]);
+    expect(
+      await inDockPanel("detail-tab-events").getAttribute("aria-selected"),
+    ).toBe("true");
+
+    const pop = inDockPanel("dock-details-pop");
+    await pop.waitForDisplayed({ timeout: 15000 });
+    await pointerClick(await pop);
+    await showing("Deployment", (t) => t === "linked", "the Deployment again");
+    await until(
+      async () =>
+        (await byTestId("detail-tab-events").getAttribute("aria-selected")) ===
+        "true",
+      "the drawer never opened on Events",
+    );
+    await shown("detail-events");
+    await until(
+      async () =>
+        (await browser.$$('[data-testid^="dock-tab-details:"]').length) === 0,
+      "the details tab stayed in the dock",
+    );
     await closeDrawer();
   });
 

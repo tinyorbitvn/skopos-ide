@@ -1,5 +1,5 @@
 import { deleteTestNamespace } from "../helpers/kube";
-import { byTestId, dockTabTitles, openCluster } from "../helpers/ui";
+import { byTestId, dockTabTitles, inDockPanel, openCluster } from "../helpers/ui";
 
 const KIND = "kind-skopos-e2e";
 const NS = "skopos-test-dock-restart";
@@ -19,7 +19,8 @@ describe("the dock layout across a restart: after", () => {
 
   it("restores the height, the tab order, the active tab and the Logs tab's options", async () => {
     await until(
-      async () => JSON.stringify(await dockTabTitles()) === JSON.stringify(["Create", "Logs · keeper"]),
+      async () =>
+        JSON.stringify(await dockTabTitles()) === JSON.stringify(["Create", "Logs · keeper", "Pod · keeper"]),
       "the dock never restored its tabs in their order",
     );
     expect(await browser.$('[data-testid^="dock-tab-logs:"]').getAttribute("aria-selected")).toBe("true");
@@ -32,5 +33,15 @@ describe("the dock layout across a restart: after", () => {
       async () => (await byTestId("logs-view").getText()).includes("keeper line"),
       "the restored Logs tab never streamed",
     );
+  });
+
+  it("restores the details tab on Events, showing its object", async () => {
+    await browser.$('[data-testid^="dock-tab-details:"]').click();
+    await until(async () => {
+      const title = inDockPanel("dock-details-title");
+      return (await title.isExisting()) && (await title.getText()) === "keeper";
+    }, "the restored details tab never showed keeper");
+    expect(await inDockPanel("detail-tab-events").getAttribute("aria-selected")).toBe("true");
+    await inDockPanel("detail-events").waitForDisplayed({ timeout: 30000 });
   });
 });
