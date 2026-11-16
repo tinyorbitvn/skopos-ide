@@ -4,7 +4,10 @@ import {
   clickWhenShown,
   gone,
   openCluster,
+  expectRows,
+  expectRowsExactly,
   openResource,
+  pickFilterSuggestion,
   pointerClick,
   rowId,
   searchResources,
@@ -16,6 +19,22 @@ import {
 const KIND = "kind-skopos-e2e";
 const NS = "skopos-e2e-map";
 const GATEWAY_GROUP = "gateway.networking.k8s.io";
+// The standard v1.7.0 kinds, in the order Network lists them (spec M2).
+const NETWORK_GATEWAY_KINDS = [
+  "gatewayclasses",
+  "gateways",
+  "listenersets",
+  "httproutes",
+  "grpcroutes",
+  "tlsroutes",
+  "tcproutes",
+  "udproutes",
+  "backendtlspolicies",
+  "referencegrants",
+];
+// The test puts this annotation on the fixture's Pod (spec M31).
+const FILTER_KEY = "skopos-e2e/filter";
+const FILTER_VALUE = "found";
 
 const DEPLOYMENT = `Deployment/${NS}/web`;
 // Ids ending in "-" are prefixes of generated names.
@@ -482,6 +501,99 @@ describe("resource map", () => {
           `${NS}/edge`,
         ),
       "the HTTPRoute row never showed its parent",
+    );
+  });
+
+  it("puts Helm and Argo CD under Nodes, and every Gateway API kind under Network", async () => {
+    const sections = () =>
+      browser.execute(() =>
+        Array.from(document.querySelectorAll('[data-testid^="nav-section-"]')).map(
+          (s) => s.getAttribute("data-testid") ?? "",
+        ),
+      );
+    await until(
+      async () =>
+        (await sections()).slice(0, 4).join(" ") ===
+        "nav-section-nodes nav-section-helm nav-section-argocd nav-section-workloads",
+      "the sidebar never started with Nodes, Helm, Argo CD and Workloads",
+    );
+    for (const plural of NETWORK_GATEWAY_KINDS) {
+      await byTestId(`nav-item-${GATEWAY_GROUP}-${plural}`).waitForExist({
+        timeout: 30000,
+        timeoutMsg: `Network never listed ${plural}`,
+      });
+    }
+    // Opens the k8s.io domain of Custom Resources, if it has one, to look inside it.
+    const domain = byTestId("nav-crd-domain-toggle-k8s.io");
+    if (
+      (await domain.isExisting()) &&
+      (await domain.getAttribute("aria-expanded")) !== "true"
+    ) {
+      await domain.click();
+    }
+    const placed = await browser.execute((group: string) => {
+      return Array.from(
+        document.querySelectorAll(`[data-testid^="nav-item-${group}-"]`),
+      ).map((item) => [
+        (item.getAttribute("data-testid") ?? "").slice(
+          `nav-item-${group}-`.length,
+        ),
+        item.closest('[data-testid^="nav-section-"]')?.getAttribute("data-testid") ??
+          "",
+      ]);
+    }, GATEWAY_GROUP);
+    expect(placed.map(([, section]) => section)).toEqual(
+      placed.map(() => "nav-section-network"),
+    );
+    expect(
+      placed
+        .map(([plural]) => plural)
+        .filter((plural) => NETWORK_GATEWAY_KINDS.includes(plural)),
+    ).toEqual(NETWORK_GATEWAY_KINDS);
+    expect(
+      await byTestId(`nav-crd-group-${GATEWAY_GROUP}`).isExisting(),
+    ).toBe(false);
+  });
+
+  it("finds the Pod by an annotation picked from the suggestions, shows its chip, and every Pod again without the token", async () => {
+    await kubectl([
+      "-n",
+      NS,
+      "annotate",
+      "pod",
+      pod,
+      `${FILTER_KEY}=${FILTER_VALUE}`,
+      "--overwrite",
+    ]);
+    // Every namespace's Pods, so the filter visibly narrows the list.
+    await openResource("nav-item-core-pods", "Pod");
+    await expectRows("the kube-system pods and the fixture's Pod", (ids) =>
+      ids.includes(rowId(NS, pod)) &&
+      ids.some((id) => id.startsWith("resource-row-kube-system-")),
+    );
+
+    await (await shown("resource-search")).setValue("anno:skopos");
+    await pickFilterSuggestion(`anno:${FILTER_KEY}`);
+    await pickFilterSuggestion("=");
+    await pickFilterSuggestion(FILTER_VALUE);
+    await expectRowsExactly([rowId(NS, pod)]);
+    await browser.keys("Escape");
+    await gone("filter-suggestions");
+
+    expect(await byTestId("filter-token-edit-0").getAttribute("aria-label")).toBe(
+      `Edit filter anno:${FILTER_KEY} = ${FILTER_VALUE}`,
+    );
+    const chip = (await shown(rowId(NS, pod))).$('[data-testid="filter-chip"]');
+    await chip.waitForExist({ timeout: 15000 });
+    expect(await chip.getAttribute("title")).toBe(
+      `anno ${FILTER_KEY}=${FILTER_VALUE}`,
+    );
+
+    await clickWhenShown("filter-token-remove-0");
+    await gone("filter-tokens");
+    await expectRows("every Pod again", (ids) =>
+      ids.includes(rowId(NS, pod)) &&
+      ids.some((id) => id.startsWith("resource-row-kube-system-")),
     );
   });
 });

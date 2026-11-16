@@ -133,6 +133,12 @@ async function startMapFixture() {
     "crd/gatewayclasses.gateway.networking.k8s.io",
     "crd/gateways.gateway.networking.k8s.io",
     "crd/httproutes.gateway.networking.k8s.io",
+    // The sidebar's Network section lists these as well (spec M31).
+    "crd/listenersets.gateway.networking.k8s.io",
+    "crd/tlsroutes.gateway.networking.k8s.io",
+    "crd/tcproutes.gateway.networking.k8s.io",
+    "crd/udproutes.gateway.networking.k8s.io",
+    "crd/backendtlspolicies.gateway.networking.k8s.io",
   ]);
   await kubectl([
     "delete",
