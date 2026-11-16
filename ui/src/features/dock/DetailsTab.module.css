@@ -1,0 +1,51 @@
+/* A details tab's panel: the header stays in view, the body scrolls (spec K10). */
+.root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* One row, on the drawer band's surface and border (spec H23, K8). */
+.band {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 4px 8px 4px 16px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.back {
+  margin-left: -8px;
+}
+
+.title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font: var(--type-heading);
+  letter-spacing: var(--track-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kind {
+  flex: none;
+  font: var(--type-label);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.grow {
+  flex: 1;
+}
+
+.divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+}

@@ -1421,3 +1421,14 @@ test("the overlay slides in, the dim fades in, and the dark dim is stronger", ()
   });
   expect(decls(".handle")).toMatchObject({ top: "14px", bottom: "14px" });
 });
+
+test("the drawer's Overview stays in one column", async () => {
+  const f = fake();
+  render(drawer());
+  await act(flush);
+  await f.snapshot([pod()]);
+  expect(
+    screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(document.querySelector(".overviewColumns")).toBeNull();
+});

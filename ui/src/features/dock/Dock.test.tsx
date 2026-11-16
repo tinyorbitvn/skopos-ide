@@ -9,6 +9,7 @@ import {
   SquareTerminal,
   Terminal,
 } from "lucide-react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { resetCatalogForTest } from "../../stores/catalog";
@@ -71,7 +72,11 @@ function editorOf(id: string) {
 }
 
 async function show(clusterId = "c1") {
-  const view = render(<Dock clusterId={clusterId} />);
+  const view = render(
+    <MemoryRouter>
+      <Dock clusterId={clusterId} />
+    </MemoryRouter>,
+  );
   await act(flush);
   return view;
 }

@@ -343,3 +343,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The dock's Overview (spec K10): its sections flow into columns. */
+.overviewColumns {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  align-items: start;
+  column-gap: var(--space-8);
+}
+
+/* `display: grid` would otherwise show the Overview under the other tabs. */
+.overviewColumns[hidden] {
+  display: none;
+}
