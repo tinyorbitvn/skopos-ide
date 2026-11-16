@@ -25,6 +25,7 @@ import type { HelmRepoAdd } from "./generated/HelmRepoAdd";
 import type { HelmRevision } from "./generated/HelmRevision";
 import type { HelmUpgradeRequest } from "./generated/HelmUpgradeRequest";
 import type { InvolvedRef } from "./generated/InvolvedRef";
+import type { KindSchema } from "./generated/KindSchema";
 import type { LogDownload } from "./generated/LogDownload";
 import type { LogEvent } from "./generated/LogEvent";
 import type { LogOptions } from "./generated/LogOptions";
@@ -202,6 +203,8 @@ export const api = {
     }),
   resourceEvents: (clusterId: string, involved: InvolvedRef) =>
     call<JsonValue[]>("resource_events", { clusterId, involved }),
+  apiSchema: (clusterId: string, apiVersion: string, kind: string) =>
+    call<KindSchema>("api_schema", { clusterId, apiVersion, kind }),
   workloadScale: (
     clusterId: string,
     resource: ResourceRef,

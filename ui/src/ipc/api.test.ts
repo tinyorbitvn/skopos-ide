@@ -95,6 +95,11 @@ const SPEC: PortForwardSpec = {
 
 test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   ["resources_names", () => api.resourcesNames("c1"), { clusterId: "c1" }],
+  [
+    "api_schema",
+    () => api.apiSchema("c1", "apps/v1", "Deployment"),
+    { clusterId: "c1", apiVersion: "apps/v1", kind: "Deployment" },
+  ],
   ["portforward_list", () => api.portforwardList(), {}],
   ["portforward_add", () => api.portforwardAdd(SPEC), { spec: SPEC }],
   ["portforward_start", () => api.portforwardStart("pf-1"), { id: "pf-1" }],

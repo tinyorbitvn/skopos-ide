@@ -1,6 +1,7 @@
 use serde_json::Value;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
+use skopos_core::openapi::KindSchema;
 use skopos_core::resources::{
     ApiResourceInfo, ApplyResult, InvolvedRef, ObjectNames, Propagation, ResourceRef, WatchEvent,
 };
@@ -181,6 +182,20 @@ pub async fn resource_events(
     involved: InvolvedRef,
 ) -> Result<Vec<Value>, IpcError> {
     state.core.resource_events(&cluster_id, &involved).await
+}
+
+/// One kind's API docs from the cluster's OpenAPI v3 (spec L1).
+#[tauri::command]
+pub async fn api_schema(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    api_version: String,
+    kind: String,
+) -> Result<KindSchema, IpcError> {
+    state
+        .core
+        .api_schema(&cluster_id, &api_version, &kind)
+        .await
 }
 
 #[tauri::command]
