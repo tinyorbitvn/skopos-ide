@@ -103,11 +103,16 @@ describe("cordon and drain on a real node", () => {
   });
 
   it("cordons and uncordons", async () => {
+    const status = async () =>
+      (await browser.$(`[data-testid="resource-row-${WORKER}"] [data-testid="status-cell"]`).getAttribute("aria-label")) ?? "";
     await openNodeMenu("cordon");
     await until(async () => (await byTestId(`resource-row-${WORKER}`).getText()).includes("SchedulingDisabled"), "never cordoned");
+    expect(await status()).toMatch(/^Ready; .*SchedulingDisabled/);
     expect(await unschedulable()).toBe("true");
     await resourceRowMenu(WORKER, "uncordon");
     await until(async () => !(await byTestId(`resource-row-${WORKER}`).getText()).includes("SchedulingDisabled"), "never uncordoned");
+    expect(await status()).toMatch(/^Ready(;|$)/);
+    expect(await status()).not.toContain("SchedulingDisabled");
     expect(await unschedulable()).toBe("");
   });
 
