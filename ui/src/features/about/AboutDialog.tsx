@@ -1,9 +1,10 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { Copy, Telescope, X } from "lucide-react";
+import { Copy, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ShellDialog } from "../../app/ShellDialog";
 import { Button, IconButton, toast } from "../../design";
 import { copyText } from "../../design/clipboard";
+import { SkoposLogo } from "../../design/SkoposLogo";
 import { api } from "../../ipc/api";
 import type { AppInfo } from "../../ipc/generated/AppInfo";
 import { useShell } from "../../stores/shell";
@@ -125,9 +126,9 @@ function AboutBody({ onClose }: { onClose(): void }) {
   return (
     <>
       <div className={styles.header}>
-        <div className={styles.tile}>
-          <Telescope size={24} aria-hidden="true" />
-        </div>
+        <span className={styles.logo} data-testid="about-logo">
+          <SkoposLogo size={48} />
+        </span>
         <div className={styles.titles}>
           <h2 className={styles.title}>SkoposIDE</h2>
           <p className={styles.tagline}>

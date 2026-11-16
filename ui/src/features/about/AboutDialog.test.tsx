@@ -10,6 +10,7 @@ import { toast } from "../../design";
 import { copyText } from "../../design/clipboard";
 import type { AppInfo } from "../../ipc/generated/AppInfo";
 import { resetShellForTest, useShell } from "../../stores/shell";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { mockBackend } from "../../test/ipc";
 import { AboutDialog, aboutFacts } from "./AboutDialog";
 
@@ -165,4 +166,26 @@ test("the copy text without a commit, and after app_info failed", () => {
     "Tauri unknown",
     "unknown",
   ]);
+});
+
+test("the header shows the app logo", async () => {
+  await show(() => INFO);
+
+  const logo = screen.getByTestId("about-logo");
+  const svg = logo.querySelector("svg");
+  expect(svg?.getAttribute("width")).toBe("48");
+  expect(svg?.querySelector("path.mark")).not.toBeNull();
+  expect(logo.closest("[role='dialog']")).not.toBeNull();
+});
+
+test("the logo keeps the 48 px slot the tile had, and does not shrink", () => {
+  const rules = cssRules(
+    CSS_FILES["/src/features/about/AboutDialog.module.css"] ?? "",
+  );
+  const logo = rules.find((r) => r.selector === ".logo");
+  const decl = (name: string) => logo?.decls.find(([p]) => p === name)?.[1];
+  expect(decl("flex-shrink")).toBe("0");
+  expect(decl("width")).toBe("48px");
+  expect(decl("height")).toBe("48px");
+  expect(rules.some((r) => r.selector === ".tile")).toBe(false);
 });
