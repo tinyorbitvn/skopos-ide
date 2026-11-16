@@ -1,0 +1,183 @@
+.tokens {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-5);
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.join {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 26px;
+  padding: 0 var(--space-4) 0 var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font: var(--type-caption);
+  cursor: pointer;
+}
+
+.join:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.token {
+  display: inline-flex;
+  align-items: stretch;
+  height: 26px;
+  max-width: 420px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+  overflow: hidden;
+}
+
+.token[data-editing="true"] {
+  border-color: var(--border-accent);
+}
+
+.body {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: 0 var(--space-5);
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.body:hover {
+  background: var(--surface-hover);
+}
+
+.property,
+.operator {
+  flex: none;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.any {
+  color: var(--text-tertiary);
+  font: var(--type-caption);
+}
+
+.remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.clear {
+  height: 26px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-accent);
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.clear:hover {
+  background: var(--surface-hover);
+}
+
+.join:focus-visible,
+.body:focus-visible,
+.remove:focus-visible,
+.clear:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus-ring-color);
+}
+
+.count {
+  color: var(--text-secondary);
+  font: var(--type-caption);
+  white-space: nowrap;
+}
+
+.edit {
+  position: absolute;
+  top: calc(100% + var(--space-3));
+  left: 0;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: var(--space-7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-3);
+}
+
+.editRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.editLabel {
+  color: var(--text-secondary);
+  font: var(--type-caption);
+}
+
+.editProperty {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.editValue {
+  font-family: var(--font-mono);
+}
+
+.editFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-5);
+}
