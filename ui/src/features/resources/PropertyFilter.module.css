@@ -1,0 +1,122 @@
+.filter {
+  position: relative;
+  flex: 0 1 400px;
+  min-width: 260px;
+}
+
+.box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--control-sm);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+  color: var(--text-tertiary);
+  transition: var(--transition-control);
+}
+
+.box:focus-within {
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.icon {
+  flex: none;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+
+.input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + var(--space-3));
+  left: 0;
+  z-index: 20;
+  width: max(100%, 400px);
+  max-width: calc(100vw - 32px);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-3);
+}
+
+.list {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.heading {
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  color: var(--text-secondary);
+  font: var(--type-overline);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-7);
+  width: 100%;
+  min-height: var(--control-sm);
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--surface-hover);
+}
+
+.option[aria-selected="true"] {
+  background: var(--surface-selected);
+  box-shadow: inset 2px 0 0 var(--focus-ring-color);
+}
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.hint {
+  flex: none;
+  color: var(--text-secondary);
+  font: var(--type-caption);
+}
+
+.foot {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-top: 1px solid var(--divider);
+  color: var(--text-tertiary);
+  font: var(--type-caption);
+}
