@@ -7,7 +7,6 @@ import {
   CheckMenu,
   EmptyState,
   ErrorNotice,
-  Input,
   Spinner,
   type TableColumn,
   type TableSort,
@@ -25,11 +24,22 @@ import { drawerTabOf } from "../details/drawerHistory";
 import { useDrawerHistory } from "../details/useDrawerHistory";
 import { useListUsage } from "../metrics/useListUsage";
 import { DeleteDialog } from "./DeleteDialog";
-import { matchesFilter, typedFilter } from "./filter";
+import { cutText, FilterTokens } from "./FilterTokens";
+import {
+  buildFilterIndex,
+  chipText,
+  type FilterJoin,
+  type MatchChip,
+  matchChips,
+  type ObjectFilter,
+  passes,
+  typedFilter,
+} from "./filter";
 import { kindColumns, useCustomResourceDefinition } from "./kindColumns";
 import { NamespaceFilter, namespaceFilterKey } from "./NamespaceFilter";
 import { ObjectActionBar } from "./ObjectActionBar";
 import { objectActions } from "./objectActions";
+import { PropertyFilter } from "./PropertyFilter";
 import { RowActions, useActionContext } from "./ResourceActions";
 import styles from "./ResourceScreen.module.css";
 
@@ -113,7 +123,11 @@ export function ResourceScreen(props: {
     shownTarget.plural === resource.plural
       ? `${shownTarget.namespace ?? ""}/${shownTarget.name}`
       : undefined;
+  // The filter starts empty for each list and stays while the drawer opens (spec M22).
   const [search, setSearch] = useState("");
+  const [tokens, setTokens] = useState<ObjectFilter[]>([]);
+  const [join, setJoin] = useState<FilterJoin>("and");
+  const filterBox = useRef<HTMLInputElement>(null);
   // Kept here because the table unmounts while no row matches.
   const [sort, setSort] = useState<TableSort | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -136,15 +150,22 @@ export function ResourceScreen(props: {
     return [...found];
   }, [list.items]);
 
-  const rows = useMemo(() => {
+  const namespaceRows = useMemo(() => {
     const allowed = new Set(namespaces);
-    const typed = typedFilter(search);
     return list.items.filter(
-      (o) =>
-        (allowed.size === 0 || allowed.has(o.metadata.namespace ?? "")) &&
-        (typed === null || matchesFilter(o, typed)),
+      (o) => allowed.size === 0 || allowed.has(o.metadata.namespace ?? ""),
     );
-  }, [list.items, namespaces, search]);
+  }, [list.items, namespaces]);
+  // The suggestions read the objects after the namespace filter (spec M17).
+  const filterIndex = useMemo(
+    () => buildFilterIndex(namespaceRows),
+    [namespaceRows],
+  );
+  const typed = useMemo(() => typedFilter(search), [search]);
+  const rows = useMemo(
+    () => namespaceRows.filter((o) => passes(o, tokens, join, typed)),
+    [namespaceRows, tokens, join, typed],
+  );
 
   // CPU and Memory for Pods and Nodes; undefined for every other kind.
   const usage = useListUsage(clusterId, resource, namespaces);
@@ -169,6 +190,25 @@ export function ResourceScreen(props: {
       },
     ];
   }, [info, crd, resource, context, usage]);
+
+  // The table's Name column shows the match chips; the drawer's Summary gets `columns`.
+  const tableColumns = useMemo(() => {
+    const filters = typed === null ? tokens : [...tokens, typed];
+    if (filters.length === 0) return columns;
+    return columns.map((c) =>
+      c.id === "name"
+        ? {
+            ...c,
+            render: (o: KubeObject) => (
+              <span className={styles.nameCell}>
+                <span className={styles.nameText}>{c.render(o)}</span>
+                <MatchChips chips={matchChips(o, filters)} />
+              </span>
+            ),
+          }
+        : c,
+    );
+  }, [columns, tokens, typed]);
 
   const kindActions = kindSpec(resource.group, resource.plural)?.actions ?? [];
   const KindDeleteDialog =
@@ -236,12 +276,13 @@ export function ResourceScreen(props: {
         <h2 className={styles.title} data-testid="resource-title">
           {kind}
         </h2>
-        <Input
-          aria-label="Search by name, namespace or label"
-          placeholder="Search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          data-testid="resource-search"
+        <PropertyFilter
+          text={search}
+          onTextChange={setSearch}
+          tokens={tokens}
+          onTokensChange={setTokens}
+          index={filterIndex}
+          inputRef={filterBox}
         />
         {namespaced ? (
           <NamespaceFilter
@@ -294,6 +335,19 @@ export function ResourceScreen(props: {
           Delete{selectedRows.length > 0 ? ` (${selectedRows.length})` : ""}
         </Button>
       </div>
+      <FilterTokens
+        tokens={tokens}
+        onTokensChange={setTokens}
+        join={join}
+        onJoinChange={setJoin}
+        onClear={() => {
+          setTokens([]);
+          setSearch("");
+        }}
+        shown={rows.length}
+        total={namespaceRows.length}
+        onFocusBox={() => filterBox.current?.focus()}
+      />
 
       <div className={styles.body}>
         <div className={styles.main}>
@@ -303,15 +357,15 @@ export function ResourceScreen(props: {
             <EmptyState
               title={`No ${kind} objects`}
               body={
-                search.trim() !== ""
-                  ? `No ${kind} objects match "${search.trim()}".`
+                namespaceRows.length > 0
+                  ? `No ${kind} objects match the filters.`
                   : emptyText(kind, namespaced, namespaces)
               }
             />
           ) : (
             <VirtualTable
               rows={rows}
-              columns={columns}
+              columns={tableColumns}
               rowKey={objectKey}
               rowTestId={rowTestId}
               rowLabel={(o) =>
@@ -407,5 +461,41 @@ export function ResourceRoute() {
         />
       )}
     </div>
+  );
+}
+
+/** A chip shows this many characters of `‹key›=‹value›`, then an ellipsis (spec M20). */
+const CHIP_CHARS = 44;
+
+/** The first two match chips of a row, then `+‹n›` for the rest (spec M20). */
+function MatchChips({ chips }: { chips: MatchChip[] }) {
+  if (chips.length === 0) return null;
+  const whole = (c: MatchChip) => `${c.kind} ${chipText(c)}`;
+  const rest = chips.slice(2);
+  return (
+    <>
+      {chips.slice(0, 2).map((c) => (
+        <span
+          key={whole(c)}
+          className={styles.chip}
+          title={whole(c)}
+          data-testid="filter-chip"
+        >
+          <span className={styles.chipKind}>{c.kind}</span>
+          <span className={styles.chipText}>
+            {cutText(chipText(c), CHIP_CHARS)}
+          </span>
+        </span>
+      ))}
+      {rest.length > 0 ? (
+        <span
+          className={styles.more}
+          title={rest.map(whole).join(", ")}
+          data-testid="filter-chip-more"
+        >
+          +{rest.length}
+        </span>
+      ) : null}
+    </>
   );
 }
