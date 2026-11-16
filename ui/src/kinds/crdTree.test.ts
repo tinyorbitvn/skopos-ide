@@ -113,7 +113,7 @@ test("every level sorts by its label, a group row by its full name among domain 
   ]);
 });
 
-test("built-in groups, unlistable kinds and nav-listed kinds stay out; add-on groups stay in the k8s.io domain", () => {
+test("built-in groups, unlistable kinds, nav-listed kinds and both Gateway API groups stay out; add-on groups stay in the k8s.io domain", () => {
   const rows = crdTree([
     info("internal.apiserver.k8s.io", "storageversions", "StorageVersion"),
     info(
@@ -127,33 +127,17 @@ test("built-in groups, unlistable kinds and nav-listed kinds stay out; add-on gr
     info("acme.io", "gadgets", "Gadget", false),
     info("metrics.k8s.io", "pods", "PodMetrics"),
     info("gateway.networking.k8s.io", "backendtlspolicies", "BackendTLSPolicy"),
+    info("gateway.networking.x-k8s.io", "xmeshes", "XMesh"),
   ]);
   expect(rows).toEqual([
     {
       domain: "k8s.io",
-      type: "domain",
-      label: "k8s.io",
-      title: "k8s.io · 2 API groups",
-      items: [],
-      groups: [
-        {
-          group: "gateway.networking.k8s.io",
-          label: "gateway.networking",
-          items: [
-            kind(
-              "gateway.networking.k8s.io",
-              "backendtlspolicies",
-              "BackendTLSPolicy",
-            ),
-          ],
-        },
-        {
-          group: "metrics.k8s.io",
-          label: "metrics",
-          items: [kind("metrics.k8s.io", "pods", "PodMetrics")],
-        },
-      ],
-      count: 2,
+      type: "group",
+      label: "metrics.k8s.io",
+      title: "metrics.k8s.io",
+      items: [kind("metrics.k8s.io", "pods", "PodMetrics")],
+      groups: [],
+      count: 1,
     },
   ]);
 });

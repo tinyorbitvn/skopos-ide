@@ -263,11 +263,11 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
   expect(pages.map((p) => [p.testId, p.label, p.hint])).toEqual([
     ["palette-page-overview", "Overview", "Page"],
     ["palette-page-workloads", "Workloads overview", "Page"],
+    ["palette-page-helm/charts", "Charts", "Page"],
+    ["palette-page-helm/releases", "Releases", "Page"],
     ["palette-page-r/core/pods", "Pods", "Page"],
     ["palette-page-r/core/configmaps", "ConfigMaps", "Page"],
     ["palette-page-port-forwards", "Port Forwarding", "Page"],
-    ["palette-page-helm/charts", "Charts", "Page"],
-    ["palette-page-helm/releases", "Releases", "Page"],
     ["palette-page-r/example.com/widgets", "Widget", "Page"],
   ]);
   const ctx = context();
@@ -275,21 +275,36 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
   expect(ctx.navigate.mock.calls).toEqual([
     ["/cluster/c1"],
     ["/cluster/c1/workloads"],
+    ["/cluster/c1/helm/charts"],
+    ["/cluster/c1/helm/releases"],
     ["/cluster/c1/r/core/pods"],
     ["/cluster/c1/r/core/configmaps"],
     ["/cluster/c1/port-forwards"],
-    ["/cluster/c1/helm/charts"],
-    ["/cluster/c1/helm/releases"],
     ["/cluster/c1/r/example.com/widgets"],
+  ]);
+});
+
+test("the other Gateway API kinds are pages of Network once, never custom resources", () => {
+  const pages = pageEntries("c1", [
+    info("gateway.networking.k8s.io", "gateways", "Gateway"),
+    info("gateway.networking.x-k8s.io", "xmeshes", "XMesh"),
+  ]);
+  expect(pages.map((p) => [p.testId, p.label])).toEqual([
+    ["palette-page-overview", "Overview"],
+    ["palette-page-helm/charts", "Charts"],
+    ["palette-page-helm/releases", "Releases"],
+    ["palette-page-r/gateway.networking.k8s.io/gateways", "Gateways"],
+    ["palette-page-r/gateway.networking.x-k8s.io/xmeshes", "XMeshes"],
+    ["palette-page-port-forwards", "Port Forwarding"],
   ]);
 });
 
 test("without discovery, Pages hold the overview and the routes", () => {
   expect(pageEntries("c1", []).map((p) => p.testId)).toEqual([
     "palette-page-overview",
-    "palette-page-port-forwards",
     "palette-page-helm/charts",
     "palette-page-helm/releases",
+    "palette-page-port-forwards",
   ]);
 });
 
