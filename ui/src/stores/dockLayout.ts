@@ -1,3 +1,4 @@
+import { OVERVIEW } from "../features/details/drawerHistory";
 import { api } from "../ipc/api";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { JsonValue } from "../ipc/generated/serde_json/JsonValue";
@@ -8,6 +9,7 @@ import {
   type DockLayout,
   type DockState,
   type DockTab,
+  detailsTab,
   editTab,
   type LogTabOptions,
   logsTabId,
@@ -22,7 +24,7 @@ import {
 export const DOCK_LAYOUT_KEY = "dock:layout";
 export const LAYOUT_SAVE_DELAY_MS = 300;
 
-/** A tab as saved (spec §7.1, and B3 §7 for the session kinds): its title is rebuilt on load, and it comes back clean. */
+/** A tab as saved (spec §7.1, B3 §7 for the session kinds, K12 for details): its title is rebuilt on load, and it comes back clean. */
 export type SavedTab =
   | {
       id: string;
@@ -51,7 +53,16 @@ export type SavedTab =
       pod: string;
       container: string | null;
     }
-  | { id: string; kind: "nodeShell"; clusterId: string; node: string };
+  | { id: string; kind: "nodeShell"; clusterId: string; node: string }
+  | {
+      id: string;
+      kind: "details";
+      clusterId: string;
+      resource: ResourceRef;
+      namespace: string | null;
+      name: string;
+      tab: string;
+    };
 
 export type SavedLayout = {
   version: 1;
@@ -171,6 +182,15 @@ function parseTab(v: JsonValue | undefined): DockTab | null {
       const tab = nodeShellTabFor(clusterId, node);
       return tab.id === id ? tab : null;
     }
+    case "details": {
+      const resource = parseResource(v.resource);
+      if (!resource || !isName(name)) return null;
+      if (!(namespace === null || isName(namespace))) return null;
+      // A drawer tab that is not a name reads as the Overview (spec K12).
+      const shown = isName(v.tab) ? v.tab : OVERVIEW;
+      const tab = detailsTab(clusterId, resource, namespace, name, shown);
+      return tab.id === id ? tab : null;
+    }
     default:
       return null;
   }
@@ -248,6 +268,16 @@ function savedTab(tab: DockTab): SavedTab {
         kind: "nodeShell",
         clusterId: tab.clusterId,
         node: tab.node,
+      };
+    case "details":
+      return {
+        id: tab.id,
+        kind: "details",
+        clusterId: tab.clusterId,
+        resource: tab.resource,
+        namespace: tab.namespace,
+        name: tab.name,
+        tab: tab.tab,
       };
   }
 }

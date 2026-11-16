@@ -17,6 +17,7 @@ import {
   FileCode,
   FilePlus,
   type LucideIcon,
+  PanelBottom,
   Plug,
   Plus,
   ScrollText,
@@ -62,6 +63,7 @@ const TAB_ICONS: Record<DockTab["kind"], LucideIcon> = {
   shell: Terminal,
   attach: Plug,
   nodeShell: Terminal,
+  details: PanelBottom,
 };
 
 function TabBody({ tab, shown }: { tab: DockTab; shown: boolean }) {
@@ -77,6 +79,9 @@ function TabBody({ tab, shown }: { tab: DockTab; shown: boolean }) {
     case "attach":
     case "nodeShell":
       return <TerminalTab tab={tab} shown={shown} />;
+    case "details":
+      // The details body arrives with the dock's details panel (spec K5, Task 4).
+      return null;
   }
 }
 
