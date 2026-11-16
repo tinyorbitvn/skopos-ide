@@ -98,6 +98,7 @@ function fakeBackend(
       return `sub-${a.resource.plural}`;
     },
     resources_unsubscribe: () => null,
+    resource_events: () => [],
     resource_delete: (a: {
       name: string;
       namespace: string | null;
@@ -1125,4 +1126,71 @@ test("closing focuses the root's row when what had focus is gone, else the grid"
   fireEvent.click(screen.getByTestId("detail-close"));
   await act(flush);
   expect(document.activeElement).toBe(screen.getByTestId("resource-table"));
+});
+
+/** Shows a screen at `search`, with the router state Open as drawer leaves (spec K14). */
+async function showAt(
+  fake: Fake,
+  search: string,
+  state: unknown,
+  items: KubeObject[],
+  resource: ApiResourceInfo,
+) {
+  render(
+    <MemoryRouter initialEntries={[{ pathname: "/", search, state }]}>
+      <ResourceScreen
+        key="c1"
+        clusterId="c1"
+        info={resource}
+        resources={[resource]}
+      />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  await fake.send(resource.resource.plural, {
+    type: "snapshot",
+    items,
+  } as WatchEvent);
+  await fake.send(resource.resource.plural, {
+    type: "status",
+    status: "live",
+    message: null,
+  });
+}
+
+test("a drawer opened with a drawer tab in the router state starts on it; a row click starts on Overview", async () => {
+  const fake = fakeBackend();
+  await showAt(
+    fake,
+    "?object=team-a%2Fweb",
+    { drawerTab: "events" },
+    [pod("web", "team-a"), pod("db", "team-a")],
+    DEPLOYMENTS,
+  );
+  expect(
+    screen.getByTestId("detail-tab-events").getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(document.activeElement).toBe(screen.getByTestId("detail-drawer"));
+
+  fireEvent.click(row("team-a", "db") as HTMLElement);
+  await act(flush);
+  expect(screen.getByTestId("detail-title").textContent).toBe("db");
+  expect(
+    screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
+test("a drawer tab the object does not offer starts the drawer on Overview", async () => {
+  const CONFIGMAPS = info({ plural: "configmaps", kind: "ConfigMap" });
+  await showAt(
+    fakeBackend(),
+    "?object=team-a%2Fsettings",
+    { drawerTab: "map" },
+    [pod("settings", "team-a")],
+    CONFIGMAPS,
+  );
+  expect(
+    screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(screen.queryByTestId("detail-tab-map")).toBeNull();
 });

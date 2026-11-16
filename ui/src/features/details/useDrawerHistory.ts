@@ -6,6 +6,7 @@ import {
   type DrawerEntry,
   type DrawerHistory,
   goBack,
+  OVERVIEW,
   previousEntry,
   pushTarget,
   setTab as setEntryTab,
@@ -49,11 +50,15 @@ export function rootTarget(
 /**
  * The drawer's back history, owned by the resource screen (spec H §9.3). It restarts at
  * the root whenever `openKey` changes; the screen is keyed by cluster and list, so the
- * history never outlives them. Opening a link changes no URL.
+ * history never outlives them. Opening a link changes no URL. The root starts on
+ * `startTab`, the tab Open as drawer asks for (spec K16), read only when `openKey`
+ * changes; such a start counts as a step, so focus moves into a drawer that was
+ * already open (spec K17).
  */
 export function useDrawerHistory(
   resource: ResourceRef,
   openKey: string | null,
+  startTab: string | null = null,
 ): DrawerHistoryApi {
   const { group, plural } = resource;
   const root = useMemo(
@@ -62,14 +67,19 @@ export function useDrawerHistory(
   );
   const [state, setState] = useState(() => ({
     owner: openKey,
-    history: startHistory(root),
+    history: startHistory(root, startTab ?? OVERVIEW),
     step: 0,
   }));
   let history: DrawerHistory = state.history;
   // Another root starts a new history, with no render showing the old one.
   if (state.owner !== openKey) {
-    history = startHistory(root);
-    setState({ owner: openKey, history, step: state.step });
+    history = startHistory(root, startTab ?? OVERVIEW);
+    const fromDock = startTab !== null && root !== null;
+    setState({
+      owner: openKey,
+      history,
+      step: fromDock ? state.step + 1 : state.step,
+    });
   }
   const seen = useRef(new Map<string, KubeObject>());
 

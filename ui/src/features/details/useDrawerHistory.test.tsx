@@ -95,3 +95,38 @@ test("the last object seen is kept per entry and dropped with its entry", () => 
   expect(result.current.lastSeen(node)).toBeNull();
   expect(result.current.lastSeen(root)?.metadata.name).toBe("web");
 });
+
+test("a root opened with a start tab starts on it and counts a step; the tab is read only when the key changes", () => {
+  const { result, rerender } = renderHook(
+    ({ key, tab }: { key: string | null; tab: string | null }) =>
+      useDrawerHistory(PODS, key, tab),
+    {
+      initialProps: { key: "team-a/web", tab: "events" } as {
+        key: string | null;
+        tab: string | null;
+      },
+    },
+  );
+  expect(result.current.shown?.tab).toBe("events");
+  expect(result.current.step).toBe(0);
+
+  rerender({ key: "team-a/web", tab: "map" });
+  expect(result.current.shown?.tab).toBe("events");
+
+  // Open as drawer while the drawer shows another object: a step moves focus in.
+  rerender({ key: "team-a/db", tab: "map" });
+  expect(result.current.shown).toEqual({
+    target: rootTarget(PODS, "team-a/db"),
+    tab: "map",
+  });
+  expect(result.current.step).toBe(1);
+
+  // A row click carries no state.
+  rerender({ key: "team-a/web", tab: null });
+  expect(result.current.shown?.tab).toBe("overview");
+  expect(result.current.step).toBe(1);
+
+  act(() => result.current.setTab("events"));
+  act(() => result.current.reset());
+  expect(result.current.shown?.tab).toBe("overview");
+});

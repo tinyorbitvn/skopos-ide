@@ -68,8 +68,15 @@ export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
     const before = document.activeElement;
     drawerRef.current?.focus();
     return () => {
-      if (before instanceof HTMLElement && before.isConnected) before.focus();
-      else fallback.current?.()?.focus();
+      // The body has focus when nothing does, such as after Open as drawer closed the
+      // dock tab that had it (spec K17): the row is a better place.
+      if (
+        before instanceof HTMLElement &&
+        before !== document.body &&
+        before.isConnected
+      ) {
+        before.focus();
+      } else fallback.current?.()?.focus();
     };
   }, [open]);
 

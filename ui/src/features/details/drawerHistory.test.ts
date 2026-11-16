@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import type { DrawerTarget } from "../../kinds/detail/links";
 import {
+  DRAWER_TABS,
+  drawerTabOf,
   goBack,
   MAX_ENTRIES,
   OVERVIEW,
@@ -65,4 +67,23 @@ test("the tab is kept per entry and restored on back", () => {
   h = setTab(h, "metrics");
   h = goBack(h);
   expect(shownEntry(h)).toEqual({ target: pod, tab: "events" });
+});
+
+test("a history can start on another tab, and drawerTabOf reads only a drawer tab from router state", () => {
+  expect(startHistory(pod, "events").entries).toEqual([
+    { target: pod, tab: "events" },
+  ]);
+  expect(startHistory(pod).entries).toEqual([{ target: pod, tab: OVERVIEW }]);
+  expect(DRAWER_TABS).toEqual(["overview", "metrics", "map", "events"]);
+  expect(drawerTabOf({ drawerTab: "events" })).toBe("events");
+  for (const state of [
+    null,
+    undefined,
+    "events",
+    {},
+    { drawerTab: 3 },
+    { drawerTab: "yaml" },
+  ]) {
+    expect(drawerTabOf(state)).toBeNull();
+  }
 });
