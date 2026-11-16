@@ -8,10 +8,15 @@ const state = vi.hoisted(() => ({
   fail: false,
 }));
 
+interface CaretEvent {
+  position: { offset: number };
+}
+
 class FakeEditor {
   value: string;
   options: Record<string, unknown>;
   listener: (() => void) | null = null;
+  caretListener: ((event: CaretEvent) => void) | null = null;
   disposed = false;
   modelDisposed = false;
 
@@ -30,6 +35,9 @@ class FakeEditor {
     this.value = next;
     this.listener?.();
   }
+  moveCaret(offset: number) {
+    this.caretListener?.({ position: { offset } });
+  }
   updateOptions(options: Record<string, unknown>) {
     this.options = { ...this.options, ...options };
   }
@@ -37,8 +45,15 @@ class FakeEditor {
     this.listener = listener;
     return { dispose: () => (this.listener = null) };
   }
+  onDidChangeCursorPosition(listener: (event: CaretEvent) => void) {
+    this.caretListener = listener;
+    return { dispose: () => (this.caretListener = null) };
+  }
   getModel() {
-    return { dispose: () => (this.modelDisposed = true) };
+    return {
+      getOffsetAt: (position: { offset: number }) => position.offset,
+      dispose: () => (this.modelDisposed = true),
+    };
   }
   dispose() {
     this.disposed = true;
@@ -138,4 +153,22 @@ test("an editor that cannot load says so", async () => {
   expect(screen.getByRole("alert").textContent).toContain(
     "editor could not be loaded",
   );
+});
+
+test("moving the caret reports its offset in the text", async () => {
+  const onCaret = vi.fn();
+  render(<YamlEditor value={"a: 1\n"} onChange={() => {}} onCaret={onCaret} />);
+  await act(flush);
+
+  state.editors[0].moveCaret(3);
+
+  expect(onCaret).toHaveBeenCalledWith(3);
+});
+
+test("going away stops reporting the caret", async () => {
+  const { editor, view } = await mounted();
+
+  view.unmount();
+
+  expect(editor.caretListener).toBeNull();
 });
