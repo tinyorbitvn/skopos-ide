@@ -7,6 +7,7 @@ import {
   type DockLayout,
   type DockTab,
   defaultContainer,
+  detailsTab,
   editTab,
   isPodTab,
   isSessionTab,
@@ -31,6 +32,20 @@ const PODS: ResourceRef = {
   plural: "pods",
   kind: "Pod",
   namespaced: true,
+};
+const DEPLOYMENTS: ResourceRef = {
+  group: "apps",
+  version: "v1",
+  plural: "deployments",
+  kind: "Deployment",
+  namespaced: true,
+};
+const NODES: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "nodes",
+  kind: "Node",
+  namespaced: false,
 };
 
 function dock() {
@@ -461,4 +476,71 @@ test("renameTerminals names the terminal tabs of the clusters given and leaves t
   const before = dock().tabs;
   dock().renameTerminals([{ id: "c1", name: "kind-dev" }]);
   expect(dock().tabs).toBe(before);
+});
+
+test("a details tab is named after its kind and object, and its id names the cluster, list and object", () => {
+  const web = detailsTab("c1", DEPLOYMENTS, "shop", "web", "events");
+  expect(web).toEqual({
+    id: "details:c1:apps/deployments:shop/web",
+    kind: "details",
+    clusterId: "c1",
+    title: "Deployment · web",
+    resource: DEPLOYMENTS,
+    namespace: "shop",
+    name: "web",
+    tab: "events",
+    dirty: false,
+  });
+  const node = detailsTab("c1", NODES, null, "n1", "overview");
+  expect(node.id).toBe("details:c1:/nodes:/n1");
+  expect(node.title).toBe("Node · n1");
+
+  // Never dirty, so closing it never asks (spec K6).
+  dock().open(web);
+  dock().setDirty(web.id, true);
+  expect(dock().tabs[0].dirty).toBe(false);
+});
+
+test("opening a details tab again activates it on the new drawer tab and drops its linked entries", () => {
+  const web = detailsTab("c1", DEPLOYMENTS, "shop", "web", "overview");
+  dock().open(web);
+  writeDraft(web.id, ["a linked entry"]);
+  dock().open(newCreateTab("c1"));
+  dock().setMinimized(true);
+
+  dock().open(detailsTab("c1", DEPLOYMENTS, "shop", "web", "events"));
+
+  expect(dock().tabs).toHaveLength(2);
+  expect(dock().tabs[0]).toEqual({ ...web, tab: "events" });
+  expect(dock().activeId).toBe(web.id);
+  expect(dock().minimized).toBe(false);
+  expect(readDraft(web.id)).toBeUndefined();
+});
+
+test("setDetailsTab changes one details tab's drawer tab and leaves the rest", () => {
+  const web = detailsTab("c1", DEPLOYMENTS, "shop", "web", "overview");
+  const create = newCreateTab("c1");
+  dock().open(web);
+  dock().open(create);
+  const before = dock().tabs;
+  dock().setDetailsTab(web.id, "overview");
+  expect(dock().tabs).toBe(before);
+
+  dock().setDetailsTab(web.id, "map");
+  dock().setDetailsTab(create.id, "map");
+  expect(dock().tabs).toEqual([{ ...web, tab: "map" }, create]);
+});
+
+test("the same object in two clusters gets a details tab in each, and keepClusters drops one with its draft", () => {
+  const one = detailsTab("c1", DEPLOYMENTS, "shop", "web", "overview");
+  const two = detailsTab("c2", DEPLOYMENTS, "shop", "web", "events");
+  dock().open(one);
+  dock().open(two);
+  writeDraft(two.id, []);
+  expect(ids(tabsForCluster(dock().tabs, "c1"))).toEqual([one.id]);
+  expect(ids(tabsForCluster(dock().tabs, "c2"))).toEqual([two.id]);
+
+  dock().keepClusters(["c1"]);
+  expect(ids(dock().tabs)).toEqual([one.id]);
+  expect(readDraft(two.id)).toBeUndefined();
 });

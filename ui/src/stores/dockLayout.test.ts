@@ -6,6 +6,7 @@ import { clusterEntry, mockBackend } from "../test/ipc";
 import { resetCatalogForTest, useCatalog } from "./catalog";
 import {
   type DockTab,
+  detailsTab,
   editTab,
   logsTab,
   nodeShellTabFor,
@@ -70,6 +71,26 @@ const SAVED_LOGS = {
   namespace: "shop",
   name: "api",
   options: LOGS.options,
+};
+const DETAILS = detailsTab("c2", DEPLOYMENTS, "shop", "api", "events");
+const CLUSTER_DETAILS = detailsTab("c1", NODES, null, "node-1", "map");
+const SAVED_DETAILS = {
+  id: DETAILS.id,
+  kind: "details",
+  clusterId: "c2",
+  resource: DEPLOYMENTS,
+  namespace: "shop",
+  name: "api",
+  tab: "events",
+};
+const SAVED_CLUSTER_DETAILS = {
+  id: CLUSTER_DETAILS.id,
+  kind: "details",
+  clusterId: "c1",
+  resource: NODES,
+  namespace: null,
+  name: "node-1",
+  tab: "map",
 };
 
 function saved(
@@ -419,5 +440,40 @@ test("a restored terminal tab reads Terminal until the catalog has loaded, then 
   expect(useDock.getState().tabs.map((t) => t.title)).toEqual([
     "Terminal · kind-dev",
     "Shell · worker-1",
+  ]);
+});
+
+test("a details tab saves its object and drawer tab, stays version 1, and comes back with its title and clean", () => {
+  useDock.setState({
+    tabs: [DETAILS, CLUSTER_DETAILS],
+    activeId: DETAILS.id,
+  });
+  const written = JSON.parse(
+    JSON.stringify(serializeLayout(useDock.getState())),
+  );
+  expect(written.version).toBe(1);
+  expect(written.tabs).toEqual([SAVED_DETAILS, SAVED_CLUSTER_DETAILS]);
+  expect(parseLayout(written).tabs).toEqual([DETAILS, CLUSTER_DETAILS]);
+});
+
+test("a malformed details tab is dropped alone, and a drawer tab that is not a string becomes the Overview", () => {
+  const layout = parseLayout(
+    saved([
+      { ...SAVED_DETAILS, resource: { group: "apps", plural: "deployments" } },
+      { ...SAVED_DETAILS, name: "" },
+      { ...SAVED_DETAILS, namespace: 3 },
+      { ...SAVED_DETAILS, id: "details:c2:apps/deployments:shop/other" },
+      { ...SAVED_CLUSTER_DETAILS, tab: 7 },
+      SAVED_DETAILS,
+    ]),
+  );
+  expect(layout.tabs).toEqual([
+    { ...CLUSTER_DETAILS, tab: "overview" },
+    DETAILS,
+  ]);
+
+  const { tab: _tab, ...withoutTab } = SAVED_DETAILS;
+  expect(parseLayout(saved([withoutTab])).tabs).toEqual([
+    { ...DETAILS, tab: "overview" },
   ]);
 });

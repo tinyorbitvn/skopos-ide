@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createTestNamespace, kubectl } from "../helpers/kube";
 import {
-  byTestId, clickWhenShown, dockTabTitles, openCluster, openResource, rowId,
+  byTestId, clickWhenShown, dockTabTitles, gone, openCluster, openResource, pointerClick, rowId,
   searchResources, shown,
 } from "../helpers/ui";
 
@@ -98,5 +98,29 @@ describe("the dock layout across a restart: before", () => {
         tab?.options?.timestamps === false
       );
     }, "the dock layout was never saved");
+  });
+
+  it("saves a details tab with the drawer tab it shows", async () => {
+    if (!(await byTestId("detail-drawer").isExisting())) await byTestId(rowId(NS, "keeper")).click();
+    await shown("detail-drawer");
+    await pointerClick(await shown("detail-tab-events"));
+    await shown("detail-events");
+    await pointerClick(await shown("detail-minimize"));
+    await gone("detail-drawer");
+    await expectTitles(["Create", "Logs · keeper", "Pod · keeper"], "Minimize never added the details tab");
+
+    // dock-restart-2-verify.e2e.ts expects the Logs tab active after the restart.
+    await browser.$('[data-testid^="dock-tab-logs:"]').click();
+    await until(async () => {
+      const saved = savedLayout();
+      const details = saved?.tabs?.find((t: any) => t.kind === "details");
+      return (
+        JSON.stringify(saved?.tabs?.map((t: any) => t.kind)) === JSON.stringify(["create", "logs", "details"]) &&
+        String(saved.activeId).startsWith("logs:") &&
+        details?.tab === "events" &&
+        details?.namespace === NS &&
+        details?.name === "keeper"
+      );
+    }, "the details tab was never saved");
   });
 });

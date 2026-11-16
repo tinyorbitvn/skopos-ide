@@ -17,6 +17,8 @@ import {
   FileCode,
   FilePlus,
   type LucideIcon,
+  PanelBottom,
+  PanelRightOpen,
   Plug,
   Plus,
   ScrollText,
@@ -33,7 +35,9 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { Button, ConfirmDialog, IconButton } from "../../design";
+import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import {
+  type DetailsDockTab,
   DOCK_DEFAULT_HEIGHT,
   DOCK_MIN_HEIGHT,
   type DockTab,
@@ -47,12 +51,16 @@ import { EditResourceTab } from "../editor/EditResourceTab";
 import { LogsTab } from "../logs/LogsTab";
 import { TerminalTab } from "../terminal/TerminalTab";
 import { isTerminalShortcut } from "../terminal/terminalKeys";
+import { DetailsTab } from "./DetailsTab";
 import styles from "./Dock.module.css";
+import { useOpenAsDrawer } from "./openAsDrawer";
 import { openTerminal } from "./openTerminal";
+import { shownDetailsEntry } from "./useDetailsHistory";
 
 const KEYBOARD_RESIZE_STEP = 24;
 /** A press that moves less than this is a click, so it still selects the tab. */
 const DRAG_DISTANCE = 4;
+const NO_RESOURCES: ApiResourceInfo[] = [];
 
 const TAB_ICONS: Record<DockTab["kind"], LucideIcon> = {
   edit: FileCode,
@@ -62,9 +70,18 @@ const TAB_ICONS: Record<DockTab["kind"], LucideIcon> = {
   shell: Terminal,
   attach: Plug,
   nodeShell: Terminal,
+  details: PanelBottom,
 };
 
-function TabBody({ tab, shown }: { tab: DockTab; shown: boolean }) {
+function TabBody({
+  tab,
+  shown,
+  resources,
+}: {
+  tab: DockTab;
+  shown: boolean;
+  resources: ApiResourceInfo[];
+}) {
   switch (tab.kind) {
     case "edit":
       return <EditResourceTab tab={tab} />;
@@ -77,7 +94,23 @@ function TabBody({ tab, shown }: { tab: DockTab; shown: boolean }) {
     case "attach":
     case "nodeShell":
       return <TerminalTab tab={tab} shown={shown} />;
+    case "details":
+      return <DetailsTab tab={tab} resources={resources} />;
   }
+}
+
+/** Open as drawer on a details tab's strip entry, for the entry it shows (spec K7, K15). */
+function DetailsPopButton({ tab }: { tab: DetailsDockTab }) {
+  const openAsDrawer = useOpenAsDrawer();
+  return (
+    <IconButton
+      className={styles.tabPop}
+      label={`Open ${tab.title} as drawer`}
+      icon={<PanelRightOpen size={12} aria-hidden="true" />}
+      onClick={() => openAsDrawer(tab, shownDetailsEntry(tab))}
+      data-testid={`dock-pop-${tab.id}`}
+    />
+  );
 }
 
 /** The drag handle on the dock's top edge. Up makes the dock taller. */
@@ -187,6 +220,7 @@ function DockTabItem(props: {
         ) : null}
         {tab.title}
       </button>
+      {tab.kind === "details" ? <DetailsPopButton tab={tab} /> : null}
       <button
         type="button"
         className={styles.tabClose}
@@ -201,9 +235,14 @@ function DockTabItem(props: {
   );
 }
 
-/** The panel under a cluster's content that holds its editors and logs. */
-export function Dock(props: { clusterId: string }) {
+/** The panel under a cluster's content that holds its editors, logs and details. */
+export function Dock(props: {
+  clusterId: string;
+  /** The cluster's served resources, for details tabs. */
+  resources?: ApiResourceInfo[];
+}) {
   const { clusterId } = props;
+  const resources = props.resources ?? NO_RESOURCES;
   const restored = useDock((s) => s.restored);
   const allTabs = useDock((s) => s.tabs);
   const activeId = useDock((s) => s.activeId);
@@ -344,7 +383,11 @@ export function Dock(props: { clusterId: string }) {
           hidden={!expanded || tab.id !== active?.id}
           data-testid={`dock-panel-${tab.id}`}
         >
-          <TabBody tab={tab} shown={expanded && tab.id === active?.id} />
+          <TabBody
+            tab={tab}
+            shown={expanded && tab.id === active?.id}
+            resources={resources}
+          />
         </div>
       ))}
       {closing ? (

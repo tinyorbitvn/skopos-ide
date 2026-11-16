@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { type LucideIcon, Minimize2 } from "lucide-react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TableColumn } from "../../design";
@@ -18,6 +19,7 @@ import type { KubeObject } from "../../kinds/objects";
 import { JOBS } from "../../kinds/refs";
 import { registerKind } from "../../kinds/registry";
 import { resetCatalogForTest } from "../../stores/catalog";
+import { detailsTab, resetDockForTest, useDock } from "../../stores/dock";
 import { resetGraphForTest } from "../../stores/graph";
 import { resetMetricsForTest } from "../../stores/metrics";
 import { resetResourcesForTest } from "../../stores/resources";
@@ -230,6 +232,7 @@ afterEach(() => {
   resetResourcesForTest();
   resetMetricsForTest();
   resetCatalogForTest();
+  resetDockForTest();
   vi.restoreAllMocks();
 });
 
@@ -765,7 +768,15 @@ const probe = (o: KubeObject) => (
   </button>
 );
 
-test("the header shows the actions of the object shown, then a divider and Close", async () => {
+/** What an icon draws, to compare a button's icon with the one it should be. */
+function iconMarkup(Icon: LucideIcon): string {
+  const { container, unmount } = render(<Icon size={16} aria-hidden="true" />);
+  const markup = container.querySelector("svg")?.innerHTML ?? "";
+  unmount();
+  return markup;
+}
+
+test("the header shows the actions of the object shown, then a divider, Minimize and Close", async () => {
   const f = fake();
   render(withActions(probe));
   await act(flush);
@@ -774,7 +785,13 @@ test("the header shows the actions of the object shown, then a divider and Close
   expect(button.textContent).toBe("u1");
   const divider = button.nextElementSibling as HTMLElement;
   expect(divider.getAttribute("aria-hidden")).toBe("true");
-  expect(divider.nextElementSibling).toBe(screen.getByTestId("detail-close"));
+  const minimize = screen.getByTestId("detail-minimize");
+  expect(divider.nextElementSibling).toBe(minimize);
+  expect(minimize.nextElementSibling).toBe(screen.getByTestId("detail-close"));
+  expect(minimize.getAttribute("aria-label")).toBe("Minimize to the dock");
+  const svg = minimize.querySelector("svg");
+  expect(svg?.getAttribute("width")).toBe("16");
+  expect(svg?.innerHTML).toBe(iconMarkup(Minimize2));
 });
 
 test("a deleted object keeps how it looked but gets no actions", async () => {
@@ -1330,6 +1347,40 @@ test("closing gives focus to the fallback when what had focus is gone", async ()
   fallback.remove();
 });
 
+test("closing a drawer that opened while nothing had focus gives focus to the fallback", async () => {
+  const f = fake();
+  const fallback = document.createElement("button");
+  document.body.append(fallback);
+  // Nothing has focus, as after Open as drawer removed its dock tab (spec K17).
+  expect(document.activeElement).toBe(document.body);
+  const view = render(
+    <MemoryRouter>
+      <Harness
+        clusterId="c1"
+        resource={POD}
+        objectKey="team-a/web"
+        onClose={() => {}}
+        fallbackFocus={() => fallback}
+      />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  await f.snapshot([pod()]);
+  view.rerender(
+    <MemoryRouter>
+      <Harness
+        clusterId="c1"
+        resource={POD}
+        objectKey={null}
+        onClose={() => {}}
+        fallbackFocus={() => fallback}
+      />
+    </MemoryRouter>,
+  );
+  expect(document.activeElement).toBe(fallback);
+  fallback.remove();
+});
+
 test("the overlay draws no focus ring of its own, since WebKit shows one even after a click", () => {
   const rules = cssRules(
     CSS_FILES["/src/features/details/DetailDrawer.module.css"],
@@ -1386,4 +1437,61 @@ test("the overlay slides in, the dim fades in, and the dark dim is stronger", ()
     padding: "8px 8px 10px 16px",
   });
   expect(decls(".handle")).toMatchObject({ top: "14px", bottom: "14px" });
+});
+
+test("the drawer's Overview stays in one column", async () => {
+  const f = fake();
+  render(drawer());
+  await act(flush);
+  await f.snapshot([pod()]);
+  expect(
+    screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(document.querySelector(".overviewColumns")).toBeNull();
+});
+
+test("Minimize shows while the object loads and after it is deleted", async () => {
+  const f = fake();
+  render(drawer());
+  expect(screen.getByTestId("detail-minimize")).toBeTruthy();
+  await act(flush);
+  await f.snapshot([pod()]);
+  await f.batch([], [{ namespace: "team-a", name: "web" }]);
+  expect(screen.getByTestId("detail-removed")).toBeTruthy();
+  expect(screen.getByTestId("detail-minimize")).toBeTruthy();
+});
+
+test("Minimize is hidden while the cluster does not serve the resource", async () => {
+  mockBackend({
+    resources_subscribe: () => {
+      throw { code: "NotFound", message: "the cluster no longer serves pods" };
+    },
+    resources_unsubscribe: () => null,
+    resource_get: () => {
+      throw { code: "NotFound", message: "web not found" };
+    },
+  });
+  render(drawer());
+  await act(flush);
+  await act(flush);
+  expect(screen.getByTestId("detail-not-served").textContent).toContain(
+    "the cluster no longer serves pods",
+  );
+  expect(screen.queryByTestId("detail-minimize")).toBeNull();
+});
+
+test("Minimize opens the shown object's details tab on the drawer's tab and closes the drawer", async () => {
+  const f = fake();
+  const onClose = vi.fn();
+  render(drawer(onClose));
+  await act(flush);
+  await f.snapshot([pod()]);
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Events" }), {
+    button: 0,
+  });
+  fireEvent.click(screen.getByTestId("detail-minimize"));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  const docked = detailsTab("c1", POD, "team-a", "web", "events");
+  expect(useDock.getState().tabs).toEqual([docked]);
+  expect(useDock.getState().activeId).toBe(docked.id);
 });
