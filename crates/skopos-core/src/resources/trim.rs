@@ -1,7 +1,8 @@
 //! What a watched row keeps of its object. A table holds every row of a resource, and the
 //! webview's memory grows with what each row carries. So a core Pod row keeps only what the
 //! UI reads outside the detail drawer, which fetches the whole object with `resource_get`.
-//! Its annotations stay for the list's filter, each value cut short (spec M24).
+//! Its annotations stay for the list's filter, each value cut short (spec M24), and so does its
+//! status message for the workload Status card, cut the same way (spec N20).
 
 use serde_json::Value;
 
@@ -18,12 +19,25 @@ enum Keep {
     /// An object's string values, each cut to its first this many characters on a `char`
     /// boundary. A value that is not a string is dropped.
     Strings(usize),
+    /// A string cut to its first this many characters on a `char` boundary. A value that is
+    /// not a string is dropped from its object.
+    Text(usize),
 }
 
-use Keep::{All, Each, Fields, Strings};
+use Keep::{All, Each, Fields, Strings, Text};
+
+impl Keep {
+    /// Whether an object keeps `value` under this rule at all.
+    fn admits(&self, value: &Value) -> bool {
+        !matches!(self, Text(_)) || value.is_string()
+    }
+}
 
 /// The characters a Pod row keeps of each annotation value (spec M24).
 const ANNOTATION_CHARS: usize = 256;
+
+/// The characters a Pod row keeps of its status message (spec N20).
+const MESSAGE_CHARS: usize = 256;
 
 /// What the table's Ready, Status and Restarts columns read of a container's status.
 const CONTAINER_STATUS: Keep = Fields(&[
@@ -48,6 +62,22 @@ const CONTAINER_STATUS: Keep = Fields(&[
 const POD_STATUS: Keep = Fields(&[
     ("phase", All),
     ("reason", All),
+    ("podIP", All),
+    ("qosClass", All),
+    (
+        "conditions",
+        Each(&Fields(&[("type", All), ("status", All), ("reason", All)])),
+    ),
+    ("containerStatuses", Each(&CONTAINER_STATUS)),
+    ("initContainerStatuses", Each(&CONTAINER_STATUS)),
+]);
+
+/// A Pod row's status: what the graph reads, plus the message the workload Status card shows,
+/// such as why the Pod was evicted (spec N20).
+const POD_ROW_STATUS: Keep = Fields(&[
+    ("phase", All),
+    ("reason", All),
+    ("message", Text(MESSAGE_CHARS)),
     ("podIP", All),
     ("qosClass", All),
     (
@@ -176,7 +206,7 @@ const POD_ROW: Keep = Fields(&[
             ),
         ]),
     ),
-    ("status", POD_STATUS),
+    ("status", POD_ROW_STATUS),
 ]);
 
 /// A value of another shape than the rule expects is kept as it is.
@@ -185,7 +215,11 @@ fn keep(value: &mut Value, rule: &Keep) {
         All => {}
         Fields(fields) => {
             if let Some(object) = value.as_object_mut() {
-                object.retain(|key, _| fields.iter().any(|(name, _)| name == key));
+                object.retain(|key, child| {
+                    fields
+                        .iter()
+                        .any(|(name, rule)| name == key && rule.admits(child))
+                });
                 for (name, rule) in *fields {
                     if let Some(child) = object.get_mut(*name) {
                         keep(child, rule);
@@ -209,6 +243,11 @@ fn keep(value: &mut Value, rule: &Keep) {
                     }
                     _ => false,
                 });
+            }
+        }
+        Text(max) => {
+            if let Value::String(text) = value {
+                cut_chars(text, *max);
             }
         }
     }
@@ -313,7 +352,7 @@ mod tests {
             "status": {
                 "phase": "Running",
                 "reason": "Evicted",
-                "message": "dropped",
+                "message": "The node was low on resource: memory.",
                 "podIP": "10.0.0.1",
                 "hostIP": "192.168.0.1",
                 "qosClass": "Burstable",
@@ -376,6 +415,7 @@ mod tests {
                 "status": {
                     "phase": "Running",
                     "reason": "Evicted",
+                    "message": "The node was low on resource: memory.",
                     "podIP": "10.0.0.1",
                     "qosClass": "Burstable",
                     "conditions": [{ "type": "Ready", "status": "False", "reason": "ContainersNotReady" }],
@@ -469,6 +509,43 @@ mod tests {
     }
 
     #[test]
+    fn a_pod_row_cuts_its_status_message_to_256_characters_on_a_char_boundary() {
+        let pods = resource("", "pods", "Pod");
+        for (message, kept) in [
+            ("a".repeat(10_000), "a".repeat(256)),
+            ("é".repeat(300), "é".repeat(256)),
+            (
+                format!("{}🙂🙂", "b".repeat(255)),
+                format!("{}🙂", "b".repeat(255)),
+            ),
+            ("kept whole".to_string(), "kept whole".to_string()),
+        ] {
+            let mut row = full_pod();
+            row["status"]["message"] = json!(message);
+            trim_for_watch(&pods, &mut row);
+            assert_eq!(row["status"]["message"], json!(kept));
+        }
+    }
+
+    #[test]
+    fn a_pod_row_drops_a_status_message_that_is_not_a_string() {
+        let pods = resource("", "pods", "Pod");
+        for message in [
+            json!(5),
+            json!(true),
+            json!({ "a": "b" }),
+            json!(["a"]),
+            Value::Null,
+        ] {
+            let mut row = full_pod();
+            row["status"]["message"] = message;
+            trim_for_watch(&pods, &mut row);
+            assert!(row["status"].get("message").is_none(), "{row}");
+            assert_eq!(row["status"]["phase"], "Running");
+        }
+    }
+
+    #[test]
     fn other_kinds_keep_long_annotation_values_whole() {
         let long = "a".repeat(10_000);
         for resource in [
@@ -546,6 +623,7 @@ mod tests {
             row["status"]["containerStatuses"][1]["state"]["terminated"]["reason"],
             "OOMKilled"
         );
+        assert!(row["status"].get("message").is_none());
         let text = row.to_string();
         assert!(!text.contains("visible-value"), "{text}");
         assert!(!text.contains("registry.example.com"), "{text}");
