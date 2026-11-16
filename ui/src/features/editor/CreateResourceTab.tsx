@@ -11,6 +11,8 @@ import {
   writeDraft,
 } from "../../stores/dock";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
+import { useCreateTarget } from "./apiDocsKind";
+import { ApiDocsButton, EditorLayout } from "./EditorLayout";
 import { TEMPLATES } from "./templates";
 import { validateYaml, yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
@@ -58,6 +60,8 @@ export function CreateResourceTab(props: {
   const [replacing, setReplacing] = useState<(typeof TEMPLATES)[number] | null>(
     null,
   );
+  const [caret, setCaret] = useState(0);
+  const target = useCreateTarget(text, caret);
 
   const dirty = text.trim() !== "" && text !== baseline;
   const check = useMemo(() => validateYaml(text), [text]);
@@ -123,6 +127,7 @@ export function CreateResourceTab(props: {
           A document with no namespace goes to the first namespace selected in
           the namespace filter, or to default.
         </span>
+        <ApiDocsButton />
       </div>
       {check.ok ? null : (
         <div className={styles.problem} role="alert" data-testid="yaml-error">
@@ -140,12 +145,15 @@ export function CreateResourceTab(props: {
           />
         </div>
       ) : null}
-      <YamlEditor
-        value={text}
-        onChange={setText}
-        readOnly={busy}
-        testId="yaml-editor"
-      />
+      <EditorLayout clusterId={clusterId} target={target}>
+        <YamlEditor
+          value={text}
+          onChange={setText}
+          onCaret={setCaret}
+          readOnly={busy}
+          testId="yaml-editor"
+        />
+      </EditorLayout>
       {results.length > 0 ? (
         <ul className={styles.results} data-testid="apply-results">
           {results.map((result) => (
