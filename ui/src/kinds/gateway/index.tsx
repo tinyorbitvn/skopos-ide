@@ -6,7 +6,9 @@ import { registerKind } from "../registry";
 import {
   conditionStatus,
   gatewayAddress,
+  listenerSetParent,
   NONE,
+  policyTargets,
   routeHostnames,
   routeParents,
 } from "./gateway";
@@ -46,7 +48,14 @@ function listColumn(
   };
 }
 
-// The Gateway API kinds are listed under Network (spec G §3.2).
+/** A BackendTLSPolicy's `spec.validation.hostname`, or "—". */
+function validationHostname(o: KubeObject): string {
+  const hostname = o.spec?.validation?.hostname;
+  return typeof hostname === "string" && hostname !== "" ? hostname : NONE;
+}
+
+// The Gateway API kinds are listed under Network (spec G §3.2, M2). Every other kind of
+// the two groups keeps its CRD's printer columns, and ReferenceGrant the defaults.
 registerKind(GROUP, "gatewayclasses", {
   columns: (info) =>
     baseColumns(
@@ -72,5 +81,52 @@ registerKind(GROUP, "httproutes", {
       info.resource,
       listColumn("hostnames", "Hostnames", routeHostnames),
       listColumn("parents", "Parents", routeParents),
+    ),
+});
+
+registerKind(GROUP, "grpcroutes", {
+  columns: (info) =>
+    baseColumns(
+      info.resource,
+      listColumn("hostnames", "Hostnames", routeHostnames),
+      listColumn("parents", "Parents", routeParents),
+    ),
+});
+
+registerKind(GROUP, "tlsroutes", {
+  columns: (info) =>
+    baseColumns(
+      info.resource,
+      listColumn("hostnames", "Hostnames", routeHostnames),
+      listColumn("parents", "Parents", routeParents),
+    ),
+});
+
+registerKind(GROUP, "tcproutes", {
+  columns: (info) =>
+    baseColumns(info.resource, listColumn("parents", "Parents", routeParents)),
+});
+
+registerKind(GROUP, "udproutes", {
+  columns: (info) =>
+    baseColumns(info.resource, listColumn("parents", "Parents", routeParents)),
+});
+
+registerKind(GROUP, "listenersets", {
+  columns: (info) =>
+    baseColumns(
+      info.resource,
+      listColumn("parent", "Parent", listenerSetParent),
+      conditionColumn("accepted", "Accepted", "Accepted"),
+      conditionColumn("programmed", "Programmed", "Programmed"),
+    ),
+});
+
+registerKind(GROUP, "backendtlspolicies", {
+  columns: (info) =>
+    baseColumns(
+      info.resource,
+      listColumn("targets", "Targets", policyTargets),
+      listColumn("hostname", "Hostname", validationHostname),
     ),
 });
