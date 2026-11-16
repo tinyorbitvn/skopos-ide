@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   CONFIG_MAP,
@@ -21,6 +28,9 @@ const PULL_POLICY = `${CONTAINERS}.imagePullPolicy`;
 beforeEach(() => mockElementSize());
 
 afterEach(() => {
+  // Unmount before the resets, so no mounted panel asks for API docs again and fills
+  // the cache the next test starts from.
+  cleanup();
   vi.restoreAllMocks();
   resetApiDocsCacheForTest();
 });
