@@ -1,6 +1,6 @@
 import { Columns3 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useLocation, useParams, useSearchParams } from "react-router";
 import {
   Badge,
   Button,
@@ -21,6 +21,7 @@ import { findResource, useResourceList } from "../../stores/resources";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import { DetailDrawer, isDrawerEscape } from "../details/DetailDrawer";
+import { drawerTabOf } from "../details/drawerHistory";
 import { useDrawerHistory } from "../details/useDrawerHistory";
 import { useListUsage } from "../metrics/useListUsage";
 import { DeleteDialog } from "./DeleteDialog";
@@ -70,7 +71,13 @@ export function ResourceScreen(props: {
 
   const [params, setParams] = useSearchParams();
   const openKey = params.get("object");
-  const history = useDrawerHistory(resource, openKey);
+  // Open as drawer asks for the dock tab's drawer tab in the router state (spec K16).
+  const location = useLocation();
+  const history = useDrawerHistory(
+    resource,
+    openKey,
+    drawerTabOf(location.state),
+  );
   const screenRef = useRef<HTMLDivElement>(null);
   const lastRoot = useRef<string | null>(null);
   useEffect(() => {

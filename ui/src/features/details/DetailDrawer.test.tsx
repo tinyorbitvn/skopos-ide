@@ -1330,6 +1330,40 @@ test("closing gives focus to the fallback when what had focus is gone", async ()
   fallback.remove();
 });
 
+test("closing a drawer that opened while nothing had focus gives focus to the fallback", async () => {
+  const f = fake();
+  const fallback = document.createElement("button");
+  document.body.append(fallback);
+  // Nothing has focus, as after Open as drawer removed its dock tab (spec K17).
+  expect(document.activeElement).toBe(document.body);
+  const view = render(
+    <MemoryRouter>
+      <Harness
+        clusterId="c1"
+        resource={POD}
+        objectKey="team-a/web"
+        onClose={() => {}}
+        fallbackFocus={() => fallback}
+      />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  await f.snapshot([pod()]);
+  view.rerender(
+    <MemoryRouter>
+      <Harness
+        clusterId="c1"
+        resource={POD}
+        objectKey={null}
+        onClose={() => {}}
+        fallbackFocus={() => fallback}
+      />
+    </MemoryRouter>,
+  );
+  expect(document.activeElement).toBe(fallback);
+  fallback.remove();
+});
+
 test("the overlay draws no focus ring of its own, since WebKit shows one even after a click", () => {
   const rules = cssRules(
     CSS_FILES["/src/features/details/DetailDrawer.module.css"],
