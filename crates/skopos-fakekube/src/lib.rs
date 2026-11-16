@@ -20,6 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
@@ -121,6 +122,15 @@ struct State_ {
     proxy_requests: BTreeMap<ProxyKey, Vec<ProxyRequest>>,
     /// `None` until a test serves metrics.k8s.io: every request to it answers 404.
     metrics_api: Option<MetricsApi>,
+    /// OpenAPI v3 documents by index key (`api/v1`, `apis/apps/v1`). While it is empty,
+    /// `/openapi/v3` answers 404.
+    openapi: BTreeMap<String, OpenApiDocument>,
+}
+
+/// A served OpenAPI v3 document and the hash its URL carries.
+struct OpenApiDocument {
+    hash: String,
+    body: Vec<u8>,
 }
 
 type LogKey = (String, String, String);
@@ -392,6 +402,7 @@ impl FakeKube {
                 proxies: BTreeMap::new(),
                 proxy_requests: BTreeMap::new(),
                 metrics_api: None,
+                openapi: BTreeMap::new(),
             }),
             events,
             stop_watches,
@@ -710,6 +721,26 @@ impl FakeKube {
             .failure = Some(code);
     }
 
+    /// Serves `doc` as the OpenAPI v3 document of `group_version` (`v1` or `apps/v1`) at
+    /// `/openapi/v3/‹key›?hash=‹hex of its SHA-256›`, and lists that URL in `/openapi/v3`.
+    /// Serving a group version again replaces its document under a new hash.
+    pub fn serve_openapi_v3(&self, group_version: &str, doc: Value) {
+        let key = if group_version.contains('/') {
+            format!("apis/{group_version}")
+        } else {
+            format!("api/{group_version}")
+        };
+        let body = serde_json::to_vec(&doc).expect("a JSON value always serializes");
+        let hash = Sha256::digest(&body)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        self.inner
+            .lock()
+            .openapi
+            .insert(key, OpenApiDocument { hash, body });
+    }
+
     /// The requests that reached `service` in `namespace`, oldest first.
     pub fn proxy_requests(&self, namespace: &str, service: &str) -> Vec<ProxyRequest> {
         self.inner
@@ -840,6 +871,8 @@ fn router(inner: Shared) -> Router {
             "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods",
             get(namespaced_pod_metrics),
         )
+        .route("/openapi/v3", get(openapi_index))
+        .route("/openapi/v3/{*key}", get(openapi_document))
         .fallback(generic)
         .layer(middleware::from_fn_with_state(
             inner.clone(),
@@ -850,6 +883,54 @@ fn router(inner: Shared) -> Router {
 
 async fn metrics_document(State(s): State<Shared>) -> Response {
     metrics_answer(&s, None, None)
+}
+
+/// `/openapi/v3`: the URL of each served document, or 404 while none is served.
+async fn openapi_index(State(s): State<Shared>) -> Response {
+    let st = s.lock();
+    if st.openapi.is_empty() {
+        return not_found();
+    }
+    let paths: serde_json::Map<String, Value> = st
+        .openapi
+        .iter()
+        .map(|(key, doc)| {
+            (
+                key.clone(),
+                json!({ "serverRelativeURL": openapi_url(key, &doc.hash) }),
+            )
+        })
+        .collect();
+    json_ok(json!({ "paths": paths }))
+}
+
+/// One served document. Another `hash` is redirected to the current URL, as the API server
+/// does for a document that changed.
+async fn openapi_document(
+    State(s): State<Shared>,
+    UrlPath(key): UrlPath<String>,
+    Query(params): Params,
+) -> Response {
+    let st = s.lock();
+    let Some(doc) = st.openapi.get(&key) else {
+        return not_found();
+    };
+    match params.get("hash") {
+        Some(hash) if *hash != doc.hash => (
+            StatusCode::MOVED_PERMANENTLY,
+            [(header::LOCATION, openapi_url(&key, &doc.hash))],
+        )
+            .into_response(),
+        _ => (
+            [(header::CONTENT_TYPE, "application/json")],
+            doc.body.clone(),
+        )
+            .into_response(),
+    }
+}
+
+fn openapi_url(key: &str, hash: &str) -> String {
+    format!("/openapi/v3/{key}?hash={hash}")
 }
 
 async fn node_metrics(State(s): State<Shared>) -> Response {
