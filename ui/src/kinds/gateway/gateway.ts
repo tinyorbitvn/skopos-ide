@@ -32,7 +32,7 @@ export function gatewayAddress(o: Obj): string {
   return values.length === 1 ? values[0] : `${values[0]} +${values.length - 1}`;
 }
 
-/** An HTTPRoute's hostnames joined with ", ", or "—". */
+/** A route's hostnames joined with ", ", or "—". */
 export function routeHostnames(o: Obj): string {
   const names = list(o.spec?.hostnames).filter(
     (h): h is string => typeof h === "string",
@@ -41,7 +41,7 @@ export function routeHostnames(o: Obj): string {
 }
 
 /**
- * An HTTPRoute's parents as `‹namespace›/‹name›`, with the route's namespace when a
+ * A route's parents as `‹namespace›/‹name›`, with the route's namespace when a
  * reference gives none, joined with ", ", or "—".
  */
 export function routeParents(o: Obj): string {
@@ -49,4 +49,33 @@ export function routeParents(o: Obj): string {
     .filter((p) => typeof p?.name === "string")
     .map((p) => `${p.namespace ?? o.metadata.namespace ?? ""}/${p.name}`);
   return parents.length > 0 ? parents.join(", ") : NONE;
+}
+
+/**
+ * A ListenerSet's parent as `‹namespace›/‹name›` of `spec.parentRef`, with the
+ * ListenerSet's own namespace when the reference gives none, or "—" (spec M7).
+ */
+export function listenerSetParent(o: Obj): string {
+  const ref = o.spec?.parentRef;
+  if (typeof ref?.name !== "string" || ref.name === "") return NONE;
+  const namespace =
+    typeof ref.namespace === "string" && ref.namespace !== ""
+      ? ref.namespace
+      : (o.metadata.namespace ?? "");
+  return `${namespace}/${ref.name}`;
+}
+
+/**
+ * A policy's targets as `‹kind›/‹name›`, with `:‹sectionName›` when one is set, joined
+ * with ", ", or "—" (spec M7).
+ */
+export function policyTargets(o: Obj): string {
+  const targets = list(o.spec?.targetRefs)
+    .filter((t) => typeof t?.kind === "string" && typeof t?.name === "string")
+    .map((t) =>
+      typeof t.sectionName === "string" && t.sectionName !== ""
+        ? `${t.kind}/${t.name}:${t.sectionName}`
+        : `${t.kind}/${t.name}`,
+    );
+  return targets.length > 0 ? targets.join(", ") : NONE;
 }
