@@ -23,6 +23,7 @@ use crate::kubeconfig::{
     default_sources, ClusterId, KubeconfigSync, SyncSnapshot, SyncSource, SyncWarning,
 };
 use crate::metrics::Metrics;
+use crate::openapi::ApiDocs;
 use crate::paths::AppPaths;
 use crate::portforward::{PortForward, PortForwards};
 use crate::prefs::{ClusterSettings, Prefs};
@@ -90,6 +91,8 @@ struct Inner {
     tools: Tools,
     helm: Helm,
     metrics: Metrics,
+    /// The API docs read from each cluster, until it disconnects (spec L5).
+    api_docs: ApiDocs,
     /// Held across a preferences write and the matching source change, so
     /// concurrent calls cannot leave the sync on sources that were not saved last.
     sync: Mutex<Option<KubeconfigSync>>,
@@ -230,6 +233,7 @@ impl AppCore {
                 tools: Tools::new(&paths.data),
                 helm,
                 metrics: Metrics::default(),
+                api_docs: ApiDocs::default(),
                 sync: Mutex::new(Some(sync)),
                 snapshots,
                 sync_events: Mutex::new(Some(sync_events)),
@@ -391,6 +395,7 @@ impl AppCore {
 
     pub async fn cluster_disconnect(&self, id: &ClusterId) -> CoreResult<()> {
         self.inner.connections.disconnect(id);
+        self.inner.api_docs.forget(id);
         Ok(())
     }
 
@@ -457,6 +462,10 @@ impl AppCore {
 
     pub(crate) fn metrics(&self) -> &Metrics {
         &self.inner.metrics
+    }
+
+    pub(crate) fn api_docs(&self) -> &ApiDocs {
+        &self.inner.api_docs
     }
 
     pub(crate) fn sessions(&self) -> &Arc<SessionRegistry> {

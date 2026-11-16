@@ -1,16 +1,20 @@
 //! One kind's API docs, read from the cluster's OpenAPI v3 (spec L).
 
-// Until `api_schema` (spec L1) calls into this module, parts of it have no caller.
-#![allow(dead_code)]
-
 mod cache;
 mod fetch;
 mod tree;
 mod types;
 
+use std::sync::Arc;
+
+use kube::Client;
+
+pub(crate) use cache::ApiDocs;
 pub use types::{KindSchema, SchemaField};
 
-use crate::error::CoreResult;
+use crate::app_core::AppCore;
+use crate::error::{CoreResult, ErrorCode, IpcError};
+use crate::kubeconfig::ClusterId;
 use crate::resources::invalid;
 
 /// The answer to an apiVersion that is neither form (spec L2).
@@ -61,10 +65,114 @@ impl Target {
     }
 }
 
+/// What one look, in the cache or at the cluster, found.
+enum Lookup {
+    Found(Arc<KindSchema>),
+    /// The index names no document for the group version, or the document moved or went.
+    NoDocument,
+    /// The document has no schema for the kind.
+    NoKind,
+}
+
+impl AppCore {
+    /// One kind's API docs (spec L1). Every request goes through the cluster's client (L12).
+    /// What was read is kept until the cluster disconnects (L5); a miss reads the index once
+    /// more before it is an error (L6, L13).
+    pub async fn api_schema(
+        &self,
+        id: &ClusterId,
+        api_version: &str,
+        kind: &str,
+    ) -> CoreResult<KindSchema> {
+        let target = Target::parse(api_version, kind)?;
+        let epoch = self.connections().epoch(id)?;
+        let client = self.cluster_client(id)?;
+        let mut found = self.look_up(&client, id, epoch, &target, false).await?;
+        if !matches!(found, Lookup::Found(_)) {
+            found = self.look_up(&client, id, epoch, &target, true).await?;
+        }
+        match found {
+            Lookup::Found(schema) => Ok(KindSchema::clone(&schema)),
+            Lookup::NoDocument => Err(IpcError::new(
+                ErrorCode::NotFound,
+                format!(
+                    "The cluster publishes no API docs for {}.",
+                    target.api_version
+                ),
+            )),
+            Lookup::NoKind => Err(IpcError::new(
+                ErrorCode::NotFound,
+                format!(
+                    "The API docs for {} have no {}.",
+                    target.api_version, target.kind
+                ),
+            )),
+        }
+    }
+
+    /// One look: the index (kept, or read again when `fresh_index`), then the built schema,
+    /// the kept document, or a GET of the document.
+    async fn look_up(
+        &self,
+        client: &Client,
+        id: &ClusterId,
+        epoch: u64,
+        target: &Target,
+        fresh_index: bool,
+    ) -> CoreResult<Lookup> {
+        let docs = self.api_docs();
+        let kept = if fresh_index {
+            None
+        } else {
+            docs.index(id, epoch)
+        };
+        let index = match kept {
+            Some(index) => index,
+            None => {
+                let (status, body) = fetch::get(client, fetch::INDEX_PATH).await?;
+                let index = fetch::index_answer(status, &body, &target.api_version)?;
+                docs.store_index(id, epoch, index)
+            }
+        };
+        let Some(url) = index.url(&target.key()).map(str::to_owned) else {
+            return Ok(Lookup::NoDocument);
+        };
+        if let Some(schema) = docs.schema(id, epoch, &url, &target.kind) {
+            return Ok(Lookup::Found(schema));
+        }
+        let document = match docs.document(id, epoch, &url) {
+            Some(document) => document,
+            None => {
+                let (status, body) = fetch::get(client, &url).await?;
+                match fetch::document_answer(status, &body, &target.api_version)? {
+                    Some(document) => docs.store_document(id, epoch, &url, document),
+                    None => return Ok(Lookup::NoDocument),
+                }
+            }
+        };
+        Ok(match tree::kind_schema(&document, target) {
+            Some(schema) => Lookup::Found(docs.store_schema(id, epoch, &url, &target.kind, schema)),
+            None => Lookup::NoKind,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::ErrorCode;
+
+    /// Tauri commands await `api_schema` on a multi-threaded runtime, so its future must be
+    /// `Send` whatever the borrows' lifetimes. This fails to compile when it is not.
+    #[allow(dead_code)]
+    fn api_schema_is_send<'a>(
+        core: &'a AppCore,
+        id: &'a ClusterId,
+        api_version: &'a str,
+        kind: &'a str,
+    ) {
+        fn send<T: Send>(_: &T) {}
+        send(&core.api_schema(id, api_version, kind));
+    }
 
     #[test]
     fn an_api_version_is_a_version_or_a_group_and_a_version() {
