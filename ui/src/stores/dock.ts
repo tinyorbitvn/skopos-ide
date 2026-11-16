@@ -98,12 +98,27 @@ export type DockTab =
       title: string;
       dirty: false;
       node: string;
+    }
+  | {
+      id: string;
+      kind: "details";
+      clusterId: string;
+      /** "<Kind> · <name>", rebuilt on load. */
+      title: string;
+      resource: ResourceRef;
+      namespace: string | null;
+      name: string;
+      /** The drawer tab the root shows: "overview", "metrics", "map" or "events". */
+      tab: string;
+      dirty: false;
     };
 
 export type LogsDockTab = Extract<DockTab, { kind: "logs" }>;
 export type TerminalDockTab = Extract<DockTab, { kind: "terminal" }>;
 export type PodSessionDockTab = Extract<DockTab, { kind: "shell" | "attach" }>;
 export type NodeShellDockTab = Extract<DockTab, { kind: "nodeShell" }>;
+/** A minimized details drawer (spec K5). */
+export type DetailsDockTab = Extract<DockTab, { kind: "details" }>;
 /** A tab whose body is a terminal session. */
 export type SessionDockTab =
   | TerminalDockTab
@@ -142,7 +157,8 @@ export interface DockState {
   restored: boolean;
   /**
    * Shows the dock on `tab`. A tab for the same object is focused instead, and a Logs
-   * tab keeps its options.
+   * tab keeps its options. A details tab for the same object takes the new drawer tab
+   * and goes back to its root (spec K4).
    */
   open(tab: DockTab): void;
   close(id: string): void;
@@ -154,6 +170,8 @@ export interface DockState {
   setLogOptions(id: string, patch: Partial<LogTabOptions>): void;
   /** The container of a Shell or Attach tab. Other tabs are left alone. */
   setContainer(id: string, container: string): void;
+  /** The drawer tab a details tab's root shows. Other tabs are left alone. */
+  setDetailsTab(id: string, tab: string): void;
   /** Titles the terminal tab of each cluster given after the cluster's catalog name. */
   renameTerminals(clusters: readonly { id: string; name: string }[]): void;
   /**
@@ -211,13 +229,29 @@ export const useDock: UseBoundStore<StoreApi<DockState>> = create<DockState>(
     height: DOCK_DEFAULT_HEIGHT,
     minimized: false,
     restored: false,
-    open: (tab) =>
-      set((state) => {
-        const existing = state.tabs.find((t) => sameTab(t, tab));
-        return existing
-          ? { activeId: existing.id, minimized: false }
-          : { tabs: [...state.tabs, tab], activeId: tab.id, minimized: false };
-      }),
+    open: (tab) => {
+      const existing = get().tabs.find((t) => sameTab(t, tab));
+      if (!existing) {
+        set((state) => ({
+          tabs: [...state.tabs, tab],
+          activeId: tab.id,
+          minimized: false,
+        }));
+        return;
+      }
+      if (existing.kind === "details" && tab.kind === "details") {
+        // Minimizing the object again shows its root on the new drawer tab (spec K4).
+        drafts.delete(existing.id);
+        const replaced: DockTab = { ...existing, tab: tab.tab };
+        set((state) => ({
+          tabs: state.tabs.map((t) => (t.id === existing.id ? replaced : t)),
+          activeId: existing.id,
+          minimized: false,
+        }));
+        return;
+      }
+      set({ activeId: existing.id, minimized: false });
+    },
     close: (id) => {
       drafts.delete(id);
       set((state) => {
@@ -263,6 +297,18 @@ export const useDock: UseBoundStore<StoreApi<DockState>> = create<DockState>(
             : t,
         ),
       })),
+    setDetailsTab: (id, tab) =>
+      set((state) =>
+        state.tabs.some(
+          (t) => t.id === id && t.kind === "details" && t.tab !== tab,
+        )
+          ? {
+              tabs: state.tabs.map((t) =>
+                t.id === id && t.kind === "details" ? { ...t, tab } : t,
+              ),
+            }
+          : state,
+      ),
     renameTerminals: (clusters) =>
       set((state) => {
         const names = new Map(clusters.map((c) => [c.id, c.name] as const));
@@ -511,6 +557,27 @@ export function nodeShellTab(
   node: KubeObject,
 ): NodeShellDockTab {
   return nodeShellTabFor(clusterId, node.metadata.name);
+}
+
+/** The dock tab a minimized details drawer becomes (spec K5). */
+export function detailsTab(
+  clusterId: string,
+  resource: ResourceRef,
+  namespace: string | null,
+  name: string,
+  tab: string,
+): DetailsDockTab {
+  return {
+    id: `details:${clusterId}:${resource.group}/${resource.plural}:${namespace ?? ""}/${name}`,
+    kind: "details",
+    clusterId,
+    title: `${resource.kind} · ${name}`,
+    resource,
+    namespace,
+    name,
+    tab,
+    dirty: false,
+  };
 }
 
 /** A new tab for creating resources. */
