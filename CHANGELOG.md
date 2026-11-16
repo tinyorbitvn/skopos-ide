@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **Minimize the details drawer into the dock:** a new Minimize button in the drawer's header moves the object into a dock tab below its list, which stays in full view. The tab shows the drawer's tabs live, follows links with Back and comes back after a restart; **Open as drawer** puts the object back over its own list, on the same tab.
+
 ## [0.6.0] - 2026-11-16
 
 - **New app icon and logo:** the TinyOrbit orbit mark, white on navy, replaces the old icon on Linux, macOS and Windows and in the About dialog.

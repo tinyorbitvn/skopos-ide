@@ -1,9 +1,11 @@
-import { ChevronLeft, X } from "lucide-react";
+import { ChevronLeft, Minimize2, X } from "lucide-react";
 import { type ReactElement, type ReactNode, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { IconButton, type TableColumn } from "../../design";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { KubeObject } from "../../kinds/objects";
+import { detailsTab, useDock } from "../../stores/dock";
 import { DRAWER_PANE, usePaneSize } from "../../stores/paneSize";
 import { DrawerObjectActions } from "../resources/DrawerObjectActions";
 import styles from "./DetailDrawer.module.css";
@@ -62,12 +64,16 @@ export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
 
   const fallback = useRef(props.fallbackFocus);
   fallback.current = props.fallbackFocus;
+  // False once Minimize gave focus to the dock: closing then hands nothing back (spec K3).
+  const restoreFocus = useRef(true);
 
   useEffect(() => {
     if (!open) return;
     const before = document.activeElement;
+    restoreFocus.current = true;
     drawerRef.current?.focus();
     return () => {
+      if (!restoreFocus.current) return;
       // The body has focus when nothing does, such as after Open as drawer closed the
       // dock tab that had it (spec K17): the row is a better place.
       if (
@@ -89,8 +95,28 @@ export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
 
   if (entry === null) return null;
 
-  const { info, read, own, kind, name } = entry;
+  const { target, info, read, own, kind, name, tab } = entry;
   const object = read.object;
+  // Hidden where the resource is unknown (spec K2).
+  const canMinimize = info !== undefined && read.status !== "notServed";
+
+  /** Moves the shown entry into the dock and closes the drawer (spec K3). */
+  function minimize(): void {
+    if (!info) return;
+    const docked = detailsTab(
+      clusterId,
+      info.resource,
+      target.namespace,
+      target.name,
+      tab,
+    );
+    // The tab's button has to be on screen before it can take focus.
+    flushSync(() => useDock.getState().open(docked));
+    restoreFocus.current = false;
+    onClose();
+    document.getElementById(`dock-tab-${docked.id}`)?.focus();
+  }
+
   let actions: ReactNode = null;
   if ((read.status === "live" || read.status === "fetched") && object) {
     if (own) actions = props.actions?.(object) ?? null;
@@ -143,6 +169,14 @@ export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
                   {actions}
                   <span className={styles.divider} aria-hidden="true" />
                 </>
+              ) : null}
+              {canMinimize ? (
+                <IconButton
+                  label="Minimize to the dock"
+                  icon={<Minimize2 size={16} aria-hidden="true" />}
+                  onClick={minimize}
+                  data-testid="detail-minimize"
+                />
               ) : null}
               <IconButton
                 label="Close details"

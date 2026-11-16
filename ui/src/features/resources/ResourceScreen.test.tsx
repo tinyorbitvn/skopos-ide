@@ -15,7 +15,12 @@ import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
 import { type DeleteDialogProps, registerKind } from "../../kinds/registry";
-import { detailsTab, resetDockForTest, useDock } from "../../stores/dock";
+import {
+  type DetailsDockTab,
+  detailsTab,
+  resetDockForTest,
+  useDock,
+} from "../../stores/dock";
 import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
 import { mockElementSize } from "../../test/size";
@@ -1283,4 +1288,135 @@ test("a drawer opened from the dock's strip gives focus back to its row on Close
   fireEvent.click(screen.getByTestId("detail-close"));
   await act(flush);
   expect(document.activeElement).toBe(row("team-a", "db"));
+});
+
+test("Minimize closes the drawer and shows the object's details tab on the drawer's tab, with focus on its button", async () => {
+  const fake = fakeBackend();
+  const db = detailsTab("c1", DEPLOYMENTS.resource, "team-a", "db", "overview");
+  useDock.getState().open(db);
+  useDock.getState().setMinimized(true);
+  await showWithDock(
+    fake,
+    [pod("web", "team-a"), pod("db", "team-a")],
+    DEPLOYMENTS,
+  );
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  fireEvent.mouseDown(
+    within(screen.getByTestId("detail-drawer")).getByTestId(
+      "detail-tab-events",
+    ),
+    { button: 0 },
+  );
+  await act(flush);
+
+  fireEvent.click(screen.getByTestId("detail-minimize"));
+  await act(flush);
+
+  const id = "details:c1:apps/deployments:team-a/web";
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  expect(screen.getByTestId("where").textContent).not.toContain("object=");
+  const dock = useDock.getState();
+  expect(dock.tabs.map((t) => t.id)).toEqual([db.id, id]);
+  expect(dock.tabs[1]).toMatchObject({
+    kind: "details",
+    title: "Deployment · web",
+    tab: "events",
+  });
+  expect(dock.activeId).toBe(id);
+  expect(dock.minimized).toBe(false);
+  const shownPanel = screen.getByTestId(`dock-panel-${id}`);
+  expect(shownPanel.hidden).toBe(false);
+  expect(
+    within(shownPanel)
+      .getByTestId("detail-tab-events")
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+  expect(document.activeElement).toBe(screen.getByTestId(`dock-tab-${id}`));
+
+  // The drawer's history went with it: a row click starts afresh.
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  expect(screen.queryByTestId("detail-back")).toBeNull();
+  expect(
+    within(screen.getByTestId("detail-drawer"))
+      .getByTestId("detail-tab-overview")
+      .getAttribute("aria-selected"),
+  ).toBe("true");
+});
+
+test("a second Minimize of the same object opens no second tab, and a row click leaves the tab open", async () => {
+  const fake = fakeBackend();
+  await showWithDock(fake, [pod("web", "team-a")], DEPLOYMENTS);
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  fireEvent.click(screen.getByTestId("detail-minimize"));
+  await act(flush);
+  const id = "details:c1:apps/deployments:team-a/web";
+  expect(useDock.getState().tabs.map((t) => t.id)).toEqual([id]);
+  expect((useDock.getState().tabs[0] as DetailsDockTab).tab).toBe("overview");
+
+  // The same object in the drawer and in the dock (spec K21).
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  expect(useDock.getState().tabs).toHaveLength(1);
+  fireEvent.mouseDown(
+    within(screen.getByTestId("detail-drawer")).getByTestId(
+      "detail-tab-events",
+    ),
+    { button: 0 },
+  );
+  await act(flush);
+
+  fireEvent.click(screen.getByTestId("detail-minimize"));
+  await act(flush);
+  const { tabs, activeId } = useDock.getState();
+  expect(tabs.map((t) => t.id)).toEqual([id]);
+  expect((tabs[0] as DetailsDockTab).tab).toBe("events");
+  expect(activeId).toBe(id);
+});
+
+test("Minimize while a linked object is shown docks the linked object", async () => {
+  const fake = fakeBackend();
+  const NAMESPACES = info({
+    plural: "namespaces",
+    kind: "Namespace",
+    namespaced: false,
+  });
+  await showWithDock(fake, [pod("web", "team-a")], DEPLOYMENTS, [
+    DEPLOYMENTS,
+    NAMESPACES,
+  ]);
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  fireEvent.click(
+    within(screen.getByTestId("detail-relations")).getByRole("button", {
+      name: "team-a",
+    }),
+  );
+  await act(flush);
+  await fake.send("namespaces", {
+    type: "snapshot",
+    items: [{ metadata: { name: "team-a" } }],
+  } as WatchEvent);
+  expect(screen.getByTestId("detail-kind").textContent).toBe("Namespace");
+
+  fireEvent.click(screen.getByTestId("detail-minimize"));
+  await act(flush);
+  const docked = detailsTab(
+    "c1",
+    NAMESPACES.resource,
+    null,
+    "team-a",
+    "overview",
+  );
+  expect(docked.id).toBe("details:c1:/namespaces:/team-a");
+  expect(useDock.getState().tabs).toEqual([docked]);
+  expect(useDock.getState().activeId).toBe(docked.id);
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  expect(
+    within(screen.getByTestId(`dock-panel-${docked.id}`)).getByTestId(
+      "dock-details-kind",
+    ).textContent,
+  ).toBe("Namespace");
 });
