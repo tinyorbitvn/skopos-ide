@@ -402,7 +402,7 @@ fn object_with_server_fields(name: &str) -> Value {
 #[tokio::test]
 async fn managed_fields_are_stripped() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
-    // Not Pods: their rows drop every annotation, and this checks that others stay.
+    // Not Pods: their rows cut annotation values, and this checks that others keep them whole.
     fake.upsert("configmaps", object_with_server_fields("listed"));
 
     let configmaps = resource("", "ConfigMap", "configmaps", true);
@@ -928,9 +928,11 @@ async fn subscribing_to_disconnected_cluster_errors() {
 }
 
 /// A table holds every Pod row, so a row carries only what the UI reads outside the drawer.
+/// Its annotations stay for the filter, each value cut to 256 characters (spec M24, M26).
 #[tokio::test]
 async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let long = "x".repeat(300);
     fake.upsert(
         "pods",
         json!({
@@ -938,7 +940,7 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
                 "name": "full",
                 "namespace": "default",
                 "labels": { "app": "web" },
-                "annotations": { "note": "for the drawer" },
+                "annotations": { "note": "for the drawer", "long": long },
             },
             "spec": { "containers": [{
                 "name": "main",
@@ -957,7 +959,10 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
         json!([{ "name": "main", "image": "registry.k8s.io/pause:3.10" }])
     );
     assert_eq!(row["status"]["phase"], "Running");
-    assert!(row["metadata"].get("annotations").is_none(), "{row}");
+    assert_eq!(
+        row["metadata"]["annotations"],
+        json!({ "note": "for the drawer", "long": "x".repeat(256) })
+    );
 
     let whole = core
         .resource_get(&id, &pods(), Some("default"), "full")
@@ -965,7 +970,7 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
         .unwrap();
     assert_eq!(
         whole["metadata"]["annotations"],
-        json!({ "note": "for the drawer" })
+        json!({ "note": "for the drawer", "long": long })
     );
     assert_eq!(
         whole["spec"]["containers"][0]["env"],

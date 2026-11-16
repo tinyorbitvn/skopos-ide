@@ -1,6 +1,7 @@
 //! What a watched row keeps of its object. A table holds every row of a resource, and the
 //! webview's memory grows with what each row carries. So a core Pod row keeps only what the
 //! UI reads outside the detail drawer, which fetches the whole object with `resource_get`.
+//! Its annotations stay for the list's filter, each value cut short (spec M24).
 
 use serde_json::Value;
 
@@ -14,9 +15,15 @@ enum Keep {
     Fields(&'static [(&'static str, Keep)]),
     /// An array's items each follow the rule.
     Each(&'static Keep),
+    /// An object's string values, each cut to its first this many characters on a `char`
+    /// boundary. A value that is not a string is dropped.
+    Strings(usize),
 }
 
-use Keep::{All, Each, Fields};
+use Keep::{All, Each, Fields, Strings};
+
+/// The characters a Pod row keeps of each annotation value (spec M24).
+const ANNOTATION_CHARS: usize = 256;
 
 /// What the table's Ready, Status and Restarts columns read of a container's status.
 const CONTAINER_STATUS: Keep = Fields(&[
@@ -123,10 +130,10 @@ const POD_GRAPH: Keep = Fields(&[
     ("status", POD_STATUS),
 ]);
 
-/// The Pods table, its search and sort, the pod lists of the Node, Job and Rollout
+/// The Pods table, its filter and sort, the pod lists of the Node, Job and Rollout
 /// drawers, the Pods row-menu Port forward action (which reads the container ports) and the
 /// Workspace Pods view's Image column (spec E §4.9) read these. `uid` and `resourceVersion` let
-/// an action or a fetch name the object.
+/// an action or a fetch name the object. The filter matches annotations, so they stay, cut.
 const POD_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -140,6 +147,7 @@ const POD_ROW: Keep = Fields(&[
             ("creationTimestamp", All),
             ("deletionTimestamp", All),
             ("labels", All),
+            ("annotations", Strings(ANNOTATION_CHARS)),
             ("ownerReferences", All),
         ]),
     ),
@@ -192,6 +200,24 @@ fn keep(value: &mut Value, rule: &Keep) {
                 }
             }
         }
+        Strings(max) => {
+            if let Some(object) = value.as_object_mut() {
+                object.retain(|_, child| match child {
+                    Value::String(text) => {
+                        cut_chars(text, *max);
+                        true
+                    }
+                    _ => false,
+                });
+            }
+        }
+    }
+}
+
+/// Cuts `text` to its first `max` characters, on a `char` boundary.
+fn cut_chars(text: &mut String, max: usize) {
+    if let Some((end, _)) = text.char_indices().nth(max) {
+        text.truncate(end);
     }
 }
 
@@ -262,7 +288,7 @@ mod tests {
                 "deletionTimestamp": "2026-11-01T09:00:00Z",
                 "generateName": "web-",
                 "labels": { "app": "web" },
-                "annotations": { "note": "dropped" },
+                "annotations": { "prometheus.io/scrape": "true" },
                 "ownerReferences": [{ "kind": "ReplicaSet", "name": "web", "uid": "u-rs", "apiVersion": "apps/v1" }],
                 "finalizers": ["example.com/hold"],
             },
@@ -339,6 +365,7 @@ mod tests {
                     "creationTimestamp": "2026-11-01T08:00:00Z",
                     "deletionTimestamp": "2026-11-01T09:00:00Z",
                     "labels": { "app": "web" },
+                    "annotations": { "prometheus.io/scrape": "true" },
                     "ownerReferences": [{ "kind": "ReplicaSet", "name": "web", "uid": "u-rs", "apiVersion": "apps/v1" }],
                 },
                 "spec": {
@@ -386,7 +413,7 @@ mod tests {
     fn a_pod_missing_parts_or_shaped_oddly_is_kept_as_far_as_it_goes() {
         let mut row = json!({
             "kind": "Pod",
-            "metadata": { "name": "odd" },
+            "metadata": { "name": "odd", "annotations": "not a map" },
             "spec": null,
             "status": { "containerStatuses": "not a list", "conditions": [1, "two"] },
         });
@@ -395,11 +422,67 @@ mod tests {
             row,
             json!({
                 "kind": "Pod",
-                "metadata": { "name": "odd" },
+                "metadata": { "name": "odd", "annotations": "not a map" },
                 "spec": null,
                 "status": { "containerStatuses": "not a list", "conditions": [1, "two"] },
             })
         );
+    }
+
+    #[test]
+    fn a_pod_row_cuts_each_annotation_value_to_256_characters_on_a_char_boundary() {
+        let long = "a".repeat(10_000);
+        let wide = "é".repeat(300);
+        let mixed = format!("{}🙂🙂", "b".repeat(255));
+        let mut row = full_pod();
+        row["metadata"]["annotations"] = json!({
+            "long": long,
+            "wide": wide,
+            "mixed": mixed,
+            "short": "kept whole",
+            "empty": "",
+        });
+        trim_for_watch(&resource("", "pods", "Pod"), &mut row);
+        let annotations = &row["metadata"]["annotations"];
+        assert_eq!(annotations["long"], "a".repeat(256));
+        let wide = annotations["wide"].as_str().unwrap();
+        assert_eq!(wide.chars().count(), 256);
+        assert_eq!(wide, "é".repeat(256));
+        assert_eq!(annotations["mixed"], format!("{}🙂", "b".repeat(255)));
+        assert_eq!(annotations["short"], "kept whole");
+        assert_eq!(annotations["empty"], "");
+    }
+
+    #[test]
+    fn a_pod_row_drops_annotation_values_that_are_not_strings() {
+        let mut row = full_pod();
+        row["metadata"]["annotations"] = json!({
+            "number": 5,
+            "flag": true,
+            "nested": { "a": "b" },
+            "list": ["a"],
+            "nothing": null,
+            "text": "stays",
+        });
+        trim_for_watch(&resource("", "pods", "Pod"), &mut row);
+        assert_eq!(row["metadata"]["annotations"], json!({ "text": "stays" }));
+    }
+
+    #[test]
+    fn other_kinds_keep_long_annotation_values_whole() {
+        let long = "a".repeat(10_000);
+        for resource in [
+            resource("", "configmaps", "ConfigMap"),
+            resource("apps", "deployments", "Deployment"),
+            resource("metrics.k8s.io", "pods", "PodMetrics"),
+        ] {
+            let mut row = json!({
+                "metadata": { "name": "x", "annotations": { "long": long, "number": 5 } },
+            });
+            let before = row.clone();
+            trim_for_watch(&resource, &mut row);
+            assert_eq!(row, before, "{}", resource.plural);
+        }
     }
 
     #[test]
