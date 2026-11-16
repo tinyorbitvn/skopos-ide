@@ -25,7 +25,7 @@ import { drawerTabOf } from "../details/drawerHistory";
 import { useDrawerHistory } from "../details/useDrawerHistory";
 import { useListUsage } from "../metrics/useListUsage";
 import { DeleteDialog } from "./DeleteDialog";
-import { matchesSearch } from "./filter";
+import { matchesFilter, typedFilter } from "./filter";
 import { kindColumns, useCustomResourceDefinition } from "./kindColumns";
 import { NamespaceFilter, namespaceFilterKey } from "./NamespaceFilter";
 import { ObjectActionBar } from "./ObjectActionBar";
@@ -138,10 +138,11 @@ export function ResourceScreen(props: {
 
   const rows = useMemo(() => {
     const allowed = new Set(namespaces);
+    const typed = typedFilter(search);
     return list.items.filter(
       (o) =>
         (allowed.size === 0 || allowed.has(o.metadata.namespace ?? "")) &&
-        matchesSearch(o, search),
+        (typed === null || matchesFilter(o, typed)),
     );
   }, [list.items, namespaces, search]);
 
