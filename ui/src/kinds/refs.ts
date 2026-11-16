@@ -28,6 +28,13 @@ export const DEPLOYMENTS: ResourceRef = {
   kind: "Deployment",
   namespaced: true,
 };
+export const REPLICASETS: ResourceRef = {
+  group: "apps",
+  version: "v1",
+  plural: "replicasets",
+  kind: "ReplicaSet",
+  namespaced: true,
+};
 export const CONFIGMAPS: ResourceRef = {
   group: "",
   version: "v1",
