@@ -37,16 +37,42 @@ function r(label: string, group: string, plural: string): NavResource {
 }
 
 const GATEWAY = "gateway.networking.k8s.io";
+const GATEWAY_EXPERIMENTAL = "gateway.networking.x-k8s.io";
 const ARGO = "argoproj.io";
+
+/** The Gateway API's standard and experimental groups. Network lists every served kind of both (spec M3). */
+export const GATEWAY_GROUPS: ReadonlySet<string> = new Set([
+  GATEWAY,
+  GATEWAY_EXPERIMENTAL,
+]);
 
 /**
  * The sidebar sections of F4, in order. Overview is the cluster home route and not
  * a resource. The Workloads Overview entry links to the Workloads overview (F17). Port Forwarding and Helm's
  * Charts and Releases are routes of the cluster screen, not resource kinds. Custom Resources starts with Definitions; the
- * entries for each CRD are added by `customResourceGroups`. The Gateway API kinds are under Network and Argo CD has its own section (spec G §3); their items hide where the cluster does not serve them.
+ * entries for each CRD are added by `customResourceGroups`. Helm and Argo CD come right under Nodes (spec M1). The Gateway
+ * API kinds are under Network, where `visibleSections` adds the other served kinds of `GATEWAY_GROUPS` (spec M2, M3), and
+ * Argo CD has its own section (spec G §3); their items hide where the cluster does not serve them.
  */
 export const NAV_SECTIONS: NavSection[] = [
   { id: "nodes", label: "Nodes", items: [r("Nodes", "", "nodes")] },
+  {
+    id: "helm",
+    label: "Helm",
+    items: [
+      { type: "route", label: "Charts", path: "helm/charts" },
+      { type: "route", label: "Releases", path: "helm/releases" },
+    ],
+  },
+  {
+    id: "argocd",
+    label: "Argo CD",
+    items: [
+      r("Applications", ARGO, "applications"),
+      r("ApplicationSets", ARGO, "applicationsets"),
+      r("AppProjects", ARGO, "appprojects"),
+    ],
+  },
   {
     id: "workloads",
     label: "Workloads",
@@ -97,8 +123,13 @@ export const NAV_SECTIONS: NavSection[] = [
       r("NetworkPolicies", "networking.k8s.io", "networkpolicies"),
       r("GatewayClasses", GATEWAY, "gatewayclasses"),
       r("Gateways", GATEWAY, "gateways"),
+      r("ListenerSets", GATEWAY, "listenersets"),
       r("HTTPRoutes", GATEWAY, "httproutes"),
       r("GRPCRoutes", GATEWAY, "grpcroutes"),
+      r("TLSRoutes", GATEWAY, "tlsroutes"),
+      r("TCPRoutes", GATEWAY, "tcproutes"),
+      r("UDPRoutes", GATEWAY, "udproutes"),
+      r("BackendTLSPolicies", GATEWAY, "backendtlspolicies"),
       r("ReferenceGrants", GATEWAY, "referencegrants"),
       { type: "route", label: "Port Forwarding", path: "port-forwards" },
     ],
@@ -118,23 +149,6 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [r("Namespaces", "", "namespaces")],
   },
   { id: "events", label: "Events", items: [r("Events", "", "events")] },
-  {
-    id: "helm",
-    label: "Helm",
-    items: [
-      { type: "route", label: "Charts", path: "helm/charts" },
-      { type: "route", label: "Releases", path: "helm/releases" },
-    ],
-  },
-  {
-    id: "argocd",
-    label: "Argo CD",
-    items: [
-      r("Applications", ARGO, "applications"),
-      r("ApplicationSets", ARGO, "applicationsets"),
-      r("AppProjects", ARGO, "appprojects"),
-    ],
-  },
   {
     id: "access",
     label: "Access Control",
@@ -199,16 +213,14 @@ function listable(resources: ApiResourceInfo[]): Set<string> {
   return out;
 }
 
-/** Removes the items that are not served or not listable, then empty sections. */
-export function visibleSections(resources: ApiResourceInfo[]): NavSection[] {
-  const ok = listable(resources);
-  return NAV_SECTIONS.map((section) => ({
-    ...section,
-    // A route needs no resource to list, so it always shows.
-    items: section.items.filter(
-      (i) => i.type === "route" || ok.has(`${i.group}/${i.plural}`),
-    ),
-  })).filter((section) => section.items.length > 0);
+/**
+ * A kind made plural (spec M4): `es` after a final s, x, z, ch or sh, `ies` in place of a
+ * final y after a consonant, otherwise `s`.
+ */
+export function pluralKind(kind: string): string {
+  if (/(s|x|z|ch|sh)$/i.test(kind)) return `${kind}es`;
+  if (/[^aeiou]y$/i.test(kind)) return `${kind.slice(0, -1)}ies`;
+  return `${kind}s`;
 }
 
 /** `group/plural` of every resource a section lists; Custom Resources leaves them out. */
@@ -219,8 +231,57 @@ const NAV_RESOURCE_KEYS: ReadonlySet<string> = new Set(
 );
 
 /**
+ * The listable kinds of `GATEWAY_GROUPS` that Network does not list itself, named after
+ * their kind and sorted by that name (spec M3).
+ */
+function otherGatewayItems(resources: ApiResourceInfo[]): NavResource[] {
+  return resources
+    .filter(
+      (info) =>
+        GATEWAY_GROUPS.has(info.resource.group) &&
+        info.canList &&
+        !NAV_RESOURCE_KEYS.has(
+          `${info.resource.group}/${info.resource.plural}`,
+        ),
+    )
+    .map((info) =>
+      r(
+        pluralKind(info.resource.kind),
+        info.resource.group,
+        info.resource.plural,
+      ),
+    )
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Removes the items that are not served or not listable, then empty sections. Network
+ * also gets the other served Gateway API kinds, just before Port Forwarding.
+ */
+export function visibleSections(resources: ApiResourceInfo[]): NavSection[] {
+  const ok = listable(resources);
+  const gateway = otherGatewayItems(resources);
+  return NAV_SECTIONS.map((section) => {
+    // A route needs no resource to list, so it always shows.
+    const items = section.items.filter(
+      (i) => i.type === "route" || ok.has(`${i.group}/${i.plural}`),
+    );
+    if (section.id !== "network" || gateway.length === 0) {
+      return { ...section, items };
+    }
+    const route = items.findIndex((i) => i.type === "route");
+    const at = route === -1 ? items.length : route;
+    return {
+      ...section,
+      items: [...items.slice(0, at), ...gateway, ...items.slice(at)],
+    };
+  }).filter((section) => section.items.length > 0);
+}
+
+/**
  * Listable custom resources grouped by API group, with groups and items sorted.
- * Resources that a section lists are left out, one by one, so other kinds of their group stay.
+ * Resources that a section lists are left out, one by one, so other kinds of their group
+ * stay. Both Gateway API groups are left out whole: Network lists their kinds (spec M5).
  */
 export function customResourceGroups(resources: ApiResourceInfo[]): CrdGroup[] {
   const groups = new Map<string, CrdGroup>();
@@ -228,6 +289,7 @@ export function customResourceGroups(resources: ApiResourceInfo[]): CrdGroup[] {
     const { group, plural, kind } = info.resource;
     if (
       BUILTIN_GROUPS.has(group) ||
+      GATEWAY_GROUPS.has(group) ||
       !info.canList ||
       NAV_RESOURCE_KEYS.has(`${group}/${plural}`)
     ) {

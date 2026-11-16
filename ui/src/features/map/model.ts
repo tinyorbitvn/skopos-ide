@@ -2,7 +2,7 @@ import type { GraphEdge } from "../../ipc/generated/GraphEdge";
 import type { GraphNamespaceCount } from "../../ipc/generated/GraphNamespaceCount";
 import type { GraphNode } from "../../ipc/generated/GraphNode";
 import type { GraphRel } from "../../ipc/generated/GraphRel";
-import { NAV_SECTIONS } from "../../kinds/nav";
+import { NAV_SECTIONS, pluralKind } from "../../kinds/nav";
 import { levelOf, STATUS_TEXT } from "./layout/constants";
 
 /** A real edge, or a bridge through hidden kinds (spec H62). */
@@ -217,16 +217,10 @@ export function summaryTitle(filtering: boolean): string {
     : "Every resource in the cluster";
 }
 
-/** The Gateway API lists, which the sidebar shows under Custom Resources. */
-const GATEWAY_LISTS: Readonly<Record<string, string>> = {
-  gatewayclasses: "GatewayClasses",
-  gateways: "Gateways",
-  httproutes: "HTTPRoutes",
-};
-
 /**
  * The name of a list for "Open in ‹Plural›" and the missing-kinds note: the sidebar's
- * label, the Gateway API's, or the kind made plural. Without a kind, the plural.
+ * label, or the kind made plural as Network names the other Gateway API kinds (spec M6).
+ * Without a kind, the plural.
  */
 export function listLabel(plural: string, kind?: string): string {
   for (const section of NAV_SECTIONS) {
@@ -234,12 +228,7 @@ export function listLabel(plural: string, kind?: string): string {
       if (item.type === "resource" && item.plural === plural) return item.label;
     }
   }
-  const gateway = GATEWAY_LISTS[plural];
-  if (gateway) return gateway;
-  if (kind === undefined) return plural;
-  if (kind.endsWith("s")) return `${kind}es`;
-  if (kind.endsWith("y")) return `${kind.slice(0, -1)}ies`;
-  return `${kind}s`;
+  return kind === undefined ? plural : pluralKind(kind);
 }
 
 /** The note for kinds the user cannot list (spec E §17). */

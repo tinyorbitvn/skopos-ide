@@ -195,8 +195,16 @@ describe("texts", () => {
     expect(listLabel("persistentvolumeclaims")).toBe("PersistentVolumeClaims");
     expect(listLabel("gatewayclasses")).toBe("GatewayClasses");
     expect(listLabel("httproutes")).toBe("HTTPRoutes");
+    expect(listLabel("listenersets")).toBe("ListenerSets");
+    expect(listLabel("backendtlspolicies")).toBe("BackendTLSPolicies");
     expect(listLabel("widgets")).toBe("widgets");
     expect(listLabel("widgets", "Widget")).toBe("Widgets");
+    // The other Gateway API kinds take Network's names (spec M4, M6).
+    expect(listLabel("xmeshes", "XMesh")).toBe("XMeshes");
+    expect(listLabel("xbackendtrafficpolicies", "XBackendTrafficPolicy")).toBe(
+      "XBackendTrafficPolicies",
+    );
+    expect(listLabel("gizmos", "Gateway")).toBe("Gateways");
   });
 
   it("says which kinds the user cannot list", () => {

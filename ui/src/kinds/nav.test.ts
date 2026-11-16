@@ -2,10 +2,12 @@ import { expect, test } from "vitest";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import {
   customResourceGroups,
+  GATEWAY_GROUPS,
   groupFromSegment,
   groupSegment,
   NAV_SECTIONS,
   navItemKey,
+  pluralKind,
   resourcePath,
   visibleSections,
 } from "./nav";
@@ -32,6 +34,15 @@ function info(
 
 const EXPECTED: [string, string[]][] = [
   ["nodes", ["/nodes"]],
+  ["helm", ["route:helm/charts", "route:helm/releases"]],
+  [
+    "argocd",
+    [
+      "argoproj.io/applications",
+      "argoproj.io/applicationsets",
+      "argoproj.io/appprojects",
+    ],
+  ],
   [
     "workloads",
     [
@@ -70,8 +81,13 @@ const EXPECTED: [string, string[]][] = [
       "networking.k8s.io/networkpolicies",
       "gateway.networking.k8s.io/gatewayclasses",
       "gateway.networking.k8s.io/gateways",
+      "gateway.networking.k8s.io/listenersets",
       "gateway.networking.k8s.io/httproutes",
       "gateway.networking.k8s.io/grpcroutes",
+      "gateway.networking.k8s.io/tlsroutes",
+      "gateway.networking.k8s.io/tcproutes",
+      "gateway.networking.k8s.io/udproutes",
+      "gateway.networking.k8s.io/backendtlspolicies",
       "gateway.networking.k8s.io/referencegrants",
       "route:port-forwards",
     ],
@@ -86,15 +102,6 @@ const EXPECTED: [string, string[]][] = [
   ],
   ["namespaces", ["/namespaces"]],
   ["events", ["/events"]],
-  ["helm", ["route:helm/charts", "route:helm/releases"]],
-  [
-    "argocd",
-    [
-      "argoproj.io/applications",
-      "argoproj.io/applicationsets",
-      "argoproj.io/appprojects",
-    ],
-  ],
   [
     "access",
     [
@@ -118,14 +125,14 @@ test("NAV_SECTIONS covers every F4 resource", () => {
   expect(actual).toEqual(EXPECTED);
   expect(NAV_SECTIONS.map((s) => s.label)).toEqual([
     "Nodes",
+    "Helm",
+    "Argo CD",
     "Workloads",
     "Config",
     "Network",
     "Storage",
     "Namespaces",
     "Events",
-    "Helm",
-    "Argo CD",
     "Access Control",
     "Custom Resources",
   ]);
@@ -158,21 +165,16 @@ test("sections with no visible items disappear; routes need no listable resource
   expect(
     shape([info("", "pods"), info("", "nodes", { canList: false })]),
   ).toEqual([
+    helm,
     ["workloads", ["/pods"]],
     ["network", ["route:port-forwards"]],
-    helm,
   ]);
-  expect(shape([])).toEqual([["network", ["route:port-forwards"]], helm]);
+  expect(shape([])).toEqual([helm, ["network", ["route:port-forwards"]]]);
 });
 
-test("Helm and Argo CD sit between Events and Access Control", () => {
+test("Helm and Argo CD sit right under Nodes, before Workloads", () => {
   const ids = NAV_SECTIONS.map((s) => s.id);
-  expect(ids.slice(ids.indexOf("events"), ids.indexOf("events") + 4)).toEqual([
-    "events",
-    "helm",
-    "argocd",
-    "access",
-  ]);
+  expect(ids.slice(0, 4)).toEqual(["nodes", "helm", "argocd", "workloads"]);
   expect(NAV_SECTIONS.find((s) => s.id === "helm")).toEqual({
     id: "helm",
     label: "Helm",
@@ -248,32 +250,121 @@ test("each Argo CD page shows only when its kind is served", () => {
 });
 
 test("the Gateway API kinds sit in Network between NetworkPolicies and Port Forwarding", () => {
-  const keys =
-    NAV_SECTIONS.find((s) => s.id === "network")?.items.map(navItemKey) ?? [];
+  const network = NAV_SECTIONS.find((s) => s.id === "network");
+  const keys = network?.items.map(navItemKey) ?? [];
   const at = keys.indexOf("networking.k8s.io/networkpolicies");
   expect(keys.slice(at + 1)).toEqual([
     "gateway.networking.k8s.io/gatewayclasses",
     "gateway.networking.k8s.io/gateways",
+    "gateway.networking.k8s.io/listenersets",
     "gateway.networking.k8s.io/httproutes",
     "gateway.networking.k8s.io/grpcroutes",
+    "gateway.networking.k8s.io/tlsroutes",
+    "gateway.networking.k8s.io/tcproutes",
+    "gateway.networking.k8s.io/udproutes",
+    "gateway.networking.k8s.io/backendtlspolicies",
     "gateway.networking.k8s.io/referencegrants",
     "route:port-forwards",
   ]);
+  expect(network?.items.slice(5, 15).map((i) => i.label)).toEqual([
+    "GatewayClasses",
+    "Gateways",
+    "ListenerSets",
+    "HTTPRoutes",
+    "GRPCRoutes",
+    "TLSRoutes",
+    "TCPRoutes",
+    "UDPRoutes",
+    "BackendTLSPolicies",
+    "ReferenceGrants",
+  ]);
 });
 
-test("custom resources leave out the kinds a section lists, matched per resource", () => {
+test("GATEWAY_GROUPS holds the standard and the experimental group", () => {
+  expect([...GATEWAY_GROUPS].sort()).toEqual([
+    "gateway.networking.k8s.io",
+    "gateway.networking.x-k8s.io",
+  ]);
+});
+
+test("Network adds the other listable kinds of both Gateway API groups, sorted, before Port Forwarding", () => {
+  const network = (resources: ApiResourceInfo[]) =>
+    visibleSections(resources).find((s) => s.id === "network")?.items ?? [];
+  const items = network([
+    info("gateway.networking.k8s.io", "gateways", {}, "Gateway"),
+    info("gateway.networking.k8s.io", "referencegrants", {}, "ReferenceGrant"),
+    info("gateway.networking.x-k8s.io", "xmeshes", {}, "XMesh"),
+    info("gateway.networking.x-k8s.io", "xbackends", {}, "XBackend"),
+    info(
+      "gateway.networking.x-k8s.io",
+      "xtelemetrypolicies",
+      {},
+      "XTelemetryPolicy",
+    ),
+    info(
+      "gateway.networking.x-k8s.io",
+      "xbackendtrafficpolicies",
+      {},
+      "XBackendTrafficPolicy",
+    ),
+    info("gateway.networking.k8s.io", "futureroutes", {}, "FutureRoute"),
+    info(
+      "gateway.networking.x-k8s.io",
+      "xhidden",
+      { canList: false },
+      "XHidden",
+    ),
+    info("example.com", "widgets", {}, "Widget"),
+  ]);
+  expect(items.map((i) => [navItemKey(i), i.label])).toEqual([
+    ["gateway.networking.k8s.io/gateways", "Gateways"],
+    ["gateway.networking.k8s.io/referencegrants", "ReferenceGrants"],
+    ["gateway.networking.k8s.io/futureroutes", "FutureRoutes"],
+    ["gateway.networking.x-k8s.io/xbackends", "XBackends"],
+    [
+      "gateway.networking.x-k8s.io/xbackendtrafficpolicies",
+      "XBackendTrafficPolicies",
+    ],
+    ["gateway.networking.x-k8s.io/xmeshes", "XMeshes"],
+    ["gateway.networking.x-k8s.io/xtelemetrypolicies", "XTelemetryPolicies"],
+    ["route:port-forwards", "Port Forwarding"],
+  ]);
+  expect(items[2]).toEqual({
+    type: "resource",
+    label: "FutureRoutes",
+    group: "gateway.networking.k8s.io",
+    plural: "futureroutes",
+  });
+  // NAV_SECTIONS itself stays static.
+  expect(
+    NAV_SECTIONS.flatMap((s) => s.items).some(
+      (i) => i.type === "resource" && i.plural === "xmeshes",
+    ),
+  ).toBe(false);
+});
+
+test("pluralKind adds es, ies or s", () => {
+  expect(pluralKind("XMesh")).toBe("XMeshes");
+  expect(pluralKind("XBackendTrafficPolicy")).toBe("XBackendTrafficPolicies");
+  expect(pluralKind("Gateway")).toBe("Gateways");
+  expect(pluralKind("Ingress")).toBe("Ingresses");
+  expect(pluralKind("Box")).toBe("Boxes");
+  expect(pluralKind("Quiz")).toBe("Quizes");
+  expect(pluralKind("Patch")).toBe("Patches");
+  expect(pluralKind("Key")).toBe("Keys");
+  expect(pluralKind("Widget")).toBe("Widgets");
+});
+
+test("custom resources leave out the kinds a section lists, and both Gateway API groups whole", () => {
   const groups = customResourceGroups([
     info("argoproj.io", "applications", {}, "Application"),
     info("argoproj.io", "appprojects", {}, "AppProject"),
     info("argoproj.io", "rollouts", {}, "Rollout"),
     info("gateway.networking.k8s.io", "gateways", {}, "Gateway"),
-    info("gateway.networking.k8s.io", "tlsroutes", {}, "TLSRoute"),
+    info("gateway.networking.k8s.io", "futureroutes", {}, "FutureRoute"),
+    info("gateway.networking.x-k8s.io", "xmeshes", {}, "XMesh"),
   ]);
   expect(groups).toEqual([
     { group: "argoproj.io", items: [{ label: "Rollout", plural: "rollouts" }] },
-    {
-      group: "gateway.networking.k8s.io",
-      items: [{ label: "TLSRoute", plural: "tlsroutes" }],
-    },
   ]);
 });
