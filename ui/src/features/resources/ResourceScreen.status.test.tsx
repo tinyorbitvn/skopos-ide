@@ -116,3 +116,29 @@ test("a Deployment's Status shows its Pods' worst state, and clicking it opens t
   await act(flush);
   expect(screen.getByTestId("detail-drawer")).toBeTruthy();
 });
+
+test("Escape on an open Status card in the drawer closes the card, not the drawer", async () => {
+  const send = fakeBackend();
+  render(
+    <MemoryRouter>
+      <ResourceScreen clusterId="c1" info={INFO} resources={[INFO]} />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  await send("deployments", [WEB]);
+  await send("replicasets", [WEB_RS]);
+  await send("pods", [crashing("web-abc-1"), crashing("web-abc-2")]);
+  fireEvent.click(screen.getByTestId("resource-row-ns-web"));
+  await act(flush);
+  const drawer = screen.getByTestId("detail-drawer");
+  const cell = within(drawer).getByTestId("status-cell");
+  fireEvent.focus(cell);
+  await screen.findByTestId("status-card");
+  fireEvent.keyDown(cell, { key: "Escape" });
+  await act(flush);
+  expect(screen.queryByTestId("status-card")).toBeNull();
+  expect(screen.getByTestId("detail-drawer")).toBeTruthy();
+  fireEvent.keyDown(cell, { key: "Escape" });
+  await act(flush);
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+});

@@ -5,7 +5,8 @@ import styles from "./Tooltip.module.css";
 /**
  * A hint on hover or focus. `label` is a short tip on the inverse surface. `card` is a
  * larger panel on the raised surface that follows the light and dark themes; give it a
- * `label`, which screen readers announce in place of the card's content.
+ * `label`, which screen readers announce in place of the card's content. An Escape that
+ * closes a card goes no further, so a drawer around the card stays open.
  */
 export function Tooltip({
   content,
@@ -31,6 +32,9 @@ export function Tooltip({
             }
             sideOffset={6}
             collisionPadding={variant === "card" ? 8 : 0}
+            onEscapeKeyDown={
+              variant === "card" ? (e) => e.stopPropagation() : undefined
+            }
             {...(label === undefined ? {} : { "aria-label": label })}
           >
             {content}
