@@ -11,7 +11,7 @@ import {
   usageItem,
   usageSnapshot,
 } from "../test/metrics";
-import { connectClusters } from "../test/terminal";
+import { connectClusters, setClusterState } from "../test/terminal";
 import { resetCatalogForTest } from "./catalog";
 import {
   askUsage,
@@ -171,7 +171,7 @@ test("the history keeps 240 samples per item and one hour; an item that left kee
   ]);
 });
 
-test("a usage error keeps the last snapshot; Unreachable shows no error", async () => {
+test("a usage error keeps the last snapshot; Unreachable shows only while the cluster is connected", async () => {
   let answer: "ok" | "forbidden" | "gone" = "ok";
   const SNAPSHOT = usageSnapshot([WEB]);
   mockBackend({
@@ -191,7 +191,18 @@ test("a usage error keeps the last snapshot; Unreachable shows no error", async 
   await askUsage("c1", "pods", null);
   expect(metrics().usage[PODS]?.error).toBeNull();
 
+  // The cluster is connected, so metrics-server itself did not answer.
   answer = "gone";
+  await askUsage("c1", "pods", null);
+  expect(metrics().usage[PODS]?.error?.code).toBe("Unreachable");
+  expect(metrics().usage[PODS]?.value).toEqual(SNAPSHOT);
+  expect(metrics().usage[PODS]?.loading).toBe(false);
+
+  // Once the connection is gone, Unreachable is the disconnect: no error.
+  answer = "ok";
+  await askUsage("c1", "pods", null);
+  answer = "gone";
+  setClusterState("c1", { status: "disconnected" });
   await askUsage("c1", "pods", null);
   expect(metrics().usage[PODS]?.error).toBeNull();
   expect(metrics().usage[PODS]?.value).toEqual(SNAPSHOT);

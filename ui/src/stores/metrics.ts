@@ -127,6 +127,12 @@ function nextSeq(key: string): number {
   return mine;
 }
 
+/**
+ * Whether the cluster is connected now. The backend's `Unreachable` means two things: the
+ * cluster went away, or, while it is still connected, Prometheus or metrics-server did not
+ * answer (a timeout, or a 408, 429, 502, 503 or 504 through the proxy). Only the first may
+ * hide the error.
+ */
 function connected(clusterId: string): boolean {
   return (
     useCatalog.getState().clusters.find((c) => c.id === clusterId)?.state
@@ -381,7 +387,7 @@ export async function askQuery(
   } catch (error) {
     if (seqs.get(key) !== mine) return;
     const failure = asFailure(error);
-    if (failure.code === "Unreachable") {
+    if (failure.code === "Unreachable" && !connected(clusterId)) {
       // The cluster went away: no error block, and the poller asks on the reconnect.
       patchQuery(key, { loading: false });
       markMissed(key);
@@ -393,6 +399,7 @@ export async function askQuery(
       patchQuery(key, { loading: false });
       void refreshProvider(clusterId);
     } else {
+      // Prometheus not answering while the cluster is connected is an error to show.
       patchQuery(key, { error: failure, loading: false });
     }
   }
@@ -508,7 +515,7 @@ export async function askUsage(
   } catch (error) {
     if (seqs.get(key) !== mine) return;
     const failure = asFailure(error);
-    if (failure.code === "Unreachable") {
+    if (failure.code === "Unreachable" && !connected(clusterId)) {
       patchUsage(key, { loading: false });
       markMissed(key);
     } else if (
