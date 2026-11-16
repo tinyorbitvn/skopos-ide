@@ -5,15 +5,11 @@
   margin-bottom: var(--space-10);
 }
 
-.tile {
-  display: grid;
+.logo {
+  display: flex;
   flex-shrink: 0;
-  place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: var(--radius-lg);
-  background: var(--surface-accent);
-  color: var(--text-on-accent);
 }
 
 .titles {

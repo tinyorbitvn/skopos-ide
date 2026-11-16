@@ -1,0 +1,9 @@
+/* The brand colours of the app icon (assets/icon.svg). They do not change with the theme,
+   and the TinyOrbit ramps have no step for this navy. */
+.tile {
+  fill: #000055;
+}
+
+.mark {
+  fill: #ffffff;
+}
