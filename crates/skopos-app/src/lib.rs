@@ -148,6 +148,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::resources::resource_apply,
             commands::resources::resource_delete,
             commands::resources::resource_events,
+            commands::resources::api_schema,
             commands::resources::ui_state_get,
             commands::resources::ui_state_set,
             commands::settings::cluster_settings_get,
