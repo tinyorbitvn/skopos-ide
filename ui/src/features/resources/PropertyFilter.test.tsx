@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { KubeObject } from "../../kinds/objects";
+import { FilterTokens } from "./FilterTokens";
 import {
   buildFilterIndex,
+  type FilterJoin,
   filterText,
   LAST_APPLIED,
   type ObjectFilter,
@@ -452,5 +454,274 @@ describe("PropertyFilter", () => {
     expect(box().value).toBe("name ");
     expect(document.activeElement).toBe(box());
     expect(list()).not.toBeNull();
+  });
+});
+
+/** The box and the row of tokens, wired as `ResourceScreen` wires them. */
+function Row(props: { tokens: ObjectFilter[]; text?: string }) {
+  const [text, setText] = useState(props.text ?? "");
+  const [tokens, setTokens] = useState<ObjectFilter[]>(props.tokens);
+  const [join, setJoin] = useState<FilterJoin>("and");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const index = useMemo(() => buildFilterIndex(OBJECTS), []);
+  return (
+    <>
+      <PropertyFilter
+        text={text}
+        onTextChange={setText}
+        tokens={tokens}
+        onTokensChange={setTokens}
+        index={index}
+        inputRef={inputRef}
+      />
+      <FilterTokens
+        tokens={tokens}
+        onTokensChange={setTokens}
+        join={join}
+        onJoinChange={setJoin}
+        onClear={() => {
+          setTokens([]);
+          setText("");
+        }}
+        shown={2}
+        total={3}
+        onFocusBox={() => inputRef.current?.focus()}
+      />
+      <output data-testid="tokens">{tokens.map(filterText).join(" | ")}</output>
+      <output data-testid="join">{join}</output>
+      <button type="button">elsewhere</button>
+    </>
+  );
+}
+
+const TIER_WEB = label("tier", "=", "web");
+const byId = (id: string) => screen.getByTestId(id);
+const panel = () => screen.queryByTestId("filter-edit");
+
+function openEdit(at: number): HTMLElement {
+  fireEvent.click(byId(`filter-token-edit-${at}`));
+  return screen.getByRole("dialog", { name: "Edit filter" });
+}
+
+function valueBox(): HTMLInputElement {
+  return byId("filter-edit-value") as HTMLInputElement;
+}
+
+describe("FilterTokens", () => {
+  test("there is no row without a token", () => {
+    render(<Row tokens={[]} />);
+    expect(screen.queryByTestId("filter-tokens")).toBeNull();
+  });
+
+  test("each token shows its property, operator and value, with edit and remove buttons named by its text form", () => {
+    const long = "x".repeat(60);
+    render(
+      <Row
+        tokens={[
+          TIER_WEB,
+          {
+            property: { type: "annotation", key: "note" },
+            operator: ":",
+            value: "",
+          },
+          { property: { type: "name" }, operator: "=", value: long },
+          { property: { type: "text" }, operator: ":", value: "web" },
+          { property: { type: "text" }, operator: "!:", value: "db" },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "Filters" })).toBe(
+      byId("filter-tokens"),
+    );
+    const edit = (i: number) => byId(`filter-token-edit-${i}`);
+    expect(edit(0).textContent).toBe("label:tier=web");
+    expect(edit(0).getAttribute("aria-label")).toBe(
+      "Edit filter label:tier = web",
+    );
+    expect(byId("filter-token-remove-0").getAttribute("aria-label")).toBe(
+      "Remove filter label:tier = web",
+    );
+    expect(edit(1).textContent).toBe("anno:note:any value");
+    const cut = within(edit(2)).getByTitle(long);
+    expect(cut.textContent).toBe(`${"x".repeat(48)}…`);
+    expect(edit(3).textContent).toBe('"web"');
+    expect(edit(3).getAttribute("aria-label")).toBe('Edit filter "web"');
+    expect(edit(4).textContent).toBe('not"db"');
+    expect(byId("filter-token-remove-4").getAttribute("aria-label")).toBe(
+      'Remove filter not "db"',
+    );
+  });
+
+  test("a join sits before each token from the second on, and pressing one switches every join", () => {
+    render(
+      <Row tokens={[TIER_WEB, label("a", "=", "1"), label("b", "=", "2")]} />,
+    );
+    expect(screen.queryByTestId("filter-join-0")).toBeNull();
+    for (const i of [1, 2]) {
+      expect(byId(`filter-join-${i}`).textContent).toBe("and");
+      expect(byId(`filter-join-${i}`).title).toBe(
+        "Rows match every filter. Click to match any filter.",
+      );
+    }
+    fireEvent.click(byId("filter-join-2"));
+    expect(byId("join").textContent).toBe("or");
+    for (const i of [1, 2]) {
+      expect(byId(`filter-join-${i}`).textContent).toBe("or");
+      expect(byId(`filter-join-${i}`).title).toBe(
+        "Rows match any filter. Click to match every filter.",
+      );
+    }
+    fireEvent.click(byId("filter-join-1"));
+    expect(byId("join").textContent).toBe("and");
+  });
+
+  test("the count reads shown of total", () => {
+    render(<Row tokens={[TIER_WEB]} />);
+    expect(byId("filter-count").textContent).toBe("2 of 3");
+  });
+
+  test("remove takes one token out and puts focus in the box", () => {
+    render(<Row tokens={[TIER_WEB, label("b", "=", "2")]} />);
+    fireEvent.click(byId("filter-token-remove-0"));
+    expect(tokens()).toBe("label:b = 2");
+    expect(document.activeElement).toBe(box());
+  });
+
+  test("Clear filters removes every token and the text, and puts focus in the box", () => {
+    render(<Row tokens={[TIER_WEB, label("b", "=", "2")]} text="typed" />);
+    fireEvent.click(byId("filter-clear"));
+    expect(tokens()).toBe("");
+    expect(box().value).toBe("");
+    expect(screen.queryByTestId("filter-tokens")).toBeNull();
+    expect(document.activeElement).toBe(box());
+  });
+
+  test("the edit button opens the panel: the property in words, its operators, and the value focused", () => {
+    render(
+      <Row
+        tokens={[
+          TIER_WEB,
+          { property: { type: "text" }, operator: ":", value: "api" },
+        ]}
+      />,
+    );
+    const edit = openEdit(0);
+    expect(byId("filter-token-edit-0").getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(byId("filter-token-0").getAttribute("data-editing")).toBe("true");
+    expect(within(edit).getByText("Label tier")).toBeTruthy();
+    const radios = within(edit).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.labels?.[0]?.textContent)).toEqual([
+      "=",
+      "!=",
+      ":",
+      "!:",
+    ]);
+    expect(radios.map((r) => r.checked)).toEqual([true, false, false, false]);
+    expect(byId("filter-edit-operator-not-equals")).toBeTruthy();
+    expect(valueBox().value).toBe("web");
+    expect(document.activeElement).toBe(valueBox());
+
+    fireEvent.click(byId("filter-edit-cancel"));
+    const text = openEdit(1);
+    expect(within(text).getByText("Free text")).toBeTruthy();
+    expect(
+      within(text)
+        .getAllByRole("radio")
+        .map((r) => (r as HTMLInputElement).labels?.[0]?.textContent),
+    ).toEqual([":", "!:"]);
+  });
+
+  test("Apply saves the operator and the trimmed value, and focus returns to the token", () => {
+    render(<Row tokens={[TIER_WEB]} />);
+    const edit = openEdit(0);
+    fireEvent.click(within(edit).getByRole("radio", { name: "!=" }));
+    fireEvent.change(valueBox(), { target: { value: "  api " } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("label:tier != api");
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(byId("filter-token-edit-0"));
+  });
+
+  test("Enter in the value applies", () => {
+    render(<Row tokens={[TIER_WEB]} />);
+    openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "db" } });
+    fireEvent.keyDown(valueBox(), { key: "Enter" });
+    expect(tokens()).toBe("label:tier = db");
+    expect(panel()).toBeNull();
+  });
+
+  test("an empty value removes the token, and focus goes to the box", () => {
+    render(
+      <Row
+        tokens={[
+          { property: { type: "name" }, operator: "=", value: "x" },
+          label("b", "=", "2"),
+        ]}
+      />,
+    );
+    openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "   " } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("label:b = 2");
+    expect(document.activeElement).toBe(box());
+  });
+
+  test("an empty value with : or !: on a label or annotation means any value", () => {
+    render(<Row tokens={[TIER_WEB]} />);
+    const edit = openEdit(0);
+    fireEvent.click(within(edit).getByRole("radio", { name: "!:" }));
+    fireEvent.change(valueBox(), { target: { value: "" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("label:tier !:");
+    expect(byId("filter-token-edit-0").textContent).toBe(
+      "label:tier!:any value",
+    );
+  });
+
+  test("Cancel and Escape keep the token and return focus to it; Escape goes no further than the panel", () => {
+    const outer = vi.fn();
+    render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: the test listens for keys that leave the panel.
+      <div onKeyDown={(e) => outer(e.key)}>
+        <Row tokens={[TIER_WEB]} />
+      </div>,
+    );
+    let edit = openEdit(0);
+    fireEvent.click(within(edit).getByRole("radio", { name: ":" }));
+    fireEvent.change(valueBox(), { target: { value: "db" } });
+    fireEvent.click(byId("filter-edit-cancel"));
+    expect(tokens()).toBe("label:tier = web");
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(byId("filter-token-edit-0"));
+
+    edit = openEdit(0);
+    expect(valueBox().value).toBe("web");
+    fireEvent.change(valueBox(), { target: { value: "db" } });
+    fireEvent.keyDown(valueBox(), { key: "Escape" });
+    expect(tokens()).toBe("label:tier = web");
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(byId("filter-token-edit-0"));
+    expect(outer).not.toHaveBeenCalledWith("Escape");
+  });
+
+  test("a pointer down outside the token cancels; inside the panel it does not", () => {
+    render(<Row tokens={[TIER_WEB]} />);
+    const edit = openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "db" } });
+    fireEvent.pointerDown(within(edit).getByRole("radio", { name: "!=" }));
+    expect(panel()).not.toBeNull();
+    fireEvent.pointerDown(screen.getByText("elsewhere"));
+    expect(panel()).toBeNull();
+    expect(tokens()).toBe("label:tier = web");
+  });
+
+  test("the edit button closes its open panel", () => {
+    render(<Row tokens={[TIER_WEB]} />);
+    openEdit(0);
+    fireEvent.click(byId("filter-token-edit-0"));
+    expect(panel()).toBeNull();
   });
 });
