@@ -161,14 +161,18 @@ function fake(
   extra: Parameters<typeof mockBackend>[0] = {},
 ) {
   let send: (e: WatchEvent) => void = () => {};
+  // A linked workload's Summary also watches Pods (spec N3), so a test can name the watch.
+  const byPlural = new Map<string, (e: WatchEvent) => void>();
   const rows = new Map<string, KubeObject>();
   const keep = (o: KubeObject) =>
     rows.set(`${o.metadata.namespace}/${o.metadata.name}`, o);
   const backend = mockBackend({
     resources_subscribe: (a: {
+      resource: ResourceRef;
       onEvent: { onmessage: (e: WatchEvent) => void };
     }) => {
       send = a.onEvent.onmessage;
+      byPlural.set(a.resource.plural, send);
       return "sub";
     },
     resources_unsubscribe: () => null,
@@ -184,12 +188,14 @@ function fake(
   });
   return {
     backend,
-    // The second act lets the drawer's fetch come back.
-    snapshot: async (items: KubeObject[]) => {
+    // The second act lets the drawer's fetch come back. Without `plural` the latest
+    // subscription gets the snapshot.
+    snapshot: async (items: KubeObject[], plural?: string) => {
       await act(async () => {
         rows.clear();
         items.forEach(keep);
-        send({ type: "snapshot", items } as WatchEvent);
+        const to = plural === undefined ? send : byPlural.get(plural);
+        to?.({ type: "snapshot", items } as WatchEvent);
         await flush();
       });
       await act(flush);
@@ -1130,7 +1136,7 @@ test("a link opens its object in the drawer, and Back returns with focus in the 
   expect(screen.queryByTestId("detail-back")).toBeNull();
   fireEvent.click(screen.getByTestId("detail-owner-link"));
   await act(flush);
-  await f.snapshot([replicaSet]);
+  await f.snapshot([replicaSet], "replicasets");
   expect(screen.getByTestId("detail-title").textContent).toBe("web-1");
   expect(screen.getByTestId("detail-kind").textContent).toBe("ReplicaSet");
   expect(screen.getByTestId("detail-drawer").getAttribute("aria-label")).toBe(
@@ -1153,7 +1159,7 @@ test("an entry deleted while it waits in the history shows how it last looked on
   await f.snapshot([owned()]);
   fireEvent.click(screen.getByTestId("detail-owner-link"));
   await act(flush);
-  await f.snapshot([replicaSet]);
+  await f.snapshot([replicaSet], "replicasets");
   fireEvent.click(screen.getByTestId("detail-back"));
   await act(flush);
   // The Pod went away while the ReplicaSet was shown.
@@ -1250,7 +1256,7 @@ test("the screen's actions are for its own kind; another kind gets its own bar",
   expect(screen.getByTestId("screen-actions")).toBeTruthy();
   fireEvent.click(screen.getByTestId("detail-owner-link"));
   await act(flush);
-  await f.snapshot([replicaSet]);
+  await f.snapshot([replicaSet], "replicasets");
   expect(screen.queryByTestId("screen-actions")).toBeNull();
   expect(screen.getByTestId("detail-actions")).toBeTruthy();
 });
@@ -1275,7 +1281,7 @@ test("a linked entry starts on the Overview and Back restores the earlier tab", 
   // The Overview stays mounted under Events, so its link can still be clicked.
   fireEvent.click(screen.getByTestId("detail-owner-link"));
   await act(flush);
-  await f.snapshot([replicaSet]);
+  await f.snapshot([replicaSet], "replicasets");
   expect(
     screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
   ).toBe("true");

@@ -2,14 +2,15 @@ import { ArrowDownToLine, CirclePause, CirclePlay } from "lucide-react";
 import { createElement } from "react";
 import { toast } from "../../design";
 import { api } from "../../ipc/api";
-import { baseColumns, statusColumn, textColumn } from "../columns";
+import { baseColumns, textColumn } from "../columns";
 import type { KindAction } from "../registry";
 import { registerKind } from "../registry";
+import { nodeStatusColumn } from "../statusCells";
 import { usageColumns } from "../usageColumns";
 import { nodeShellAction } from "../workloads/sessionActions";
 import { DrainDialog } from "./DrainDialog";
 import { NodeDetail } from "./NodeDetail";
-import { internalIp, nodeRoles, nodeStatus, nodeTaints } from "./node";
+import { internalIp, nodeRoles, nodeTaints } from "./node";
 
 const cordon: KindAction = {
   id: "cordon",
@@ -55,7 +56,7 @@ registerKind("", "nodes", {
   columns: (info, usage) =>
     baseColumns(
       info.resource,
-      statusColumn(nodeStatus),
+      nodeStatusColumn(),
       textColumn("roles", "Roles", nodeRoles),
       textColumn(
         "version",

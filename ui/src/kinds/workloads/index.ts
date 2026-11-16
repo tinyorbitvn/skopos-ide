@@ -10,6 +10,7 @@ import {
 import { portForwardAction } from "../network/portForwardAction";
 import { type KubeObject, objectKey } from "../objects";
 import { registerKind } from "../registry";
+import { workloadStatusColumn } from "../statusCells";
 import { usageColumns } from "../usageColumns";
 import "./jobs";
 import { podLogsAction, workloadLogsAction } from "./logsAction";
@@ -90,11 +91,11 @@ const readyOver = (o: KubeObject) =>
   `${count(o.status?.readyReplicas)}/${desiredReplicas(o)}`;
 
 registerKind("apps", "deployments", {
-  columns: (info) =>
+  columns: (info, _usage, owned) =>
     baseColumns(
       info.resource,
       textColumn("ready", "Ready", readyOver, { width: 72 }),
-      statusColumn(deploymentStatus),
+      workloadStatusColumn(info.resource.kind, deploymentStatus, owned),
       numberColumn("upToDate", "Up-to-date", (o) =>
         count(o.status?.updatedReplicas),
       ),
@@ -108,11 +109,11 @@ registerKind("apps", "deployments", {
 });
 
 registerKind("apps", "statefulsets", {
-  columns: (info) =>
+  columns: (info, _usage, owned) =>
     baseColumns(
       info.resource,
       textColumn("ready", "Ready", readyOver, { width: 72 }),
-      statusColumn(replicaSetStatus),
+      workloadStatusColumn(info.resource.kind, replicaSetStatus, owned),
     ),
   actions: [workloadLogsAction, scaleAction, restartAction],
   detail: RolloutDetail,
@@ -125,7 +126,7 @@ registerKind("apps", "statefulsets", {
 });
 
 registerKind("apps", "daemonsets", {
-  columns: (info) =>
+  columns: (info, _usage, owned) =>
     baseColumns(
       info.resource,
       numberColumn("desired", "Desired", (o) =>
@@ -135,7 +136,7 @@ registerKind("apps", "daemonsets", {
         count(o.status?.currentNumberScheduled),
       ),
       numberColumn("ready", "Ready", (o) => count(o.status?.numberReady)),
-      statusColumn(daemonSetStatus),
+      workloadStatusColumn(info.resource.kind, daemonSetStatus, owned),
       numberColumn("upToDate", "Up-to-date", (o) =>
         count(o.status?.updatedNumberScheduled),
       ),
@@ -159,13 +160,13 @@ registerKind("apps", "daemonsets", {
 });
 
 registerKind("apps", "replicasets", {
-  columns: (info) =>
+  columns: (info, _usage, owned) =>
     baseColumns(
       info.resource,
       numberColumn("desired", "Desired", desiredReplicas),
       numberColumn("current", "Current", (o) => count(o.status?.replicas)),
       numberColumn("ready", "Ready", (o) => count(o.status?.readyReplicas)),
-      statusColumn(replicaSetStatus),
+      workloadStatusColumn(info.resource.kind, replicaSetStatus, owned),
     ),
   actions: [workloadLogsAction, scaleAction],
   detail: RolloutDetail,

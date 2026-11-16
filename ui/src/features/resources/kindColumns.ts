@@ -6,8 +6,10 @@ import type { KubeObject } from "../../kinds/objects";
 import { columnsFromCrd } from "../../kinds/printerColumns";
 import { defaultColumns, kindSpec } from "../../kinds/registry";
 import type { UsageView } from "../../kinds/usageColumns";
+import type { OwnedPods } from "../../kinds/workloads/ownedPods";
 import { findResource, useResourceList } from "../../stores/resources";
 import { useListUsage } from "../metrics/useListUsage";
+import { useOwnedPods } from "./useOwnedPods";
 
 /**
  * The definition of a custom resource, kept up to date. It is undefined for
@@ -34,15 +36,19 @@ export function useCustomResourceDefinition(
   return list.items.find((o) => o.metadata.name === name);
 }
 
-/** The table columns of a kind: its own, its CRD's printer columns, or the defaults. */
+/**
+ * The table columns of a kind: its own, its CRD's printer columns, or the defaults.
+ * `owned` finds each workload's Pods for the workload kinds' Status (spec N4).
+ */
 export function kindColumns(
   info: ApiResourceInfo,
   crd: KubeObject | undefined,
   usage: UsageView | undefined,
+  owned?: OwnedPods,
 ): TableColumn<KubeObject>[] {
   const { resource } = info;
   const registered = kindSpec(resource.group, resource.plural)?.columns;
-  if (registered) return registered(info, usage);
+  if (registered) return registered(info, usage, owned);
   const printer = columnsFromCrd(crd, resource.version);
   if (printer.length === 0) return defaultColumns(resource);
   return [
@@ -64,8 +70,9 @@ export function useKindColumns(
   const crd = useCustomResourceDefinition(clusterId, info, resources);
   const namespaces = useMemo(() => (namespace ? [namespace] : []), [namespace]);
   const usage = useListUsage(clusterId, info?.resource ?? null, namespaces);
+  const owned = useOwnedPods(clusterId, info);
   return useMemo(
-    () => (info ? kindColumns(info, crd, usage) : []),
-    [info, crd, usage],
+    () => (info ? kindColumns(info, crd, usage, owned) : []),
+    [info, crd, usage, owned],
   );
 }

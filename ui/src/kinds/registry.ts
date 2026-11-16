@@ -5,6 +5,7 @@ import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import { formatAge, type KubeObject } from "./objects";
 import type { UsageView } from "./usageColumns";
+import type { OwnedPods } from "./workloads/ownedPods";
 import type { VolumeItem } from "./workloads/volumes";
 
 export interface KindAction {
@@ -81,11 +82,13 @@ export interface PodSpecSource {
 export interface KindSpec {
   /**
    * The whole set of columns for this kind, in place of the defaults. `usage` is the
-   * latest metrics-server usage, for the kinds that show CPU and Memory.
+   * latest metrics-server usage, for the kinds that show CPU and Memory. `owned` finds
+   * each workload's Pods, for the workload kinds' Status (spec N4).
    */
   columns?(
     resource: ApiResourceInfo,
     usage?: UsageView,
+    owned?: OwnedPods,
   ): TableColumn<KubeObject>[];
   /** Row actions, shown above the Delete every kind has. */
   actions?: KindAction[];
