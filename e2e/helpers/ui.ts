@@ -153,8 +153,28 @@ export async function expectRowsExactly(expected: string[]): Promise<void> {
   );
 }
 
+/**
+ * Types into the list's filter box. Its suggestions open over the rows, so Escape closes
+ * them; the text stays and filters the rows.
+ */
 export async function searchResources(text: string): Promise<void> {
   await (await shown("resource-search")).setValue(text);
+  if (await byTestId("filter-suggestions").isExisting()) {
+    await browser.keys("Escape");
+    await gone("filter-suggestions");
+  }
+}
+
+/** Picks the filter suggestion whose main text is `text`, with the real pointer. */
+export async function pickFilterSuggestion(text: string): Promise<void> {
+  const option = await browser.$(
+    `//*[@data-testid="filter-suggestions"]//*[@role="option"][./span[1][normalize-space()="${text}"]]`,
+  );
+  await option.waitForDisplayed({
+    timeout: TIMEOUT,
+    timeoutMsg: `the filter never suggested ${text}`,
+  });
+  await pointerClick(option);
 }
 
 /** Picks an item from the menu at the end of a resource row. */
