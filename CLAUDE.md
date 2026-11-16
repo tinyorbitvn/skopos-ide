@@ -28,4 +28,7 @@ make test-argocd  # Argo CD actions against Argo CD Core on that cluster (networ
 make test-metrics # Prometheus and metrics-server on that cluster (network, minutes)
 make e2e          # full end-to-end suite on the running app (Linux)
 make dev          # run the app with hot reload
+make release VERSION=x.y.z  # on main: bump, date CHANGELOG notes, commit, tag (see docs/releasing.md)
 ```
+
+`main` is the only long-lived branch. Add release notes under `## [Unreleased]` in `CHANGELOG.md`.
