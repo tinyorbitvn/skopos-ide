@@ -1,0 +1,78 @@
+/* The Status cell of workload and Node lists, and its card (spec N8, N14, N15, N19). */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  cursor: default;
+}
+
+.status:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.status > * {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.badgeCount {
+  margin-left: var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.more {
+  flex: none;
+  color: var(--text-tertiary);
+  font: var(--type-caption);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.title {
+  font: var(--type-label);
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 156px 40px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.state {
+  display: flex;
+  min-width: 0;
+}
+
+.count {
+  line-height: 20px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail {
+  min-width: 0;
+  line-height: 20px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.inactive {
+  line-height: 20px;
+  color: var(--text-tertiary);
+}
+
+.note {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+}
