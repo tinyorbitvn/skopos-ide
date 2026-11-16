@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { CONFIG_MAP } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
@@ -49,6 +56,9 @@ function inTab(id: string) {
 beforeEach(() => mockElementSize());
 
 afterEach(() => {
+  // Unmount before the resets, so no mounted panel asks for API docs again and fills
+  // the cache the next test starts from.
+  cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
   resetApiDocsToggleForTest();

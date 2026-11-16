@@ -1,5 +1,6 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -90,6 +91,9 @@ function pickTemplate(id: string) {
 }
 
 afterEach(() => {
+  // Unmount before the resets, so no mounted panel asks for API docs again and fills
+  // the cache the next test starts from.
+  cleanup();
   resetDockForTest();
   resetApiDocsToggleForTest();
   resetApiDocsCacheForTest();
