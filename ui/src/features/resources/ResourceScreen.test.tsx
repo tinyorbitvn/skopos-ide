@@ -75,6 +75,26 @@ function pod(name: string, namespace = "default"): KubeObject {
   return { metadata: { name, namespace, resourceVersion: "1" } };
 }
 
+function labelled(
+  name: string,
+  labels: Record<string, string>,
+  namespace = "ns",
+): KubeObject {
+  return { metadata: { name, namespace, resourceVersion: "1", labels } };
+}
+
+/** Types a filter into the box and adds it with Enter, as its first suggestion. */
+function addToken(text: string) {
+  const box = screen.getByTestId("resource-search");
+  fireEvent.change(box, { target: { value: text } });
+  fireEvent.keyDown(box, { key: "Enter" });
+}
+
+const chipTitles = (el: HTMLElement | null) =>
+  within(el as HTMLElement)
+    .queryAllByTestId("filter-chip")
+    .map((c) => c.title);
+
 /** The saved UI state and the live subscriptions of one fake backend. */
 function fakeBackend(
   over: {
@@ -340,10 +360,146 @@ test("search filters rows", async () => {
   expect(row("a", "db")).toBeTruthy();
 
   fireEvent.change(search, { target: { value: "absent" } });
-  expect(screen.getByText(/match "absent"/)).toBeTruthy();
+  expect(screen.getByText("No Pod objects match the filters.")).toBeTruthy();
 
   fireEvent.change(search, { target: { value: "" } });
   expect(row("a", "web")).toBeTruthy();
+});
+
+test("tokens narrow the rows, the row shows the chips it matched by, two at most, then +n", async () => {
+  const fake = fakeBackend();
+  await show(fake, [
+    labelled("web", {
+      app: "web",
+      tier: "front",
+      team: "a-team",
+      zone: "east",
+    }),
+    labelled("db", { app: "sql" }),
+  ]);
+  addToken("label:app = web");
+  expect(
+    screen.getByTestId("filter-token-edit-0").getAttribute("aria-label"),
+  ).toBe("Edit filter label:app = web");
+  expect(row("ns", "db")).toBeNull();
+  expect(chipTitles(row("ns", "web"))).toEqual(["label app=web"]);
+  expect(screen.getByTestId("filter-count").textContent).toBe("1 of 2");
+
+  // The typed text narrows as well, and adds the labels its word matched.
+  fireEvent.change(screen.getByTestId("resource-search"), {
+    target: { value: "a" },
+  });
+  const web = row("ns", "web") as HTMLElement;
+  expect(chipTitles(web)).toEqual(["label app=web", "label team=a-team"]);
+  const more = within(web).getByTestId("filter-chip-more");
+  expect(more.textContent).toBe("+1");
+  expect(more.title).toBe("label zone=east");
+});
+
+test("a chip cuts its text after 44 characters and keeps the whole as its title", async () => {
+  const fake = fakeBackend();
+  const long = "v".repeat(60);
+  await show(fake, [labelled("web", { note: long })]);
+  addToken("label:note : v");
+  const chip = within(row("ns", "web") as HTMLElement).getByTestId(
+    "filter-chip",
+  );
+  expect(chip.title).toBe(`label note=${long}`);
+  expect(chip.textContent).toBe(`label${`note=${long}`.slice(0, 44)}…`);
+});
+
+test("names, namespaces, != and !: add no chip", async () => {
+  const fake = fakeBackend();
+  await show(fake, [labelled("web", { app: "web" })]);
+  addToken("name = web");
+  addToken("namespace : n");
+  addToken("label:app != sql");
+  addToken("label:tier !:");
+  expect(row("ns", "web")).toBeTruthy();
+  expect(chipTitles(row("ns", "web"))).toEqual([]);
+  expect(screen.queryByTestId("filter-chip-more")).toBeNull();
+});
+
+test("when objects exist but none passes, the empty state says the filters match none", async () => {
+  const fake = fakeBackend();
+  await show(fake, [labelled("web", { app: "web" }), labelled("db", {})]);
+  addToken("label:app = absent");
+  expect(screen.queryByTestId("resource-table")).toBeNull();
+  expect(screen.getByText("No Pod objects match the filters.")).toBeTruthy();
+  expect(screen.getByTestId("filter-count").textContent).toBe("0 of 2");
+
+  fireEvent.click(screen.getByTestId("filter-clear"));
+  expect(row("ns", "web")).toBeTruthy();
+  expect(screen.queryByTestId("filter-tokens")).toBeNull();
+  expect(document.activeElement).toBe(screen.getByTestId("resource-search"));
+});
+
+test("the suggestions and the count read only the namespaces the namespace filter keeps", async () => {
+  const fake = fakeBackend({ uiState: { "namespaces:c1": ["team-a"] } });
+  await show(fake, [
+    labelled("web", { app: "web" }, "team-a"),
+    labelled("db", { role: "sql" }, "team-b"),
+  ]);
+  const box = screen.getByTestId("resource-search");
+  act(() => box.focus());
+  const options = within(screen.getByTestId("filter-suggestions"))
+    .getAllByRole("option")
+    .map((o) => o.firstElementChild?.textContent);
+  expect(options).toContain("label:app");
+  expect(options).not.toContain("label:role");
+  addToken("label:app : w");
+  expect(screen.getByTestId("filter-count").textContent).toBe("1 of 1");
+});
+
+test("the filter stays while the drawer opens and closes, and the drawer shows no chip", async () => {
+  const fake = fakeBackend();
+  await show(
+    fake,
+    [labelled("web", { app: "web" }, "team-a"), labelled("db", {}, "team-a")],
+    DEPLOYMENTS,
+  );
+  addToken("label:app = web");
+  fireEvent.change(screen.getByTestId("resource-search"), {
+    target: { value: "we" },
+  });
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  const drawer = screen.getByTestId("detail-drawer");
+  expect(within(drawer).queryAllByTestId("filter-chip")).toEqual([]);
+  fireEvent.click(screen.getByTestId("detail-close"));
+  await act(flush);
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  expect(screen.getByTestId("filter-token-0")).toBeTruthy();
+  expect(
+    (screen.getByTestId("resource-search") as HTMLInputElement).value,
+  ).toBe("we");
+  expect(row("team-a", "db")).toBeNull();
+  expect(chipTitles(row("team-a", "web"))).toEqual(["label app=web"]);
+});
+
+test("Escape in the filter box or its edit panel never closes the drawer", async () => {
+  const fake = fakeBackend();
+  await show(fake, [labelled("web", { app: "web" }, "team-a")], DEPLOYMENTS);
+  addToken("label:app = web");
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  const box = screen.getByTestId("resource-search") as HTMLInputElement;
+  act(() => box.focus());
+  fireEvent.change(box, { target: { value: "we" } });
+  fireEvent.keyDown(box, { key: "Escape" });
+  expect(screen.queryByTestId("filter-suggestions")).toBeNull();
+  expect(screen.getByTestId("detail-drawer")).toBeTruthy();
+  fireEvent.keyDown(box, { key: "Escape" });
+  expect(box.value).toBe("");
+  expect(screen.getByTestId("detail-drawer")).toBeTruthy();
+
+  fireEvent.click(screen.getByTestId("filter-token-edit-0"));
+  fireEvent.keyDown(screen.getByTestId("filter-edit-value"), {
+    key: "Escape",
+  });
+  expect(screen.queryByTestId("filter-edit")).toBeNull();
+  await act(flush);
+  expect(screen.getByTestId("detail-drawer")).toBeTruthy();
 });
 
 test("the sort survives a search that matches nothing", async () => {
