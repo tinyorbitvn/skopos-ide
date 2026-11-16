@@ -3,15 +3,18 @@ import {
   FileCode,
   FilePlus,
   type LucideIcon,
+  PanelBottom,
   Plug,
   ScrollText,
   SquareTerminal,
   Terminal,
 } from "lucide-react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { resetCatalogForTest } from "../../stores/catalog";
 import {
+  detailsTab,
   editTab,
   logsTab,
   newCreateTab,
@@ -69,7 +72,11 @@ function editorOf(id: string) {
 }
 
 async function show(clusterId = "c1") {
-  const view = render(<Dock clusterId={clusterId} />);
+  const view = render(
+    <MemoryRouter>
+      <Dock clusterId={clusterId} />
+    </MemoryRouter>,
+  );
   await act(flush);
   return view;
 }
@@ -309,7 +316,17 @@ test("each tab shows its kind's 14 px icon before its title", async () => {
   const shell = podSessionTab("shell", "c1", "team-a", "web", "main");
   const attach = podSessionTab("attach", "c1", "team-a", "web", "main");
   const nodeShell = nodeShellTabFor("c1", "worker-1");
-  for (const tab of [WEB, create, logs, terminal, shell, attach, nodeShell]) {
+  const details = detailsTab("c1", PODS, "team-a", "web", "events");
+  for (const tab of [
+    WEB,
+    create,
+    logs,
+    terminal,
+    shell,
+    attach,
+    nodeShell,
+    details,
+  ]) {
     useDock.getState().open(tab);
   }
   await show();
@@ -322,6 +339,7 @@ test("each tab shows its kind's 14 px icon before its title", async () => {
     [shell, Terminal],
     [attach, Plug],
     [nodeShell, Terminal],
+    [details, PanelBottom],
   ] as const) {
     const button = screen.getByTestId(`dock-tab-${tab.id}`);
     const svg = button.querySelector("svg");

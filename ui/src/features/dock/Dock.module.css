@@ -109,6 +109,13 @@
   color: var(--text-primary);
 }
 
+/* Open as drawer on a details tab: smaller than an IconButton, to fit the 26 px tab. */
+.tab .tabPop {
+  flex: none;
+  width: var(--control-xs);
+  height: var(--control-xs);
+}
+
 .tabLabel:focus-visible,
 .tabClose:focus-visible {
   outline: none;

@@ -153,7 +153,7 @@ export function ClusterLayout(props: { clusterId: string }) {
         <div className={styles.content}>
           <Outlet context={context} />
         </div>
-        <Dock clusterId={clusterId} />
+        <Dock clusterId={clusterId} resources={resources} />
       </div>
     </div>
   );

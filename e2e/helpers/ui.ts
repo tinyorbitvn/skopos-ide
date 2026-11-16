@@ -261,9 +261,10 @@ export async function closeDockTabs(): Promise<void> {
 /** The titles of the dock's tabs, left to right. */
 export async function dockTabTitles(): Promise<string[]> {
   return browser.execute(() =>
-    Array.from(document.querySelectorAll('[data-testid="dock"] [role="tab"]')).map(
-      (tab) => tab.textContent ?? "",
-    ),
+    // Only the dock's tab buttons: a details tab's panel holds tab triggers of its own.
+    Array.from(
+      document.querySelectorAll('[data-testid="dock"] [role="tab"][data-testid^="dock-tab-"]'),
+    ).map((tab) => tab.textContent ?? ""),
   );
 }
 
