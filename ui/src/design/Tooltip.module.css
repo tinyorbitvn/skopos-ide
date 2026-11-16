@@ -12,3 +12,15 @@
 .content[data-state="instant-open"] {
   animation: to-fade-in var(--dur-fast) var(--ease-out);
 }
+
+/* A larger panel that follows the theme, like Menu and Select (spec N19). */
+.card {
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  padding: var(--space-6) var(--space-7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-3);
+}
