@@ -1,9 +1,19 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { ApplyResult } from "../../ipc/generated/ApplyResult";
 import { resetDockForTest, useDock, writeDraft } from "../../stores/dock";
+import { kindSchema } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
+import { resetApiDocsCacheForTest } from "./apiDocsCache";
+import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { CreateResourceTab } from "./CreateResourceTab";
 import { TEMPLATES } from "./templates";
 
@@ -11,15 +21,22 @@ vi.mock("./YamlEditor", () => ({
   YamlEditor: (props: {
     value: string;
     onChange(v: string): void;
+    onCaret?(offset: number): void;
     readOnly?: boolean;
     testId?: string;
   }) => (
-    <textarea
-      data-testid={props.testId}
-      value={props.value}
-      readOnly={props.readOnly}
-      onChange={(e) => props.onChange(e.target.value)}
-    />
+    <>
+      <textarea
+        data-testid={props.testId}
+        value={props.value}
+        readOnly={props.readOnly}
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+      <input
+        data-testid="yaml-caret"
+        onChange={(e) => props.onCaret?.(Number(e.target.value))}
+      />
+    </>
   ),
 }));
 
@@ -39,7 +56,10 @@ function backend(
 ) {
   return mockBackend({
     ui_state_get: () => namespaces,
+    ui_state_set: () => null,
     resource_apply: apply,
+    api_schema: (args: { apiVersion: string; kind: string }) =>
+      kindSchema({ apiVersion: args.apiVersion, kind: args.kind }),
   });
 }
 
@@ -69,7 +89,11 @@ function pickTemplate(id: string) {
   fireEvent.click(screen.getByTestId(`menu-item-${id}`));
 }
 
-afterEach(() => resetDockForTest());
+afterEach(() => {
+  resetDockForTest();
+  resetApiDocsToggleForTest();
+  resetApiDocsCacheForTest();
+});
 
 test("template fills the editor and leaves it clean", async () => {
   backend();
@@ -186,9 +210,11 @@ test("the default namespace comes from the first selected namespace filter value
   fireEvent.click(applyButton());
   await act(flush);
 
-  expect(calls.callsTo("ui_state_get")).toEqual([
-    { key: namespaceFilterKey("c1") },
-  ]);
+  expect(
+    calls
+      .callsTo("ui_state_get")
+      .filter((args) => args.key === namespaceFilterKey("c1")),
+  ).toEqual([{ key: namespaceFilterKey("c1") }]);
   expect(calls.callsTo("resource_apply")).toEqual([
     { clusterId: "c1", yaml: DOCUMENT, defaultNamespace: "team-b" },
   ]);
@@ -315,4 +341,72 @@ test("text and results survive the tab leaving the screen and coming back", asyn
 
   expect(editor().value).toBe(DOCUMENT);
   expect(screen.getByTestId("apply-result-0").textContent).toContain("denied");
+});
+
+const TWO =
+  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: b\n";
+
+function moveCaret(offset: number) {
+  fireEvent.change(screen.getByTestId("yaml-caret"), {
+    target: { value: String(offset) },
+  });
+}
+
+async function shownKind(kind: string) {
+  await waitFor(() =>
+    expect(screen.getByTestId("api-docs-kind").textContent).toBe(kind),
+  );
+}
+
+async function wait(ms: number) {
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+}
+
+test("the API docs follow the document that holds the caret (spec L15)", async () => {
+  const calls = backend();
+  show();
+  expect(await screen.findByTestId("api-docs-no-kind")).toBeTruthy();
+
+  type(TWO);
+  await shownKind("ConfigMap");
+  moveCaret(TWO.indexOf("---") + 4);
+  await shownKind("Deployment");
+  moveCaret(0);
+  await shownKind("ConfigMap");
+
+  expect(calls.callsTo("api_schema")).toEqual([
+    { clusterId: "c1", apiVersion: "v1", kind: "ConfigMap" },
+    { clusterId: "c1", apiVersion: "apps/v1", kind: "Deployment" },
+  ]);
+});
+
+test("a document of only a comment or a bare --- has no kind (spec L15)", async () => {
+  const calls = backend();
+  show();
+  const text = "apiVersion: v1\nkind: ConfigMap\n---\n# only a note\n";
+  type(text);
+  await shownKind("ConfigMap");
+
+  moveCaret(text.length);
+  expect(await screen.findByTestId("api-docs-no-kind")).toBeTruthy();
+
+  type("---\n");
+  moveCaret(0);
+  await wait(400);
+  expect(screen.getByTestId("api-docs-no-kind")).toBeTruthy();
+  expect(calls.callsTo("api_schema")).toHaveLength(1);
+});
+
+test("text that does not parse keeps the kind shown last (spec L15)", async () => {
+  const calls = backend();
+  show();
+  type("apiVersion: v1\nkind: ConfigMap\n");
+  await shownKind("ConfigMap");
+
+  type("apiVersion: v1\nkind: [\n");
+  expect(screen.getByTestId("yaml-error")).toBeTruthy();
+  await wait(400);
+
+  expect(screen.getByTestId("api-docs-kind").textContent).toBe("ConfigMap");
+  expect(calls.callsTo("api_schema")).toHaveLength(1);
 });

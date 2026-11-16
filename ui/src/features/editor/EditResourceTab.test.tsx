@@ -8,7 +8,10 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { readDraft, resetDockForTest, useDock } from "../../stores/dock";
+import { CONFIG_MAP } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
+import { resetApiDocsCacheForTest } from "./apiDocsCache";
+import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { EditResourceTab } from "./EditResourceTab";
 
 vi.mock("./YamlEditor", () => ({
@@ -58,6 +61,9 @@ function backend(overrides: Record<string, (args: never) => unknown> = {}) {
   return mockBackend({
     resource_get_yaml: () => YAML,
     resource_replace: () => ({}),
+    ui_state_get: () => null,
+    ui_state_set: () => null,
+    api_schema: () => CONFIG_MAP,
     ...overrides,
   });
 }
@@ -85,7 +91,11 @@ function dirty() {
   return useDock.getState().tabs.find((t) => t.id === TAB.id)?.dirty;
 }
 
-afterEach(() => resetDockForTest());
+afterEach(() => {
+  resetDockForTest();
+  resetApiDocsToggleForTest();
+  resetApiDocsCacheForTest();
+});
 
 test("loads the YAML, is clean, and save is disabled until edited", async () => {
   const calls = backend();
@@ -419,4 +429,55 @@ test("a clean tab that comes back reads the object again", async () => {
   await act(flush);
 
   expect(calls.callsTo("resource_get_yaml")).toHaveLength(2);
+});
+
+test("the API docs show the kind of the object it edits (spec L14)", async () => {
+  const calls = backend();
+  await show();
+
+  expect((await screen.findByTestId("api-docs-kind")).textContent).toBe(
+    "ConfigMap",
+  );
+  expect(calls.callsTo("api_schema")).toEqual([
+    { clusterId: "c1", apiVersion: "v1", kind: "ConfigMap" },
+  ]);
+});
+
+test("the API docs toggle hides the panel and keeps the editor and its text (spec L17)", async () => {
+  const calls = backend();
+  await show();
+  await screen.findByTestId("api-docs");
+  edit(EDITED);
+  const toggle = screen.getByTestId("api-docs-toggle");
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+  fireEvent.click(toggle);
+
+  expect(screen.queryByTestId("api-docs")).toBeNull();
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expect(editor().value).toBe(EDITED);
+  expect(calls.callsTo("ui_state_set")).toEqual([
+    { key: "editor.apiDocs", value: false },
+  ]);
+});
+
+test("a cluster with no API docs shows the error beside the editor, which keeps the focus and its test ids (spec L33)", async () => {
+  backend({
+    api_schema: () => {
+      throw failure(
+        "NotFound",
+        "This cluster does not publish OpenAPI v3, so API docs are not available.",
+      );
+    },
+  });
+  await show();
+  editor().focus();
+
+  const error = await screen.findByTestId("api-docs-error");
+
+  expect(error.textContent).toContain(
+    "This cluster does not publish OpenAPI v3",
+  );
+  expect(document.activeElement).toBe(editor());
+  expect(screen.getByTestId("yaml-save")).toBeTruthy();
 });

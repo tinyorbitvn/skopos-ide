@@ -24,6 +24,14 @@ export const DRAWER_PANE: PaneSize = {
   max: 760,
 };
 
+/** The API docs beside a YAML editor; every edit and create tab shares it (spec L18). */
+export const API_DOCS_PANE: PaneSize = {
+  key: "layout.apiDocsWidth",
+  initial: 340,
+  min: 280,
+  max: 560,
+};
+
 /** The pane's width, within its bounds, and the setter that saves it. */
 export function usePaneSize(pane: PaneSize): [number, (width: number) => void] {
   const [saved, save] = useUiState<number>(pane.key, pane.initial);

@@ -12,7 +12,9 @@ import {
   useDock,
   writeDraft,
 } from "../../stores/dock";
+import { editTarget } from "./apiDocsKind";
 import type { CreateDraft } from "./CreateResourceTab";
+import { ApiDocsButton, EditorLayout } from "./EditorLayout";
 import { stripServerFields, validateYaml, yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
 import styles from "./YamlEditor.module.css";
@@ -66,6 +68,7 @@ export function EditResourceTab(props: {
 
   const dirty = text !== loaded;
   const check = useMemo(() => validateYaml(text), [text]);
+  const target = useMemo(() => editTarget(resource), [resource]);
   let problem: string | null = null;
   if (!check.ok) problem = yamlProblem(check);
   else if (check.documents !== 1)
@@ -201,6 +204,7 @@ export function EditResourceTab(props: {
           >
             Create instead
           </Button>
+          <ApiDocsButton />
         </div>
       ) : (
         <div className={styles.toolbar}>
@@ -217,6 +221,7 @@ export function EditResourceTab(props: {
           <span className={styles.hint}>
             {dirty ? "Unsaved changes" : "No changes"}
           </span>
+          <ApiDocsButton />
         </div>
       )}
       {!gone && problem ? (
@@ -234,12 +239,14 @@ export function EditResourceTab(props: {
         </div>
       ) : null}
       {gone && !text ? null : (
-        <YamlEditor
-          value={text}
-          onChange={setText}
-          readOnly={busy || gone}
-          testId="yaml-editor"
-        />
+        <EditorLayout clusterId={clusterId} target={target}>
+          <YamlEditor
+            value={text}
+            onChange={setText}
+            readOnly={busy || gone}
+            testId="yaml-editor"
+          />
+        </EditorLayout>
       )}
       {conflict ? (
         <Dialog
