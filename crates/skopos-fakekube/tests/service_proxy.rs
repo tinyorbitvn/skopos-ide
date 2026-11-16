@@ -19,9 +19,12 @@ async fn client(fake: &FakeKube, dir: &std::path::Path) -> Client {
         context: Some("fake".into()),
         ..Default::default()
     };
-    let config = Config::from_custom_kubeconfig(kubeconfig, &options)
+    let mut config = Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
         .unwrap();
+    // As the app's connect does: kube's default retries a 503 up to 15 times with growing
+    // backoff, which takes minutes before the error comes back.
+    config.default_retry = false;
     Client::try_from(config).unwrap()
 }
 
