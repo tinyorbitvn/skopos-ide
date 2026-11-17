@@ -6,6 +6,7 @@
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
@@ -19,6 +20,7 @@ use skopos_core::app_core::AppCore;
 use skopos_core::cluster::ConnectionState;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
+use skopos_core::secrets::{MemorySecretStore, SecretStore};
 use skopos_fakekube::{FakeKube, FakeKubeConfig};
 use tempfile::TempDir;
 
@@ -30,8 +32,17 @@ const KIND_WAIT: Duration = Duration::from_secs(120);
 pub const TEST_IMAGE: &str = "registry.k8s.io/e2e-test-images/agnhost:2.53";
 
 async fn start_core(root: &Path, context: &str) -> (AppCore, ClusterId) {
+    start_core_with(root, context, Arc::new(MemorySecretStore::default())).await
+}
+
+/// `start_core` with the store that keeps the secrets of metrics URLs.
+async fn start_core_with(
+    root: &Path,
+    context: &str,
+    secrets: Arc<dyn SecretStore>,
+) -> (AppCore, ClusterId) {
     let paths = AppPaths::under(&root.join("app"), &root.join("home"));
-    let core = AppCore::start_with_kubeconfig_env(paths, None)
+    let core = AppCore::start_with_secret_store(paths, None, secrets)
         .await
         .unwrap();
     let started = Instant::now();
@@ -55,13 +66,21 @@ async fn start_core(root: &Path, context: &str) -> (AppCore, ClusterId) {
 }
 
 pub async fn connected_fake(cfg: FakeKubeConfig) -> (AppCore, FakeKube, ClusterId, TempDir) {
+    connected_fake_with(cfg, Arc::new(MemorySecretStore::default())).await
+}
+
+/// `connected_fake` with the store that keeps the secrets of metrics URLs.
+pub async fn connected_fake_with(
+    cfg: FakeKubeConfig,
+    secrets: Arc<dyn SecretStore>,
+) -> (AppCore, FakeKube, ClusterId, TempDir) {
     let fake = FakeKube::start(cfg).await.unwrap();
     let root = tempfile::tempdir().unwrap();
     let kube_dir = root.path().join("home").join(".kube");
     std::fs::create_dir_all(&kube_dir).unwrap();
     fake.write_kubeconfig(&kube_dir.join("config"), FAKE_CONTEXT)
         .unwrap();
-    let (core, id) = start_core(root.path(), FAKE_CONTEXT).await;
+    let (core, id) = start_core_with(root.path(), FAKE_CONTEXT, secrets).await;
     (core, fake, id, root)
 }
 
