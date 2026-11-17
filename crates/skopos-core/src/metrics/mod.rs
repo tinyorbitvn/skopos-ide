@@ -12,15 +12,19 @@ pub(crate) use usage::METRICS_API;
 pub use usage::{UsageItem, UsageOf, UsageSnapshot};
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use url::{Host, Url};
 
 use crate::error::CoreResult;
 use crate::resources::invalid;
 
-/// `ClusterSettings.metricsProvider`: detect, pin one Prometheus Service, use metrics-server
-/// alone, or show no metrics.
+/// `ClusterSettings.metricsProvider`: detect, pin one Prometheus Service or a
+/// Prometheus-compatible URL, use metrics-server alone, or show no metrics.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "kind",
@@ -43,6 +47,16 @@ pub enum MetricsProviderSetting {
         /// A label every query also matches, for a tenant that holds several clusters.
         matcher: Option<LabelMatcher>,
     },
+    /// A Prometheus-compatible API reached directly at a URL, such as Mimir or Grafana Cloud.
+    Remote {
+        /// The API base, such as `https://mimir.example.com/prometheus`.
+        url: String,
+        tenant: Option<String>,
+        matcher: Option<LabelMatcher>,
+        auth: RemoteAuth,
+        /// A PEM file of CAs trusted beside the system's.
+        ca_path: Option<String>,
+    },
     MetricsServer,
     /// `none` on the wire. A variant named `None` would read as `Option::None` in patterns.
     #[serde(rename = "none")]
@@ -55,6 +69,30 @@ pub enum MetricsProviderSetting {
 pub enum PrometheusScheme {
     Http,
     Https,
+}
+
+/// How a `remote` setting proves who it is. The Basic password and the Bearer token are kept
+/// in the keychain, never here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(export)]
+pub enum RemoteAuth {
+    /// `none` on the wire, named like [`MetricsProviderSetting::Off`] for the same reason.
+    #[serde(rename = "none")]
+    Anonymous,
+    Basic {
+        username: String,
+    },
+    Bearer,
+    /// A client certificate and its key, as PEM files.
+    Mtls {
+        cert_path: String,
+        key_path: String,
+    },
 }
 
 /// `name="value"`: a label every query also matches, such as `cluster="prod"`.
@@ -71,6 +109,11 @@ const TENANT_ERROR: &str =
 const LABEL_NAME_ERROR: &str = "A label name is letters, digits and _, and does not start with __.";
 const LABEL_PAIR_ERROR: &str = "A cluster label needs a name and a value.";
 const LABEL_VALUE_ERROR: &str = "A label value is at most 1024 characters.";
+const URL_ERROR: &str =
+    "The URL must be http:// or https:// with a host, without a user name, query or fragment.";
+const PLAIN_HTTP_ERROR: &str = "Basic and Bearer credentials need https://, except to localhost.";
+const MTLS_HTTP_ERROR: &str = "A client certificate needs https://.";
+const USERNAME_ERROR: &str = "The user name must not be empty or contain ':'.";
 /// Mimir's longest tenant ID.
 const TENANT_MAX: usize = 150;
 const LABEL_VALUE_MAX: usize = 1024;
@@ -78,6 +121,7 @@ const LABEL_VALUE_MAX: usize = 1024;
 impl MetricsProviderSetting {
     /// The setting as it is saved. A pinned Service has its names checked, its path prefix
     /// trimmed to `/a/b` form or `None`, its tenant and cluster label checked (spec I2, I3).
+    /// A URL is checked with its authentication, and its PEM files are read (spec I32 to I35).
     /// Anything else is `InvalidInput`.
     pub(crate) fn normalized(self) -> CoreResult<Self> {
         let Self::Prometheus {
@@ -90,7 +134,7 @@ impl MetricsProviderSetting {
             matcher,
         } = self
         else {
-            return Ok(self);
+            return remote_of(self);
         };
         let namespace = namespace.trim().to_owned();
         let service = service.trim().to_owned();
@@ -117,6 +161,158 @@ impl MetricsProviderSetting {
             matcher: matcher_of(matcher)?,
         })
     }
+}
+
+/// A `remote` setting as it is saved (spec I32 to I35); any other setting as it is.
+fn remote_of(setting: MetricsProviderSetting) -> CoreResult<MetricsProviderSetting> {
+    let MetricsProviderSetting::Remote {
+        url,
+        tenant,
+        matcher,
+        auth,
+        ca_path,
+    } = setting
+    else {
+        return Ok(setting);
+    };
+    let (url, parsed) = remote_url_of(&url)?;
+    Ok(MetricsProviderSetting::Remote {
+        url,
+        tenant: tenant_of(tenant)?,
+        matcher: matcher_of(matcher)?,
+        auth: auth_of(auth, &parsed)?,
+        ca_path: ca_path_of(ca_path)?,
+    })
+}
+
+/// The URL trimmed and without trailing `/`, and parsed: `http` or `https` with a host, and
+/// no user info, query or fragment, so no credential is ever saved in it (spec I32).
+fn remote_url_of(url: &str) -> CoreResult<(String, Url)> {
+    let url = url.trim().trim_end_matches('/');
+    Url::parse(url)
+        .ok()
+        .filter(|parsed| {
+            matches!(parsed.scheme(), "http" | "https")
+                && parsed.host().is_some()
+                && parsed.username().is_empty()
+                && parsed.password().is_none()
+                && parsed.query().is_none()
+                && parsed.fragment().is_none()
+        })
+        .map(|parsed| (url.to_owned(), parsed))
+        .ok_or_else(|| invalid(URL_ERROR))
+}
+
+/// Basic and Bearer over `https`, or plain `http` to this machine; a client certificate only
+/// over `https` (spec I33). The user name is trimmed and holds no `:` (I34), and the
+/// certificate and key files are read (I35).
+fn auth_of(auth: RemoteAuth, url: &Url) -> CoreResult<RemoteAuth> {
+    let https = url.scheme() == "https";
+    match auth {
+        RemoteAuth::Anonymous => Ok(RemoteAuth::Anonymous),
+        RemoteAuth::Basic { .. } | RemoteAuth::Bearer if !https && !is_loopback(url) => {
+            Err(invalid(PLAIN_HTTP_ERROR))
+        }
+        RemoteAuth::Basic { username } => {
+            let username = username.trim();
+            if username.is_empty() || username.contains(':') {
+                return Err(invalid(USERNAME_ERROR));
+            }
+            Ok(RemoteAuth::Basic {
+                username: username.to_owned(),
+            })
+        }
+        RemoteAuth::Bearer => Ok(RemoteAuth::Bearer),
+        RemoteAuth::Mtls { .. } if !https => Err(invalid(MTLS_HTTP_ERROR)),
+        RemoteAuth::Mtls {
+            cert_path,
+            key_path,
+        } => Ok(RemoteAuth::Mtls {
+            cert_path: pem_file_of(&cert_path, PemFile::Certificate)?,
+            key_path: pem_file_of(&key_path, PemFile::Key)?,
+        }),
+    }
+}
+
+/// `localhost`, an address in `127.0.0.0/8`, or `::1`.
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Domain(name)) => name == "localhost",
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
+/// An empty CA path is no CA file.
+fn ca_path_of(path: Option<String>) -> CoreResult<Option<String>> {
+    match path.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(path) => pem_file_of(path, PemFile::Ca).map(Some),
+    }
+}
+
+/// The PEM files a `remote` setting names.
+#[derive(Debug, Clone, Copy)]
+enum PemFile {
+    Ca,
+    Certificate,
+    Key,
+}
+
+impl PemFile {
+    /// The setting's field, which a refusal carries as its details so the page can show it
+    /// under that field.
+    fn field(self) -> &'static str {
+        match self {
+            Self::Ca => "caPath",
+            Self::Certificate => "certPath",
+            Self::Key => "keyPath",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Ca => "The CA file",
+            Self::Certificate => "The certificate file",
+            Self::Key => "The key file",
+        }
+    }
+}
+
+/// The path trimmed, once its file was read and holds what `kind` needs (spec I35): a
+/// certificate, or one unencrypted PKCS#8, RSA or SEC1 EC key.
+fn pem_file_of(path: &str, kind: PemFile) -> CoreResult<String> {
+    let refused = |message: String| invalid(message).with_details(kind.field());
+    let path = path.trim();
+    if !Path::new(path).is_absolute() {
+        return Err(refused(format!(
+            "{} must be an absolute path.",
+            kind.noun()
+        )));
+    }
+    let pem =
+        std::fs::read(path).map_err(|e| refused(format!("{path} could not be read: {e}.")))?;
+    let usable = match kind {
+        PemFile::Ca | PemFile::Certificate => holds_certificates(&pem),
+        PemFile::Key => PrivateKeyDer::from_pem_slice(&pem).is_ok(),
+    };
+    if !usable {
+        return Err(refused(match kind {
+            PemFile::Ca | PemFile::Certificate => format!("{path} holds no PEM certificate."),
+            PemFile::Key => {
+                format!("{path} holds no unencrypted PEM private key (PKCS#8, RSA or EC).")
+            }
+        }));
+    }
+    Ok(path.to_owned())
+}
+
+/// Whether a PEM file holds a certificate, and every certificate block in it can be read.
+fn holds_certificates(pem: &[u8]) -> bool {
+    CertificateDer::pem_slice_iter(pem)
+        .collect::<Result<Vec<_>, _>>()
+        .is_ok_and(|certificates| !certificates.is_empty())
 }
 
 /// Lowercase letters, digits and `-`, 1 to 63 characters, with a letter or digit at each
@@ -685,5 +881,336 @@ mod tests {
             refusal(mimir(None, Some(("cluster", too_long.as_str())))),
             "A label value is at most 1024 characters."
         );
+    }
+
+    /// A URL with no tenant, no label and no CA file.
+    fn remote(url: &str, auth: RemoteAuth) -> MetricsProviderSetting {
+        MetricsProviderSetting::Remote {
+            url: url.to_owned(),
+            tenant: None,
+            matcher: None,
+            auth,
+            ca_path: None,
+        }
+    }
+
+    fn basic(username: &str) -> RemoteAuth {
+        RemoteAuth::Basic {
+            username: username.to_owned(),
+        }
+    }
+
+    fn mtls(cert_path: &str, key_path: &str) -> RemoteAuth {
+        RemoteAuth::Mtls {
+            cert_path: cert_path.to_owned(),
+            key_path: key_path.to_owned(),
+        }
+    }
+
+    /// The setting as saved, or the message and details of its refusal.
+    fn saved(setting: MetricsProviderSetting) -> Result<MetricsProviderSetting, String> {
+        setting.normalized().map_err(|err| {
+            assert_eq!(err.code, ErrorCode::InvalidInput);
+            match err.details {
+                Some(details) => format!("{} [{details}]", err.message),
+                None => err.message,
+            }
+        })
+    }
+
+    /// A PEM block labelled `label`. The save reads PEM, not what the block holds.
+    fn pem(label: &str) -> String {
+        format!("-----BEGIN {label}-----\nAAAA\n-----END {label}-----\n")
+    }
+
+    #[test]
+    fn a_remote_setting_uses_the_contract_shape() {
+        let setting = MetricsProviderSetting::Remote {
+            url: "https://mimir.example.com/prometheus".to_owned(),
+            tenant: Some("team-a".to_owned()),
+            matcher: Some(LabelMatcher {
+                name: "cluster".to_owned(),
+                value: "prod".to_owned(),
+            }),
+            auth: basic("me"),
+            ca_path: Some("/etc/ssl/mimir-ca.pem".to_owned()),
+        };
+        let wire = json!({
+            "kind": "remote",
+            "url": "https://mimir.example.com/prometheus",
+            "tenant": "team-a",
+            "matcher": { "name": "cluster", "value": "prod" },
+            "auth": { "kind": "basic", "username": "me" },
+            "caPath": "/etc/ssl/mimir-ca.pem",
+        });
+        assert_eq!(serde_json::to_value(&setting).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<MetricsProviderSetting>(wire).unwrap(),
+            setting
+        );
+        for (auth, wire) in [
+            (RemoteAuth::Anonymous, json!({ "kind": "none" })),
+            (RemoteAuth::Bearer, json!({ "kind": "bearer" })),
+            (
+                mtls("/c.pem", "/k.pem"),
+                json!({ "kind": "mtls", "certPath": "/c.pem", "keyPath": "/k.pem" }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&auth).unwrap(), wire);
+            assert_eq!(serde_json::from_value::<RemoteAuth>(wire).unwrap(), auth);
+        }
+    }
+
+    #[test]
+    fn a_remote_url_is_trimmed_and_names_only_a_scheme_host_port_and_path() {
+        let url_of = |url: &str| match saved(remote(url, RemoteAuth::Anonymous)) {
+            Ok(MetricsProviderSetting::Remote { url, .. }) => Ok(url),
+            Ok(other) => panic!("{other:?}"),
+            Err(message) => Err(message),
+        };
+        assert_eq!(
+            url_of(" https://mimir.example.com/prometheus/ ").unwrap(),
+            "https://mimir.example.com/prometheus"
+        );
+        assert_eq!(
+            url_of("https://mimir.example.com//").unwrap(),
+            "https://mimir.example.com"
+        );
+        assert_eq!(
+            url_of("http://127.0.0.1:9009/prometheus").unwrap(),
+            "http://127.0.0.1:9009/prometheus"
+        );
+        let text = "The URL must be http:// or https:// with a host, without a user name, query or fragment.";
+        for bad in [
+            "",
+            "   ",
+            "mimir.example.com",
+            "/prometheus",
+            "https://",
+            "ftp://mimir.example.com",
+            "file:///etc/prometheus",
+            "https://me@mimir.example.com",
+            "https://me:secret@mimir.example.com",
+            "https://:secret@mimir.example.com",
+            "https://mimir.example.com/?org=1",
+            "https://mimir.example.com?",
+            "https://mimir.example.com/#top",
+        ] {
+            assert_eq!(url_of(bad).unwrap_err(), text, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn basic_and_bearer_need_https_except_to_localhost_and_a_client_certificate_always() {
+        let https_text = "Basic and Bearer credentials need https://, except to localhost.";
+        for auth in [basic("me"), RemoteAuth::Bearer] {
+            assert_eq!(
+                saved(remote("http://mimir.example.com", auth.clone())).unwrap_err(),
+                https_text
+            );
+            assert_eq!(
+                saved(remote("http://10.0.0.1:9009", auth.clone())).unwrap_err(),
+                https_text
+            );
+            for loopback in [
+                "https://mimir.example.com",
+                "http://localhost:9009",
+                "http://LOCALHOST",
+                "http://127.0.0.1:9009",
+                "http://127.10.20.30",
+                "http://[::1]:9009",
+            ] {
+                assert!(
+                    saved(remote(loopback, auth.clone())).is_ok(),
+                    "{loopback} {auth:?}"
+                );
+            }
+        }
+        assert!(saved(remote("http://mimir.example.com", RemoteAuth::Anonymous)).is_ok());
+
+        let dir = tempfile::tempdir().unwrap();
+        let cert = dir.path().join("client.pem");
+        let key = dir.path().join("client.key");
+        std::fs::write(&cert, pem("CERTIFICATE")).unwrap();
+        std::fs::write(&key, pem("PRIVATE KEY")).unwrap();
+        let (cert, key) = (cert.to_str().unwrap(), key.to_str().unwrap());
+        assert_eq!(
+            saved(remote("http://127.0.0.1:9009", mtls(cert, key))).unwrap_err(),
+            "A client certificate needs https://."
+        );
+        assert!(saved(remote("https://127.0.0.1:9009", mtls(cert, key))).is_ok());
+    }
+
+    #[test]
+    fn a_basic_user_name_is_trimmed_and_holds_no_colon() {
+        assert_eq!(
+            saved(remote("https://mimir.example.com", basic(" me "))).unwrap(),
+            remote("https://mimir.example.com", basic("me"))
+        );
+        let text = "The user name must not be empty or contain ':'.";
+        for bad in ["", "  ", "me:you"] {
+            assert_eq!(
+                saved(remote("https://mimir.example.com", basic(bad))).unwrap_err(),
+                text,
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_remote_tenant_and_label_follow_the_prometheus_rules() {
+        let with = |tenant: &str, name: &str, value: &str| MetricsProviderSetting::Remote {
+            url: "https://mimir.example.com".to_owned(),
+            tenant: Some(tenant.to_owned()),
+            matcher: Some(LabelMatcher {
+                name: name.to_owned(),
+                value: value.to_owned(),
+            }),
+            auth: RemoteAuth::Anonymous,
+            ca_path: Some("  ".to_owned()),
+        };
+        assert_eq!(
+            saved(with(" team-a ", " cluster ", "prod")).unwrap(),
+            MetricsProviderSetting::Remote {
+                url: "https://mimir.example.com".to_owned(),
+                tenant: Some("team-a".to_owned()),
+                matcher: Some(LabelMatcher {
+                    name: "cluster".to_owned(),
+                    value: "prod".to_owned(),
+                }),
+                auth: RemoteAuth::Anonymous,
+                ca_path: None,
+            }
+        );
+        assert!(matches!(
+            saved(with("", "", "")).unwrap(),
+            MetricsProviderSetting::Remote {
+                tenant: None,
+                matcher: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            saved(with("a|b", "", "")).unwrap_err(),
+            "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters."
+        );
+        assert_eq!(
+            saved(with("", "__name__", "up")).unwrap_err(),
+            "A label name is letters, digits and _, and does not start with __."
+        );
+        assert_eq!(
+            saved(with("", "cluster", "")).unwrap_err(),
+            "A cluster label needs a name and a value."
+        );
+    }
+
+    #[test]
+    fn certificate_and_key_files_are_absolute_and_hold_pem() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, content: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, content).unwrap();
+            path.to_str().unwrap().to_owned()
+        };
+        let ca = file(
+            "ca.pem",
+            &format!("{}{}", pem("CERTIFICATE"), pem("CERTIFICATE")),
+        );
+        let cert = file("client.pem", &format!("comment\n{}", pem("CERTIFICATE")));
+        let pkcs8 = file("pkcs8.key", &pem("PRIVATE KEY"));
+        let rsa = file("rsa.key", &pem("RSA PRIVATE KEY"));
+        let ec = file("ec.key", &pem("EC PRIVATE KEY"));
+        let encrypted = file("encrypted.key", &pem("ENCRYPTED PRIVATE KEY"));
+        let empty = file("empty.pem", "");
+        let missing = dir.path().join("missing.pem");
+        let missing_reason = std::fs::read(&missing).unwrap_err().to_string();
+        let missing = missing.to_str().unwrap().to_owned();
+
+        let url = "https://mimir.example.com";
+        let with_ca = |ca_path: &str, auth: RemoteAuth| MetricsProviderSetting::Remote {
+            url: url.to_owned(),
+            tenant: None,
+            matcher: None,
+            auth,
+            ca_path: Some(ca_path.to_owned()),
+        };
+        // Paths are trimmed and kept; the files stay where they are (spec I36).
+        assert_eq!(
+            saved(with_ca(
+                &format!(" {ca} "),
+                mtls(&format!(" {cert} "), &pkcs8)
+            ))
+            .unwrap(),
+            with_ca(&ca, mtls(&cert, &pkcs8))
+        );
+        for key in [&rsa, &ec] {
+            assert!(saved(remote(url, mtls(&cert, key))).is_ok(), "{key}");
+        }
+        assert!(saved(with_ca(&ca, RemoteAuth::Bearer)).is_ok());
+
+        assert_eq!(
+            saved(with_ca(&pkcs8, RemoteAuth::Anonymous)).unwrap_err(),
+            format!("{pkcs8} holds no PEM certificate. [caPath]")
+        );
+        assert_eq!(
+            saved(remote(url, mtls(&empty, &pkcs8))).unwrap_err(),
+            format!("{empty} holds no PEM certificate. [certPath]")
+        );
+        for key in [&encrypted, &cert] {
+            assert_eq!(
+                saved(remote(url, mtls(&cert, key))).unwrap_err(),
+                format!(
+                    "{key} holds no unencrypted PEM private key (PKCS#8, RSA or EC). [keyPath]"
+                )
+            );
+        }
+        assert_eq!(
+            saved(with_ca(&missing, RemoteAuth::Anonymous)).unwrap_err(),
+            format!("{missing} could not be read: {missing_reason}. [caPath]")
+        );
+        assert_eq!(
+            saved(with_ca("ca.pem", RemoteAuth::Anonymous)).unwrap_err(),
+            "The CA file must be an absolute path. [caPath]"
+        );
+        assert_eq!(
+            saved(remote(url, mtls(" ", &pkcs8))).unwrap_err(),
+            "The certificate file must be an absolute path. [certPath]"
+        );
+        assert_eq!(
+            saved(remote(url, mtls(&cert, "client.key"))).unwrap_err(),
+            "The key file must be an absolute path. [keyPath]"
+        );
+    }
+
+    /// Review Focus 5: the punctuation Mimir allows is kept; anything else is refused.
+    #[test]
+    fn a_remote_tenant_keeps_every_character_mimir_allows() {
+        let with_tenant = |tenant: &str| MetricsProviderSetting::Remote {
+            url: "https://mimir.example.com".to_owned(),
+            tenant: Some(tenant.to_owned()),
+            matcher: None,
+            auth: RemoteAuth::Anonymous,
+            ca_path: None,
+        };
+        let allowed = "Team.A_1-(prod)*'!";
+        assert_eq!(
+            saved(with_tenant(&format!(" {allowed} "))).unwrap(),
+            with_tenant(allowed)
+        );
+        assert!(saved(with_tenant(&"a".repeat(150))).is_ok());
+        let text =
+            "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.";
+        let long = "a".repeat(151);
+        for bad in [
+            "team a",
+            "team/a",
+            "équipe",
+            ".",
+            "..",
+            "__mimir_cluster",
+            long.as_str(),
+        ] {
+            assert_eq!(saved(with_tenant(bad)).unwrap_err(), text, "{bad:?}");
+        }
     }
 }
