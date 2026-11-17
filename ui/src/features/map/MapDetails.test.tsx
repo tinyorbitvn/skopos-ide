@@ -80,6 +80,31 @@ describe("MapDetails", () => {
     expect(facts()[0]).toEqual(["Ready", "Ready1/1"]);
   });
 
+  it("keeps rule rows that share a label", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const role = "Role/shop/dup-reader";
+    show(role, {
+      model: buildModel(
+        [
+          gnode(role, {
+            status: "neutral",
+            facts: [
+              ["pods", "get"],
+              ["pods", "list, watch"],
+            ],
+          }),
+        ],
+        [],
+      ),
+    });
+    expect(facts()).toEqual([
+      ["pods", "podsget"],
+      ["pods", "podslist, watch"],
+    ]);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("falls back to the status word without a status text", () => {
     expect(placeLine(gnode("GatewayClass//shared"))).toBe(
       "GatewayClass · cluster scope",
