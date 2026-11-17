@@ -3,6 +3,22 @@
 // Usage: node scripts/build-site.mjs --out <dir> [--release-json <file>]
 // See docs/releasing.md, "Project site".
 
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const FONTS = [
+  ["manrope", "manrope-latin-400-normal.woff2"],
+  ["manrope", "manrope-latin-500-normal.woff2"],
+  ["manrope", "manrope-latin-600-normal.woff2"],
+  ["jetbrains-mono", "jetbrains-mono-latin-400-normal.woff2"],
+  ["jetbrains-mono", "jetbrains-mono-latin-500-normal.woff2"],
+];
+const LUCIDE_TAGS = "path|circle|rect|line|polyline|polygon|ellipse";
+const USAGE = "usage: node scripts/build-site.mjs --out <dir> [--release-json <file>]";
+
 /** The installers every release publishes, as the publish job of release.yml checks. */
 export const ASSET_SUFFIXES = [
   "amd64.AppImage",
@@ -139,4 +155,204 @@ export function render(template, { release, images, sprite }) {
     );
   }
   return html;
+}
+
+/** The app's own glyphs, name → path data, from ui/src/design/glyphPaths.ts. */
+export function appGlyphs(ts) {
+  const start = ts.indexOf("GLYPH_PATHS");
+  if (start === -1) throw new Error("glyphPaths.ts: GLYPH_PATHS not found");
+  const glyphs = new Map();
+  for (const m of ts.slice(start).matchAll(/(?:"([a-z0-9-]+)"|([a-z0-9]+)):\s*"([^"]+)"/g)) {
+    glyphs.set(m[1] ?? m[2], m[3]);
+  }
+  return glyphs;
+}
+
+/** The SVG elements of a lucide-react icon module, without React's keys. */
+export function lucideNodes(mjs) {
+  const nodes = [];
+  const element = new RegExp(`\\[\\s*"(${LUCIDE_TAGS})",\\s*\\{([^}]*)\\}\\s*\\]`, "g");
+  for (const m of mjs.matchAll(element)) {
+    const attrs = [];
+    for (const a of m[2].matchAll(/(?:"([\w-]+)"|([\w-]+)):\s*"([^"]*)"/g)) {
+      const name = a[1] ?? a[2];
+      if (name !== "key") attrs.push([name, a[3]]);
+    }
+    nodes.push({ tag: m[1], attrs });
+  }
+  if (nodes.length === 0) throw new Error("lucide icon: no SVG elements found");
+  return nodes;
+}
+
+/**
+ * A hidden SVG sprite with one <symbol id="i-<name>"> per name: the app's own glyph when
+ * there is one, else the Lucide icon of that name.
+ */
+export function sprite(names, { glyphs, readLucide }) {
+  const symbols = [...new Set(names)].sort().map((name) => {
+    if (glyphs.has(name)) {
+      return `<symbol id="i-${name}" viewBox="0 0 24 24"><path d="${escapeHtml(glyphs.get(name))}" fill="currentColor" stroke="none" fill-rule="evenodd"/></symbol>`;
+    }
+    const mjs = readLucide(name);
+    if (mjs == null) {
+      throw new Error(`icon "${name}": not one of the app's glyphs and not a Lucide icon`);
+    }
+    const body = lucideNodes(mjs)
+      .map(({ tag, attrs }) => `<${tag} ${attrs.map(([k, v]) => `${k}="${escapeHtml(v)}"`).join(" ")}/>`)
+      .join("");
+    return `<symbol id="i-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`;
+  });
+  return (
+    "<!-- Icons: SkoposIDE's own glyphs, and Lucide icons (ISC License, Copyright (c) Lucide Icons and Contributors). -->\n" +
+    `<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">${symbols.join("")}</svg>`
+  );
+}
+
+function within(parent, child) {
+  const rel = path.relative(parent, child);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+/**
+ * The output folder as an absolute path, after checking that replacing it cannot delete
+ * work: not the repository or an ancestor; inside the repository only tmp/site and the
+ * tests' tmp/site-test-*; and only an empty folder or a previous build.
+ */
+export function assertSafeOut(out, root) {
+  const target = path.resolve(out);
+  const repo = path.resolve(root);
+  if (within(target, repo)) {
+    throw new Error(`refusing to replace ${target}: it holds the repository`);
+  }
+  if (within(repo, target)) {
+    const [first, second, ...rest] = path.relative(repo, target).split(path.sep);
+    const allowed =
+      first === "tmp" &&
+      rest.length === 0 &&
+      (second === "site" || (second ?? "").startsWith("site-test-"));
+    if (!allowed) {
+      throw new Error(
+        `refusing to replace ${target}: inside the repository only tmp/site may be replaced`,
+      );
+    }
+  }
+  if (fs.existsSync(target)) {
+    if (!fs.statSync(target).isDirectory()) {
+      throw new Error(`refusing to replace ${target}: it is not a folder`);
+    }
+    const entries = fs.readdirSync(target);
+    const previousBuild = entries.includes("index.html") && entries.includes("tokens.css");
+    if (entries.length > 0 && !previousBuild) {
+      throw new Error(`refusing to replace ${target}: it is not empty and holds no previous build`);
+    }
+  }
+  return target;
+}
+
+// Files under dir as "/"-separated relative paths, skipping dotfiles; a symbolic link
+// is an error, since the Pages artifact must not contain one.
+function listFiles(dir, prefix = "") {
+  const files = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const full = path.join(dir, entry.name);
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) throw new Error(`site/${rel}: symbolic links are not allowed`);
+    if (stat.isDirectory()) files.push(...listFiles(full, rel));
+    else if (stat.isFile()) files.push(rel);
+  }
+  return files;
+}
+
+/**
+ * Renders site/ for a parsed release into out. Everything is read and rendered first;
+ * the folder is replaced only when all of it succeeded.
+ */
+export function build({ release, out, root }) {
+  const target = assertSafeOut(out, root);
+  const siteDir = path.join(root, "site");
+  const files = new Map();
+  const template = fs.readFileSync(path.join(siteDir, "index.html"), "utf8");
+  for (const rel of listFiles(siteDir)) {
+    if (rel !== "index.html") files.set(rel, fs.readFileSync(path.join(siteDir, ...rel.split("/"))));
+  }
+  const images = {};
+  for (const [rel, data] of files) {
+    const m = /^images\/([a-z0-9-]+\.png)$/.exec(rel);
+    if (m) images[m[1]] = pngSize(data);
+  }
+  const names = [...template.matchAll(/href="#i-([a-z0-9-]+)"/g)].map((m) => m[1]);
+  const glyphs = appGlyphs(
+    fs.readFileSync(path.join(root, "ui", "src", "design", "glyphPaths.ts"), "utf8"),
+  );
+  const icons = path.join(root, "ui", "node_modules", "lucide-react", "dist", "esm", "icons");
+  const readLucide = (name) => {
+    const file = path.join(icons, `${name}.mjs`);
+    return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+  };
+  files.set("index.html", render(template, { release, images, sprite: sprite(names, { glyphs, readLucide }) }));
+  files.set("tokens.css", fs.readFileSync(path.join(root, "ui", "src", "design", "tinyorbit.css")));
+  files.set("icon.svg", fs.readFileSync(path.join(root, "assets", "icon.svg")));
+  for (const [pkg, file] of FONTS) {
+    const source = path.join(root, "ui", "node_modules", "@fontsource", pkg, "files", file);
+    if (!fs.existsSync(source)) throw new Error(`font not found: ${source} (run pnpm install)`);
+    files.set(`fonts/${file}`, fs.readFileSync(source));
+  }
+  fs.rmSync(target, { recursive: true, force: true });
+  for (const [rel, data] of files) {
+    const dest = path.join(target, ...rel.split("/"));
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, data);
+  }
+  return target;
+}
+
+function parseArgs(argv) {
+  const args = { out: undefined, releaseJson: undefined };
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--out") args.out = argv[++i];
+    else if (argv[i] === "--release-json") args.releaseJson = argv[++i];
+    else throw new Error(`unknown argument: ${argv[i]}\n${USAGE}`);
+  }
+  if (!args.out) throw new Error(USAGE);
+  return args;
+}
+
+function fetchLatestRelease() {
+  const repo = process.env.GITHUB_REPOSITORY || "vanlongme/skopos-ide";
+  try {
+    const text = execFileSync("gh", ["api", `repos/${repo}/releases/latest`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `could not read the latest release of ${repo} with gh: ${String(err.stderr || err.message).trim()}`,
+    );
+  }
+}
+
+/** The command line: reads and checks the release, then builds. */
+export function cli(argv, { root = ROOT, fetchRelease = fetchLatestRelease } = {}) {
+  const args = parseArgs(argv);
+  const json = args.releaseJson
+    ? JSON.parse(fs.readFileSync(path.resolve(args.releaseJson), "utf8"))
+    : fetchRelease();
+  const release = parseRelease(json);
+  const out = build({ release, out: args.out, root });
+  return { release, out };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const { release, out } = cli(process.argv.slice(2));
+    console.log(`build-site: ${release.tag} built into ${out}`);
+  } catch (err) {
+    console.error(`build-site: ${err.message}`);
+    process.exitCode = 1;
+  }
 }

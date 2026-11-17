@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, test } from "node:test";
+import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   ASSET_SUFFIXES,
+  appGlyphs,
+  assertSafeOut,
+  build,
+  cli,
   formatDate,
   formatSize,
+  lucideNodes,
   parseRelease,
   pngSize,
   render,
+  sprite,
 } from "./build-site.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -233,5 +240,227 @@ describe("pngSize", () => {
   test("rejects a file that is not a PNG", () => {
     assert.throws(() => pngSize(Buffer.from("GIF89a, not a PNG file, padded to length")), /PNG/);
     assert.throws(() => pngSize(Buffer.alloc(10)), /PNG/);
+  });
+});
+const GLYPHS_TS = path.join(ROOT, "ui", "src", "design", "glyphPaths.ts");
+const LUCIDE_ICONS = path.join(ROOT, "ui", "node_modules", "lucide-react", "dist", "esm", "icons");
+const FONT_FILES = [
+  "jetbrains-mono-latin-400-normal.woff2",
+  "jetbrains-mono-latin-500-normal.woff2",
+  "manrope-latin-400-normal.woff2",
+  "manrope-latin-500-normal.woff2",
+  "manrope-latin-600-normal.woff2",
+];
+
+// A fresh empty folder in the repository's git-ignored tmp/, one of the places
+// assertSafeOut lets the build replace.
+function tempOut() {
+  const base = path.join(ROOT, "tmp");
+  fs.mkdirSync(base, { recursive: true });
+  return fs.mkdtempSync(path.join(base, "site-test-"));
+}
+
+function readLucide(name) {
+  const file = path.join(LUCIDE_ICONS, `${name}.mjs`);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+}
+
+describe("icons", () => {
+  const ts = fs.readFileSync(GLYPHS_TS, "utf8");
+
+  test("appGlyphs reads every glyph the app draws", () => {
+    const glyphs = appGlyphs(ts);
+    const names = [...ts.matchAll(/^\s*\|\s*"([a-z0-9-]+)"/gm)].map((m) => m[1]);
+    assert.ok(names.length > 0);
+    assert.deepEqual([...glyphs.keys()].sort(), names.sort());
+    for (const d of glyphs.values()) assert.match(d, /^M[0-9.\sA-Za-z-]+$/);
+  });
+
+  test("lucideNodes reads a Lucide icon's elements, without React keys", () => {
+    const nodes = lucideNodes(fs.readFileSync(path.join(LUCIDE_ICONS, "network.mjs"), "utf8"));
+    assert.deepEqual(
+      nodes.map((node) => node.tag),
+      ["rect", "rect", "rect", "path", "path"],
+    );
+    assert.deepEqual(nodes[0].attrs, [
+      ["x", "16"],
+      ["y", "16"],
+      ["width", "6"],
+      ["height", "6"],
+      ["rx", "1"],
+    ]);
+    for (const node of nodes) assert.ok(node.attrs.every(([name]) => name !== "key"));
+    assert.throws(() => lucideNodes("export default {};"), /no SVG elements/);
+  });
+
+  test("sprite fills the app's glyphs, strokes Lucide icons and draws each name once", () => {
+    const svg = sprite(["download", "trash-2", "download"], { glyphs: appGlyphs(ts), readLucide });
+    assert.equal(svg.match(/<symbol /g).length, 2);
+    assert.match(
+      svg,
+      /<symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M[^"]+" fill="currentColor" stroke="none" fill-rule="evenodd"\/><\/symbol>/,
+    );
+    assert.match(
+      svg,
+      /<symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">(<path d="[^"]+"\/>)+<\/symbol>/,
+    );
+    assert.match(svg, /^<!-- [^>]*Lucide[^>]*ISC[^>]*-->\n<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">/);
+    assert.throws(
+      () => sprite(["no-such-icon"], { glyphs: appGlyphs(ts), readLucide }),
+      /no-such-icon/,
+    );
+  });
+});
+
+describe("assertSafeOut", () => {
+  test("accepts tmp/site, the tests' folders and new folders outside the repository", () => {
+    for (const out of [
+      path.join(ROOT, "tmp", "site"),
+      path.join(ROOT, "tmp", "site-test-abc"),
+      path.join(os.tmpdir(), "skopos-site-no-such-folder"),
+    ]) {
+      assert.equal(assertSafeOut(out, ROOT), out);
+    }
+  });
+
+  test("refuses the repository, its ancestors and other folders inside it", () => {
+    for (const out of [
+      ROOT,
+      path.dirname(ROOT),
+      path.parse(ROOT).root,
+      path.join(ROOT, "site"),
+      path.join(ROOT, "tmp"),
+      path.join(ROOT, "tmp", "worktrees"),
+      path.join(ROOT, "tmp", "site-canvas"),
+      path.join(ROOT, "tmp", "site", "nested"),
+      path.join(ROOT, "ui", "dist"),
+    ]) {
+      assert.throws(() => assertSafeOut(out, ROOT), /^Error: refusing/, out);
+    }
+  });
+
+  test("refuses a folder that is not empty and holds no previous build", (t) => {
+    const dir = tempOut();
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(dir, "notes.txt"), "keep me");
+    assert.throws(() => assertSafeOut(dir, ROOT), /refusing/);
+    fs.writeFileSync(path.join(dir, "index.html"), "previous build");
+    fs.writeFileSync(path.join(dir, "tokens.css"), "previous build");
+    assert.equal(assertSafeOut(dir, ROOT), dir);
+  });
+});
+
+describe("build", () => {
+  const release = parseRelease(releaseJson());
+  let out;
+  let html;
+
+  before(() => {
+    out = tempOut();
+    build({ release, out, root: ROOT });
+    html = fs.readFileSync(path.join(out, "index.html"), "utf8");
+  });
+  after(() => fs.rmSync(out, { recursive: true, force: true }));
+
+  test("leaves no placeholder", () => {
+    assert.ok(!html.includes("{{"));
+  });
+
+  test("every relative link and source exists in the output", () => {
+    const css = fs.readFileSync(path.join(out, "site.css"), "utf8");
+    const refs = [
+      ...[...html.matchAll(/\s(?:href|src)="([^"]+)"/g)].map((m) => m[1]),
+      ...[...css.matchAll(/url\("?([^")]+)"?\)/g)].map((m) => m[1]),
+    ].filter((ref) => !ref.startsWith("#") && !/^[a-z]+:/.test(ref));
+    assert.ok(refs.length > 0);
+    for (const ref of refs) assert.ok(fs.existsSync(path.join(out, ...ref.split("/"))), ref);
+  });
+
+  test("links each installer once, with its address, name and size", () => {
+    const links = [...html.matchAll(/<a\s[^>]*data-asset="([^"]+)"[^>]*>/g)];
+    assert.deepEqual(links.map((m) => m[1]).sort(), [...ASSET_SUFFIXES].sort());
+    for (const [tag, suffix] of links) {
+      const asset = release.assets[suffix];
+      assert.ok(tag.includes(`href="${asset.url}"`), tag);
+      assert.ok(tag.includes(`data-name="${asset.name}"`), tag);
+      assert.ok(tag.includes(`data-size="${asset.size}"`), tag);
+    }
+  });
+
+  test("every image has alt text and the size of its file", () => {
+    const imgs = [...html.matchAll(/<img\s[^>]*>/g)].map((m) => m[0]);
+    assert.ok(imgs.length > 0);
+    for (const img of imgs) {
+      assert.match(img, /\salt="[^"]*"/, img);
+      const width = /\swidth="(\d+)"/.exec(img)?.[1];
+      const height = /\sheight="(\d+)"/.exec(img)?.[1];
+      assert.ok(width && height, img);
+      const src = /\ssrc="(images\/[^"]+\.png)"/.exec(img)?.[1];
+      if (src) {
+        const file = fs.readFileSync(path.join(out, ...src.split("/")));
+        assert.deepEqual({ width: Number(width), height: Number(height) }, pngSize(file), src);
+      }
+    }
+  });
+
+  test("every icon the page uses has its symbol", () => {
+    const used = new Set([...html.matchAll(/href="#(i-[a-z0-9-]+)"/g)].map((m) => m[1]));
+    assert.ok(used.size > 0);
+    for (const id of used) assert.ok(html.includes(`<symbol id="${id}"`), id);
+  });
+
+  test("copies the tokens, the five fonts and the icon, and writes no links", () => {
+    assert.deepEqual(
+      fs.readFileSync(path.join(out, "tokens.css")),
+      fs.readFileSync(path.join(ROOT, "ui", "src", "design", "tinyorbit.css")),
+    );
+    assert.deepEqual(fs.readdirSync(path.join(out, "fonts")).sort(), FONT_FILES);
+    assert.ok(fs.existsSync(path.join(out, "icon.svg")));
+    assert.ok(fs.existsSync(path.join(out, "site.js")));
+    for (const entry of fs.readdirSync(out, { recursive: true })) {
+      assert.ok(!fs.lstatSync(path.join(out, entry)).isSymbolicLink(), entry);
+    }
+  });
+});
+
+describe("cli", () => {
+  function releaseFile(t, json) {
+    const dir = tempOut();
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const file = path.join(dir, "release.json");
+    fs.writeFileSync(file, JSON.stringify(json));
+    return file;
+  }
+
+  test("an invalid release leaves the previous build as it was", (t) => {
+    const out = tempOut();
+    t.after(() => fs.rmSync(out, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(out, "index.html"), "previous build");
+    fs.writeFileSync(path.join(out, "tokens.css"), "previous build");
+    const json = releaseJson();
+    json.assets = json.assets.filter((asset) => asset.name !== "SkoposIDE_0.6.1_x64-setup.exe");
+    const file = releaseFile(t, json);
+    assert.throws(() => cli(["--out", out, "--release-json", file], { root: ROOT }), /x64-setup\.exe/);
+    assert.deepEqual(fs.readdirSync(out).sort(), ["index.html", "tokens.css"]);
+    assert.equal(fs.readFileSync(path.join(out, "index.html"), "utf8"), "previous build");
+  });
+
+  test("builds from a release file without asking GitHub", (t) => {
+    const out = tempOut();
+    t.after(() => fs.rmSync(out, { recursive: true, force: true }));
+    const file = releaseFile(t, releaseJson());
+    const fetchRelease = () => {
+      throw new Error("must not fetch when --release-json is given");
+    };
+    const result = cli(["--out", out, "--release-json", file], { root: ROOT, fetchRelease });
+    assert.equal(result.release.tag, "v0.6.1");
+    assert.equal(result.out, out);
+    assert.ok(fs.readFileSync(path.join(out, "index.html"), "utf8").includes("SkoposIDE_0.6.1_x64-setup.exe"));
+  });
+
+  test("rejects unknown arguments and a missing --out", () => {
+    assert.throws(() => cli([], { root: ROOT }), /usage/);
+    assert.throws(() => cli(["--out"], { root: ROOT }), /usage/);
+    assert.throws(() => cli(["--out", "tmp/site", "--publish"], { root: ROOT }), /unknown argument/);
   });
 });
