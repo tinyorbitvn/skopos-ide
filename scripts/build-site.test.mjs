@@ -550,4 +550,12 @@ describe("page", () => {
       );
     }
   });
+
+  test("draws the four figures", () => {
+    for (const id of ["mock-dock", "mock-map", "mock-metrics", "mock-apps"]) {
+      const match = new RegExp(`<figure [^>]*id="${id}"[^>]*>([\\s\\S]*?)</figure>`).exec(template);
+      assert.ok(match, id);
+      assert.ok(match[1].trim().length > 200, `${id} is empty`);
+    }
+  });
 });
