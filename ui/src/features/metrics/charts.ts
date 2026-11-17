@@ -324,7 +324,7 @@ export function noSamplesNote(
   provider: MetricsProvider,
   result: MetricsResult,
 ): string | null {
-  if (provider.kind !== "prometheus") return null;
+  if (provider.kind !== "prometheus" && provider.kind !== "remote") return null;
   const empty =
     result.missing.length > 0 &&
     result.failed.length === 0 &&

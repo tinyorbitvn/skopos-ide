@@ -66,7 +66,11 @@ export interface MetricsPanelProps {
   ) => string | null;
 }
 
-type PrometheusProvider = Extract<MetricsProvider, { kind: "prometheus" }>;
+/** A provider that answers PromQL: a Prometheus Service or a Prometheus-compatible URL. */
+type PrometheusProvider = Extract<
+  MetricsProvider,
+  { kind: "prometheus" | "remote" }
+>;
 type ServerProvider = Extract<MetricsProvider, { kind: "metricsServer" }>;
 
 const RANGES: { value: MetricsRange; label: string }[] = [
@@ -84,18 +88,26 @@ const VIEWS: { value: MetricsView; label: string }[] = [
 const FORBIDDEN_NOTE =
   "Metrics are not shown: the nodes API is forbidden, so usage cannot be summed.";
 
+/** ", tenant ‹tenant›" and ", label ‹name›="‹value›"", each when set (spec I22). */
+function scopeText(provider: PrometheusProvider): string {
+  const tenant = provider.tenant === null ? "" : `, tenant ${provider.tenant}`;
+  const label =
+    provider.matcher === null ? "" : `, label ${labelText(provider.matcher)}`;
+  return `${tenant}${label}`;
+}
+
 function sourceText(provider: PrometheusProvider | ServerProvider): string {
+  // Only the Service or the host, the tenant and the label: nothing that identifies the
+  // user (I21), and not the URL's path (I52).
+  if (provider.kind === "remote") {
+    return `Prometheus API at ${provider.host}, set in the cluster settings${scopeText(provider)}`;
+  }
   if (provider.kind === "prometheus") {
     const how =
       provider.chosenBy === "setting"
         ? "pinned in the cluster settings"
         : "autodetected";
-    // Only the Service, the tenant and the label: nothing that identifies the user (I21).
-    const tenant =
-      provider.tenant === null ? "" : `, tenant ${provider.tenant}`;
-    const label =
-      provider.matcher === null ? "" : `, label ${labelText(provider.matcher)}`;
-    return `Prometheus ${provider.namespace}/${provider.service}:${provider.port}, ${how}, through the API server proxy${tenant}${label}`;
+    return `Prometheus ${provider.namespace}/${provider.service}:${provider.port}, ${how}, through the API server proxy${scopeText(provider)}`;
   }
   const how =
     provider.chosenBy === "setting"
@@ -176,7 +188,7 @@ function Toolbar(props: {
   const setView = useMetrics((s) => s.setView);
   return (
     <div className={styles.toolbar} data-testid="metrics-toolbar">
-      {props.provider.kind === "prometheus" ? (
+      {props.provider.kind !== "metricsServer" ? (
         <Segmented
           label="Range"
           size="sm"
@@ -319,7 +331,11 @@ function PrometheusMetrics(
       {error ? (
         <ErrorBlock
           clusterId={clusterId}
-          title="Prometheus did not answer"
+          title={
+            provider.kind === "remote"
+              ? `${provider.host} did not answer`
+              : "Prometheus did not answer"
+          }
           error={error}
           busy={busy}
           onRetry={() => void askQuery(clusterId, target, range)}
@@ -471,13 +487,10 @@ export function MetricsPanel(props: MetricsPanelProps) {
           action={{ label: "Helm charts", to: chartsPath(clusterId) }}
         />
       );
-  } else if (value.kind === "prometheus") {
-    body = <PrometheusMetrics {...props} provider={value} />;
   } else if (value.kind === "metricsServer") {
     body = <ServerMetrics {...props} provider={value} />;
   } else {
-    // A Prometheus-compatible URL has no panel yet.
-    body = null;
+    body = <PrometheusMetrics {...props} provider={value} />;
   }
 
   return (
