@@ -52,3 +52,7 @@ test("pages builds outside the checkout and uploads that folder", () => {
   assert.ok(pages.includes("path: ${{ runner.temp }}/site"));
   assert.ok(pages.includes("GH_TOKEN: ${{ github.token }}"));
 });
+
+test("the build job may read the Pages site, which configure-pages looks up", () => {
+  assert.match(pages, /^ {2}build:\n(?: {4}.*\n)*? {4}permissions:\n {6}contents: read\n {6}pages: read$/m);
+});

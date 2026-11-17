@@ -558,4 +558,25 @@ describe("page", () => {
       assert.ok(match[1].trim().length > 200, `${id} is empty`);
     }
   });
+
+  test("sets page text in colors with at least 4.5:1 contrast", () => {
+    // --text-tertiary (gray-500) measures 4.37:1 on white, below the spec's 4.5:1 for text.
+    // Only the drawn figures, which picture the app's own screens, may use it.
+    const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const pageText = rules
+      .filter((m) => /(^|[;\s])color:\s*var\(--text-tertiary\)/.test(m[2]))
+      .map((m) => m[1].trim().replace(/\s+/g, " "))
+      .filter((selector) => !selector.split(",").every((s) => s.trim().startsWith(".mock")));
+    assert.deepEqual(pageText, []);
+  });
+
+  test("keeps a focus outline that forced-colors mode can show", () => {
+    // Forced colors drop box shadows, so the ring needs an outline; a transparent one shows there.
+    assert.doesNotMatch(css, /outline:\s*(none|0)\s*;/);
+  });
+
+  test("keeps a flipped feature's text on the left once its row stacks", () => {
+    // A wrapped row-reverse line packs from the right; flex-end packs it from the left.
+    assert.match(css, /\.feature--flip \{\n {2}flex-direction: row-reverse;\n {2}justify-content: flex-end;\n\}/);
+  });
 });
