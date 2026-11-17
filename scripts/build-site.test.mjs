@@ -464,3 +464,90 @@ describe("cli", () => {
     assert.throws(() => cli(["--out", "tmp/site", "--publish"], { root: ROOT }), /unknown argument/);
   });
 });
+describe("page", () => {
+  const release = parseRelease(releaseJson());
+  const template = fs.readFileSync(path.join(ROOT, "site", "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(ROOT, "site", "site.css"), "utf8");
+  let out;
+  let html;
+
+  before(() => {
+    out = tempOut();
+    build({ release, out, root: ROOT });
+    html = fs.readFileSync(path.join(out, "index.html"), "utf8");
+  });
+  after(() => fs.rmSync(out, { recursive: true, force: true }));
+
+  test("has one h1, the landmarks and a skip link", () => {
+    assert.equal(html.match(/<h1[\s>]/g)?.length, 1);
+    for (const part of ['<header class="nav">', '<main id="main">', '<footer class="footer">']) {
+      assert.ok(html.includes(part), part);
+    }
+    assert.ok(html.includes('<a class="skip" href="#main">Skip to content</a>'));
+  });
+
+  test("has one Orbit-filled button and one dark band", () => {
+    assert.equal(html.match(/button--primary/g)?.length, 1);
+    assert.equal(html.match(/class="band"/g)?.length, 1);
+  });
+
+  test("every in-page link has its target", () => {
+    for (const [, id] of html.matchAll(/href="#([a-z][a-z0-9-]*)"/g)) {
+      if (!id.startsWith("i-")) assert.ok(html.includes(`id="${id}"`), id);
+    }
+  });
+
+  test("links only to the repository, its files and its releases", () => {
+    const urls = [...html.matchAll(/(?:href|src)="([a-z]+:[^"]*)"/g)].map((m) => m[1]);
+    assert.ok(urls.length > 0);
+    for (const url of urls) assert.match(url, /^https:\/\/github\.com\/vanlongme\/skopos-ide($|[/#])/);
+    assert.doesNotMatch(css, /https?:|@import/);
+  });
+
+  test("the hero works without the script", () => {
+    assert.match(
+      html,
+      /<a class="button button--primary button--lg" id="hero-download" href="#download">.*<span data-label>Download<\/span><\/a>/,
+    );
+    assert.ok(html.includes('v0.6.1<span id="hero-file"></span>'));
+    assert.ok(html.includes('<p class="hero__alt" id="hero-alt" hidden></p>'));
+  });
+
+  test("shows the release in the hero, the stats, the cards, the downloads and the footer", () => {
+    for (const text of [
+      "Released 16 November 2026",
+      "Everything here is in release 0.6.1",
+      '<span class="stats__value">9.8 MB</span>',
+      "The Windows installer is 9.8 MB.",
+      "SkoposIDE 0.6.1</h2>",
+      "chmod +x SkoposIDE_0.6.1_amd64.AppImage",
+      "latest: v0.6.1 · 2026-11-16",
+    ]) {
+      assert.ok(html.includes(text), text);
+    }
+  });
+
+  test("follows the copy rules: no exclamation marks and no we", () => {
+    const text = template
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<!doctype html>/i, "")
+      .replace(/<[^>]+>/g, " ");
+    assert.doesNotMatch(text, /!/);
+    assert.doesNotMatch(text, /\b(we|our|us)\b/i);
+  });
+
+  test("keeps every color in the tokens", () => {
+    assert.doesNotMatch(template, /\sstyle="/);
+    assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+  });
+
+  test("labels the four drawn figures", () => {
+    for (const id of ["mock-dock", "mock-map", "mock-metrics", "mock-apps"]) {
+      assert.match(
+        template,
+        new RegExp(`<figure class="feature__media shot mock[^"]*" id="${id}" role="img" aria-label="[^"]{20,}">`),
+        id,
+      );
+    }
+  });
+});
