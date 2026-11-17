@@ -324,9 +324,10 @@ export function MapDetails({
         ) : null}
       </div>
       <dl className={styles.facts}>
-        {node.facts.map(([label, value]) => (
+        {node.facts.map(([label, value], i) => (
           <div
-            key={label}
+            // biome-ignore lint/suspicious/noArrayIndexKey: rule labels may repeat
+            key={`${i}:${label}`}
             className={styles.fact}
             data-testid="map-fact"
             data-label={label}
