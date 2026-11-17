@@ -4,28 +4,310 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SkoposIDE: a desktop IDE for Kubernetes</title>
+<meta name="description" content="An open-source desktop IDE for the Kubernetes clusters you already run: live resources, logs, shells, YAML and metrics for every context in your kubeconfig. For Linux, macOS and Windows.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="site.css">
 <script src="site.js" defer></script>
 </head>
-<body>
+<body id="top">
 {{sprite}}
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav__bar">
+    <a class="brand" href="#top">
+      <img src="icon.svg" alt="" width="28" height="28">
+      <span class="brand__name">SkoposIDE</span>
+    </a>
+    <nav class="nav__links" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a>
+    </nav>
+    <div class="nav__actions">
+      <a class="button button--ghost button--sm nav__source" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Source</a>
+      <a class="button button--secondary button--sm" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+    </div>
+  </div>
+</header>
+
 <main id="main">
-<h1>SkoposIDE {{release.version}}</h1>
-<p><a id="hero-download" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-label>Download</span></a><span id="hero-file"></span></p>
-<p id="hero-alt" hidden></p>
-<img {{image:pods-drawer-light.png}} alt="SkoposIDE with the Pods of the kind-skopos-e2e cluster and the details drawer of its etcd Pod">
-<section id="download">
-<h2><svg class="icon" aria-hidden="true"><use href="#i-file-code"/></svg>Released {{release.date}}</h2>
-<ul>
-<li><a href="{{asset:aarch64.dmg:url}}" data-asset="aarch64.dmg" data-name="{{asset:aarch64.dmg:name}}" data-size="{{asset:aarch64.dmg:size}}">{{asset:aarch64.dmg:name}}</a></li>
-<li><a href="{{asset:x64.dmg:url}}" data-asset="x64.dmg" data-name="{{asset:x64.dmg:name}}" data-size="{{asset:x64.dmg:size}}">{{asset:x64.dmg:name}}</a></li>
-<li><a href="{{asset:x64-setup.exe:url}}" data-asset="x64-setup.exe" data-name="{{asset:x64-setup.exe:name}}" data-size="{{asset:x64-setup.exe:size}}">{{asset:x64-setup.exe:name}}</a></li>
-<li><a href="{{asset:amd64.AppImage:url}}" data-asset="amd64.AppImage" data-name="{{asset:amd64.AppImage:name}}" data-size="{{asset:amd64.AppImage:size}}">{{asset:amd64.AppImage:name}}</a></li>
-<li><a href="{{asset:amd64.deb:url}}" data-asset="amd64.deb" data-name="{{asset:amd64.deb:name}}" data-size="{{asset:amd64.deb:size}}">{{asset:amd64.deb:name}}</a></li>
-</ul>
-</section>
+  <section class="wrap hero" aria-labelledby="hero-title">
+    <p class="overline">Open source · Apache-2.0</p>
+    <h1 class="hero__title" id="hero-title">A desktop IDE for the Kubernetes clusters you already run.</h1>
+    <p class="hero__lead">Live resources, logs, shells, YAML and metrics for every context in your kubeconfig, in one window. For Linux, macOS and Windows.</p>
+    <div class="hero__actions">
+      <a class="button button--primary button--lg" id="hero-download" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-label>Download</span></a>
+      <a class="button button--secondary button--lg" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>View the source</a>
+    </div>
+    <p class="hero__meta"><span class="mono">v{{release.version}}<span id="hero-file"></span></span><span>Released {{release.date}}</span><a href="#download">Other platforms →</a></p>
+    <p class="hero__alt" id="hero-alt" hidden></p>
+  </section>
+
+  <div class="wrap">
+    <figure class="shot shot--hero">
+      <img {{image:pods-drawer-light.png}} alt="SkoposIDE with the Pods of the kind-skopos-e2e cluster and the details drawer of its etcd Pod">
+    </figure>
+    <ul class="stats" aria-label="At a glance">
+      <li><span class="stats__value">3</span><span class="stats__label">Platforms: Linux, macOS and Windows</span></li>
+      <li><span class="stats__value">5</span><span class="stats__label">Installers in every release</span></li>
+      <li><span class="stats__value">{{asset:x64-setup.exe:size}}</span><span class="stats__label">Windows installer, release {{release.version}}</span></li>
+      <li><span class="stats__value">Apache-2.0</span><span class="stats__label">License, source on GitHub</span></li>
+    </ul>
+  </div>
+
+  <section class="wrap section" id="features" aria-labelledby="features-title">
+    <p class="overline">What works today</p>
+    <h2 class="section__title" id="features-title">One window for the clusters you already run.</h2>
+    <p class="section__lead">Everything here is in release {{release.version}}, except where marked Next release. What is not built yet is on the roadmap, further down.</p>
+
+    <article class="feature">
+      <div class="feature__text">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-layers"/></svg>
+        <h3>Every kubeconfig, one catalog</h3>
+        <p>SkoposIDE reads your kubeconfig files and lists every context in a catalog. Pin the clusters you use to the hotbar and keep several connected at once.</p>
+        <ul>
+          <li>Connection state for each cluster</li>
+          <li>Pinned clusters on the hotbar, one click away</li>
+          <li>Several clusters connected at the same time</li>
+        </ul>
+      </div>
+      <figure class="feature__media shot">
+        <img {{image:catalog-light.png}} alt="The catalog with the kind-skopos-e2e cluster" loading="lazy" decoding="async">
+      </figure>
+    </article>
+
+    <article class="feature feature--flip">
+      <div class="feature__text">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-file-code"/></svg>
+        <div class="feature__head">
+          <h3>YAML beside the API docs</h3>
+          <span class="badge next-release">Next release</span>
+        </div>
+        <p>Edit or create any object in a YAML editor. The fields of its kind come from the cluster's own API docs, right next to the text.</p>
+        <ul>
+          <li>Search and a field tree for the kind</li>
+          <li>Each field's type, default and description</li>
+          <li>The same panel in edit and create tabs</li>
+        </ul>
+      </div>
+      <figure class="feature__media shot">
+        <img {{image:dock-yaml-light.png}} alt="An edit tab with the YAML of the screens ConfigMap and the API docs of its kind beside it" loading="lazy" decoding="async">
+      </figure>
+    </article>
+
+    <article class="feature">
+      <div class="feature__text">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-scroll-text"/></svg>
+        <h3>Logs, shell and port forward</h3>
+        <p>Open a container's logs, a shell or a port forward from the details drawer. Each one opens as a tab in the dock below the list, so the list stays in view.</p>
+        <ul>
+          <li>Logs of each container</li>
+          <li>A shell in a running container</li>
+          <li>Port forwards from the details drawer</li>
+        </ul>
+      </div>
+      <figure class="feature__media shot mock" id="mock-dock" role="img" aria-label="The Pods list with the dock below it: tabs for a container's logs, a shell and a port forward, with the logs tab open"></figure>
+    </article>
+
+    <article class="feature feature--flip">
+      <div class="feature__text">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-network"/></svg>
+        <h3>Resource map</h3>
+        <p>See how an object connects to the rest of the cluster: what owns it and which Pods a Service selects.</p>
+        <ul>
+          <li>Owner chains from an Argo CD Application down to its Pods</li>
+          <li>RBAC access links <span class="next-release">· next release</span></li>
+          <li>Export as PNG or PDF <span class="next-release">· next release</span></li>
+        </ul>
+      </div>
+      <figure class="feature__media shot mock mock--page mock--fit" id="mock-map" role="img" aria-label="Resource map: an Argo CD Application owns Deployment api, its ReplicaSet and three Pods; Service api selects the Pods; ServiceAccount api is bound to Role pod-reader through RoleBinding api-read"></figure>
+    </article>
+
+    <article class="feature">
+      <div class="feature__text">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-activity"/></svg>
+        <h3>Metrics where you look</h3>
+        <p>CPU and memory for Pods, workloads and Nodes, from metrics-server or a Prometheus-compatible API in the cluster.</p>
+        <ul>
+          <li>Grafana Mimir and other multi-tenant APIs: scheme, path prefix and tenant</li>
+          <li>A cluster label for backends that hold several clusters</li>
+          <li>Errors and empty answers say which setting to check</li>
+        </ul>
+      </div>
+      <figure class="feature__media shot mock" id="mock-metrics" role="img" aria-label="The Metrics tab of Deployment api: CPU at 0.21 cores under its 0.25 core request and memory at 182 MiB under its 256 MiB limit over 6 hours, with the source line naming Prometheus, the tenant and the cluster label"></figure>
+    </article>
+
+    <article class="feature feature--flip">
+      <div class="feature__text">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-package"/></svg>
+        <h3>Helm and Argo CD</h3>
+        <p>Helm releases and Argo CD Applications have their own lists in the sidebar.</p>
+        <ul>
+          <li>Each release's chart, revision and status</li>
+          <li>Each Application's sync state and health</li>
+          <li>Sync an Application from the app</li>
+        </ul>
+      </div>
+      <figure class="feature__media shot mock mock--page mock--padded mock--fit" id="mock-apps" role="img" aria-label="Three Helm releases with their charts and revisions, all deployed, and three Argo CD Applications with their sync state and health, beside a Sync button"></figure>
+    </article>
+
+    <ul class="cards">
+      <li class="card">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-table"/></svg>
+        <h3 class="card__title">Live resource tables</h3>
+        <p>Each kind has its own columns, status and actions, such as scale, restart and node drain. Lists follow the cluster as it changes.</p>
+      </li>
+      <li class="card">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-cpu"/></svg>
+        <h3 class="card__title">Tauri 2 and a Rust core</h3>
+        <p>A Rust core and a React UI in a native shell. The Windows installer is {{asset:x64-setup.exe:size}}.</p>
+      </li>
+      <li class="card">
+        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-command"/></svg>
+        <h3 class="card__title">Keyboard first</h3>
+        <p>A command palette and shortcuts for every view, from switching clusters to opening a shell.</p>
+      </li>
+    </ul>
+  </section>
+
+  <section class="band" aria-labelledby="band-title">
+    <div class="wrap">
+      <div class="band__head">
+        <h2 class="section__title" id="band-title">Light or dark, like the rest of your desktop.</h2>
+        <p>SkoposIDE follows your system theme, or keeps the one you pick in Preferences. The same Pods list, in the dark theme.</p>
+      </div>
+      <figure class="shot band__shot">
+        <img {{image:pods-drawer-dark.png}} alt="The same Pods list and details drawer in the dark theme" loading="lazy" decoding="async">
+      </figure>
+    </div>
+  </section>
+
+  <section class="wrap section" id="download" aria-labelledby="download-title">
+    <p class="overline">Download</p>
+    <h2 class="section__title" id="download-title">SkoposIDE {{release.version}}</h2>
+    <p class="section__lead">Released {{release.date}}. Every file comes from <a href="{{release.url}}">GitHub Releases</a>. Builds are not signed yet, so each platform has one first-run step.</p>
+    <div class="downloads">
+      <article class="platform">
+        <h3 class="platform__name">macOS</h3>
+        <ul class="files">
+          <li class="file">
+            <span class="file__text"><span class="file__label">Apple silicon</span><span class="file__meta">{{asset:aarch64.dmg:name}} · {{asset:aarch64.dmg:size}}</span></span>
+            <a class="button button--secondary button--sm" href="{{asset:aarch64.dmg:url}}" data-asset="aarch64.dmg" data-name="{{asset:aarch64.dmg:name}}" data-size="{{asset:aarch64.dmg:size}}" aria-label="Download {{asset:aarch64.dmg:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </li>
+          <li class="file">
+            <span class="file__text"><span class="file__label">Intel</span><span class="file__meta">{{asset:x64.dmg:name}} · {{asset:x64.dmg:size}}</span></span>
+            <a class="button button--secondary button--sm" href="{{asset:x64.dmg:url}}" data-asset="x64.dmg" data-name="{{asset:x64.dmg:name}}" data-size="{{asset:x64.dmg:size}}" aria-label="Download {{asset:x64.dmg:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </li>
+        </ul>
+        <div class="first-run">
+          <p><strong>First run.</strong> Drag the app to Applications. If macOS blocks it, choose Open Anyway in System Settings › Privacy &amp; Security, or run:</p>
+          <code>xattr -cr /Applications/SkoposIDE.app</code>
+        </div>
+      </article>
+      <article class="platform">
+        <h3 class="platform__name">Windows</h3>
+        <ul class="files">
+          <li class="file">
+            <span class="file__text"><span class="file__label">64-bit installer</span><span class="file__meta">{{asset:x64-setup.exe:name}} · {{asset:x64-setup.exe:size}}</span></span>
+            <a class="button button--secondary button--sm" href="{{asset:x64-setup.exe:url}}" data-asset="x64-setup.exe" data-name="{{asset:x64-setup.exe:name}}" data-size="{{asset:x64-setup.exe:size}}" aria-label="Download {{asset:x64-setup.exe:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </li>
+        </ul>
+        <div class="first-run">
+          <p><strong>First run.</strong> In SmartScreen, choose More info, then Run anyway.</p>
+        </div>
+      </article>
+      <article class="platform">
+        <h3 class="platform__name">Linux</h3>
+        <ul class="files">
+          <li class="file">
+            <span class="file__text"><span class="file__label">AppImage</span><span class="file__meta">{{asset:amd64.AppImage:name}} · {{asset:amd64.AppImage:size}}</span></span>
+            <a class="button button--secondary button--sm" href="{{asset:amd64.AppImage:url}}" data-asset="amd64.AppImage" data-name="{{asset:amd64.AppImage:name}}" data-size="{{asset:amd64.AppImage:size}}" aria-label="Download {{asset:amd64.AppImage:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </li>
+          <li class="file">
+            <span class="file__text"><span class="file__label">Debian and Ubuntu package</span><span class="file__meta">{{asset:amd64.deb:name}} · {{asset:amd64.deb:size}}</span></span>
+            <a class="button button--secondary button--sm" href="{{asset:amd64.deb:url}}" data-asset="amd64.deb" data-name="{{asset:amd64.deb:name}}" data-size="{{asset:amd64.deb:size}}" aria-label="Download {{asset:amd64.deb:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </li>
+        </ul>
+        <div class="first-run">
+          <p><strong>First run.</strong> Mark the AppImage executable, then run it:</p>
+          <code>chmod +x {{asset:amd64.AppImage:name}}</code>
+        </div>
+      </article>
+    </div>
+    <p class="download__more">
+      <span>Older versions and their notes: <a href="https://github.com/vanlongme/skopos-ide/releases">GitHub Releases →</a></span>
+      <span>Build from source with Rust, Node.js 22 and pnpm: <a href="https://github.com/vanlongme/skopos-ide#develop">README →</a></span>
+    </p>
+  </section>
+
+  <section class="wrap section section--last" id="roadmap" aria-labelledby="roadmap-title">
+    <p class="overline">Roadmap</p>
+    <h2 class="section__title" id="roadmap-title">What comes next</h2>
+    <p class="section__lead">The plan lives in <a href="https://github.com/vanlongme/skopos-ide/blob/main/docs/roadmap.md">docs/roadmap.md</a> and changes as work lands.</p>
+    <div class="milestones">
+      <article class="milestone">
+        <p class="overline">Milestone B</p>
+        <h3 class="milestone__title">Ecosystem integrations</h3>
+        <dl class="milestone__items">
+          <div><dt>GitOps</dt><dd>Flux objects, sync status and reconcile</dd></div>
+          <div><dt>Policy</dt><dd>Admission policies and bindings</dd></div>
+          <div><dt>Cost</dt><dd>OpenCost-backed cost views</dd></div>
+          <div><dt>Security</dt><dd>Image vulnerability scanning</dd></div>
+          <div><dt>Cloud</dt><dd>Clusters from AWS, Azure and Google Cloud accounts</dd></div>
+          <div><dt>CLI and MCP</dt><dd>A skopos command and an MCP server for AI agents</dd></div>
+          <div><dt>Delivery</dt><dd>Code signing, notarization and auto-update</dd></div>
+        </dl>
+      </article>
+      <article class="milestone">
+        <p class="overline">Milestone C</p>
+        <h3 class="milestone__title">AI and extensions</h3>
+        <dl class="milestone__items">
+          <div><dt>AI chat</dt><dd>A cluster-aware assistant on your own model API key, asking before any change</dd></div>
+          <div><dt>Extensions</dt><dd>A public extension API with sandboxed loading</dd></div>
+        </dl>
+      </article>
+    </div>
+  </section>
 </main>
+
+<footer class="footer">
+  <div class="wrap footer__grid">
+    <div>
+      <a class="brand" href="#top"><img src="icon.svg" alt="" width="22" height="22"><span class="brand__name">SkoposIDE</span></a>
+      <p class="footer__about">Open-source desktop Kubernetes IDE. Tauri 2, a Rust core and a React UI.</p>
+    </div>
+    <nav aria-label="Product">
+      <p class="overline">Product</p>
+      <ul>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#download">Download</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
+        <li><a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a></li>
+      </ul>
+    </nav>
+    <nav aria-label="Source">
+      <p class="overline">Source</p>
+      <ul>
+        <li><a href="https://github.com/vanlongme/skopos-ide">Repository</a></li>
+        <li><a href="https://github.com/vanlongme/skopos-ide/releases">Releases</a></li>
+        <li><a href="https://github.com/vanlongme/skopos-ide/issues">Issues</a></li>
+        <li><a href="https://github.com/vanlongme/skopos-ide#readme">README</a></li>
+      </ul>
+    </nav>
+    <nav aria-label="Legal">
+      <p class="overline">Legal</p>
+      <ul>
+        <li><a href="https://github.com/vanlongme/skopos-ide/blob/main/LICENSE">License</a></li>
+        <li><a href="https://github.com/vanlongme/skopos-ide/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</a></li>
+      </ul>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="footer__bottom"><span>Copyright The SkoposIDE Authors · Apache-2.0</span><span class="mono">latest: {{release.tag}} · {{release.isoDate}}</span></p>
+  </div>
+</footer>
 </body>
 </html>
