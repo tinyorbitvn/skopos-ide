@@ -4,6 +4,7 @@
 mod detect;
 pub(crate) mod prometheus;
 mod query;
+mod remote;
 pub(crate) mod templates;
 pub(crate) use detect::Metrics;
 pub use detect::MetricsLimits;
@@ -198,7 +199,7 @@ fn remote_of(setting: MetricsProviderSetting) -> CoreResult<MetricsProviderSetti
 
 /// The URL trimmed and without trailing `/`, and parsed: `http` or `https` with a host, and
 /// no user info, query or fragment, so no credential is ever saved in it (spec I32).
-fn remote_url_of(url: &str) -> CoreResult<(String, Url)> {
+pub(crate) fn remote_url_of(url: &str) -> CoreResult<(String, Url)> {
     let url = url.trim().trim_end_matches('/');
     Url::parse(url)
         .ok()
@@ -246,7 +247,7 @@ fn auth_of(auth: RemoteAuth, url: &Url) -> CoreResult<RemoteAuth> {
 }
 
 /// `localhost`, an address in `127.0.0.0/8`, or `::1`.
-fn is_loopback(url: &Url) -> bool {
+pub(crate) fn is_loopback(url: &Url) -> bool {
     match url.host() {
         Some(Host::Domain(name)) => name == "localhost",
         Some(Host::Ipv4(address)) => address.is_loopback(),
@@ -265,7 +266,7 @@ fn ca_path_of(path: Option<String>) -> CoreResult<Option<String>> {
 
 /// The PEM files a `remote` setting names.
 #[derive(Debug, Clone, Copy)]
-enum PemFile {
+pub(crate) enum PemFile {
     Ca,
     Certificate,
     Key,
@@ -291,11 +292,18 @@ impl PemFile {
     }
 }
 
-/// The path trimmed, once its file was read and holds what `kind` needs (spec I35): a
-/// certificate, or one unencrypted PKCS#8, RSA or SEC1 EC key.
+/// The path trimmed, once its file was read and holds what `kind` needs (spec I35).
 fn pem_file_of(path: &str, kind: PemFile) -> CoreResult<String> {
-    let refused = |message: String| invalid(message).with_details(kind.field());
     let path = path.trim();
+    read_pem_file(path, kind)?;
+    Ok(path.to_owned())
+}
+
+/// The file at the absolute `path`, when it holds what `kind` needs (spec I35): a
+/// certificate, or one unencrypted PKCS#8, RSA or SEC1 EC key. The refusal's details name
+/// the setting's field.
+pub(crate) fn read_pem_file(path: &str, kind: PemFile) -> CoreResult<Vec<u8>> {
+    let refused = |message: String| invalid(message).with_details(kind.field());
     if !Path::new(path).is_absolute() {
         return Err(refused(format!(
             "{} must be an absolute path.",
@@ -316,7 +324,7 @@ fn pem_file_of(path: &str, kind: PemFile) -> CoreResult<String> {
             }
         }));
     }
-    Ok(path.to_owned())
+    Ok(pem)
 }
 
 /// Whether a PEM file holds a certificate, and every certificate block in it can be read.
@@ -533,6 +541,14 @@ pub enum MetricsProvider {
         matcher: Option<LabelMatcher>,
         chosen_by: PrometheusChoice,
     },
+    /// A URL reached directly (spec I52). Its path, user name and secret are never shown.
+    Remote {
+        /// The URL's host, with `:port` when the URL names one.
+        host: String,
+        tenant: Option<String>,
+        matcher: Option<LabelMatcher>,
+        chosen_by: RemoteChoice,
+    },
     MetricsServer {
         chosen_by: MetricsServerChoice,
     },
@@ -552,6 +568,14 @@ pub enum PrometheusChoice {
     Operator,
     CommunityChart,
     Label,
+}
+
+/// A URL is never detected: only the setting names one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RemoteChoice {
+    Setting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -734,6 +758,29 @@ mod tests {
                 "series": { "cpuUsage": [[60.0, 0.5]] },
                 "missing": ["fsUsage"],
                 "failed": ["fsReads"],
+            })
+        );
+    }
+
+    #[test]
+    fn a_remote_provider_names_only_its_host_tenant_and_label() {
+        let provider = MetricsProvider::Remote {
+            host: "mimir.example.com:8443".to_owned(),
+            tenant: Some("team-a".to_owned()),
+            matcher: Some(LabelMatcher {
+                name: "cluster".to_owned(),
+                value: "prod".to_owned(),
+            }),
+            chosen_by: RemoteChoice::Setting,
+        };
+        assert_eq!(
+            serde_json::to_value(&provider).unwrap(),
+            json!({
+                "kind": "remote",
+                "host": "mimir.example.com:8443",
+                "tenant": "team-a",
+                "matcher": { "name": "cluster", "value": "prod" },
+                "chosenBy": "setting",
             })
         );
     }

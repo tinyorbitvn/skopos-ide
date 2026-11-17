@@ -341,6 +341,8 @@ impl AppCore {
         self.inner.clusters.update(|all| {
             all.insert(id.clone(), s);
         })?;
+        // A save reads a URL's certificate files again.
+        self.metrics().forget_remote(id);
         if !needs_secret {
             self.inner.secrets.delete(id);
         }

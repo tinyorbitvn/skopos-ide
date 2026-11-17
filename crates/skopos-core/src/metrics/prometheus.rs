@@ -1,5 +1,6 @@
-//! Prometheus through the API server's service proxy (spec §5.4): no port-forward, and the
-//! user's own rights on `services/proxy`.
+//! Prometheus requests and answers (spec §5.4, I37), and the two transports that carry them:
+//! the API server's service proxy, with no port-forward and the user's own rights on
+//! `services/proxy`, and a URL reached directly.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -9,6 +10,7 @@ use kube::client::Body;
 use kube::Client;
 use serde_json::Value;
 
+use super::remote::Remote;
 use super::templates::{up_query, Window};
 use super::{LabelMatcher, PrometheusScheme};
 use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -54,17 +56,102 @@ impl Endpoint {
     }
 }
 
+/// Where a Prometheus API is, as its requests need it: a Service behind the API server, or a
+/// URL (spec I37).
+pub(crate) trait Target: Sync {
+    /// Where `api`, such as `/api/v1/query`, is: a proxy path or a URL.
+    fn url(&self, api: &str) -> String;
+    /// Sent as [`TENANT_HEADER`] with every request.
+    fn tenant(&self) -> Option<&str>;
+    /// Added to every selector of every query.
+    fn matcher(&self) -> Option<&LabelMatcher>;
+}
+
+impl Target for Endpoint {
+    fn url(&self, api: &str) -> String {
+        self.path(api)
+    }
+
+    fn tenant(&self) -> Option<&str> {
+        self.tenant.as_deref()
+    }
+
+    fn matcher(&self) -> Option<&LabelMatcher> {
+        self.matcher.as_ref()
+    }
+}
+
+/// How requests reach Prometheus (spec I37). Both transports send the same requests and read
+/// the answers alike; they differ in how they send and in the words of a refusal.
+#[derive(Clone, Copy)]
+pub(crate) enum Transport<'a> {
+    /// A Service through the API server's service proxy.
+    ServiceProxy {
+        client: &'a Client,
+        endpoint: &'a Endpoint,
+    },
+    /// A URL reached directly (spec §9).
+    Remote(&'a Remote),
+}
+
+impl Transport<'_> {
+    fn target(&self) -> &dyn Target {
+        match self {
+            Self::ServiceProxy { endpoint, .. } => *endpoint,
+            Self::Remote(remote) => remote.endpoint(),
+        }
+    }
+
+    pub(crate) fn matcher(&self) -> Option<&LabelMatcher> {
+        self.target().matcher()
+    }
+
+    /// One request, without retry, given up after `limit`. Returns Prometheus's `data`.
+    async fn call(&self, request: Request<Vec<u8>>, limit: Duration) -> CoreResult<Value> {
+        match self {
+            Self::ServiceProxy { client, endpoint } => {
+                proxy_call(client, endpoint, request, limit).await
+            }
+            Self::Remote(remote) => remote.call(request, limit).await,
+        }
+    }
+
+    /// Whether Prometheus answers: `/api/v1/query?query=up`.
+    pub(crate) async fn probe(&self, limit: Duration) -> CoreResult<()> {
+        let data = self.call(probe_request(self.target())?, limit).await?;
+        if data["resultType"].is_string() {
+            Ok(())
+        } else {
+            Err(IpcError::new(
+                ErrorCode::Internal,
+                "the service answered, but not like Prometheus",
+            ))
+        }
+    }
+
+    /// One range query over `window`.
+    pub(crate) async fn query_range(
+        &self,
+        query: &str,
+        window: Window,
+        limit: Duration,
+    ) -> CoreResult<Vec<(f64, f64)>> {
+        let request = range_request(self.target(), query, window)?;
+        matrix_points(&self.call(request, limit).await?)
+    }
+}
+
 /// A GET when the encoded parameters fit in [`GET_LIMIT`], a form POST otherwise, carrying
-/// the tenant header when the Endpoint has a tenant.
+/// the tenant header when the target has a tenant.
 pub(crate) fn build_request(
-    endpoint: &Endpoint,
+    target: &dyn Target,
     api: &str,
     params: &[(&str, String)],
 ) -> CoreResult<Request<Vec<u8>>> {
     let encoded = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(params.iter().map(|(key, value)| (*key, value.as_str())))
         .finish();
-    let path = endpoint.path(api);
+    let path = target.url(api);
     let (mut builder, body) = if encoded.len() <= GET_LIMIT {
         (Request::get(format!("{path}?{encoded}")), Vec::new())
     } else {
@@ -73,8 +160,8 @@ pub(crate) fn build_request(
             encoded.into_bytes(),
         )
     };
-    if let Some(tenant) = &endpoint.tenant {
-        builder = builder.header(TENANT_HEADER, tenant.as_str());
+    if let Some(tenant) = target.tenant() {
+        builder = builder.header(TENANT_HEADER, tenant);
     }
     builder.body(body).map_err(|e| {
         IpcError::new(
@@ -86,18 +173,18 @@ pub(crate) fn build_request(
 
 /// The detection probe: `/api/v1/query` for `up`, with the cluster label when there is one
 /// (spec I15).
-fn probe_request(endpoint: &Endpoint) -> CoreResult<Request<Vec<u8>>> {
+fn probe_request(target: &dyn Target) -> CoreResult<Request<Vec<u8>>> {
     build_request(
-        endpoint,
+        target,
         "/api/v1/query",
-        &[("query", up_query(endpoint.matcher.as_ref()))],
+        &[("query", up_query(target.matcher()))],
     )
 }
 
 /// One range query over `window`.
-fn range_request(endpoint: &Endpoint, query: &str, window: Window) -> CoreResult<Request<Vec<u8>>> {
+fn range_request(target: &dyn Target, query: &str, window: Window) -> CoreResult<Request<Vec<u8>>> {
     build_request(
-        endpoint,
+        target,
         "/api/v1/query_range",
         &[
             ("query", query.to_owned()),
@@ -108,8 +195,8 @@ fn range_request(endpoint: &Endpoint, query: &str, window: Window) -> CoreResult
     )
 }
 
-/// One request, without retry, given up after `limit`. Returns Prometheus's `data`.
-async fn call(
+/// One request through the service proxy, without retry, given up after `limit`.
+async fn proxy_call(
     client: &Client,
     endpoint: &Endpoint,
     request: Request<Vec<u8>>,
@@ -132,11 +219,34 @@ async fn call(
             format!("Prometheus did not answer within {limit:?}"),
         )
     })??;
-    answer(status, &body, endpoint, verb)
+    answer(status, &body, |status, message| {
+        proxy_refusal(endpoint, verb, status, message)
+    })
+}
+
+/// How the service proxy words a 401, 403 or 404.
+fn proxy_refusal(endpoint: &Endpoint, verb: &str, status: StatusCode, message: String) -> IpcError {
+    match status {
+        StatusCode::FORBIDDEN => IpcError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "Reading Prometheus needs permission to {verb} services/proxy in namespace {}: {message}",
+                endpoint.namespace
+            ),
+        ),
+        StatusCode::UNAUTHORIZED => IpcError::new(ErrorCode::Unauthorized, message),
+        _ => IpcError::new(ErrorCode::NotFound, message),
+    }
 }
 
 /// Prometheus's `data` from a successful answer, or the contract's error for any other.
-fn answer(status: StatusCode, body: &[u8], endpoint: &Endpoint, verb: &str) -> CoreResult<Value> {
+/// `refusal` words a 401 (other than Mimir's missing tenant), a 403 or a 404 for the
+/// transport, given the status and the answer's own message.
+pub(crate) fn answer(
+    status: StatusCode,
+    body: &[u8],
+    refusal: impl FnOnce(StatusCode, String) -> IpcError,
+) -> CoreResult<Value> {
     let parsed: Option<Value> = serde_json::from_slice(body).ok();
     if status.is_success() {
         let Some(parsed) = parsed else {
@@ -168,19 +278,11 @@ fn answer(status: StatusCode, body: &[u8], endpoint: &Endpoint, verb: &str) -> C
         })
         .unwrap_or_else(|| format!("HTTP {code}"));
     let error = match code {
-        403 => IpcError::new(
-            ErrorCode::Forbidden,
-            format!(
-                "Reading Prometheus needs permission to {verb} services/proxy in namespace {}: {message}",
-                endpoint.namespace
-            ),
-        ),
         // Mimir with multi-tenancy on, asked without a tenant (spec I10).
         401 if String::from_utf8_lossy(body).trim() == NO_TENANT_BODY => {
             IpcError::new(ErrorCode::Unauthorized, NO_TENANT_MESSAGE)
         }
-        401 => IpcError::new(ErrorCode::Unauthorized, message),
-        404 => IpcError::new(ErrorCode::NotFound, message),
+        401 | 403 | 404 => refusal(status, message),
         408 | 429 | 502 | 503 | 504 => IpcError::new(ErrorCode::Unreachable, message),
         _ => IpcError::new(ErrorCode::Internal, message),
     };
@@ -220,37 +322,6 @@ fn matrix_points(data: &Value) -> CoreResult<Vec<(f64, f64)>> {
         .collect())
 }
 
-/// Whether `endpoint` answers like Prometheus: `/api/v1/query?query=up`.
-pub(crate) async fn probe(client: &Client, endpoint: &Endpoint, limit: Duration) -> CoreResult<()> {
-    let data = call(client, endpoint, probe_request(endpoint)?, limit).await?;
-    if data["resultType"].is_string() {
-        Ok(())
-    } else {
-        Err(IpcError::new(
-            ErrorCode::Internal,
-            "the service answered, but not like Prometheus",
-        ))
-    }
-}
-
-/// One range query over `window`.
-pub(crate) async fn query_range(
-    client: &Client,
-    endpoint: &Endpoint,
-    query: &str,
-    window: Window,
-    limit: Duration,
-) -> CoreResult<Vec<(f64, f64)>> {
-    let data = call(
-        client,
-        endpoint,
-        range_request(endpoint, query, window)?,
-        limit,
-    )
-    .await?;
-    matrix_points(&data)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -273,8 +344,7 @@ mod tests {
         answer(
             StatusCode::from_u16(code).unwrap(),
             body.as_bytes(),
-            &endpoint(),
-            verb,
+            |status, message| proxy_refusal(&endpoint(), verb, status, message),
         )
         .unwrap_err()
     }
@@ -341,12 +411,9 @@ mod tests {
     fn answers_become_data_or_contract_errors() {
         let ok = json!({ "status": "success", "data": { "resultType": "vector", "result": [] } });
         assert_eq!(
-            answer(
-                StatusCode::OK,
-                ok.to_string().as_bytes(),
-                &endpoint(),
-                "get"
-            )
+            answer(StatusCode::OK, ok.to_string().as_bytes(), |_, _| {
+                unreachable!("a success is no refusal")
+            })
             .unwrap(),
             ok["data"]
         );

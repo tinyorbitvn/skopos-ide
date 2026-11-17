@@ -4,6 +4,7 @@ import type { MetricsServerChoice } from "./MetricsServerChoice";
 import type { NoProviderChoice } from "./NoProviderChoice";
 import type { PrometheusChoice } from "./PrometheusChoice";
 import type { PrometheusScheme } from "./PrometheusScheme";
+import type { RemoteChoice } from "./RemoteChoice";
 
 /**
  * Where this cluster's metrics come from, and why.
@@ -12,4 +13,8 @@ export type MetricsProvider = { "kind": "prometheus", namespace: string, service
 /**
  * As the Endpoint has them; `null` for a detected Prometheus.
  */
-scheme: PrometheusScheme | null, pathPrefix: string | null, tenant: string | null, matcher: LabelMatcher | null, chosenBy: PrometheusChoice, } | { "kind": "metricsServer", chosenBy: MetricsServerChoice, } | { "kind": "none", chosenBy: NoProviderChoice, };
+scheme: PrometheusScheme | null, pathPrefix: string | null, tenant: string | null, matcher: LabelMatcher | null, chosenBy: PrometheusChoice, } | { "kind": "remote", 
+/**
+ * The URL's host, with `:port` when the URL names one.
+ */
+host: string, tenant: string | null, matcher: LabelMatcher | null, chosenBy: RemoteChoice, } | { "kind": "metricsServer", chosenBy: MetricsServerChoice, } | { "kind": "none", chosenBy: NoProviderChoice, };
