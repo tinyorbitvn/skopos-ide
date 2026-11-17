@@ -57,3 +57,23 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
   ```
 
   The version files and notes already say 0.7.0, so `make release` is not run again.
+
+## Project site
+
+The project site at https://vanlongme.github.io/skopos-ide/ is built from `site/` by
+`scripts/build-site.mjs` and deployed by `.github/workflows/pages.yml`.
+
+- A push to `main` that changes `site/`, the build script, the tokens, the glyphs, the icon or
+  the workflow redeploys it, and so does Run workflow on the `pages` workflow.
+- Every successful `release` run redeploys it. The version, dates, sizes and download links come
+  from the latest published release, read with `gh api`, so a new release needs no edit. When an
+  installer is missing from the release, the build stops and the live site stays as it was.
+- When you cut a release, remove the `next-release` marks in `site/index.html` for what the
+  release ships, and mark new features under `## [Unreleased]` that the page shows.
+- `make site-screens` refreshes the screenshots in `site/images/` from the e2e `screens` spec
+  (Docker, kind and the WebKit driver).
+- `make site` builds the site into `tmp/site/` from the latest published release. Serve that
+  folder over HTTP to look at it (`python3 -m http.server --directory tmp/site`), since browsers
+  block fonts from `file://`.
+
+The repository's Settings › Pages › Build and deployment › Source must be **GitHub Actions**.

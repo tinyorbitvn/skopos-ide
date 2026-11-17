@@ -4,6 +4,9 @@ SkoposIDE is an open-source desktop Kubernetes IDE built with Tauri 2, a Rust
 core and a React UI. It reads your kubeconfig files, connects to several
 clusters at once and lets you switch between them from a hotbar.
 
+Project site, with downloads for Linux, macOS and Windows:
+https://vanlongme.github.io/skopos-ide/
+
 ## Status
 
 Phase 3 (kinds). SkoposIDE is not yet feature complete: today it provides
@@ -44,7 +47,8 @@ make e2e-smoke  # smoke end-to-end tests, no Docker
   for tests).
 - `ui/` React front end.
 - `e2e/` WebdriverIO end-to-end specs and helpers.
-- `scripts/` helper scripts (kind setup, provenance check).
+- `scripts/` helper scripts (kind setup, provenance check, project site build).
+- `site/` the project site, deployed to GitHub Pages (see `docs/releasing.md`).
 - `docs/` roadmap, specs and plans.
 
 ## Unsigned builds
