@@ -170,7 +170,8 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
             },
             endpoint: None,
         },
-        MetricsProviderSetting::Off => Chosen {
+        // No transport reaches a URL yet: shown as no provider.
+        MetricsProviderSetting::Remote { .. } | MetricsProviderSetting::Off => Chosen {
             provider: MetricsProvider::Off {
                 chosen_by: NoProviderChoice::Setting,
             },

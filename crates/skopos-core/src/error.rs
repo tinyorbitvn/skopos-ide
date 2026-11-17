@@ -39,9 +39,10 @@ static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| pattern(r"://[^/\s]+@"))
 pub fn sanitize_text(input: &str) -> String {
     let text = PEM_BLOCK.replace_all(input, REDACTED);
     let text = BEARER_VALUE.replace_all(&text, |caps: &Captures| {
-        // "bearer token" in a sentence names the thing rather than giving its value.
+        // "bearer token" or "Bearer credentials" in a sentence names the thing rather than
+        // giving its value.
         let word = caps[2].trim_end_matches(|c: char| !c.is_alphanumeric());
-        if word.eq_ignore_ascii_case("token") {
+        if word.eq_ignore_ascii_case("token") || word.eq_ignore_ascii_case("credentials") {
             caps[0].to_owned()
         } else {
             format!("{} {REDACTED}", &caps[1])
@@ -472,6 +473,7 @@ mod tests {
             "connection refused",
             "context refers to missing cluster \"prod\"",
             "the bearer token expired",
+            "Basic and Bearer credentials need https://, except to localhost.",
             r#"secrets "db-password" not found"#,
         ] {
             assert_eq!(sanitize_text(msg), msg);

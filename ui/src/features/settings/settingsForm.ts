@@ -270,6 +270,11 @@ function providerSetting(draft: SettingsDraft): MetricsProviderSetting {
       return { kind: "metricsServer" };
     case "none":
       return { kind: "none" };
+    case "remote":
+      // The page offers no URL option yet, so it never saves one.
+      throw new Error(
+        "the Settings page cannot save a Prometheus-compatible URL yet",
+      );
   }
 }
 
