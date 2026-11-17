@@ -28,6 +28,7 @@ use crate::paths::AppPaths;
 use crate::portforward::{PortForward, PortForwards};
 use crate::prefs::{ClusterSettings, Prefs};
 use crate::resources::{RunningDrain, WatchHub};
+use crate::secrets::{MemorySecretStore, SecretStore, Secrets};
 use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
 use crate::tools::{ToolProgress, Tools};
@@ -91,6 +92,8 @@ struct Inner {
     tools: Tools,
     helm: Helm,
     metrics: Metrics,
+    /// The passwords and tokens of metrics URLs (spec §10).
+    secrets: Secrets,
     /// The API docs read from each cluster, until it disconnects (spec L5).
     api_docs: ApiDocs,
     /// Held across a preferences write and the matching source change, so
@@ -191,9 +194,21 @@ impl AppCore {
     }
 
     /// `start` with the `KUBECONFIG` value passed in, so tests never see a real one.
+    /// Secrets are kept in memory.
     pub async fn start_with_kubeconfig_env(
         paths: AppPaths,
         kubeconfig_env: Option<OsString>,
+    ) -> CoreResult<AppCore> {
+        let secrets = Arc::new(MemorySecretStore::default());
+        Self::start_with_secret_store(paths, kubeconfig_env, secrets).await
+    }
+
+    /// `start_with_kubeconfig_env` with the store that keeps the secrets of metrics URLs:
+    /// the app passes the OS keychain.
+    pub async fn start_with_secret_store(
+        paths: AppPaths,
+        kubeconfig_env: Option<OsString>,
+        secrets: Arc<dyn SecretStore>,
     ) -> CoreResult<AppCore> {
         paths.ensure_dirs()?;
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
@@ -233,6 +248,7 @@ impl AppCore {
                 tools: Tools::new(&paths.data),
                 helm,
                 metrics: Metrics::default(),
+                secrets: Secrets::new(secrets),
                 api_docs: ApiDocs::default(),
                 sync: Mutex::new(Some(sync)),
                 snapshots,
@@ -276,8 +292,10 @@ impl AppCore {
         self.inner.pasted.add(yaml)
     }
 
+    /// Also deletes the secret of the cluster's metrics URL (spec I50).
     pub fn catalog_remove_pasted(&self, id: &ClusterId) -> CoreResult<()> {
         if self.inner.pasted.remove(id)? {
+            self.inner.secrets.delete(id);
             return Ok(());
         }
         // A pasted entry can still be listed here until the sync catches up.
@@ -315,12 +333,17 @@ impl AppCore {
             .unwrap_or_default()
     }
 
+    /// A metrics setting that needs no password or token deletes the saved one (spec I50).
     pub fn cluster_settings_set(&self, id: &ClusterId, mut s: ClusterSettings) -> CoreResult<()> {
         s.metrics_provider = s.metrics_provider.normalized()?;
         let metrics_changed = self.cluster_settings_get(id).metrics_provider != s.metrics_provider;
+        let needs_secret = s.metrics_provider.needs_secret();
         self.inner.clusters.update(|all| {
             all.insert(id.clone(), s);
         })?;
+        if !needs_secret {
+            self.inner.secrets.delete(id);
+        }
         if metrics_changed {
             self.metrics().forget(id);
         }
@@ -462,6 +485,10 @@ impl AppCore {
 
     pub(crate) fn metrics(&self) -> &Metrics {
         &self.inner.metrics
+    }
+
+    pub(crate) fn secrets(&self) -> &Secrets {
+        &self.inner.secrets
     }
 
     pub(crate) fn api_docs(&self) -> &ApiDocs {
