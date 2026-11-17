@@ -1,4 +1,3 @@
-import { Ellipsis } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import {
@@ -11,6 +10,7 @@ import {
   type TableColumn,
   VirtualTable,
 } from "../../design";
+import { Ellipsis } from "../../design/glyphs";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { resourcePath } from "../../kinds/nav";
 import { forwardsOf, usePortForwards } from "../../stores/portForwards";

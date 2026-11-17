@@ -1,6 +1,7 @@
-import { type LucideIcon, Plug, Terminal } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import { Plug, Terminal } from "../../design/glyphs";
 import {
   mountView,
   resetSessionsForTest,

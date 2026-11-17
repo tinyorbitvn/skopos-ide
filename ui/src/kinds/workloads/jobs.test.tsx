@@ -1,8 +1,8 @@
 import { act, render, screen, within } from "@testing-library/react";
-import { CirclePause, CirclePlay, Play } from "lucide-react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import { CirclePause, CirclePlay, Play } from "../../design/glyphs";
 import { OverviewSections } from "../../features/details/OverviewSections";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";

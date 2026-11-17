@@ -1,4 +1,4 @@
-import { ScrollText } from "lucide-react";
+import { ScrollText } from "../../design/glyphs";
 import { logsTab, useDock } from "../../stores/dock";
 import type { KindAction } from "../registry";
 

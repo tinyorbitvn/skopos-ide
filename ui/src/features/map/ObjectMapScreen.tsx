@@ -1,7 +1,8 @@
-import { ArrowLeft, RotateCcw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "../../design/Button";
+import { RotateCcw } from "../../design/glyphs";
 import { Segmented } from "../../design/Segmented";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";

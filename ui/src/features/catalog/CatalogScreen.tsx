@@ -1,4 +1,3 @@
-import { Ellipsis } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { clusterStatus } from "../../app/clusterStatus";
@@ -16,6 +15,7 @@ import {
   StatusDot,
   toast,
 } from "../../design";
+import { Ellipsis } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";

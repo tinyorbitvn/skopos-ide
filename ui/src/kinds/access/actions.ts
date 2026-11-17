@@ -1,5 +1,5 @@
-import { KeyRound } from "lucide-react";
 import { createElement } from "react";
+import { KeyRound } from "../../design/glyphs";
 import type { KindAction } from "../registry";
 import { KubeconfigDialog } from "./KubeconfigDialog";
 

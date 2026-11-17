@@ -7,10 +7,10 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { RotateCcw } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { IS_MAC, matchesShortcut } from "../../app/shortcuts";
 import { Button, Spinner } from "../../design";
+import { RotateCcw } from "../../design/glyphs";
 import { restoreWorkspace, useWorkspace } from "../../stores/workspace";
 import { DragGhost } from "./DropZones";
 import { collide, dropAction, parseTarget } from "./drag";

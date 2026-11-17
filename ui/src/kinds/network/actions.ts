@@ -1,5 +1,5 @@
-import { Star } from "lucide-react";
 import { toast } from "../../design";
+import { Star } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import type { KindAction } from "../registry";
 import { isDefaultIngressClass } from "./network";

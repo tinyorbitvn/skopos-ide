@@ -1,6 +1,6 @@
-import { CircleStop, History, RefreshCw, RotateCcw } from "lucide-react";
 import { createElement } from "react";
 import { toast } from "../../design";
+import { CircleStop, History, RefreshCw, RotateCcw } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import type { KindAction } from "../registry";
 import { canTerminate, isDeleting } from "./application";

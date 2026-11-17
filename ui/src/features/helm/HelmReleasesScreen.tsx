@@ -1,10 +1,3 @@
-import {
-  CircleArrowUp,
-  Ellipsis,
-  History,
-  PackagePlus,
-  Trash2,
-} from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
@@ -19,6 +12,13 @@ import {
   useNow,
   VirtualTable,
 } from "../../design";
+import {
+  CircleArrowUp,
+  Ellipsis,
+  History,
+  PackagePlus,
+  Trash2,
+} from "../../design/glyphs";
 import type { HelmRelease } from "../../ipc/generated/HelmRelease";
 import {
   type HelmRun,

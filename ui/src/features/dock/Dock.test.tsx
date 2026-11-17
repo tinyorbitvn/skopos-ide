@@ -1,16 +1,13 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import {
-  FileCode,
   FilePlus,
   type LucideIcon,
   PanelBottom,
-  Plug,
-  ScrollText,
   SquareTerminal,
-  Terminal,
 } from "lucide-react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { FileCode, Plug, ScrollText, Terminal } from "../../design/glyphs";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { resetCatalogForTest } from "../../stores/catalog";
 import {

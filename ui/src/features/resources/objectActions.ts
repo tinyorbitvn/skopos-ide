@@ -1,5 +1,6 @@
-import { FileCode, type LucideIcon, ShieldOff, Trash2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { toast } from "../../design";
+import { FileCode, ShieldOff, Trash2 } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";

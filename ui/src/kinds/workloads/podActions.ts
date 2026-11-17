@@ -1,5 +1,5 @@
-import { Zap } from "lucide-react";
 import { toast } from "../../design";
+import { Zap } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import type { KindAction } from "../registry";
 

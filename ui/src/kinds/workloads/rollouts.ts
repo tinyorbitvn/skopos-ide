@@ -1,6 +1,6 @@
-import { MoveVertical, RotateCw } from "lucide-react";
 import { createElement } from "react";
 import { toast } from "../../design";
+import { MoveVertical, RotateCw } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import type { StatusInfo } from "../columns";
 import type { KubeObject } from "../objects";

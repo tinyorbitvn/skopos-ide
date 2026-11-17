@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { Circle, FileCode } from "lucide-react";
+import { Circle } from "lucide-react";
 import { expect, test, vi } from "vitest";
+import { FileCode } from "../../design/glyphs";
 import { ObjectActionBar } from "./ObjectActionBar";
 import type { ObjectActionItem } from "./objectActions";
 

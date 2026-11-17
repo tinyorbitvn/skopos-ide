@@ -1,6 +1,6 @@
-import { ArrowDownToLine, CirclePause, CirclePlay } from "lucide-react";
 import { createElement } from "react";
 import { toast } from "../../design";
+import { ArrowDownToLine, CirclePause, CirclePlay } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import { baseColumns, textColumn } from "../columns";
 import type { KindAction } from "../registry";

@@ -1,12 +1,12 @@
+import type { LucideIcon } from "lucide-react";
+import { toast } from "../../design";
 import {
   ExternalLink,
-  type LucideIcon,
   Play,
   RotateCw,
   Square,
   Trash2,
-} from "lucide-react";
-import { toast } from "../../design";
+} from "../../design/glyphs";
 import { failureMessage } from "../../ipc/client";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import {

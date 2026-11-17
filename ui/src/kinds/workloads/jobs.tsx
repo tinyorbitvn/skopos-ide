@@ -1,5 +1,5 @@
-import { CirclePause, CirclePlay, Play } from "lucide-react";
 import { toast, useNow } from "../../design";
+import { CirclePause, CirclePlay, Play } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import {
   baseColumns,

@@ -1,5 +1,5 @@
-import { LogOut } from "lucide-react";
 import { toast } from "../../design";
+import { LogOut } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import {
   baseColumns,
