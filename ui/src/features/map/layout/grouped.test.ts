@@ -6,10 +6,13 @@ import {
   gedge,
   gnode,
   ownsCycle,
+  RBAC,
+  rbacGraph,
 } from "../../../test/graph";
 import { buildModel, type MapModel } from "../model";
 import { leafSize } from "./geometry";
 import {
+  ACCESS_BOX,
   boxRects,
   EXTERNAL,
   footprint,
@@ -24,6 +27,11 @@ import {
 
 function demoModel() {
   const { nodes, edges } = demoGraph();
+  return buildModel(nodes, edges);
+}
+
+function rbacModel() {
+  const { nodes, edges } = rbacGraph();
   return buildModel(nodes, edges);
 }
 
@@ -136,6 +144,99 @@ describe("groupedEdges", () => {
       expect(e.d).toMatch(/^M-?\d/);
       expect(e.head).toMatch(/Z$/);
     }
+  });
+});
+
+describe("access columns", () => {
+  it("puts a RoleBinding level with its ServiceAccount in column 4 and its Role level with it in column 5", () => {
+    const model = rbacModel();
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[RBAC.binding]).toBe("ns:shop");
+    expect(tree.parentOf[RBAC.role]).toBe("ns:shop");
+    const pos = layoutGrouped(model, ids, "h");
+    expect(pos[DEMO.configMap].x).toBeLessThan(pos[RBAC.binding].x);
+    expect(pos[RBAC.binding].x).toBeLessThan(pos[RBAC.role].x);
+    expect(pos[RBAC.binding].y).toBeCloseTo(pos[DEMO.account].y);
+    expect(pos[RBAC.role].y).toBeCloseTo(pos[RBAC.binding].y);
+    // A second binding of the same ServiceAccount takes the next free spot.
+    expect(pos[RBAC.viewBinding].x).toBeCloseTo(pos[RBAC.binding].x);
+    expect(pos[RBAC.viewBinding].y).toBeGreaterThan(pos[RBAC.binding].y);
+  });
+
+  it("places the access columns in their boxes without overlaps, both ways", () => {
+    const model = rbacModel();
+    const ids = model.nodes.map((n) => n.id);
+    checkLayout(model, ids, layoutGrouped(model, ids, "h"));
+    const pos = layoutGrouped(model, ids, "v");
+    checkLayout(model, ids, pos);
+    expect(pos[RBAC.binding].x).toBeCloseTo(pos[DEMO.account].x);
+    expect(pos[RBAC.binding].y).toBeGreaterThan(pos[DEMO.account].y);
+  });
+
+  it("holds ClusterRoleBindings and ClusterRoles in the Cluster-wide access box, after the namespaces", () => {
+    const model = rbacModel();
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.groups[ACCESS_BOX]).toMatchObject({
+      kind: "Access",
+      name: "Cluster-wide access",
+      namespace: "",
+    });
+    expect(tree.groups[ACCESS_BOX].kids).toEqual([
+      RBAC.clusterBinding,
+      RBAC.clusterRole,
+    ]);
+    expect(tree.groups[ROOT].kids).toEqual([
+      EXTERNAL,
+      DEMO.gatewayClass,
+      "ns:edge",
+      "ns:jobs",
+      "ns:shop",
+      ACCESS_BOX,
+    ]);
+    const pos = layoutGrouped(model, ids, "h");
+    expect(pos[RBAC.clusterBinding].x).toBeLessThan(pos[RBAC.clusterRole].x);
+    expect(pos[RBAC.clusterRole].y).toBeCloseTo(pos[RBAC.clusterBinding].y);
+  });
+
+  it("puts the ClusterRole of a RoleBinding in the Cluster-wide access box", () => {
+    const model = rbacModel();
+    const ids = [DEMO.account, RBAC.viewBinding, RBAC.clusterRole];
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[RBAC.viewBinding]).toBe("ns:shop");
+    expect(tree.parentOf[RBAC.clusterRole]).toBe(ACCESS_BOX);
+    expect(tree.groups[ACCESS_BOX].kids).toEqual([RBAC.clusterRole]);
+  });
+
+  it("draws no Cluster-wide access box when it would be empty", () => {
+    const model = rbacModel();
+    const namespaced = model.nodes
+      .filter((n) => n.namespace !== "")
+      .map((n) => n.id);
+    expect(groupTree(model, namespaced).groups[ACCESS_BOX]).toBeUndefined();
+    const demo = demoModel();
+    expect(
+      groupTree(
+        demo,
+        demo.nodes.map((n) => n.id),
+      ).groups[ACCESS_BOX],
+    ).toBeUndefined();
+  });
+
+  it("draws binds and grants as access edges between the columns", () => {
+    const model = rbacModel();
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    const edges = groupedEdges(model, tree, layoutGrouped(model, ids), "h", "");
+    const access = edges.filter((e) => e.cls === "access");
+    expect(access.map((e) => `${e.from} ${e.rel} ${e.to}`).sort()).toEqual(
+      model.edges
+        .filter((e) => e.rel === "binds" || e.rel === "grants")
+        .map((e) => `${e.from} ${e.rel} ${e.to}`)
+        .sort(),
+    );
+    for (const e of access) expect(e.ids).toEqual([e.from, e.to]);
   });
 });
 

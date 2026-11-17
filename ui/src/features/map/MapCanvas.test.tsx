@@ -133,6 +133,27 @@ describe("MapCanvas", () => {
     }
   });
 
+  it("draws the Cluster-wide access box like a namespace box, with the c-role icon", () => {
+    const { nodes, edges: links } = rbacGraph();
+    const model = buildModel(nodes, links);
+    const first = draw({ model });
+    const box = screen.getByTestId("map-access");
+    expect(box.getAttribute("class")?.split(" ")).toContain("boxAccess");
+    expect(box.getAttribute("data-box")).toBe("access");
+    expect(box.querySelector("svg")?.getAttribute("data-icon")).toBe("c-role");
+    expect(box.textContent).toBe(
+      "Cluster-wide accessClusterRoleBindings and ClusterRoles",
+    );
+    expect(
+      screen
+        .getAllByTestId("map-namespace")
+        .map((el) => el.getAttribute("data-namespace")),
+    ).toEqual(["edge", "jobs", "shop"]);
+    first.unmount();
+    draw({ model, layout: "layered", memoryKey: "c1|cluster|layered" });
+    expect(screen.queryByTestId("map-access")).toBeNull();
+  });
+
   it("dims the nodes the search does not match", () => {
     draw({ search: "WEB-7D9-A" });
     expect(node(DEMO.podA).classList.contains("dim")).toBe(false);

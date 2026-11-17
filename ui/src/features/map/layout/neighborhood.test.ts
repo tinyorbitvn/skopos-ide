@@ -143,6 +143,10 @@ describe("geometry", () => {
       title: "Outside the cluster",
       sub: "Load balancers",
     });
+    expect(boxText(model, { kind: "Access", id: "", name: "" })).toEqual({
+      title: "Cluster-wide access",
+      sub: "ClusterRoleBindings and ClusterRoles",
+    });
     const deployment = boxText(model, {
       kind: "Deployment",
       id: DEMO.deployment,

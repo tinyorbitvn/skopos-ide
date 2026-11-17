@@ -77,6 +77,13 @@ const LEGEND_EDGES = [
   ["access", "Grants access: binding to ServiceAccount and role"],
 ] as const;
 
+/** The icon in the head of a box that is not an owner (spec E §8.1, O §5.2). */
+const BOX_ICON: Readonly<Record<string, string>> = {
+  Namespace: "Namespace",
+  External: "LoadBalancer",
+  Access: "ClusterRole",
+};
+
 /** A name cut to the label's width; the full name is in the tooltip. */
 function shortName(name: string): string {
   return name.length > 30 ? `${name.slice(0, 29)}…` : name;
@@ -534,7 +541,9 @@ export function MapCanvas({
                       "data-testid": "map-namespace",
                       "data-namespace": b.namespace,
                     }
-                  : {};
+                  : b.kind === "Access"
+                    ? { "data-testid": "map-access" }
+                    : {};
               return (
                 <g
                   key={b.key}
@@ -549,13 +558,7 @@ export function MapCanvas({
                     height={r.y1 - r.y0}
                   />
                   <KindIcon
-                    kind={
-                      node
-                        ? node.kind
-                        : b.kind === "External"
-                          ? "LoadBalancer"
-                          : "Namespace"
-                    }
+                    kind={node ? node.kind : BOX_ICON[b.kind]}
                     size={28}
                     x={r.x0 + 10}
                     y={r.y0 + 9}

@@ -53,7 +53,10 @@ export interface SceneIcon {
   size: number;
 }
 
-/** A Grouped box: an owner (with its node), a namespace, or the outside. */
+/**
+ * A Grouped box: an owner (with its node), a namespace, the outside, or the Cluster-wide
+ * access box.
+ */
 export interface SceneBox {
   key: string;
   node: GraphNode | null;
