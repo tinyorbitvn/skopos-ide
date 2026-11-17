@@ -60,11 +60,12 @@ The Argo CD actions write an Application the way the Argo CD API server does
 - License: Apache-2.0, the license in `LICENSE`, chosen of the two the set offers (Apache-2.0
   and CC-BY-4.0). Copyright The Kubernetes Authors.
 
-The resource map draws 15 of these icons (`pod`, `deploy`, `rs`, `sts`, `ds`, `job`,
-`cronjob`, `svc`, `ing`, `cm`, `secret`, `sa`, `pvc`, `ns`, `crd`). `ui/scripts/packK8sIcons.mjs`
-packs them into path data in `ui/src/features/map/icons/k8sIcons.ts` and leaves their shapes
-and colours unchanged. The Gateway, HTTPRoute and GatewayClass icons put a Lucide glyph in the
-frame of the set's Ingress icon.
+The resource map draws 19 of these icons (`pod`, `deploy`, `rs`, `sts`, `ds`, `job`,
+`cronjob`, `svc`, `ing`, `cm`, `secret`, `sa`, `pvc`, `ns`, `crd`, `role`, `rb`, `c-role`,
+`crb`). `ui/scripts/packK8sIcons.mjs` packs them into path data in
+`ui/src/features/map/icons/k8sIcons.ts` and leaves their shapes and colours unchanged. The
+Gateway, HTTPRoute and GatewayClass icons put a Lucide glyph in the frame of the set's Ingress
+icon.
 
 The Kubernetes logo is a registered trademark of The Linux Foundation; its use here does not
 imply endorsement by The Linux Foundation or the CNCF.

@@ -6,6 +6,8 @@ import {
   demoGraph,
   drawnHiding,
   gnode,
+  RBAC,
+  rbacGraph,
   servedResource,
 } from "../../test/graph";
 import { MapDetails, type MapDetailsProps, placeLine } from "./MapDetails";
@@ -40,6 +42,11 @@ function show(id: string, over: Partial<MapDetailsProps> = {}) {
     </MemoryRouter>,
   );
   return props;
+}
+
+function rbacModel() {
+  const { nodes, edges } = rbacGraph();
+  return buildModel(nodes, edges);
 }
 
 const facts = () =>
@@ -105,6 +112,29 @@ describe("MapDetails", () => {
       `out routes ${DEMO.route}: Routes to HTTPRouteweb`,
       `out class ${DEMO.gatewayClass}: Uses class GatewayClassshared`,
       `in routes ${DEMO.gatewayLb}: Routed from LoadBalancer203.0.113.24`,
+    ]);
+  });
+
+  it("labels a binding's links Binds and Grants", () => {
+    show(RBAC.clusterBinding, { model: rbacModel() });
+    expect(connections()).toEqual([
+      `out binds ${DEMO.account}: Binds ServiceAccountweb`,
+      `out binds ${RBAC.nightly}: Binds ServiceAccountnightly`,
+      `out grants ${RBAC.clusterRole}: Grants ClusterRoleview`,
+    ]);
+  });
+
+  it("labels the links into a ServiceAccount Bound by", () => {
+    show(DEMO.account, { model: rbacModel() });
+    expect(connections()).toContain(
+      `in binds ${RBAC.binding}: Bound by RoleBindingweb-config-reader`,
+    );
+  });
+
+  it("labels the links into a role Granted by", () => {
+    show(RBAC.role, { model: rbacModel() });
+    expect(connections()).toEqual([
+      `in grants ${RBAC.binding}: Granted by RoleBindingweb-config-reader`,
     ]);
   });
 

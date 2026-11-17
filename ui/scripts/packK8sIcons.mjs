@@ -3,7 +3,8 @@
 // Each icon becomes { vb, paths: [{ d, s, t }] }: `s` is its paint as a style string and `t`
 // joins its ancestors' transforms. <use> elements are resolved to their target, and the
 // editor metadata is dropped. Shapes and colours are not changed.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 
 const NAMES = [
@@ -22,6 +23,10 @@ const NAMES = [
   "pvc",
   "ns",
   "crd",
+  "role",
+  "rb",
+  "c-role",
+  "crb",
 ];
 const XLINK = "http://www.w3.org/1999/xlink";
 const PAINT = [
@@ -98,11 +103,21 @@ function styleOf(paint) {
 const num = (el, key) => Number(el.getAttribute(key) ?? 0);
 
 /** A path for the shapes the set uses, or null for anything else. */
-function shape(el, tag) {
+export function shape(el, tag) {
   if (tag === "path") return el.getAttribute("d");
   if (tag === "circle") {
     const [cx, cy, r] = [num(el, "cx"), num(el, "cy"), num(el, "r")];
     return `M${cx - r} ${cy} a${r} ${r} 0 1 0 ${2 * r} 0 a${r} ${r} 0 1 0 ${-2 * r} 0 Z`;
+  }
+  // Two arcs from the left end, as a circle (spec O §5.4).
+  if (tag === "ellipse") {
+    const [cx, cy, rx, ry] = [
+      num(el, "cx"),
+      num(el, "cy"),
+      num(el, "rx"),
+      num(el, "ry"),
+    ];
+    return `M${cx - rx} ${cy} a${rx} ${ry} 0 1 0 ${2 * rx} 0 a${rx} ${ry} 0 1 0 ${-2 * rx} 0 Z`;
   }
   if (tag === "rect") {
     const [x, y, w, h] = [
@@ -171,37 +186,49 @@ function pack(file) {
   return { vb: rnd(root.getAttribute("viewBox") ?? "0 0 1 1"), paths };
 }
 
-const [dir, out] = process.argv.slice(2);
-if (!dir || !out) {
-  console.error("usage: node ui/scripts/packK8sIcons.mjs <icon dir> <out.ts>");
-  process.exit(2);
+function main() {
+  const [dir, out] = process.argv.slice(2);
+  if (!dir || !out) {
+    console.error(
+      "usage: node ui/scripts/packK8sIcons.mjs <icon dir> <out.ts>",
+    );
+    process.exit(2);
+  }
+  const icons = Object.fromEntries(
+    NAMES.map((name) => [name, pack(`${dir}/${name}.svg`)]),
+  );
+  for (const name of NAMES) console.error(name, icons[name].paths.length);
+  writeFileSync(
+    out,
+    [
+      "// The Kubernetes Icons Set's unlabeled resource icons. Copyright The Kubernetes Authors,",
+      "// Apache-2.0: see THIRD_PARTY_NOTICES.md. Packed by ui/scripts/packK8sIcons.mjs; do not",
+      "// edit by hand.",
+      "",
+      `export type K8sIconName = ${NAMES.map((n) => JSON.stringify(n)).join(" | ")};`,
+      "",
+      "/** One path: its data, its paint as a style string, and its transforms. */",
+      "export interface IconPath {",
+      "  d: string;",
+      "  s: string;",
+      "  t: string;",
+      "}",
+      "",
+      "export interface PackedIcon {",
+      "  vb: string;",
+      "  paths: IconPath[];",
+      "}",
+      "",
+      `export const K8S_ICONS: Readonly<Record<K8sIconName, PackedIcon>> = ${JSON.stringify(icons, null, 2)};`,
+      "",
+    ].join("\n"),
+  );
 }
-const icons = Object.fromEntries(
-  NAMES.map((name) => [name, pack(`${dir}/${name}.svg`)]),
-);
-for (const name of NAMES) console.error(name, icons[name].paths.length);
-writeFileSync(
-  out,
-  [
-    "// The Kubernetes Icons Set's unlabeled resource icons. Copyright The Kubernetes Authors,",
-    "// Apache-2.0: see THIRD_PARTY_NOTICES.md. Packed by ui/scripts/packK8sIcons.mjs; do not",
-    "// edit by hand.",
-    "",
-    `export type K8sIconName = ${NAMES.map((n) => JSON.stringify(n)).join(" | ")};`,
-    "",
-    "/** One path: its data, its paint as a style string, and its transforms. */",
-    "export interface IconPath {",
-    "  d: string;",
-    "  s: string;",
-    "  t: string;",
-    "}",
-    "",
-    "export interface PackedIcon {",
-    "  vb: string;",
-    "  paths: IconPath[];",
-    "}",
-    "",
-    `export const K8S_ICONS: Readonly<Record<K8sIconName, PackedIcon>> = ${JSON.stringify(icons, null, 2)};`,
-    "",
-  ].join("\n"),
-);
+
+// Packs only when run as a script, so tests can import `shape`.
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main();
+}

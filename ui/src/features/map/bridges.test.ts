@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge } from "../../ipc/generated/GraphEdge";
 import type { GraphNode } from "../../ipc/generated/GraphNode";
-import { DEMO, demoGraph, gedge, gnode, ownsCycle } from "../../test/graph";
+import {
+  DEMO,
+  demoGraph,
+  gedge,
+  gnode,
+  ownsCycle,
+  rbacGraph,
+} from "../../test/graph";
 import { bridgeEdges } from "./bridges";
 import { kindView } from "./filters";
 import { buildModel, namespaceView } from "./model";
@@ -129,6 +136,16 @@ describe("bridgeEdges", () => {
       gedge("Pod/n/orphan", "mounts", "ConfigMap/n/c"),
     ];
     expect(bridgesHiding(["Pod"], nodes, edges)).toEqual([]);
+  });
+
+  it("bridges no access link through a hidden ServiceAccount or binding", () => {
+    const { nodes, edges } = rbacGraph();
+    for (const kinds of [
+      ["ServiceAccount"],
+      ["RoleBinding", "ClusterRoleBinding"],
+    ]) {
+      expect(bridgesHiding(kinds, nodes, edges), kinds.join()).toEqual([]);
+    }
   });
 
   it("ignores nodes outside the view", () => {

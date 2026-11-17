@@ -107,7 +107,7 @@ describe("namespaceView", () => {
 });
 
 describe("levels", () => {
-  it("orders kinds the way in first and config last", () => {
+  it("orders kinds the way in first, config, then bindings and roles last", () => {
     expect(levelOf("LoadBalancer")).toBe(0);
     expect(levelOf("HTTPRoute")).toBe(1);
     expect(levelOf("GatewayClass")).toBe(2);
@@ -115,6 +115,10 @@ describe("levels", () => {
     expect(levelOf("Job")).toBe(4);
     expect(levelOf("Pod")).toBe(5);
     expect(levelOf("PersistentVolumeClaim")).toBe(9);
+    expect(levelOf("RoleBinding")).toBe(10);
+    expect(levelOf("ClusterRoleBinding")).toBe(10);
+    expect(levelOf("Role")).toBe(11);
+    expect(levelOf("ClusterRole")).toBe(11);
     expect(levelOf("Widget")).toBe(5);
   });
 

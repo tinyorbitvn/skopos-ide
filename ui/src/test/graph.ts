@@ -34,6 +34,10 @@ const LISTS: Record<string, [string, string]> = {
   Gateway: ["gateway.networking.k8s.io", "gateways"],
   HTTPRoute: ["gateway.networking.k8s.io", "httproutes"],
   GatewayClass: ["gateway.networking.k8s.io", "gatewayclasses"],
+  Role: ["rbac.authorization.k8s.io", "roles"],
+  RoleBinding: ["rbac.authorization.k8s.io", "rolebindings"],
+  ClusterRole: ["rbac.authorization.k8s.io", "clusterroles"],
+  ClusterRoleBinding: ["rbac.authorization.k8s.io", "clusterrolebindings"],
 };
 
 /** A node from its id, `‹Kind›/‹namespace›/‹name›`, healthy and without facts. */
@@ -252,6 +256,79 @@ export function demoGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     gedge(d.jobPod, "env", d.token),
   ];
   return { nodes, edges };
+}
+
+/** Ids of the access chains `rbacGraph` adds to the demo graph. */
+export const RBAC = {
+  binding: "RoleBinding/shop/web-config-reader",
+  role: "Role/shop/web-config-reader",
+  viewBinding: "RoleBinding/shop/web-view",
+  clusterBinding: "ClusterRoleBinding//readers",
+  clusterRole: "ClusterRole//view",
+  nightly: "ServiceAccount/jobs/nightly",
+  nightlyBinding: "RoleBinding/jobs/nightly-view",
+} as const;
+
+/**
+ * The demo graph with access chains (spec O §4): the shop's ServiceAccount has a
+ * RoleBinding to a Role and one to ClusterRole `view`, and a ClusterRoleBinding to `view`
+ * that also binds the nightly Job's ServiceAccount, which a RoleBinding of its own
+ * namespace binds to `view` as well.
+ */
+export function rbacGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const { nodes, edges } = demoGraph();
+  const d = DEMO;
+  const a = RBAC;
+  const binding = (role: string, subjects: string): [string, string][] => [
+    ["Role", role],
+    ["Subjects", subjects],
+  ];
+  return {
+    nodes: [
+      ...nodes,
+      gnode(a.nightly, { status: "neutral" }),
+      gnode(a.binding, {
+        status: "neutral",
+        facts: binding("Role web-config-reader", "1 ServiceAccount"),
+      }),
+      gnode(a.role, {
+        status: "neutral",
+        facts: [["configmaps", "get, list"]],
+      }),
+      gnode(a.viewBinding, {
+        status: "neutral",
+        facts: binding("ClusterRole view", "1 ServiceAccount"),
+      }),
+      gnode(a.clusterBinding, {
+        status: "neutral",
+        facts: binding("ClusterRole view", "2 ServiceAccounts"),
+      }),
+      gnode(a.clusterRole, {
+        status: "neutral",
+        facts: [
+          ["pods, services", "get, list, watch"],
+          ["Aggregated", "Yes"],
+        ],
+      }),
+      gnode(a.nightlyBinding, {
+        status: "neutral",
+        facts: binding("ClusterRole view", "1 ServiceAccount"),
+      }),
+    ],
+    edges: [
+      ...edges,
+      gedge(d.jobPod, "runsAs", a.nightly),
+      gedge(a.binding, "binds", d.account),
+      gedge(a.binding, "grants", a.role),
+      gedge(a.viewBinding, "binds", d.account),
+      gedge(a.viewBinding, "grants", a.clusterRole),
+      gedge(a.clusterBinding, "binds", d.account),
+      gedge(a.clusterBinding, "binds", a.nightly),
+      gedge(a.clusterBinding, "grants", a.clusterRole),
+      gedge(a.nightlyBinding, "binds", a.nightly),
+      gedge(a.nightlyBinding, "grants", a.clusterRole),
+    ],
+  };
 }
 
 /** A served resource the current user may do anything with, as discovery lists it. */

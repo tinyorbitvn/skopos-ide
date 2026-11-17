@@ -74,6 +74,7 @@ const LEGEND_EDGES = [
   ["own", "Owns"],
   ["net", "Routes traffic: LB, Gateway, Route, Ingress, Service"],
   ["use", "Mounts or uses (config, GatewayClass)"],
+  ["access", "Grants access: binding to ServiceAccount and role"],
 ] as const;
 
 /** A name cut to the label's width; the full name is in the tooltip. */
