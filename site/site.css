@@ -83,7 +83,7 @@ a:hover {
 }
 
 a:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
   border-radius: 4px;
   box-shadow: var(--focus-ring);
 }
@@ -144,7 +144,7 @@ a:focus-visible {
   font: var(--type-overline);
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .mono {
@@ -233,7 +233,7 @@ a:focus-visible {
 }
 
 .button:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
   border-radius: var(--radius-control);
   box-shadow: var(--focus-ring);
 }
@@ -296,7 +296,7 @@ a:focus-visible {
 }
 
 .next-release:not(.badge) {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /* Hero */
@@ -341,7 +341,7 @@ a:focus-visible {
   justify-content: center;
   gap: 6px 14px;
   font: var(--type-caption);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .hero__alt {
@@ -413,7 +413,7 @@ a:focus-visible {
   display: block;
   margin-top: 4px;
   font: var(--type-body-sm);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /* Sections */
@@ -456,6 +456,7 @@ a:focus-visible {
 
 .feature--flip {
   flex-direction: row-reverse;
+  justify-content: flex-end;
 }
 
 .feature__text {
@@ -625,7 +626,7 @@ a:focus-visible {
   margin-top: 2px;
   font-family: var(--font-mono);
   font-size: var(--text-11);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
@@ -730,7 +731,7 @@ a:focus-visible {
   margin: 8px 0 0;
   max-width: 28ch;
   font: var(--type-body-sm);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .footer ul {
@@ -750,7 +751,7 @@ a:focus-visible {
   flex-wrap: wrap;
   gap: 8px 20px;
   font: var(--type-caption);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .footer__bottom .mono {
