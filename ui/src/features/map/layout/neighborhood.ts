@@ -9,12 +9,16 @@ export type Depth = 1 | 2 | "all";
  *
  * - The owner chain above the focus, and everything it owns below.
  * - Links within `depth` hops, counted from the focus and everything it owns, where
- *   ConfigMap, Secret, ServiceAccount, PersistentVolumeClaim and GatewayClass end a path.
+ *   ConfigMap, Secret, ServiceAccount, PersistentVolumeClaim, GatewayClass, Role and
+ *   ClusterRole end a path.
  * - Inbound traffic climbed over `routes` edges up to the load balancer, from each Service,
  *   route, Ingress or Gateway reached in fewer than `depth` hops. A Gateway brings its
  *   GatewayClass.
  * - An entry point walks forward over `routes` and `selects` to Services and Pods, which
  *   bring their owner chain.
+ * - Each ServiceAccount brings, whatever the depth, the bindings that bind it and the roles
+ *   they grant. No walk goes from a binding to the other ServiceAccounts it binds (spec O
+ *   §5.3).
  */
 export function neighborhood(
   model: MapModel,
@@ -48,7 +52,8 @@ export function neighborhood(
     const d = seen.get(id) ?? 0;
     if (d >= max || (id !== focusId && LEAVES.has(kindOf(id)))) continue;
     for (const link of linksOf(model, id)) {
-      if (seen.has(link.other)) continue;
+      // A binding reached through its owner leads to its role, not its ServiceAccounts.
+      if (seen.has(link.other) || (link.rel === "binds" && link.out)) continue;
       seen.set(link.other, d + 1);
       queue.push(link.other);
     }
@@ -92,5 +97,17 @@ export function neighborhood(
     if (kindOf(id) !== "LoadBalancer") climb(id, true, front);
   }
   for (const id of front) if (!seen.has(id)) seen.set(id, max);
+  // Each ServiceAccount's bindings and the roles they grant, whatever the depth.
+  for (const id of [...seen.keys()]) {
+    if (kindOf(id) !== "ServiceAccount") continue;
+    for (const bound of linksOf(model, id)) {
+      if (bound.rel !== "binds" || bound.out) continue;
+      if (!seen.has(bound.other)) seen.set(bound.other, max);
+      for (const granted of linksOf(model, bound.other)) {
+        if (granted.rel !== "grants" || !granted.out) continue;
+        if (!seen.has(granted.other)) seen.set(granted.other, max);
+      }
+    }
+  }
   return [...seen.keys()];
 }

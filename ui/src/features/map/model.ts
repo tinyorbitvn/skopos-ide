@@ -86,12 +86,24 @@ const VIEW_STOPS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The links a namespace view follows: `routes` and `class` either way, a ServiceAccount to
+ * the bindings that bind it, and a binding to the role it grants (spec O §4.5). A binding
+ * leads to none of the ServiceAccounts it binds, and a role leads nowhere.
+ */
+const joins = (link: Link) =>
+  link.rel === "routes" ||
+  link.rel === "class" ||
+  (link.rel === "binds" && !link.out) ||
+  (link.rel === "grants" && link.out);
+
+/**
  * The ids drawn when the namespaces in `hidden` are hidden, in the snapshot's order.
  * With nothing hidden, every node. Otherwise the nodes of the shown namespaces, then,
- * until nothing is added, every node joined to one of them by a `routes` or `class`
- * edge: the subscription's own rule (spec E §4.7), which also brings in the cluster-scoped
- * and load balancer nodes connected to what is shown. A GatewayClass or LoadBalancer is
- * brought in but never walked on from, because many objects share one.
+ * until nothing is added, every node `joins` reaches from one of them: the subscription's
+ * own rule (spec E §4.7, O §4.5), which also brings in the cluster-scoped and load
+ * balancer nodes connected to what is shown, the bindings of its ServiceAccounts and the
+ * roles of its bindings. A GatewayClass or LoadBalancer is brought in but never walked on
+ * from, because many objects share one.
  */
 export function namespaceView(
   model: MapModel,
@@ -106,8 +118,7 @@ export function namespaceView(
   const queue = [...shown];
   for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
     for (const link of linksOf(model, id)) {
-      if (link.rel !== "routes" && link.rel !== "class") continue;
-      if (shown.has(link.other)) continue;
+      if (!joins(link) || shown.has(link.other)) continue;
       shown.add(link.other);
       if (!VIEW_STOPS.has(nodeOf(model, link.other).kind))
         queue.push(link.other);
