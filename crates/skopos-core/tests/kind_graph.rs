@@ -1,4 +1,4 @@
-//! The resource graph against the real `skopos-e2e` kind cluster (spec E §4.8).
+//! The resource graph against the real `skopos-e2e` kind cluster (spec E §4.8, O §4.6).
 //! Needs `make test-kind`. Only `e2e/.tmp/kubeconfig` is read, never a default one.
 
 use std::panic::AssertUnwindSafe;
@@ -27,6 +27,9 @@ const CONTEXT: &str = "kind-skopos-e2e";
 /// The namespace, and the GatewayClass's name.
 const NAMESPACE: &str = "skopos-test-graph";
 const GATEWAY: &str = "gateway.networking.k8s.io";
+const RBAC: &str = "rbac.authorization.k8s.io";
+/// The ClusterRoleBinding of ServiceAccount `web` to the built-in ClusterRole `view`.
+const VIEW_BINDING: &str = "skopos-test-graph-web-view";
 const GATEWAY_API: &str =
     "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml";
 const GATEWAY_CRDS: [&str; 3] = [
@@ -147,6 +150,16 @@ fn api(
 
 fn gateway_classes(client: &Client) -> Api<DynamicObject> {
     api(client, GATEWAY, "GatewayClass", "gatewayclasses", false)
+}
+
+fn cluster_role_bindings(client: &Client) -> Api<DynamicObject> {
+    api(
+        client,
+        RBAC,
+        "ClusterRoleBinding",
+        "clusterrolebindings",
+        false,
+    )
 }
 
 async fn apply(api: &Api<DynamicObject>, object: Value) {
@@ -288,6 +301,45 @@ async fn create_fixture(client: &Client) {
     }
 }
 
+/// Spec O §4.6: ServiceAccount `web` gets a RoleBinding to a Role that reads ConfigMaps, and a
+/// ClusterRoleBinding to the built-in ClusterRole `view`.
+async fn create_access(client: &Client) {
+    let subjects = json!([{ "kind": "ServiceAccount", "name": "web", "namespace": NAMESPACE }]);
+    let role_ref = |kind: &str, name: &str| json!({ "apiGroup": RBAC, "kind": kind, "name": name });
+    apply(
+        &api(client, RBAC, "Role", "roles", true),
+        json!({
+            "apiVersion": format!("{RBAC}/v1"),
+            "kind": "Role",
+            "metadata": { "name": "web-config-reader", "namespace": NAMESPACE },
+            "rules": [{ "apiGroups": [""], "resources": ["configmaps"], "verbs": ["get", "list"] }],
+        }),
+    )
+    .await;
+    apply(
+        &api(client, RBAC, "RoleBinding", "rolebindings", true),
+        json!({
+            "apiVersion": format!("{RBAC}/v1"),
+            "kind": "RoleBinding",
+            "metadata": { "name": "web-config-reader", "namespace": NAMESPACE },
+            "roleRef": role_ref("Role", "web-config-reader"),
+            "subjects": subjects,
+        }),
+    )
+    .await;
+    apply(
+        &cluster_role_bindings(client),
+        json!({
+            "apiVersion": format!("{RBAC}/v1"),
+            "kind": "ClusterRoleBinding",
+            "metadata": { "name": VIEW_BINDING },
+            "roleRef": role_ref("ClusterRole", "view"),
+            "subjects": subjects,
+        }),
+    )
+    .await;
+}
+
 /// Waits out a leftover from an earlier failed run, then creates the namespace.
 async fn create_namespace(client: &Client) {
     let namespaces: Api<Namespace> = Api::all(client.clone());
@@ -310,8 +362,8 @@ async fn create_namespace(client: &Client) {
         .unwrap();
 }
 
-/// Builds the fixture, runs `body`, removes the namespace and the GatewayClass whether or not
-/// it failed, then reports the failure.
+/// Builds the fixture, runs `body`, removes the namespace, the GatewayClass and the
+/// ClusterRoleBinding whether or not it failed, then reports the failure.
 async fn with_fixture<F>(client: &Client, body: F)
 where
     F: std::future::Future<Output = ()>,
@@ -327,6 +379,9 @@ where
     let _ = namespaces.delete(NAMESPACE, &DeleteParams::default()).await;
     let _ = gateway_classes(client)
         .delete(NAMESPACE, &DeleteParams::default())
+        .await;
+    let _ = cluster_role_bindings(client)
+        .delete(VIEW_BINDING, &DeleteParams::default())
         .await;
     if let Err(panic) = outcome {
         std::panic::resume_unwind(panic);
@@ -549,6 +604,69 @@ async fn the_graph_of_the_e2e_fixture() {
             status_of(&later, &id("ConfigMap", "web-config")).0,
             GraphStatus::Critical
         );
+        core.resource_graph_unsubscribe(&map.id);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "needs the skopos-e2e kind cluster"]
+async fn the_access_chain_of_a_service_account() {
+    install_gateway_api();
+    let (core, cluster, _root) = connected().await;
+    let client = core.cluster_client(&cluster).unwrap();
+    with_fixture(&client, async {
+        create_access(&client).await;
+        let mut map = Map::start(&core, &cluster);
+        let role = id("Role", "web-config-reader");
+        let view = "ClusterRole//view";
+        let chain = map
+            .until("the Role and ClusterRole view", |s| {
+                s.find(&role).is_some() && s.find(view).is_some()
+            })
+            .await;
+
+        let account = id("ServiceAccount", "web");
+        let binding = id("RoleBinding", "web-config-reader");
+        let cluster_binding = format!("ClusterRoleBinding//{VIEW_BINDING}");
+        let pod = chain.only("Pod").id.clone();
+        for (from, to, rel) in [
+            (pod.as_str(), account.as_str(), GraphRel::RunsAs),
+            (binding.as_str(), account.as_str(), GraphRel::Binds),
+            (binding.as_str(), role.as_str(), GraphRel::Grants),
+            (cluster_binding.as_str(), account.as_str(), GraphRel::Binds),
+            (cluster_binding.as_str(), view, GraphRel::Grants),
+        ] {
+            assert!(chain.has_edge(from, to, rel), "{from} {rel:?} {to}");
+        }
+        assert_eq!(status_of(&chain, &role), (GraphStatus::Neutral, None));
+        assert_eq!(
+            chain.node(&role).facts,
+            [("configmaps".to_owned(), "get, list".to_owned())]
+        );
+        assert_eq!(
+            chain.node(&binding).facts,
+            [
+                ("Role".to_owned(), "Role web-config-reader".to_owned()),
+                ("Subjects".to_owned(), "1 ServiceAccount".to_owned()),
+            ]
+        );
+        assert_eq!(
+            chain.node(view).facts.last(),
+            Some(&("Aggregated".to_owned(), "Yes".to_owned())),
+            "the built-in view collects the aggregate-to-view roles"
+        );
+        let counted = chain
+            .counts
+            .iter()
+            .find(|c| c.namespace == NAMESPACE)
+            .map(|c| c.nodes);
+        assert_eq!(
+            counted,
+            Some(13),
+            "the RoleBinding and the Role join the eleven"
+        );
+        assert!(chain.missing.is_empty(), "{:?}", chain.missing);
         core.resource_graph_unsubscribe(&map.id);
     })
     .await;
