@@ -7,6 +7,9 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "../../design";
+import type { MapFormat } from "../../ipc/generated/MapFormat";
+import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { resetGraphForTest } from "../../stores/graph";
 import {
   DEMO,
@@ -17,10 +20,14 @@ import {
   servedResource,
   snapshotOf,
 } from "../../test/graph";
-import { flush } from "../../test/ipc";
+import { clusterEntry, flush } from "../../test/ipc";
+import { exportButton, MAP_IMAGE, pickExport } from "../../test/mapExport";
 import { mockElementSize } from "../../test/size";
 import { ClusterMapScreen, FORCE_HINT } from "./ClusterMapScreen";
+import { renderMapPng } from "./exportMap";
 import { resetMovedForTest } from "./MapCanvas";
+
+vi.mock("./exportMap", () => ({ renderMapPng: vi.fn() }));
 
 function Where() {
   const location = useLocation();
@@ -33,9 +40,11 @@ let store: Record<string, unknown>;
 async function show(
   saved: Record<string, unknown> = {},
   defaultNamespace: string | null = null,
+  handlers: Parameters<typeof graphBackend>[0] = {},
 ) {
   store = { ...saved };
   g = graphBackend({
+    ...handlers,
     ui_state_get: (a: { key: string }) => store[a.key] ?? null,
     ui_state_set: (a: { key: string; value: unknown }) => {
       store[a.key] = a.value;
@@ -427,5 +436,142 @@ describe("ClusterMapScreen", () => {
     fireEvent.click(screen.getByTestId("map-layout-layered"));
     expect(radio("layered").checked).toBe(true);
     await waitFor(() => expect(store["map.layout.c1"]).toBe("layered"));
+  });
+});
+
+describe("ClusterMapScreen Export", () => {
+  beforeEach(() => {
+    useCatalog.setState({
+      clusters: [
+        clusterEntry({
+          id: "c1",
+          name: "arn:aws:eks:eu-west-1:1:cluster/prod",
+        }),
+      ],
+    });
+    vi.mocked(renderMapPng).mockReset().mockResolvedValue(MAP_IMAGE);
+  });
+
+  afterEach(() => {
+    resetCatalogForTest();
+  });
+
+  it("sits before Reset layout, disabled while the map loads and on error", async () => {
+    await show();
+    const button = exportButton();
+    expect(button.title).toBe("Save the map as you see it");
+    expect(button.textContent).toBe("Export");
+    expect(button.nextElementSibling?.getAttribute("data-testid")).toBe(
+      "map-reset",
+    );
+    expect(button.disabled).toBe(true);
+    await g.send(demoSnapshot());
+    expect(exportButton().disabled).toBe(false);
+    await g.send({ type: "failure", message: "discovery failed" });
+    expect(exportButton().disabled).toBe(true);
+  });
+
+  it("is disabled while too many resources or none are shown", async () => {
+    await show();
+    await g.send(snapshotOf(pods(1501), []));
+    expect(exportButton().disabled).toBe(true);
+    await g.send(snapshotOf([], []));
+    expect(exportButton().disabled).toBe(true);
+  });
+
+  it.each<[MapFormat, string, string, string]>([
+    [
+      "png",
+      "PNG image",
+      "Map exported as PNG",
+      "arn-aws-eks-eu-west-1-1-cluster-prod-map.png",
+    ],
+    [
+      "pdf",
+      "PDF document",
+      "Map exported as PDF",
+      "arn-aws-eks-eu-west-1-1-cluster-prod-map.pdf",
+    ],
+  ])(
+    "%s asks where to save as %s, writes the drawn canvas and toasts the path written",
+    async (format, filter, done, name) => {
+      const success = vi.spyOn(toast, "success");
+      await show({}, null, {
+        "plugin:dialog|save": () => "/home/me/maps/prod",
+        map_export: () => `/home/me/maps/prod.${format}`,
+      });
+      await g.send(demoSnapshot());
+      await pickExport(format);
+      expect(g.backend.callsTo("plugin:dialog|save")).toEqual([
+        {
+          options: {
+            defaultPath: name,
+            filters: [{ name: filter, extensions: [format] }],
+          },
+        },
+      ]);
+      expect(renderMapPng).toHaveBeenCalledWith(
+        screen.getByTestId("map-canvas"),
+      );
+      expect(g.backend.callsTo("map_export")).toEqual([
+        { path: "/home/me/maps/prod", format, png: MAP_IMAGE.png, scale: 2 },
+      ]);
+      expect(success).toHaveBeenCalledWith(
+        done,
+        `/home/me/maps/prod.${format}`,
+      );
+    },
+  );
+
+  it("does nothing more, and says nothing, when the save dialog is cancelled", async () => {
+    const success = vi.spyOn(toast, "success");
+    const error = vi.spyOn(toast, "error");
+    await show({}, null, { "plugin:dialog|save": () => null });
+    await g.send(demoSnapshot());
+    await pickExport("png");
+    expect(g.backend.callsTo("plugin:dialog|save")).toHaveLength(1);
+    expect(renderMapPng).not.toHaveBeenCalled();
+    expect(g.backend.callsTo("map_export")).toEqual([]);
+    expect(success).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    expect(exportButton().disabled).toBe(false);
+  });
+
+  it("is disabled while an export runs, and a second one does nothing", async () => {
+    let finish: (path: string) => void = () => {};
+    await show({}, null, {
+      "plugin:dialog|save": () => "/home/me/prod.png",
+      map_export: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await g.send(demoSnapshot());
+    await pickExport("png");
+    expect(exportButton().disabled).toBe(true);
+    await pickExport("pdf");
+    expect(g.backend.callsTo("plugin:dialog|save")).toHaveLength(1);
+    await act(async () => {
+      finish("/home/me/prod.png");
+      await flush();
+    });
+    expect(exportButton().disabled).toBe(false);
+  });
+
+  it("shows the reason when map_export fails", async () => {
+    const error = vi.spyOn(toast, "error");
+    await show({}, null, {
+      "plugin:dialog|save": () => "/root/prod.png",
+      map_export: () => {
+        throw { code: "Forbidden", message: "Permission denied (os error 13)" };
+      },
+    });
+    await g.send(demoSnapshot());
+    await pickExport("png");
+    expect(error).toHaveBeenCalledWith(
+      "Could not export the map",
+      "Permission denied (os error 13)",
+    );
+    expect(exportButton().disabled).toBe(false);
   });
 });

@@ -70,6 +70,14 @@ describe("MapCanvas", () => {
     );
   });
 
+  it("points canvasRef at the canvas element, and lets go of it when unmounted", () => {
+    const canvasRef = { current: null as HTMLDivElement | null };
+    const { unmount } = draw({ canvasRef });
+    expect(canvasRef.current).toBe(screen.getByTestId("map-canvas"));
+    unmount();
+    expect(canvasRef.current).toBeNull();
+  });
+
   it("draws every node with its test attributes, owners as boxes in Grouped", () => {
     draw();
     expect(screen.getAllByTestId("map-node")).toHaveLength(22);
