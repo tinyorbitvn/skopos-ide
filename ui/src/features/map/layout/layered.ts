@@ -6,11 +6,19 @@ import type { Positions } from "./grouped";
 const SELECTS: ReadonlySet<GraphRel> = new Set(["selects"]);
 const ROUTES: ReadonlySet<GraphRel> = new Set(["routes"]);
 const OWNS: ReadonlySet<GraphRel> = new Set(["owns"]);
+const BINDS: ReadonlySet<GraphRel> = new Set(["binds"]);
+const GRANTS: ReadonlySet<GraphRel> = new Set(["grants"]);
+const BINDINGS: ReadonlySet<string> = new Set([
+  "RoleBinding",
+  "ClusterRoleBinding",
+]);
+const ROLES: ReadonlySet<string> = new Set(["Role", "ClusterRole"]);
 
 /**
  * Each node's rank: ownership first (Deployment → ReplicaSet → Pod), then a Service one
  * rank before the Pods it selects, routes before their Services, Gateways before their
- * routes, load balancers first, and config one rank after the Pods that use it.
+ * routes, load balancers first, config one rank after the Pods that use it, a binding one
+ * rank after the ServiceAccounts it binds and a role one after the bindings that grant it.
  */
 export function ranks(
   model: MapModel,
@@ -73,10 +81,25 @@ export function ranks(
     for (const id of lbs) rank[id] = first;
   }
   pass(
-    (id) => !(id in rank),
+    (id) => !(id in rank) && !BINDINGS.has(kind(id)) && !ROLES.has(kind(id)),
     (id) => {
       const u = linked(id, USE, "in");
       return u.length ? Math.max(...u) + 1 : ownerNext(id);
+    },
+  );
+  // The access chain follows its ServiceAccounts, in the level order (spec O §5.2).
+  pass(
+    (id) => BINDINGS.has(kind(id)),
+    (id) => {
+      const a = linked(id, BINDS, "out");
+      return a.length ? Math.max(...a) + 1 : ownerNext(id);
+    },
+  );
+  pass(
+    (id) => ROLES.has(kind(id)),
+    (id) => {
+      const b = linked(id, GRANTS, "in");
+      return b.length ? Math.max(...b) + 1 : ownerNext(id);
     },
   );
   const low = Math.min(...ids.map((id) => rank[id]));

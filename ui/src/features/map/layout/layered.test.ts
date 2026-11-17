@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEMO, demoGraph, ownsCycle } from "../../../test/graph";
+import {
+  DEMO,
+  demoGraph,
+  ownsCycle,
+  RBAC,
+  rbacGraph,
+} from "../../../test/graph";
 import { buildModel, type MapModel } from "../model";
 import { cellW, leafSize } from "./geometry";
 import type { Positions } from "./grouped";
@@ -8,6 +14,11 @@ import { neighborhood } from "./neighborhood";
 
 function demoModel() {
   const { nodes, edges } = demoGraph();
+  return buildModel(nodes, edges);
+}
+
+function rbacModel() {
+  const { nodes, edges } = rbacGraph();
   return buildModel(nodes, edges);
 }
 
@@ -56,6 +67,25 @@ describe("ranks", () => {
     expect(rank[DEMO.replicaSet]).toBeLessThan(rank[DEMO.podA]);
     expect(rank[DEMO.configMap]).toBe(rank[DEMO.podA] + 1);
   });
+
+  it("puts a binding one rank after its ServiceAccount, and its role one after it", () => {
+    const model = rbacModel();
+    const rank = ranks(model, [
+      DEMO.deployment,
+      DEMO.replicaSet,
+      DEMO.podA,
+      DEMO.podB,
+      DEMO.account,
+      RBAC.binding,
+      RBAC.role,
+      RBAC.clusterBinding,
+      RBAC.clusterRole,
+    ]);
+    expect(rank[RBAC.binding]).toBe(rank[DEMO.account] + 1);
+    expect(rank[RBAC.clusterBinding]).toBe(rank[DEMO.account] + 1);
+    expect(rank[RBAC.role]).toBe(rank[RBAC.binding] + 1);
+    expect(rank[RBAC.clusterRole]).toBe(rank[RBAC.binding] + 1);
+  });
 });
 
 describe("layoutFocus", () => {
@@ -99,6 +129,18 @@ describe("layoutClusterLayered", () => {
       );
     expect(bottom("edge")).toBeLessThan(top("jobs"));
     expect(bottom("jobs")).toBeLessThan(top("shop"));
+  });
+
+  it("puts cluster-scoped bindings and roles in the cluster-scoped row, others in their band", () => {
+    const model = rbacModel();
+    const ids = model.nodes.map((n) => n.id);
+    const pos = layoutClusterLayered(model, ids);
+    expectPlacedApart(model, ids, pos);
+    expect(pos[RBAC.clusterBinding].y).toBe(0);
+    expect(pos[RBAC.clusterRole].y).toBe(0);
+    expect(pos[RBAC.binding].y).toBeGreaterThan(0);
+    expect(pos[RBAC.binding].x).toBeGreaterThan(pos[DEMO.account].x);
+    expect(pos[RBAC.role].x).toBeGreaterThan(pos[RBAC.binding].x);
   });
 });
 

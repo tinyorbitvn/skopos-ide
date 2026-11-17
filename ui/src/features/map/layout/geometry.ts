@@ -25,7 +25,7 @@ export interface BoxText {
 /** A box of the Grouped layout, as `boxText` reads it. */
 export interface BoxRef {
   kind: string;
-  /** The owner's node id; empty for namespace and external boxes. */
+  /** The owner's node id; empty for the other boxes. */
   id: string;
   name: string;
 }
@@ -34,6 +34,12 @@ export function boxText(model: MapModel, box: BoxRef): BoxText {
   if (box.kind === "Namespace") return { title: box.name, sub: "Namespace" };
   if (box.kind === "External") {
     return { title: "Outside the cluster", sub: "Load balancers" };
+  }
+  if (box.kind === "Access") {
+    return {
+      title: "Cluster-wide access",
+      sub: "ClusterRoleBindings and ClusterRoles",
+    };
   }
   const node = nodeOf(model, box.id);
   return { title: node.name, sub: `${node.kind} · ${statusLine(node)}` };

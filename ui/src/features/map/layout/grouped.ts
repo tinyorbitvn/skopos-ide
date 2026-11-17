@@ -23,7 +23,10 @@ export interface Point {
 /** Node centres, and for boxes their top-left corner, by node id or box key. */
 export type Positions = Record<string, Point>;
 
-/** A Grouped box: an owner (keyed by its node id), a namespace, the outside, or the root. */
+/**
+ * A Grouped box: an owner (keyed by its node id), a namespace, the outside, the
+ * Cluster-wide access box, or the root.
+ */
 export interface Group {
   key: string;
   /** The owner's node id; empty for the other boxes. */
@@ -43,10 +46,20 @@ export interface GroupTree {
   depth: Record<string, number>;
 }
 
-/** The root box's key, and the key of the box of load balancers. */
+/**
+ * The root box's key, the key of the box of load balancers, and the key of the box of
+ * ClusterRoleBindings and ClusterRoles (spec O §5.2).
+ */
 export const ROOT = "";
 export const EXTERNAL = "ext";
+export const ACCESS_BOX = "access";
 const namespaceKey = (namespace: string) => `ns:${namespace}`;
+
+/** The cluster-scoped kinds the Cluster-wide access box holds. */
+const CLUSTER_ACCESS: ReadonlySet<string> = new Set([
+  "ClusterRoleBinding",
+  "ClusterRole",
+]);
 
 function ownerOf(model: MapModel, id: string): string | null {
   return model.incoming.get(id)?.find((e) => e.rel === "owns")?.from ?? null;
@@ -54,10 +67,11 @@ function ownerOf(model: MapModel, id: string): string | null {
 
 /**
  * Containment for the Grouped layout: a node sits in its nearest drawn owner's box,
- * else in its namespace's box; load balancers sit in the outside box, other
- * cluster-scoped nodes at the root. Kubernetes does not forbid owner references that
- * form a cycle: every walk stops at the first repeat, and a node whose box would hold
- * it back sits in its namespace's box instead, so the tree never has a cycle.
+ * else in its namespace's box; load balancers sit in the outside box, ClusterRoleBindings
+ * and ClusterRoles in the Cluster-wide access box, other cluster-scoped nodes at the root;
+ * those three boxes exist only when they hold a node. Kubernetes does not forbid owner
+ * references that form a cycle: every walk stops at the first repeat, and a node whose box
+ * would hold it back sits in its namespace's box instead, so the tree never has a cycle.
  */
 export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
   const groups: Record<string, Group> = {
@@ -71,21 +85,23 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
     },
   };
   const parentOf: Record<string, string> = {};
+  // A box at the root, made when it first gets a node.
+  const topBox = (
+    key: string,
+    kind: string,
+    name: string,
+    namespace: string,
+  ): string => {
+    if (!groups[key]) {
+      groups[key] = { key, id: "", kind, name, namespace, kids: [] };
+      parentOf[key] = ROOT;
+    }
+    return key;
+  };
   const holder = (id: string): string => {
     const node = nodeOf(model, id);
     if (node.kind === "LoadBalancer") {
-      if (!groups[EXTERNAL]) {
-        groups[EXTERNAL] = {
-          key: EXTERNAL,
-          id: "",
-          kind: "External",
-          name: "Outside the cluster",
-          namespace: "",
-          kids: [],
-        };
-        parentOf[EXTERNAL] = ROOT;
-      }
-      return EXTERNAL;
+      return topBox(EXTERNAL, "External", "Outside the cluster", "");
     }
     const visited = new Set([id]);
     for (
@@ -98,23 +114,20 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
     }
     return outerBox(id);
   };
-  // The namespace's box, or the root for a cluster-scoped node.
+  // The namespace's box; for a cluster-scoped node, the Cluster-wide access box or the root.
   const outerBox = (id: string): string => {
     const node = nodeOf(model, id);
-    if (node.namespace === "") return ROOT;
-    const key = namespaceKey(node.namespace);
-    if (!groups[key]) {
-      groups[key] = {
-        key,
-        id: "",
-        kind: "Namespace",
-        name: node.namespace,
-        namespace: node.namespace,
-        kids: [],
-      };
-      parentOf[key] = ROOT;
+    if (node.namespace === "") {
+      return CLUSTER_ACCESS.has(node.kind)
+        ? topBox(ACCESS_BOX, "Access", "Cluster-wide access", "")
+        : ROOT;
     }
-    return key;
+    return topBox(
+      namespaceKey(node.namespace),
+      "Namespace",
+      node.namespace,
+      node.namespace,
+    );
   };
   for (const id of ids) {
     const node = nodeOf(model, id);
@@ -148,11 +161,15 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
   const namespaces = [
     ...new Set(Object.values(groups).map((g) => g.namespace)),
   ].sort();
+  // Snapshot order; at the root, the outside first, then the cluster-scoped nodes, the
+  // namespaces by name and the Cluster-wide access box last.
   const order = (k: string) =>
     k === EXTERNAL
       ? -1
-      : (index.get(k) ??
-        10000 + namespaces.indexOf(groups[k]?.namespace ?? ""));
+      : k === ACCESS_BOX
+        ? 10000 + namespaces.length
+        : (index.get(k) ??
+          10000 + namespaces.indexOf(groups[k]?.namespace ?? ""));
   for (const k of Object.keys(parentOf).sort((a, b) => order(a) - order(b))) {
     groups[parentOf[k]].kids.push(k);
   }
@@ -213,6 +230,8 @@ function linkedTo(
 
 const SELECTS: ReadonlySet<GraphRel> = new Set(["selects"]);
 const ROUTES: ReadonlySet<GraphRel> = new Set(["routes"]);
+const BINDS: ReadonlySet<GraphRel> = new Set(["binds"]);
+const GRANTS: ReadonlySet<GraphRel> = new Set(["grants"]);
 
 /** A laid-out block: size, and points relative to its top-left corner. */
 interface Block {
@@ -234,7 +253,7 @@ const mean = (vals: (number | null)[]): number | null => {
   return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
 };
 
-/** Columns inside a namespace box: routes, Services, workloads, config. */
+/** Columns inside a namespace box: routes, Services, workloads, config, bindings, roles. */
 const ROLE: Readonly<Record<string, number>> = {
   Gateway: 0,
   Ingress: 0,
@@ -244,6 +263,10 @@ const ROLE: Readonly<Record<string, number>> = {
   Secret: 3,
   ServiceAccount: 3,
   PersistentVolumeClaim: 3,
+  RoleBinding: 4,
+  ClusterRoleBinding: 4,
+  Role: 5,
+  ClusterRole: 5,
 };
 
 interface Item {
@@ -335,10 +358,11 @@ export function layoutGrouped(
     return { w, h: y + rowH, pts };
   };
 
-  // Inside a namespace: columns for routes, Services, workloads and config. Each column
-  // but the workloads lines its items up with what they link to, so most links run straight.
+  // Inside a namespace, or the Cluster-wide access box: columns for routes, Services,
+  // workloads, config, bindings and roles. Each column but the workloads lines its items up
+  // with what they link to, so most links run straight.
   const namespace = (kids: string[]): Block => {
-    const cols: string[][] = [[], [], [], []];
+    const cols: string[][] = [[], [], [], [], [], []];
     for (const k of kids) {
       cols[isBox(k) ? 2 : (ROLE[nodeOf(model, k).kind] ?? 2)].push(k);
     }
@@ -419,12 +443,15 @@ export function layoutGrouped(
       pods.length > 0 &&
       pods.every((p) => podEnd(model, tree, p, pods, other) !== p);
     const placed: (ReturnType<typeof aligned> | undefined)[] = [];
+    // Where each item of a placed column sits across the flow.
+    const mids = (r: number) =>
+      new Map((placed[r]?.items ?? []).map((it) => [it.k, it.mid]));
     placed[1] = aligned(
       cols[1],
       (k) => mean(linkedTo(model, k, SELECTS, "out").map(centre)),
       (k) => boxWide(visiblePods(linkedTo(model, k, SELECTS, "out")), k),
     );
-    const svc = new Map((placed[1]?.items ?? []).map((it) => [it.k, it.mid]));
+    const svc = mids(1);
     placed[0] = aligned(
       cols[0],
       (k) =>
@@ -436,6 +463,27 @@ export function layoutGrouped(
       (k) => mean(linkedTo(model, k, USE, "in").map(centre)),
       (k) => boxWide(visiblePods(linkedTo(model, k, USE, "in")), k),
     );
+    // A binding sits level with the ServiceAccounts of this box it binds, and a role with
+    // the bindings of this box that grant it; one with none here stacks after the others
+    // (spec O §5.2).
+    const config = mids(3);
+    placed[4] = aligned(
+      cols[4],
+      (k) =>
+        mean(
+          linkedTo(model, k, BINDS, "out").map((a) => config.get(a) ?? null),
+        ),
+      () => false,
+    );
+    const bindings = mids(4);
+    placed[5] = aligned(
+      cols[5],
+      (k) =>
+        mean(
+          linkedTo(model, k, GRANTS, "in").map((b) => bindings.get(b) ?? null),
+        ),
+      () => false,
+    );
     const raw: Positions = {};
     let m = 0;
     let cMin = Number.POSITIVE_INFINITY;
@@ -446,7 +494,7 @@ export function layoutGrouped(
       cMin = Math.min(cMin, cc);
       cMax = Math.max(cMax, cc + crossOf(b));
     };
-    for (const r of [0, 1, 2, 3]) {
+    for (const r of [0, 1, 2, 3, 4, 5]) {
       if (r === 2) {
         if (cols[2].length) {
           place(work, m, 0);
@@ -500,7 +548,7 @@ export function layoutGrouped(
     const content =
       g.kind === "Root"
         ? shelf(kidBlocks())
-        : g.kind === "Namespace"
+        : g.kind === "Namespace" || g.kind === "Access"
           ? namespace(g.kids)
           : g.kind === "Deployment" ||
               g.kind === "CronJob" ||

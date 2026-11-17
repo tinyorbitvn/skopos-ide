@@ -109,7 +109,8 @@
   stroke-width: 1;
 }
 
-.boxNamespace rect {
+.boxNamespace rect,
+.boxAccess rect {
   fill: var(--surface-page);
   stroke: var(--border-strong-color);
   stroke-width: 1.5;
