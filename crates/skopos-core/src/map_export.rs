@@ -51,7 +51,10 @@ pub fn decode_png_base64(png: &str) -> Result<Vec<u8>, IpcError> {
 }
 
 /// Writes the map drawn at `scale` image pixels per CSS pixel and returns the path written. A
-/// path with no extension gains the format's; another extension is kept.
+/// path with no extension gains the format's; another extension is kept. The path must be
+/// absolute. The file is written under a temporary name in the same folder and then renamed
+/// over the path, so a failed write leaves nothing behind and a symlink at the path is replaced,
+/// not followed.
 pub fn write_map(
     path: &Path,
     format: MapFormat,
@@ -64,17 +67,48 @@ pub fn write_map(
             "The map scale must be above 0 and at most 2",
         ));
     }
+    if !path.is_absolute() {
+        return Err(IpcError::new(
+            ErrorCode::InvalidInput,
+            "the destination path must be absolute",
+        ));
+    }
     let image = decode(png)?;
     let path = if path.extension().is_some() {
         path.to_owned()
     } else {
         path.with_extension(format.extension())
     };
-    match format {
-        MapFormat::Png => std::fs::write(&path, png)?,
-        MapFormat::Pdf => std::fs::write(&path, pdf(&image, scale)?)?,
-    }
+    let folder = path.parent().ok_or_else(|| {
+        IpcError::new(
+            ErrorCode::InvalidInput,
+            "the destination path has no folder",
+        )
+    })?;
+    let pdf_bytes;
+    let bytes = match format {
+        MapFormat::Png => png,
+        MapFormat::Pdf => {
+            pdf_bytes = pdf(&image, scale)?;
+            &pdf_bytes
+        }
+    };
+    let mut file = temp_file_in(folder)?;
+    file.write_all(bytes)?;
+    file.persist(&path).map_err(|error| error.error)?;
     Ok(path)
+}
+
+/// A temporary file in `folder` that gets the mode a plain `std::fs::write` would give.
+fn temp_file_in(folder: &Path) -> std::io::Result<tempfile::NamedTempFile> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".map-export-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        builder.permissions(std::fs::Permissions::from_mode(0o666));
+    }
+    builder.tempfile_in(folder)
 }
 
 /// An image as 8-bit RGB samples, row by row from the top.
@@ -442,5 +476,77 @@ mod tests {
         let path = dir.path().join("missing").join("map.png");
         let error = write_map(&path, MapFormat::Png, &rgb_png(1, 1, [0; 3]), 1.0).unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn a_relative_path_is_refused() {
+        let error = write_map(
+            Path::new("map.png"),
+            MapFormat::Png,
+            &rgb_png(1, 1, [0; 3]),
+            1.0,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert_eq!(error.message, "the destination path must be absolute");
+    }
+
+    #[test]
+    fn an_existing_file_is_replaced_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("map.png");
+        std::fs::write(&path, vec![7u8; 4096]).unwrap();
+        let png = rgb_png(1, 1, [0; 3]);
+        write_map(&path, MapFormat::Png, &png, 1.0).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), png);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_at_the_path_is_replaced_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, "keep").unwrap();
+        let path = dir.path().join("map.png");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let png = rgb_png(1, 1, [0; 3]);
+        write_map(&path, MapFormat::Png, &png, 1.0).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_file());
+        assert_eq!(std::fs::read(&path).unwrap(), png);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_file_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("map.png");
+        std::fs::create_dir(&path).unwrap();
+        write_map(&path, MapFormat::Png, &rgb_png(1, 1, [0; 3]), 1.0).unwrap_err();
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["map.png"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_gets_the_same_mode_as_a_plain_write() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain.png");
+        std::fs::write(&plain, b"x").unwrap();
+        let path = write_map(
+            &dir.path().join("map"),
+            MapFormat::Png,
+            &rgb_png(1, 1, [0; 3]),
+            1.0,
+        )
+        .unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), mode(&plain));
     }
 }
