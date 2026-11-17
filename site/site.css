@@ -1,0 +1,68 @@
+/*
+ * SkoposIDE project site. Colors, type, spacing, radii and shadows come from tokens.css,
+ * the build's copy of the app's TinyOrbit tokens (ui/src/design/tinyorbit.css).
+ */
+
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/manrope-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/manrope-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/manrope-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+
+body {
+  margin: 0;
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: var(--type-body);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkoposIDE: a desktop IDE for Kubernetes</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+{{sprite}}
+<main id="main">
+<h1>SkoposIDE {{release.version}}</h1>
+<p><a id="hero-download" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-label>Download</span></a><span id="hero-file"></span></p>
+<p id="hero-alt" hidden></p>
+<img {{image:pods-drawer-light.png}} alt="SkoposIDE with the Pods of the kind-skopos-e2e cluster and the details drawer of its etcd Pod">
+<section id="download">
+<h2><svg class="icon" aria-hidden="true"><use href="#i-file-code"/></svg>Released {{release.date}}</h2>
+<ul>
+<li><a href="{{asset:aarch64.dmg:url}}" data-asset="aarch64.dmg" data-name="{{asset:aarch64.dmg:name}}" data-size="{{asset:aarch64.dmg:size}}">{{asset:aarch64.dmg:name}}</a></li>
+<li><a href="{{asset:x64.dmg:url}}" data-asset="x64.dmg" data-name="{{asset:x64.dmg:name}}" data-size="{{asset:x64.dmg:size}}">{{asset:x64.dmg:name}}</a></li>
+<li><a href="{{asset:x64-setup.exe:url}}" data-asset="x64-setup.exe" data-name="{{asset:x64-setup.exe:name}}" data-size="{{asset:x64-setup.exe:size}}">{{asset:x64-setup.exe:name}}</a></li>
+<li><a href="{{asset:amd64.AppImage:url}}" data-asset="amd64.AppImage" data-name="{{asset:amd64.AppImage:name}}" data-size="{{asset:amd64.AppImage:size}}">{{asset:amd64.AppImage:name}}</a></li>
+<li><a href="{{asset:amd64.deb:url}}" data-asset="amd64.deb" data-name="{{asset:amd64.deb:name}}" data-size="{{asset:amd64.deb:size}}">{{asset:amd64.deb:name}}</a></li>
+</ul>
+</section>
+</main>
+</body>
+</html>
