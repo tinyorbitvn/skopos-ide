@@ -17,6 +17,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **Node conditions in the Status:** the Node list shows Ready, NotReady or Unknown, then conditions that are happening, such as memory or disk pressure, and SchedulingDisabled. A card lists every condition with its age and reason.
 - **Access on the resource map:** the map follows a workload's ServiceAccount to the RoleBindings and ClusterRoleBindings that bind it and the Roles and ClusterRoles they grant, with each role's rules in the details pane.
 - **Export the resource map:** the cluster and object maps save what they show as a PNG image or a PDF document.
+- **SkoposIDE's own action icons:** the icons of actions such as Delete, Edit YAML, Logs, Shell, Scale, Restart and Drain are drawn for SkoposIDE in one flat style, and each action shows the same icon in every toolbar, menu and button.
 
 ## [0.6.1] - 2026-11-16
 
