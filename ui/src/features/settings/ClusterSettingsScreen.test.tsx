@@ -233,12 +233,13 @@ test("each field carries its label and help, and the provider options their desc
   const group = screen.getByRole("group", { name: "Metrics provider" });
   expect(group).toBe(screen.getByTestId("settings-metrics"));
   expect(
-    ["auto", "prometheus", "metricsServer", "none"].map(
+    ["auto", "prometheus", "remote", "metricsServer", "none"].map(
       (k) => screen.getByTestId(`settings-metrics-${k}`).textContent,
     ),
   ).toEqual([
     "DetectLook for a Prometheus Service across namespaces, then fall back to metrics-server",
     "Prometheus or Mimir in the clusterA Service you name, queried through the API server proxy",
+    "Prometheus-compatible URLMimir, Grafana Cloud or another Prometheus API, reached directly",
     "metrics-server onlyCurrent CPU and memory, no history",
     "NoneNo metrics for this cluster",
   ]);
@@ -713,4 +714,398 @@ test("Save drops the answers read under the old settings", async () => {
   type("settings-terminal-cwd", "/srv");
   await save();
   expect(useMetrics.getState().queries[key]).toBeUndefined();
+});
+
+const SAVED_URL = clusterSettings({
+  metricsProvider: {
+    kind: "remote",
+    url: "https://mimir.example.com/prometheus",
+    tenant: "team-a",
+    matcher: { name: "cluster", value: "prod" },
+    auth: { kind: "basic", username: "me" },
+    caPath: "/etc/ssl/team-ca.pem",
+  },
+});
+const URL_FIELDS = [
+  "settings-remote-url",
+  "settings-remote-tenant",
+  "settings-remote-label-name",
+  "settings-remote-label-value",
+];
+const urlFields = () => URL_FIELDS.map((id) => input(id).value);
+const KEYCHAIN_DOWN =
+  "The system keychain is not available (no Secret Service). Use a client certificate or no authentication.";
+
+const authOption = (kind: string) =>
+  screen
+    .getByTestId(`settings-remote-auth-${kind}`)
+    .querySelector("input") as HTMLInputElement;
+
+function pickAuth(kind: string): void {
+  fireEvent.click(authOption(kind));
+}
+
+/** The test ids of the URL option's fields, in page order. */
+function urlOptionIds(): string[] {
+  return Array.from(document.querySelectorAll("[data-testid]"))
+    .map((e) => e.getAttribute("data-testid") ?? "")
+    .filter(
+      (id) =>
+        id.startsWith("settings-remote-") &&
+        !/-(none|basic|bearer|mtls)$/.test(id),
+    );
+}
+
+test("a Prometheus-compatible URL shows URL, Tenant, the Cluster label and Authentication, empty and with None, then each choice's fields", async () => {
+  const backend = await show({ saved: FULL });
+  pickProvider("remote");
+  expect(radio("remote").checked).toBe(true);
+  expect(urlFields()).toEqual(["", "", "", ""]);
+  expect(authOption("none").checked).toBe(true);
+  expect(urlOptionIds()).toEqual([
+    ...URL_FIELDS,
+    "settings-remote-auth",
+    "settings-remote-ca",
+    "settings-remote-ca-choose",
+  ]);
+  expect(screen.getByRole("radiogroup", { name: "Authentication" })).toBe(
+    screen.getByTestId("settings-remote-auth"),
+  );
+  expect(screen.getByTestId("settings-remote-auth").textContent).toBe(
+    "NoneBasicBearerClient certificate",
+  );
+  expect(URL_FIELDS.map((id) => input(id).placeholder)).toEqual([
+    "https://mimir.example.com/prometheus",
+    "X-Scope-OrgID, empty for none",
+    "cluster",
+    "prod",
+  ]);
+  for (const id of [...URL_FIELDS, "settings-remote-ca"]) {
+    expect([id, input(id).classList.contains("mono")]).toEqual([id, true]);
+  }
+  expect(screen.getByLabelText("URL")).toBe(input("settings-remote-url"));
+  expect(screen.getByLabelText("Tenant")).toBe(input("settings-remote-tenant"));
+  expect(screen.getByLabelText("CA file")).toBe(input("settings-remote-ca"));
+  expect(button("settings-remote-ca-choose").textContent).toBe("Choose…");
+
+  pickAuth("basic");
+  expect(urlOptionIds().slice(5)).toEqual([
+    "settings-remote-username",
+    "settings-remote-password",
+    "settings-remote-ca",
+    "settings-remote-ca-choose",
+  ]);
+  expect(screen.getByLabelText("Username")).toBe(
+    input("settings-remote-username"),
+  );
+  expect(screen.getByLabelText("Password")).toBe(
+    input("settings-remote-password"),
+  );
+  expect(input("settings-remote-password").type).toBe("password");
+
+  pickAuth("bearer");
+  expect(urlOptionIds().slice(5)).toEqual([
+    "settings-remote-token",
+    "settings-remote-ca",
+    "settings-remote-ca-choose",
+  ]);
+  expect(screen.getByLabelText("Token")).toBe(input("settings-remote-token"));
+  expect(input("settings-remote-token").type).toBe("password");
+
+  pickAuth("mtls");
+  expect(urlOptionIds().slice(5)).toEqual([
+    "settings-remote-cert",
+    "settings-remote-cert-choose",
+    "settings-remote-key",
+    "settings-remote-key-choose",
+    "settings-remote-ca",
+    "settings-remote-ca-choose",
+  ]);
+  expect(screen.getByLabelText("Certificate file")).toBe(
+    input("settings-remote-cert"),
+  );
+  expect(screen.getByLabelText("Key file")).toBe(input("settings-remote-key"));
+
+  // Only a saved Basic or Bearer setting asks the keychain.
+  expect(backend.callsTo("metrics_secret_saved")).toEqual([]);
+});
+
+test("Choose… fills a file field from the file picker", async () => {
+  const backend = await show({
+    handlers: { "plugin:dialog|open": () => "/pki/me.crt" },
+  });
+  pickProvider("remote");
+  pickAuth("mtls");
+  fireEvent.click(button("settings-remote-cert-choose"));
+  await act(flush);
+  expect(input("settings-remote-cert").value).toBe("/pki/me.crt");
+  expect(backend.callsTo("plugin:dialog|open")).toHaveLength(1);
+});
+
+test("a saved URL fills every field; the password field is empty and says the keychain holds it, and stays so on Save", async () => {
+  const backend = await show({
+    saved: SAVED_URL,
+    handlers: { metrics_secret_saved: () => true },
+  });
+  expect(backend.callsTo("metrics_secret_saved")).toEqual([
+    { clusterId: "id-x" },
+  ]);
+  expect(radio("remote").checked).toBe(true);
+  expect(urlFields()).toEqual([
+    "https://mimir.example.com/prometheus",
+    "team-a",
+    "cluster",
+    "prod",
+  ]);
+  expect(authOption("basic").checked).toBe(true);
+  expect(input("settings-remote-username").value).toBe("me");
+  expect(input("settings-remote-ca").value).toBe("/etc/ssl/team-ca.pem");
+  expect(input("settings-remote-password").value).toBe("");
+  expect(input("settings-remote-password").placeholder).toBe(
+    "Saved in the keychain",
+  );
+  expect(errorOf("settings-remote-password")).toBeNull();
+  expect(status()).toBe("");
+
+  type("settings-remote-tenant", "team-b");
+  await save();
+  expect(backend.callsTo("metrics_secret_set")).toEqual([]);
+  expect(savedPayload(backend)?.metricsProvider).toEqual({
+    ...SAVED_URL.metricsProvider,
+    tenant: "team-b",
+  });
+});
+
+test("with no secret saved, Basic blocks Save until the password is typed", async () => {
+  await show({
+    saved: SAVED_URL,
+    handlers: { metrics_secret_saved: () => false },
+  });
+  expect(input("settings-remote-password").placeholder).toBe("");
+  expect(errorOf("settings-remote-password")).toBe("Enter the password.");
+  type("settings-remote-tenant", "team-b");
+  expect(status()).toBe("Fix the fields marked in red to save.");
+  expect(button("settings-save").disabled).toBe(true);
+
+  type("settings-remote-password", "s3cret");
+  expect(errorOf("settings-remote-password")).toBeNull();
+  expect(button("settings-save").disabled).toBe(false);
+});
+
+test("Basic's saved password is not Bearer's token, and a typed password does not carry over", async () => {
+  await show({
+    saved: SAVED_URL,
+    handlers: { metrics_secret_saved: () => true },
+  });
+  type("settings-remote-password", "typed");
+  pickAuth("bearer");
+  expect(input("settings-remote-token").value).toBe("");
+  expect(input("settings-remote-token").placeholder).toBe("");
+  expect(errorOf("settings-remote-token")).toBe("Enter the token.");
+  expect(button("settings-save").disabled).toBe(true);
+});
+
+test("Save writes the typed secret first, then the settings, and forgets the typed secret", async () => {
+  const backend = await show({
+    saved: FULL,
+    handlers: {
+      metrics_secret_set: () => null,
+      metrics_secret_saved: () => true,
+    },
+  });
+  pickProvider("remote");
+  type("settings-remote-url", " https://mimir.example.com/prometheus/ ");
+  type("settings-remote-tenant", " team-a ");
+  pickAuth("bearer");
+  type("settings-remote-token", "t0ken");
+  expect(button("settings-save").disabled).toBe(false);
+  await save();
+  await act(flush);
+
+  const writes = backend.calls.filter((c) =>
+    ["metrics_secret_set", "cluster_settings_set"].includes(c.cmd),
+  );
+  expect(writes).toEqual([
+    { cmd: "metrics_secret_set", args: { clusterId: "id-x", secret: "t0ken" } },
+    {
+      cmd: "cluster_settings_set",
+      args: {
+        id: "id-x",
+        settings: {
+          ...FULL,
+          metricsProvider: {
+            kind: "remote",
+            url: "https://mimir.example.com/prometheus",
+            tenant: "team-a",
+            matcher: null,
+            auth: { kind: "bearer" },
+            caPath: null,
+          },
+        },
+      },
+    },
+  ]);
+  expect(input("settings-remote-token").value).toBe("");
+  expect(input("settings-remote-token").placeholder).toBe(
+    "Saved in the keychain",
+  );
+  expect(errorOf("settings-remote-token")).toBeNull();
+  expect(status()).toBe(
+    "Saved. Changes apply at once; the proxy applies on the next connect.",
+  );
+  expect(keptDraft("id-x")).toBeUndefined();
+
+  // A new token alone is a change, and replaces the saved one.
+  type("settings-remote-token", "t0ken-2");
+  expect(status()).toBe("Unsaved changes.");
+  await save();
+  expect(backend.callsTo("metrics_secret_set")).toEqual([
+    { clusterId: "id-x", secret: "t0ken" },
+    { clusterId: "id-x", secret: "t0ken-2" },
+  ]);
+});
+
+test("a keychain that refuses the secret stops the save, toasts its error and keeps the draft", async () => {
+  const error = vi.spyOn(toast, "error");
+  const backend = await show({
+    saved: FULL,
+    handlers: {
+      metrics_secret_set: () => {
+        throw { code: "Unreachable", message: KEYCHAIN_DOWN, details: null };
+      },
+    },
+  });
+  pickProvider("remote");
+  type("settings-remote-url", "https://mimir.example.com/prometheus");
+  pickAuth("basic");
+  type("settings-remote-username", "me");
+  type("settings-remote-password", "s3cret");
+  await save();
+  expect(error).toHaveBeenCalledWith(
+    "Could not save the password for x",
+    KEYCHAIN_DOWN,
+  );
+  expect(backend.callsTo("cluster_settings_set")).toEqual([]);
+  expect(input("settings-remote-password").value).toBe("s3cret");
+  expect(status()).toBe("Unsaved changes.");
+  expect(button("settings-save").disabled).toBe(false);
+});
+
+test("the URL, its scheme and the user name show the core's errors under them", async () => {
+  await show();
+  pickProvider("remote");
+  const urlError =
+    "The URL must be http:// or https:// with a host, without a user name, query or fragment.";
+  expect(errorOf("settings-remote-url")).toBe(urlError);
+  type("settings-remote-url", "https://me@mimir.example.com");
+  expect(errorOf("settings-remote-url")).toBe(urlError);
+  type("settings-remote-url", "http://mimir.example.com");
+  expect(errorOf("settings-remote-url")).toBeNull();
+  pickAuth("bearer");
+  expect(errorOf("settings-remote-url")).toBe(
+    "Basic and Bearer credentials need https://, except to localhost.",
+  );
+  pickAuth("mtls");
+  expect(errorOf("settings-remote-url")).toBe(
+    "A client certificate needs https://.",
+  );
+  pickAuth("basic");
+  type("settings-remote-url", "http://localhost:9009/prometheus");
+  type("settings-remote-username", "me:you");
+  expect(errorOf("settings-remote-url")).toBeNull();
+  expect(errorOf("settings-remote-username")).toBe(
+    "The user name must not be empty or contain ':'.",
+  );
+  type("settings-remote-tenant", "team|b");
+  expect(errorOf("settings-remote-tenant")).toBe(
+    "The tenant may hold only letters, digits and ! - _ . * ' ( ), up to 150 characters.",
+  );
+  expect(status()).toBe("Fix the fields marked in red to save.");
+  expect(button("settings-save").disabled).toBe(true);
+});
+
+test("a file the save refuses shows its error under its field, until the field changes", async () => {
+  const error = vi.spyOn(toast, "error");
+  await show({
+    saved: FULL,
+    handlers: {
+      cluster_settings_set: () => {
+        throw {
+          code: "InvalidInput",
+          message: "/pki/me.crt holds no PEM certificate.",
+          details: "certPath",
+        };
+      },
+    },
+  });
+  pickProvider("remote");
+  type("settings-remote-url", "https://mimir.example.com");
+  pickAuth("mtls");
+  type("settings-remote-cert", "/pki/me.crt");
+  type("settings-remote-key", "/pki/me.key");
+  await save();
+  expect(errorOf("settings-remote-cert")).toBe(
+    "/pki/me.crt holds no PEM certificate.",
+  );
+  expect(errorOf("settings-remote-key")).toBeNull();
+  expect(error).not.toHaveBeenCalled();
+  // The file may be fixed where it is, so the error does not block another Save.
+  expect(button("settings-save").disabled).toBe(false);
+
+  type("settings-remote-cert", "/pki/other.crt");
+  expect(errorOf("settings-remote-cert")).toBeNull();
+});
+
+test("Restore defaults sets Detect, and the next Save sends it with no secret", async () => {
+  const backend = await show({
+    saved: SAVED_URL,
+    handlers: { metrics_secret_saved: () => true },
+  });
+  fireEvent.click(button("settings-restore"));
+  expect(radio("auto").checked).toBe(true);
+  await save();
+  expect(backend.callsTo("metrics_secret_set")).toEqual([]);
+  expect(savedPayload(backend)?.metricsProvider).toEqual({ kind: "auto" });
+});
+
+// Review Focus 1: a password may hold spaces, so the page sends it as typed.
+test("a typed password is saved as typed, spaces included", async () => {
+  const backend = await show({
+    saved: SAVED_URL,
+    handlers: {
+      metrics_secret_saved: () => false,
+      metrics_secret_set: () => null,
+    },
+  });
+  type("settings-remote-password", "  pa ss  ");
+  expect(button("settings-save").disabled).toBe(false);
+  await save();
+  expect(backend.callsTo("metrics_secret_set")).toEqual([
+    { clusterId: "id-x", secret: "  pa ss  " },
+  ]);
+});
+
+// Review Focus 3: a keychain that cannot be read counts as no saved secret, without a toast.
+test("a keychain that cannot be read asks for the password, without a toast", async () => {
+  const error = vi.spyOn(toast, "error");
+  const backend = await show({
+    saved: SAVED_URL,
+    handlers: {
+      metrics_secret_saved: () => {
+        throw { code: "Unreachable", message: KEYCHAIN_DOWN, details: null };
+      },
+      metrics_secret_set: () => null,
+    },
+  });
+  expect(input("settings-remote-password").placeholder).toBe("");
+  expect(errorOf("settings-remote-password")).toBe("Enter the password.");
+  expect(error).not.toHaveBeenCalled();
+
+  type("settings-remote-password", "s3cret");
+  expect(button("settings-save").disabled).toBe(false);
+  await save();
+  expect(backend.callsTo("metrics_secret_set")).toEqual([
+    { clusterId: "id-x", secret: "s3cret" },
+  ]);
+  expect(error).not.toHaveBeenCalled();
 });

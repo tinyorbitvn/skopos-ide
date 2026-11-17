@@ -1,26 +1,38 @@
 import { expect, test } from "vitest";
+import { IpcFailure } from "../../ipc/client";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
+import type { MetricsProviderSetting } from "../../ipc/generated/MetricsProviderSetting";
 import { clusterSettings, prometheus } from "../../test/metrics";
 import {
   checkIconFile,
   draftFrom,
+  draftSecretAuth,
   emptyDraft,
+  fileFieldOf,
   ICON_ERROR,
   ICON_MAX_BYTES,
   isDns1035Label,
   isDnsLabel,
+  keepsSecret,
   LABEL_NAME_ERROR,
   LABEL_PAIR_ERROR,
   LABEL_VALUE_ERROR,
+  MTLS_HTTP_ERROR,
+  PASSWORD_ERROR,
   PATH_PREFIX_ERROR,
+  PLAIN_HTTP_ERROR,
   PROMETHEUS_DEFAULTS,
   prometheusPrefill,
   type SettingsDraft,
   sameDraft,
+  secretAuthOf,
   settingsFrom,
   splitNamespaces,
   statusText,
   TENANT_ERROR,
+  TOKEN_ERROR,
+  URL_ERROR,
+  USERNAME_ERROR,
   validate,
 } from "./settingsForm";
 
@@ -47,6 +59,29 @@ const SAVED_MIMIR: ClusterSettings = clusterSettings({
     matcher: { name: "cluster", value: "prod" },
   },
 });
+
+const SAVED_URL = clusterSettings({
+  metricsProvider: {
+    kind: "remote",
+    url: "https://mimir.example.com/prometheus",
+    tenant: "team-a",
+    matcher: { name: "cluster", value: "prod" },
+    auth: { kind: "basic", username: "me" },
+    caPath: "/etc/ssl/team-ca.pem",
+  },
+});
+
+/** A draft with a valid Prometheus-compatible URL picked, plus `over`. */
+function url(over: Partial<SettingsDraft> = {}): SettingsDraft {
+  return draft({
+    provider: "remote",
+    remoteUrl: "https://mimir.example.com/prometheus",
+    ...over,
+  });
+}
+
+/** No secret typed and none kept. */
+const NO_SECRET = { typed: "", kept: false };
 
 /** A draft with a valid Prometheus picked, plus `over`. */
 function prom(over: Partial<SettingsDraft> = {}): SettingsDraft {
@@ -82,6 +117,15 @@ test("a draft shows the saved settings as text, and saving it gives them back", 
     promTenant: "",
     promLabelName: "",
     promLabelValue: "",
+    remoteUrl: "",
+    remoteTenant: "",
+    remoteLabelName: "",
+    remoteLabelValue: "",
+    remoteAuth: "none",
+    remoteUsername: "",
+    remoteCert: "",
+    remoteKey: "",
+    remoteCa: "",
   });
   expect(settingsFrom(d)).toEqual(SAVED);
 });
@@ -142,6 +186,15 @@ test("Restore defaults is an empty draft with no icon, no namespaces and Detect"
     promTenant: "",
     promLabelName: "",
     promLabelValue: "",
+    remoteUrl: "",
+    remoteTenant: "",
+    remoteLabelName: "",
+    remoteLabelValue: "",
+    remoteAuth: "none",
+    remoteUsername: "",
+    remoteCert: "",
+    remoteKey: "",
+    remoteCa: "",
   });
   expect(settingsFrom(emptyDraft())).toEqual(clusterSettings());
 });
@@ -457,6 +510,15 @@ test("drafts are the same only when every field is", () => {
     { promTenant: "x" },
     { promLabelName: "x" },
     { promLabelValue: "x" },
+    { remoteUrl: "x" },
+    { remoteTenant: "x" },
+    { remoteLabelName: "x" },
+    { remoteLabelValue: "x" },
+    { remoteAuth: "bearer" },
+    { remoteUsername: "x" },
+    { remoteCert: "x" },
+    { remoteKey: "x" },
+    { remoteCa: "x" },
   ];
   // One change per field.
   expect(changes).toHaveLength(Object.keys(emptyDraft()).length);
@@ -478,4 +540,263 @@ test("the status says what blocks a save, then what is unsaved, then what was sa
     "Saved. Changes apply at once; the proxy applies on the next connect.",
   );
   expect(statusText({}, false, false)).toBe("");
+});
+
+test("a saved URL fills every field of its authentication, and saving gives the setting back", () => {
+  expect(draftFrom(SAVED_URL)).toMatchObject({
+    provider: "remote",
+    remoteUrl: "https://mimir.example.com/prometheus",
+    remoteTenant: "team-a",
+    remoteLabelName: "cluster",
+    remoteLabelValue: "prod",
+    remoteAuth: "basic",
+    remoteUsername: "me",
+    remoteCert: "",
+    remoteKey: "",
+    remoteCa: "/etc/ssl/team-ca.pem",
+  });
+  expect(settingsFrom(draftFrom(SAVED_URL))).toEqual(SAVED_URL);
+
+  const settings: MetricsProviderSetting[] = [
+    {
+      kind: "remote",
+      url: "https://mimir.example.com",
+      tenant: null,
+      matcher: null,
+      auth: { kind: "mtls", certPath: "/pki/me.crt", keyPath: "/pki/me.key" },
+      caPath: null,
+    },
+    {
+      kind: "remote",
+      url: "http://127.0.0.1:9009/prometheus",
+      tenant: null,
+      matcher: null,
+      auth: { kind: "bearer" },
+      caPath: null,
+    },
+    {
+      kind: "remote",
+      url: "https://mimir.example.com",
+      tenant: null,
+      matcher: null,
+      auth: { kind: "none" },
+      caPath: "/etc/ssl/team-ca.pem",
+    },
+  ];
+  for (const metricsProvider of settings) {
+    const saved = clusterSettings({ metricsProvider });
+    expect(settingsFrom(draftFrom(saved))).toEqual(saved);
+  }
+  expect(
+    draftFrom(clusterSettings({ metricsProvider: settings[0] })),
+  ).toMatchObject({
+    remoteAuth: "mtls",
+    remoteCert: "/pki/me.crt",
+    remoteKey: "/pki/me.key",
+  });
+});
+
+test("the URL payload holds each field normalised, filled or empty", () => {
+  expect(settingsFrom(url()).metricsProvider).toEqual({
+    kind: "remote",
+    url: "https://mimir.example.com/prometheus",
+    tenant: null,
+    matcher: null,
+    auth: { kind: "none" },
+    caPath: null,
+  });
+  expect(
+    settingsFrom(
+      url({
+        remoteUrl: " https://mimir.example.com/prometheus// ",
+        remoteTenant: " team-a ",
+        remoteLabelName: " cluster ",
+        remoteLabelValue: " prod ",
+        remoteAuth: "basic",
+        remoteUsername: " me ",
+        remoteCa: " /etc/ssl/team-ca.pem ",
+      }),
+    ).metricsProvider,
+  ).toEqual({
+    kind: "remote",
+    url: "https://mimir.example.com/prometheus",
+    tenant: "team-a",
+    // The value is kept as typed.
+    matcher: { name: "cluster", value: " prod " },
+    auth: { kind: "basic", username: "me" },
+    caPath: "/etc/ssl/team-ca.pem",
+  });
+  expect(
+    settingsFrom(
+      url({
+        remoteAuth: "mtls",
+        remoteCert: " /pki/me.crt ",
+        remoteKey: " /pki/me.key ",
+        remoteCa: "  ",
+      }),
+    ).metricsProvider,
+  ).toMatchObject({
+    auth: { kind: "mtls", certPath: "/pki/me.crt", keyPath: "/pki/me.key" },
+    caPath: null,
+  });
+  expect(
+    settingsFrom(url({ remoteAuth: "bearer", remoteUsername: "me" }))
+      .metricsProvider,
+  ).toMatchObject({ auth: { kind: "bearer" } });
+});
+
+test("the URL, its scheme and the user name are checked as the core checks them", () => {
+  expect([
+    URL_ERROR,
+    PLAIN_HTTP_ERROR,
+    MTLS_HTTP_ERROR,
+    USERNAME_ERROR,
+  ]).toEqual([
+    "The URL must be http:// or https:// with a host, without a user name, query or fragment.",
+    "Basic and Bearer credentials need https://, except to localhost.",
+    "A client certificate needs https://.",
+    "The user name must not be empty or contain ':'.",
+  ]);
+  for (const ok of [
+    "https://mimir.example.com/prometheus",
+    " https://mimir.example.com/prometheus/ ",
+    "http://mimir.example.com:9009",
+    "https://[2001:db8::1]:8443/prometheus",
+  ]) {
+    expect([ok, validate(url({ remoteUrl: ok }))]).toEqual([ok, {}]);
+  }
+  for (const bad of [
+    "",
+    "mimir.example.com",
+    "ftp://mimir.example.com",
+    "https://",
+    "https://me@mimir.example.com",
+    "https://me:pw@mimir.example.com",
+    "https://mimir.example.com/?org=1",
+    "https://mimir.example.com/?",
+    "https://mimir.example.com/#top",
+  ]) {
+    expect([bad, validate(url({ remoteUrl: bad }))]).toEqual([
+      bad,
+      { remoteUrl: URL_ERROR },
+    ]);
+  }
+
+  const secret = { typed: "s3cret", kept: false };
+  const basic = { remoteAuth: "basic", remoteUsername: "me" } as const;
+  for (const auth of [basic, { remoteAuth: "bearer" } as const]) {
+    expect(
+      validate(url({ ...auth, remoteUrl: "http://mimir.example.com" }), secret),
+    ).toEqual({ remoteUrl: PLAIN_HTTP_ERROR });
+    for (const local of [
+      "http://localhost:9009/prometheus",
+      "http://127.0.0.1:9009",
+      "http://127.4.5.6",
+      "http://[::1]:9009",
+    ]) {
+      expect([
+        local,
+        validate(url({ ...auth, remoteUrl: local }), secret),
+      ]).toEqual([local, {}]);
+    }
+  }
+  expect(validate(url({ remoteUrl: "http://mimir.example.com" }))).toEqual({});
+  expect(
+    validate(url({ remoteAuth: "mtls", remoteUrl: "http://localhost:9009" })),
+  ).toEqual({ remoteUrl: MTLS_HTTP_ERROR });
+  // Files are read by the save, not here (spec I60).
+  expect(validate(url({ remoteAuth: "mtls" }))).toEqual({});
+
+  for (const bad of ["", "  ", "me:you"]) {
+    expect(
+      validate(url({ remoteAuth: "basic", remoteUsername: bad }), secret),
+    ).toEqual({ remoteUsername: USERNAME_ERROR });
+  }
+  expect(
+    validate(url({ remoteAuth: "basic", remoteUsername: " me " }), secret),
+  ).toEqual({});
+});
+
+test("the URL's tenant and cluster label follow the Prometheus rules, under their own fields", () => {
+  expect(
+    validate(
+      url({
+        remoteTenant: "team|b",
+        remoteLabelName: "__name__",
+        remoteLabelValue: "x",
+      }),
+    ),
+  ).toEqual({ remoteTenant: TENANT_ERROR, remoteLabelName: LABEL_NAME_ERROR });
+  expect(validate(url({ remoteLabelName: "cluster" }))).toEqual({
+    remoteLabelValue: LABEL_PAIR_ERROR,
+  });
+  expect(validate(url({ remoteLabelValue: "prod" }))).toEqual({
+    remoteLabelName: LABEL_PAIR_ERROR,
+  });
+  expect(
+    validate(
+      url({ remoteLabelName: "cluster", remoteLabelValue: "v".repeat(1025) }),
+    ),
+  ).toEqual({ remoteLabelValue: LABEL_VALUE_ERROR });
+});
+
+test("the URL's fields are checked only while it is picked", () => {
+  const bad = {
+    remoteUrl: "mimir",
+    remoteTenant: "a|b",
+    remoteAuth: "basic",
+    remoteUsername: "",
+  } as const;
+  expect(validate(draft({ provider: "auto", ...bad }))).toEqual({});
+  expect(validate(prom(bad))).toEqual({});
+});
+
+test("Basic and Bearer need the secret typed, unless the same authentication's is saved", () => {
+  expect([PASSWORD_ERROR, TOKEN_ERROR]).toEqual([
+    "Enter the password.",
+    "Enter the token.",
+  ]);
+  const basic = url({ remoteAuth: "basic", remoteUsername: "me" });
+  const bearer = url({ remoteAuth: "bearer" });
+  expect(validate(basic)).toEqual({ remoteSecret: PASSWORD_ERROR });
+  expect(validate(bearer, NO_SECRET)).toEqual({ remoteSecret: TOKEN_ERROR });
+  expect(validate(basic, { typed: "s3cret", kept: false })).toEqual({});
+  expect(validate(bearer, { typed: "", kept: true })).toEqual({});
+  expect(validate(url({ remoteAuth: "mtls" }), NO_SECRET)).toEqual({});
+  expect(validate(url(), NO_SECRET)).toEqual({});
+
+  expect(draftSecretAuth(basic)).toBe("basic");
+  expect(draftSecretAuth(bearer)).toBe("bearer");
+  expect(draftSecretAuth(url({ remoteAuth: "mtls" }))).toBeNull();
+  expect(draftSecretAuth(draft({ remoteAuth: "basic" }))).toBeNull();
+
+  // Basic's saved password is never Bearer's token (spec I58).
+  const saved = SAVED_URL.metricsProvider;
+  expect(secretAuthOf(saved)).toBe("basic");
+  expect(keepsSecret(saved, basic, true)).toBe(true);
+  expect(keepsSecret(saved, basic, false)).toBe(false);
+  expect(keepsSecret(saved, bearer, true)).toBe(false);
+  expect(keepsSecret({ kind: "auto" }, basic, true)).toBe(false);
+  expect(secretAuthOf({ kind: "auto" })).toBeNull();
+  expect(
+    secretAuthOf({
+      ...saved,
+      auth: { kind: "none" },
+    } as MetricsProviderSetting),
+  ).toBeNull();
+});
+
+test("a file the save refuses names its field in the details", () => {
+  const refused = (details: string) =>
+    new IpcFailure(
+      "InvalidInput",
+      "/pki/me.key holds no PEM certificate.",
+      details,
+    );
+  expect(fileFieldOf(refused("caPath"))).toBe("remoteCa");
+  expect(fileFieldOf(refused("certPath"))).toBe("remoteCert");
+  expect(fileFieldOf(refused("keyPath"))).toBe("remoteKey");
+  expect(fileFieldOf(refused("url"))).toBeNull();
+  expect(fileFieldOf(new IpcFailure("Internal", "boom", "caPath"))).toBeNull();
+  expect(fileFieldOf(new Error("boom"))).toBeNull();
 });

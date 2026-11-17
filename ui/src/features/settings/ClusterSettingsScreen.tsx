@@ -1,5 +1,12 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useState,
+} from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   Button,
@@ -28,13 +35,19 @@ import { dropDraft, keepDraft, keptDraft } from "./drafts";
 import { IconField } from "./IconField";
 import { overviewPath } from "./paths";
 import {
+  type AuthKind,
   draftFrom,
+  draftSecretAuth,
   emptyDraft,
+  type FileField,
+  fileFieldOf,
+  keepsSecret,
   type ProviderKind,
   prometheusPrefill,
   type SchemeChoice,
   type SettingsDraft,
   sameDraft,
+  secretAuthOf,
   settingsFrom,
   statusText,
   validate,
@@ -42,6 +55,9 @@ import {
 
 /** The Select value that stands for no default namespace: the kubeconfig's. */
 const FROM_KUBECONFIG = "__kubeconfig__";
+
+/** The password or token field's placeholder while the keychain keeps one (spec I57). */
+const SAVED_SECRET = "Saved in the keychain";
 
 const PROVIDERS: RadioOption<ProviderKind>[] = [
   {
@@ -56,6 +72,12 @@ const PROVIDERS: RadioOption<ProviderKind>[] = [
     description: "A Service you name, queried through the API server proxy",
   },
   {
+    value: "remote",
+    label: "Prometheus-compatible URL",
+    description:
+      "Mimir, Grafana Cloud or another Prometheus API, reached directly",
+  },
+  {
     value: "metricsServer",
     label: "metrics-server only",
     description: "Current CPU and memory, no history",
@@ -67,6 +89,105 @@ const SCHEMES: { value: SchemeChoice; label: string }[] = [
   { value: "http", label: "HTTP" },
   { value: "https", label: "HTTPS" },
 ];
+
+const AUTHS: { value: AuthKind; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "basic", label: "Basic" },
+  { value: "bearer", label: "Bearer" },
+  { value: "mtls", label: "Client certificate" },
+];
+
+/** The cluster label `name="value"`: two fields side by side, wrapping under a narrow window. */
+function ClusterLabelField(props: {
+  name: string;
+  value: string;
+  nameError?: string;
+  valueError?: string;
+  onName(name: string): void;
+  onValue(value: string): void;
+  testId: string;
+}) {
+  return (
+    <fieldset className={styles.labelPair}>
+      <legend className={`${styles.fieldLabel} ${styles.legend}`}>
+        Cluster label
+      </legend>
+      <div className={styles.labelRow}>
+        <div className={styles.labelPart}>
+          <Input
+            aria-label="Cluster label name"
+            placeholder="cluster"
+            className={styles.mono}
+            value={props.name}
+            error={props.nameError}
+            onChange={(e) => props.onName(e.target.value)}
+            data-testid={`${props.testId}-name`}
+          />
+        </div>
+        <span className={styles.equals} aria-hidden="true">
+          =
+        </span>
+        <div className={styles.labelPart}>
+          <Input
+            aria-label="Cluster label value"
+            placeholder="prod"
+            className={styles.mono}
+            value={props.value}
+            error={props.valueError}
+            onChange={(e) => props.onValue(e.target.value)}
+            data-testid={`${props.testId}-value`}
+          />
+        </div>
+      </div>
+    </fieldset>
+  );
+}
+
+/** A file's path, typed or picked with the file dialog (spec I56). */
+function PathField(props: {
+  label: string;
+  help?: string;
+  value: string;
+  error?: string;
+  onChange(path: string): void;
+  testId: string;
+}) {
+  const id = useId();
+  async function choose(): Promise<void> {
+    try {
+      const path = await open({ directory: false, multiple: false });
+      if (path) props.onChange(path);
+    } catch (error) {
+      toast.error("Could not open the file picker", failureMessage(error));
+    }
+  }
+  return (
+    <div className={styles.fileField}>
+      <label htmlFor={id} className={styles.fieldLabel}>
+        {props.label}
+      </label>
+      <div className={styles.fileRow}>
+        <div className={styles.filePath}>
+          <Input
+            id={id}
+            help={props.help}
+            className={styles.mono}
+            value={props.value}
+            error={props.error}
+            onChange={(e) => props.onChange(e.target.value)}
+            data-testid={props.testId}
+          />
+        </div>
+        <Button
+          onClick={() => void choose()}
+          data-testid={`${props.testId}-choose`}
+        >
+          Choose…
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function SettingsForm(props: {
   clusterId: string;
@@ -86,10 +207,35 @@ function SettingsForm(props: {
   );
   const [justSaved, setJustSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  // The URL's password or token as typed: never in the draft, so never kept past a remount.
+  const [secret, setSecret] = useState("");
+  // What the save found wrong with a file, under its field until the field changes.
+  const [fileErrors, setFileErrors] = useState<
+    Partial<Record<FileField, string>>
+  >({});
+  // Only a saved Basic or Bearer setting can keep its secret (spec I57, I58).
+  const secretSaved = useFetch(secretAuthOf(saved.metricsProvider), () =>
+    api.metricsSecretSaved(clusterId),
+  );
 
-  const errors = validate(draft);
-  const changed = !sameDraft(draft, draftFrom(saved));
-  const canSave = changed && Object.keys(errors).length === 0 && !saving;
+  const secretAuth = draftSecretAuth(draft);
+  const typedSecret = secretAuth === null ? "" : secret;
+  const keptSecret = keepsSecret(
+    saved.metricsProvider,
+    draft,
+    secretSaved.value === true,
+  );
+  // Until the keychain answers, an empty secret field is not marked, but Save waits.
+  const errors = validate(draft, {
+    typed: typedSecret,
+    kept: keptSecret || secretSaved.loading,
+  });
+  const changed = !sameDraft(draft, draftFrom(saved)) || typedSecret !== "";
+  const canSave =
+    changed &&
+    Object.keys(errors).length === 0 &&
+    !saving &&
+    !secretSaved.loading;
 
   useEffect(() => {
     if (changed) keepDraft(clusterId, draft);
@@ -99,6 +245,22 @@ function SettingsForm(props: {
   function update(fields: Partial<SettingsDraft>): void {
     setDraft((d) => ({ ...d, ...fields }));
     setJustSaved(false);
+    setFileErrors((shown) =>
+      Object.fromEntries(
+        Object.entries(shown).filter(([field]) => !(field in fields)),
+      ),
+    );
+  }
+
+  function typeSecret(value: string): void {
+    setSecret(value);
+    setJustSaved(false);
+  }
+
+  function pickAuth(remoteAuth: AuthKind): void {
+    // A password typed for Basic is never sent as Bearer's token (spec I58).
+    setSecret("");
+    update({ remoteAuth });
   }
 
   function pickProvider(provider: ProviderKind): void {
@@ -119,6 +281,8 @@ function SettingsForm(props: {
     const next = settingsFrom(draft);
     setSaving(true);
     try {
+      // The secret first: a keychain that refuses it leaves the settings unsaved (I59).
+      if (typedSecret !== "" && !(await saveSecret(typedSecret))) return;
       await api.clusterSettingsSet(clusterId, next);
       toast.success(
         `Saved the settings for ${next.displayName ?? props.contextName}`,
@@ -130,14 +294,37 @@ function SettingsForm(props: {
       forgetQueries(clusterId);
       setSaved(next);
       setDraft(draftFrom(next));
+      setSecret("");
       setJustSaved(true);
+      // The keychain now holds what was typed.
+      if (typedSecret !== "") secretSaved.retry();
     } catch (error) {
-      toast.error(
-        `Could not save the settings for ${props.name}`,
-        failureMessage(error),
-      );
+      const field = fileFieldOf(error);
+      if (field !== null) {
+        setFileErrors({ [field]: failureMessage(error) });
+      } else {
+        toast.error(
+          `Could not save the settings for ${props.name}`,
+          failureMessage(error),
+        );
+      }
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** Writes the typed password or token to the keychain; a refusal is toasted. */
+  async function saveSecret(value: string): Promise<boolean> {
+    try {
+      await api.metricsSecretSet(clusterId, value);
+      return true;
+    } catch (error) {
+      const what = secretAuth === "basic" ? "password" : "token";
+      toast.error(
+        `Could not save the ${what} for ${props.name}`,
+        failureMessage(error),
+      );
+      return false;
     }
   }
 
@@ -296,38 +483,120 @@ function SettingsForm(props: {
               onChange={(e) => update({ promTenant: e.target.value })}
               data-testid="settings-prom-tenant"
             />
-            <fieldset className={styles.labelPair}>
-              <legend className={`${styles.fieldLabel} ${styles.legend}`}>
-                Cluster label
-              </legend>
-              <div className={styles.labelRow}>
-                <div className={styles.labelPart}>
-                  <Input
-                    aria-label="Cluster label name"
-                    placeholder="cluster"
-                    className={styles.mono}
-                    value={draft.promLabelName}
-                    error={errors.promLabelName}
-                    onChange={(e) => update({ promLabelName: e.target.value })}
-                    data-testid="settings-prom-label-name"
-                  />
-                </div>
-                <span className={styles.equals} aria-hidden="true">
-                  =
-                </span>
-                <div className={styles.labelPart}>
-                  <Input
-                    aria-label="Cluster label value"
-                    placeholder="prod"
-                    className={styles.mono}
-                    value={draft.promLabelValue}
-                    error={errors.promLabelValue}
-                    onChange={(e) => update({ promLabelValue: e.target.value })}
-                    data-testid="settings-prom-label-value"
-                  />
-                </div>
-              </div>
-            </fieldset>
+            <ClusterLabelField
+              name={draft.promLabelName}
+              value={draft.promLabelValue}
+              nameError={errors.promLabelName}
+              valueError={errors.promLabelValue}
+              onName={(promLabelName) => update({ promLabelName })}
+              onValue={(promLabelValue) => update({ promLabelValue })}
+              testId="settings-prom-label"
+            />
+          </div>
+        ) : null}
+        {draft.provider === "remote" ? (
+          <div className={styles.promGrid}>
+            <div className={styles.wide}>
+              <Input
+                label="URL"
+                placeholder="https://mimir.example.com/prometheus"
+                className={styles.mono}
+                value={draft.remoteUrl}
+                error={errors.remoteUrl}
+                onChange={(e) => update({ remoteUrl: e.target.value })}
+                data-testid="settings-remote-url"
+              />
+            </div>
+            <Input
+              label="Tenant"
+              placeholder="X-Scope-OrgID, empty for none"
+              className={styles.mono}
+              value={draft.remoteTenant}
+              error={errors.remoteTenant}
+              onChange={(e) => update({ remoteTenant: e.target.value })}
+              data-testid="settings-remote-tenant"
+            />
+            <ClusterLabelField
+              name={draft.remoteLabelName}
+              value={draft.remoteLabelValue}
+              nameError={errors.remoteLabelName}
+              valueError={errors.remoteLabelValue}
+              onName={(remoteLabelName) => update({ remoteLabelName })}
+              onValue={(remoteLabelValue) => update({ remoteLabelValue })}
+              testId="settings-remote-label"
+            />
+            <div className={`${styles.schemeField} ${styles.wide}`}>
+              <span className={styles.fieldLabel} aria-hidden="true">
+                Authentication
+              </span>
+              <Segmented
+                label="Authentication"
+                value={draft.remoteAuth}
+                options={AUTHS}
+                onChange={pickAuth}
+                testId="settings-remote-auth"
+              />
+            </div>
+            {draft.remoteAuth === "basic" ? (
+              <>
+                <Input
+                  label="Username"
+                  value={draft.remoteUsername}
+                  error={errors.remoteUsername}
+                  onChange={(e) => update({ remoteUsername: e.target.value })}
+                  data-testid="settings-remote-username"
+                />
+                <Input
+                  label="Password"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={keptSecret ? SAVED_SECRET : undefined}
+                  value={secret}
+                  error={errors.remoteSecret}
+                  onChange={(e) => typeSecret(e.target.value)}
+                  data-testid="settings-remote-password"
+                />
+              </>
+            ) : null}
+            {draft.remoteAuth === "bearer" ? (
+              <Input
+                label="Token"
+                type="password"
+                autoComplete="off"
+                placeholder={keptSecret ? SAVED_SECRET : undefined}
+                value={secret}
+                error={errors.remoteSecret}
+                onChange={(e) => typeSecret(e.target.value)}
+                data-testid="settings-remote-token"
+              />
+            ) : null}
+            {draft.remoteAuth === "mtls" ? (
+              <>
+                <PathField
+                  label="Certificate file"
+                  value={draft.remoteCert}
+                  error={fileErrors.remoteCert}
+                  onChange={(remoteCert) => update({ remoteCert })}
+                  testId="settings-remote-cert"
+                />
+                <PathField
+                  label="Key file"
+                  help="An unencrypted PEM key: PKCS#8, RSA or EC"
+                  value={draft.remoteKey}
+                  error={fileErrors.remoteKey}
+                  onChange={(remoteKey) => update({ remoteKey })}
+                  testId="settings-remote-key"
+                />
+              </>
+            ) : null}
+            <PathField
+              label="CA file"
+              help="Optional: PEM certificates to trust besides the system's"
+              value={draft.remoteCa}
+              error={fileErrors.remoteCa}
+              onChange={(remoteCa) => update({ remoteCa })}
+              testId="settings-remote-ca"
+            />
           </div>
         ) : null}
       </section>
@@ -342,7 +611,10 @@ function SettingsForm(props: {
         </p>
         <Button
           size="sm"
-          onClick={() => update(emptyDraft())}
+          onClick={() => {
+            setSecret("");
+            update(emptyDraft());
+          }}
           data-testid="settings-restore"
         >
           Restore defaults
@@ -352,6 +624,8 @@ function SettingsForm(props: {
           disabled={!changed}
           onClick={() => {
             setDraft(draftFrom(saved));
+            setSecret("");
+            setFileErrors({});
             setJustSaved(false);
           }}
           data-testid="settings-reset"

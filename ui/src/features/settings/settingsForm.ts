@@ -1,9 +1,18 @@
+import { IpcFailure } from "../../ipc/client";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
+import type { LabelMatcher } from "../../ipc/generated/LabelMatcher";
 import type { MetricsProvider } from "../../ipc/generated/MetricsProvider";
 import type { MetricsProviderSetting } from "../../ipc/generated/MetricsProviderSetting";
+import type { RemoteAuth } from "../../ipc/generated/RemoteAuth";
 
-/** Detect, Prometheus, metrics-server only or None. */
+/** Detect, Prometheus, a Prometheus-compatible URL, metrics-server only or None. */
 export type ProviderKind = MetricsProviderSetting["kind"];
+
+/** None, Basic, Bearer or a client certificate (`mtls`). */
+export type AuthKind = RemoteAuth["kind"];
+
+/** The authentications whose password or token the keychain keeps (spec I48). */
+export type SecretAuth = "basic" | "bearer";
 
 /** HTTP saves no scheme; HTTPS saves "https". */
 export type SchemeChoice = "http" | "https";
@@ -28,7 +37,28 @@ export interface SettingsDraft {
   /** The cluster label `name="value"`: the name is trimmed, the value kept as typed. */
   promLabelName: string;
   promLabelValue: string;
+  /** The Prometheus-compatible URL's fields; its password or token is never part of the draft. */
+  remoteUrl: string;
+  remoteTenant: string;
+  remoteLabelName: string;
+  remoteLabelValue: string;
+  remoteAuth: AuthKind;
+  remoteUsername: string;
+  remoteCert: string;
+  remoteKey: string;
+  remoteCa: string;
 }
+
+/** The password or token field (spec I57, I58), kept apart from the draft. */
+export interface SecretField {
+  /** As typed; an empty field keeps the saved secret when `kept`. */
+  typed: string;
+  /** A secret is saved and the saved setting is `remote` with the draft's authentication. */
+  kept: boolean;
+}
+
+/** The file fields, whose problems only the save finds (spec I60). */
+export type FileField = "remoteCa" | "remoteCert" | "remoteKey";
 
 export type DraftField =
   | "accessibleNamespaces"
@@ -40,7 +70,13 @@ export type DraftField =
   | "promPrefix"
   | "promTenant"
   | "promLabelName"
-  | "promLabelValue";
+  | "promLabelValue"
+  | "remoteUrl"
+  | "remoteTenant"
+  | "remoteLabelName"
+  | "remoteLabelValue"
+  | "remoteUsername"
+  | "remoteSecret";
 
 export type DraftErrors = Partial<Record<DraftField, string>>;
 
@@ -56,6 +92,16 @@ export const LABEL_NAME_ERROR =
   "A label name is letters, digits and _, and does not start with __.";
 export const LABEL_PAIR_ERROR = "A cluster label needs a name and a value.";
 export const LABEL_VALUE_ERROR = "A label value is at most 1024 characters.";
+/** The core's texts for the URL and its authentication (spec I32 to I34, I60). */
+export const URL_ERROR =
+  "The URL must be http:// or https:// with a host, without a user name, query or fragment.";
+export const PLAIN_HTTP_ERROR =
+  "Basic and Bearer credentials need https://, except to localhost.";
+export const MTLS_HTTP_ERROR = "A client certificate needs https://.";
+export const USERNAME_ERROR = "The user name must not be empty or contain ':'.";
+/** Save with Basic or Bearer and no secret, typed or kept (spec I58). */
+export const PASSWORD_ERROR = "Enter the password.";
+export const TOKEN_ERROR = "Enter the token.";
 
 /** The Prometheus fields when nothing better is known: the operator's governing Service. */
 export const PROMETHEUS_DEFAULTS: Readonly<
@@ -81,10 +127,18 @@ const RESERVED_TENANTS = [".", "..", "__mimir_cluster"];
 const TENANT_MAX = 150;
 const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const LABEL_VALUE_MAX = 1024;
+/** The core's `details` of a file it refuses: the setting's field (spec I35). */
+const FILE_FIELDS: Record<string, FileField> = {
+  caPath: "remoteCa",
+  certPath: "remoteCert",
+  keyPath: "remoteKey",
+};
 
 export function draftFrom(settings: ClusterSettings): SettingsDraft {
   const provider = settings.metricsProvider;
   const prom = provider.kind === "prometheus" ? provider : null;
+  const remote = provider.kind === "remote" ? provider : null;
+  const auth = remote?.auth;
   return {
     displayName: settings.displayName ?? "",
     icon: settings.icon,
@@ -102,10 +156,19 @@ export function draftFrom(settings: ClusterSettings): SettingsDraft {
     promTenant: prom?.tenant ?? "",
     promLabelName: prom?.matcher?.name ?? "",
     promLabelValue: prom?.matcher?.value ?? "",
+    remoteUrl: remote?.url ?? "",
+    remoteTenant: remote?.tenant ?? "",
+    remoteLabelName: remote?.matcher?.name ?? "",
+    remoteLabelValue: remote?.matcher?.value ?? "",
+    remoteAuth: auth?.kind ?? "none",
+    remoteUsername: auth?.kind === "basic" ? auth.username : "",
+    remoteCert: auth?.kind === "mtls" ? auth.certPath : "",
+    remoteKey: auth?.kind === "mtls" ? auth.keyPath : "",
+    remoteCa: remote?.caPath ?? "",
   };
 }
 
-/** Restore defaults: empty fields, no icon, no accessible namespaces, Detect and HTTP. */
+/** Restore defaults: empty fields, no icon, no accessible namespaces, Detect, HTTP and None. */
 export function emptyDraft(): SettingsDraft {
   return {
     displayName: "",
@@ -124,6 +187,15 @@ export function emptyDraft(): SettingsDraft {
     promTenant: "",
     promLabelName: "",
     promLabelValue: "",
+    remoteUrl: "",
+    remoteTenant: "",
+    remoteLabelName: "",
+    remoteLabelValue: "",
+    remoteAuth: "none",
+    remoteUsername: "",
+    remoteCert: "",
+    remoteKey: "",
+    remoteCa: "",
   };
 }
 
@@ -192,19 +264,135 @@ function isLabelName(name: string): boolean {
 }
 
 /** The cluster label's error, under the field that has to change, in the core's order. */
-function labelErrors(name: string, value: string): DraftErrors {
+function labelErrors(
+  name: string,
+  value: string,
+  [nameField, valueField]: [DraftField, DraftField],
+): DraftErrors {
   if (name === "" && value === "") return {};
-  if (name === "") return { promLabelName: LABEL_PAIR_ERROR };
-  if (value === "") return { promLabelValue: LABEL_PAIR_ERROR };
-  if (!isLabelName(name)) return { promLabelName: LABEL_NAME_ERROR };
+  if (name === "") return { [nameField]: LABEL_PAIR_ERROR };
+  if (value === "") return { [valueField]: LABEL_PAIR_ERROR };
+  if (!isLabelName(name)) return { [nameField]: LABEL_NAME_ERROR };
   // Characters as the core counts them: an emoji is one, not two UTF-16 units.
   if (Array.from(value).length > LABEL_VALUE_MAX) {
-    return { promLabelValue: LABEL_VALUE_ERROR };
+    return { [valueField]: LABEL_VALUE_ERROR };
   }
   return {};
 }
 
-export function validate(draft: SettingsDraft): DraftErrors {
+/** The URL as the core saves it: trimmed, without trailing `/` (spec I32). */
+function remoteUrlOf(text: string): string {
+  return text.trim().replace(/\/+$/, "");
+}
+
+/**
+ * The URL when the core accepts it (spec I32): http or https with a host, and no user
+ * info, query or fragment. `?` and `#` start a query and a fragment even when empty.
+ */
+function parseRemoteUrl(text: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  const accepted =
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.hostname !== "" &&
+    url.username === "" &&
+    url.password === "" &&
+    !/[?#]/.test(text);
+  return accepted ? url : null;
+}
+
+/** localhost, an address in 127.0.0.0/8 or ::1, as the URL parser writes them (spec I33). */
+function isLoopback(url: URL): boolean {
+  return (
+    url.hostname === "localhost" ||
+    /^127\.\d+\.\d+\.\d+$/.test(url.hostname) ||
+    url.hostname === "[::1]"
+  );
+}
+
+/** The URL option's errors, each under its field (spec I32 to I34, I58). */
+function remoteErrors(draft: SettingsDraft, secret: SecretField): DraftErrors {
+  const errors: DraftErrors = {};
+  const auth = draft.remoteAuth;
+  const url = parseRemoteUrl(remoteUrlOf(draft.remoteUrl));
+  const https = url?.protocol === "https:";
+  if (url === null) {
+    errors.remoteUrl = URL_ERROR;
+  } else if (
+    (auth === "basic" || auth === "bearer") &&
+    !https &&
+    !isLoopback(url)
+  ) {
+    errors.remoteUrl = PLAIN_HTTP_ERROR;
+  } else if (auth === "mtls" && !https) {
+    errors.remoteUrl = MTLS_HTTP_ERROR;
+  }
+  const tenant = draft.remoteTenant.trim();
+  if (tenant !== "" && !isTenant(tenant)) errors.remoteTenant = TENANT_ERROR;
+  Object.assign(
+    errors,
+    labelErrors(draft.remoteLabelName.trim(), draft.remoteLabelValue, [
+      "remoteLabelName",
+      "remoteLabelValue",
+    ]),
+  );
+  const username = draft.remoteUsername.trim();
+  if (auth === "basic" && (username === "" || username.includes(":"))) {
+    errors.remoteUsername = USERNAME_ERROR;
+  }
+  if (draftSecretAuth(draft) !== null && secret.typed === "" && !secret.kept) {
+    errors.remoteSecret = auth === "basic" ? PASSWORD_ERROR : TOKEN_ERROR;
+  }
+  return errors;
+}
+
+/** The authentication whose password or token the keychain keeps for `setting`, or null. */
+export function secretAuthOf(
+  setting: MetricsProviderSetting,
+): SecretAuth | null {
+  if (setting.kind !== "remote") return null;
+  const { kind } = setting.auth;
+  return kind === "basic" || kind === "bearer" ? kind : null;
+}
+
+/** What the draft's secret field is for: Basic's password, Bearer's token, or nothing. */
+export function draftSecretAuth(draft: SettingsDraft): SecretAuth | null {
+  if (draft.provider !== "remote") return null;
+  const auth = draft.remoteAuth;
+  return auth === "basic" || auth === "bearer" ? auth : null;
+}
+
+/**
+ * Whether an empty secret field keeps the saved secret (spec I58): one is saved, and the
+ * saved setting is `remote` with the draft's authentication. Basic's password is never
+ * Bearer's token.
+ */
+export function keepsSecret(
+  saved: MetricsProviderSetting,
+  draft: SettingsDraft,
+  secretSaved: boolean,
+): boolean {
+  const auth = draftSecretAuth(draft);
+  return secretSaved && auth !== null && secretAuthOf(saved) === auth;
+}
+
+/** The file field a refused save names in its details (spec I35, I60), or null. */
+export function fileFieldOf(error: unknown): FileField | null {
+  if (!(error instanceof IpcFailure) || error.code !== "InvalidInput") {
+    return null;
+  }
+  return FILE_FIELDS[error.details ?? ""] ?? null;
+}
+
+/** The fields' errors; `secret` is the password or token field, which the draft leaves out. */
+export function validate(
+  draft: SettingsDraft,
+  secret: SecretField = { typed: "", kept: false },
+): DraftErrors {
   const errors: DraftErrors = {};
   const bad = splitNamespaces(draft.accessibleNamespaces).filter(
     (name) => !isDnsLabel(name),
@@ -235,8 +423,14 @@ export function validate(draft: SettingsDraft): DraftErrors {
     if (tenant !== "" && !isTenant(tenant)) errors.promTenant = TENANT_ERROR;
     Object.assign(
       errors,
-      labelErrors(draft.promLabelName.trim(), draft.promLabelValue),
+      labelErrors(draft.promLabelName.trim(), draft.promLabelValue, [
+        "promLabelName",
+        "promLabelValue",
+      ]),
     );
+  }
+  if (draft.provider === "remote") {
+    Object.assign(errors, remoteErrors(draft, secret));
   }
   return errors;
 }
@@ -246,10 +440,32 @@ function textOrNull(text: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/** The cluster label as the core saves it: the name trimmed, null when both are empty. */
+function matcherOf(name: string, value: string): LabelMatcher | null {
+  const trimmed = name.trim();
+  return trimmed === "" && value === "" ? null : { name: trimmed, value };
+}
+
+function remoteAuthOf(draft: SettingsDraft): RemoteAuth {
+  switch (draft.remoteAuth) {
+    case "none":
+      return { kind: "none" };
+    case "basic":
+      return { kind: "basic", username: draft.remoteUsername.trim() };
+    case "bearer":
+      return { kind: "bearer" };
+    case "mtls":
+      return {
+        kind: "mtls",
+        certPath: draft.remoteCert.trim(),
+        keyPath: draft.remoteKey.trim(),
+      };
+  }
+}
+
 function providerSetting(draft: SettingsDraft): MetricsProviderSetting {
   switch (draft.provider) {
-    case "prometheus": {
-      const labelName = draft.promLabelName.trim();
+    case "prometheus":
       return {
         kind: "prometheus",
         namespace: draft.promNamespace.trim(),
@@ -258,23 +474,23 @@ function providerSetting(draft: SettingsDraft): MetricsProviderSetting {
         scheme: draft.promScheme === "https" ? "https" : null,
         pathPrefix: pathPrefixOf(draft.promPrefix),
         tenant: textOrNull(draft.promTenant),
-        matcher:
-          labelName === "" && draft.promLabelValue === ""
-            ? null
-            : { name: labelName, value: draft.promLabelValue },
+        matcher: matcherOf(draft.promLabelName, draft.promLabelValue),
       };
-    }
+    case "remote":
+      return {
+        kind: "remote",
+        url: remoteUrlOf(draft.remoteUrl),
+        tenant: textOrNull(draft.remoteTenant),
+        matcher: matcherOf(draft.remoteLabelName, draft.remoteLabelValue),
+        auth: remoteAuthOf(draft),
+        caPath: textOrNull(draft.remoteCa),
+      };
     case "auto":
       return { kind: "auto" };
     case "metricsServer":
       return { kind: "metricsServer" };
     case "none":
       return { kind: "none" };
-    case "remote":
-      // The page offers no URL option yet, so it never saves one.
-      throw new Error(
-        "the Settings page cannot save a Prometheus-compatible URL yet",
-      );
   }
 }
 
