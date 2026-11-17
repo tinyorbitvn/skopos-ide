@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { findHelm } from "./helmCharts";
@@ -277,4 +277,45 @@ export async function ensureMetricsProviders(): Promise<PrometheusService> {
     "--timeout=600s",
   ]);
   return serverService();
+}
+
+/**
+ * `kubectl port-forward` of the Mimir Service to a free port of 127.0.0.1, so a
+ * Prometheus-compatible URL on this machine reaches it (spec I71). Resolves once kubectl
+ * forwards; `stop` ends the forward.
+ */
+export function forwardMimir(): Promise<{ port: number; stop(): void }> {
+  const child = spawn(
+    "kubectl",
+    [
+      "--kubeconfig",
+      KIND_KUBECONFIG,
+      "-n",
+      MIMIR.namespace,
+      "port-forward",
+      "--address",
+      "127.0.0.1",
+      `service/${MIMIR.service}`,
+      `:${MIMIR.port}`,
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      const forwarding = /Forwarding from 127\.0\.0\.1:(\d+)/.exec(stdout);
+      if (forwarding) {
+        resolve({ port: Number(forwarding[1]), stop: () => child.kill() });
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", reject);
+    child.once("exit", (code) =>
+      reject(new Error(`kubectl port-forward exited with ${code}: ${stderr}`)),
+    );
+  });
 }
