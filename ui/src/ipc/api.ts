@@ -30,6 +30,7 @@ import type { LogDownload } from "./generated/LogDownload";
 import type { LogEvent } from "./generated/LogEvent";
 import type { LogOptions } from "./generated/LogOptions";
 import type { LogTarget } from "./generated/LogTarget";
+import type { MapFormat } from "./generated/MapFormat";
 import type { MetricsProvider } from "./generated/MetricsProvider";
 import type { MetricsRange } from "./generated/MetricsRange";
 import type { MetricsResult } from "./generated/MetricsResult";
@@ -108,6 +109,12 @@ export const api = {
     }),
   resourceGraphUnsubscribe: (subscriptionId: string) =>
     call<void>("resource_graph_unsubscribe", { subscriptionId }),
+  /**
+   * Saves the map as drawn and returns the path written (spec O §6.4). `png`
+   * is base64 without a `data:` prefix.
+   */
+  mapExport: (path: string, format: MapFormat, png: string, scale: number) =>
+    call<string>("map_export", { path, format, png, scale }),
   resourceGet: (
     clusterId: string,
     resource: ResourceRef,

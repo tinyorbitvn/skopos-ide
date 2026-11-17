@@ -7,6 +7,7 @@ pub mod external_url;
 pub mod graph;
 pub mod helm;
 pub mod kubeconfig;
+pub mod map_export;
 pub mod metrics;
 pub mod openapi;
 pub mod paths;

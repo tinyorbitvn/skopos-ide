@@ -9,6 +9,7 @@ pub mod cluster;
 pub mod graph;
 pub mod helm;
 pub mod logs;
+pub mod map;
 pub mod metrics;
 pub mod portforward;
 pub mod resources;
