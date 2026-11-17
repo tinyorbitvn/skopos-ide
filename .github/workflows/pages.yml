@@ -1,0 +1,64 @@
+name: pages
+
+# Builds the project site from site/ with the latest release's downloads and deploys it to
+# GitHub Pages. The release workflow publishes with GITHUB_TOKEN, whose events start no
+# workflows, so this listens for that workflow's completion instead of release: published.
+# workflow_run only fires for a workflow file on the default branch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "scripts/build-site.mjs"
+      - "ui/src/design/tinyorbit.css"
+      - "ui/src/design/glyphPaths.ts"
+      - "assets/icon.svg"
+      - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install the UI packages (fonts and icons)
+        run: pnpm install --frozen-lockfile --filter ./ui
+      - name: Build the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/build-site.mjs --out "$RUNNER_TEMP/site"
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
