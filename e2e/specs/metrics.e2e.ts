@@ -2,6 +2,7 @@ import { replaceText } from "../helpers/helm";
 import { kubectl } from "../helpers/kube";
 import {
   ensureMetricsProviders,
+  forwardMimir,
   MIMIR,
   MIMIR_TENANT,
   PROMETHEUS_SERVER_SELECTOR,
@@ -115,6 +116,29 @@ async function saveMimir(tenant: string): Promise<void> {
   await until(
     async () => (await text("settings-status")) === SAVED,
     `the Mimir setting with tenant ${tenant} was never saved`,
+  );
+}
+
+/**
+ * Points the cluster's metrics at a Prometheus-compatible URL with `tenant`, the kind
+ * cluster's label and no authentication, and saves.
+ */
+async function saveRemote(url: string, tenant: string): Promise<void> {
+  await clickWhenShown("header-cluster-settings");
+  await shown("cluster-settings", 30_000);
+  await shown("settings-save", 30_000);
+  await clickWhenShown("settings-metrics-remote");
+  await replaceText("settings-remote-url", url);
+  await replaceText("settings-remote-tenant", tenant);
+  await replaceText("settings-remote-label-name", "cluster");
+  await replaceText("settings-remote-label-value", "skopos-e2e");
+  await clickWhenShown("settings-remote-auth-none");
+  const save = byTestId("settings-save");
+  await save.waitForEnabled({ timeout: 15_000 });
+  await save.click();
+  await until(
+    async () => (await text("settings-status")) === SAVED,
+    `the URL ${url} was never saved`,
   );
 }
 
@@ -290,6 +314,36 @@ describe("metrics", () => {
       "the note for an unknown tenant never showed",
     );
     expect(await text("metrics-note-action")).toBe("Cluster settings");
+  });
+
+  it("Mimir at a URL: a port-forward to it fills the Overview, and the source line names its host", async function () {
+    this.timeout(SAMPLES_TIMEOUT + 4 * 60_000);
+    const forward = await forwardMimir();
+    try {
+      const host = `127.0.0.1:${forward.port}`;
+      await saveRemote(`http://${host}/prometheus`, MIMIR_TENANT);
+      await openOverview();
+      await until(
+        async () =>
+          (await text("metrics-source")) ===
+          `Prometheus API at ${host}, set in the cluster settings, tenant ${MIMIR_TENANT}, label cluster="skopos-e2e"`,
+        "the source line never named the URL's host",
+      );
+      await until(
+        () => chartsHaveData(["cpu", "memory", "pods", "disk"]),
+        "the CPU, Memory, Pods and Disk charts never showed data from the URL",
+        SAMPLES_TIMEOUT,
+      );
+      await until(
+        async () =>
+          /^\d+(\.\d)? of \d+(\.\d)? cores · Prometheus$/.test(
+            await text("overview-gauge-cpu-caption"),
+          ),
+        "the CPU gauge never showed numbers from the URL",
+      );
+    } finally {
+      forward.stop();
+    }
   });
 
   it("Detect finds a Prometheus Service by itself", async () => {
