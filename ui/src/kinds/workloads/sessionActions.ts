@@ -1,5 +1,5 @@
-import { Plug, Terminal } from "lucide-react";
 import { toast } from "../../design";
+import { Plug, Terminal } from "../../design/glyphs";
 import {
   nodeShellImage,
   nodeShellPrompt,

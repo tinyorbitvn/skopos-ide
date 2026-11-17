@@ -1,5 +1,4 @@
 import {
-  ArrowRightLeft,
   Bell,
   Box,
   Boxes,
@@ -11,7 +10,6 @@ import {
   FolderTree,
   Globe,
   HardDrive,
-  KeyRound,
   Layers,
   LayoutDashboard,
   type LucideIcon,
@@ -24,6 +22,7 @@ import {
   Waypoints,
   Workflow,
 } from "lucide-react";
+import { ArrowRightLeft, KeyRound } from "../../design/glyphs";
 
 /** The kinds of `resources_names`, by plural. */
 export const KIND_ICONS: Partial<Record<string, LucideIcon>> = {

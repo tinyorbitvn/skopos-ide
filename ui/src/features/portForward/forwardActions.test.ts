@@ -1,6 +1,12 @@
-import { ExternalLink, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import {
+  ExternalLink,
+  Play,
+  RotateCw,
+  Square,
+  Trash2,
+} from "../../design/glyphs";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { mockBackend } from "../../test/ipc";
 import { forward } from "../../test/portForwards";

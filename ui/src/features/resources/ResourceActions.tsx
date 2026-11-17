@@ -1,7 +1,7 @@
-import { Ellipsis } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Button, ConfirmDialog, Menu } from "../../design";
+import { Ellipsis } from "../../design/glyphs";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { KubeObject } from "../../kinds/objects";

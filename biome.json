@@ -3,5 +3,51 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": { "includes": ["**", "!**/generated", "!**/dist"] },
   "formatter": { "indentStyle": "space", "indentWidth": 2 },
-  "linter": { "enabled": true, "rules": { "recommended": true } }
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "lucide-react": {
+                "importNames": [
+                  "Trash2",
+                  "FileCode",
+                  "ScrollText",
+                  "Terminal",
+                  "Plug",
+                  "ArrowRightLeft",
+                  "MoveVertical",
+                  "RotateCw",
+                  "Play",
+                  "CirclePause",
+                  "CirclePlay",
+                  "ArrowDownToLine",
+                  "LogOut",
+                  "KeyRound",
+                  "Star",
+                  "ShieldOff",
+                  "Zap",
+                  "Pencil",
+                  "RefreshCw",
+                  "RotateCcw",
+                  "CircleStop",
+                  "History",
+                  "CircleArrowUp",
+                  "PackagePlus",
+                  "ExternalLink",
+                  "Square",
+                  "Ellipsis"
+                ],
+                "message": "Use the app's own icon from design/glyphs."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

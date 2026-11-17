@@ -1,4 +1,3 @@
-import { CircleArrowUp, History, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
@@ -11,6 +10,7 @@ import {
   Tabs,
   useNow,
 } from "../../design";
+import { CircleArrowUp, History, Trash2 } from "../../design/glyphs";
 import { api } from "../../ipc/api";
 import type { HelmRelease } from "../../ipc/generated/HelmRelease";
 import type { HelmReleaseDetail } from "../../ipc/generated/HelmReleaseDetail";

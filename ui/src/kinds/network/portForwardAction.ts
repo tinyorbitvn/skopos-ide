@@ -1,5 +1,5 @@
-import { ArrowRightLeft } from "lucide-react";
 import { createElement } from "react";
+import { ArrowRightLeft } from "../../design/glyphs";
 import { PortForwardDialog } from "../../features/portForward/PortForwardDialog";
 import type { PortForwardKind } from "../../ipc/generated/PortForwardKind";
 import type { KindAction } from "../registry";

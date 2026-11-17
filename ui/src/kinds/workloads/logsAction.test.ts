@@ -1,5 +1,5 @@
-import { ScrollText } from "lucide-react";
 import { afterEach, expect, test } from "vitest";
+import { ScrollText } from "../../design/glyphs";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { newCreateTab, resetDockForTest, useDock } from "../../stores/dock";
 import type { KubeObject } from "../objects";

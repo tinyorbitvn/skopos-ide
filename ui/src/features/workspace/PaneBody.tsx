@@ -1,6 +1,6 @@
-import { Plug, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 import { Button, Spinner } from "../../design";
+import { Plug, RefreshCw } from "../../design/glyphs";
 import { connectCluster } from "../../stores/clusters";
 import { useClusterName, useWorkspaceClusterState } from "./clusters";
 import { EventsView } from "./EventsView";

@@ -14,16 +14,12 @@ import {
 import {
   ChevronDown,
   ChevronUp,
-  FileCode,
   FilePlus,
   type LucideIcon,
   PanelBottom,
   PanelRightOpen,
-  Plug,
   Plus,
-  ScrollText,
   SquareTerminal,
-  Terminal,
   X,
 } from "lucide-react";
 import {
@@ -35,6 +31,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { Button, ConfirmDialog, IconButton } from "../../design";
+import { FileCode, Plug, ScrollText, Terminal } from "../../design/glyphs";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import {
   type DetailsDockTab,

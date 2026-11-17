@@ -1,6 +1,6 @@
-import { Star } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import { Star } from "../../design/glyphs";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { mockBackend } from "../../test/ipc";
 import { type ActionContext, kindSpec } from "../registry";

@@ -1,6 +1,6 @@
-import { Zap } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import { Zap } from "../../design/glyphs";
 import { mockBackend } from "../../test/ipc";
 import { PODS } from "../refs";
 import { type ActionContext, kindSpec } from "../registry";
