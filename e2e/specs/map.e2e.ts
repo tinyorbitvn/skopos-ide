@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { expectToast } from "../helpers/helm";
 import { kubectl } from "../helpers/kube";
 import {
   byTestId,
@@ -63,6 +66,28 @@ const OBJECTS = [
   ACCOUNT,
   CLAIM,
 ];
+
+// The ServiceAccount's access (spec O §8.3). The Role web-leader does not exist.
+const READER_BINDING = `RoleBinding/${NS}/web-config-reader`;
+const READER_ROLE = `Role/${NS}/web-config-reader`;
+const VIEW_BINDING = "ClusterRoleBinding//skopos-e2e-map-web-view";
+const VIEW_ROLE = "ClusterRole//view";
+const LEADER_BINDING = `RoleBinding/${NS}/web-leader`;
+const LEADER_ROLE = `Role/${NS}/web-leader`;
+const ACCESS: [string, string, string][] = [
+  [READER_BINDING, "binds", ACCOUNT],
+  [VIEW_BINDING, "binds", ACCOUNT],
+  [LEADER_BINDING, "binds", ACCOUNT],
+  [READER_BINDING, "grants", READER_ROLE],
+  [VIEW_BINDING, "grants", VIEW_ROLE],
+  [LEADER_BINDING, "grants", LEADER_ROLE],
+];
+// Where the save dialog's answer puts the exported map; removed when the test ends.
+const EXPORT_DIR = path.resolve(__dirname, "..", ".tmp", "map-export");
+const EXPORTS = {
+  png: path.join(EXPORT_DIR, "map.png"),
+  pdf: path.join(EXPORT_DIR, "map.pdf"),
+};
 
 const until = (
   check: () => Promise<boolean>,
@@ -202,6 +227,92 @@ async function onlyNamespace(namespace: string): Promise<void> {
     async () => (await byTestId("map-ns-filter").getText()) === namespace,
     `the Namespaces filter never showed only ${namespace}`,
   );
+}
+
+/** Chooses a layout and waits until it is the chosen one. */
+async function chooseLayout(
+  layout: "grouped" | "layered" | "force",
+): Promise<void> {
+  await clickWhenShown(`map-layout-${layout}`);
+  await until(
+    async () =>
+      (await byTestId(`map-layout-${layout}`).$("input")).isSelected(),
+    `the ${layout} layout was never chosen`,
+  );
+}
+
+/** Waits until the map draws an edge for each relation. */
+async function expectEdges(
+  relations: [string, string, string][],
+): Promise<void> {
+  for (const [from, rel, to] of relations) {
+    await edge(from, rel, to).waitForExist({
+      timeout: 15000,
+      timeoutMsg: `no ${rel} edge from ${from} to ${to}`,
+    });
+  }
+}
+
+/**
+ * Whether the centre of each node's ring lies inside the Cluster-wide access box. One call
+ * reads them all, so a refit cannot move the drawing between two of them.
+ */
+async function inAccessBox(ids: string[]): Promise<boolean[]> {
+  return browser.execute((wanted: string[]) => {
+    const box = document
+      .querySelector('[data-testid="map-access"] > rect')
+      ?.getBoundingClientRect();
+    return wanted.map((id) => {
+      const ring = document
+        .querySelector(`[data-testid="map-node"][data-id="${id}"] circle`)
+        ?.getBoundingClientRect();
+      if (!box || !ring) return false;
+      const x = ring.x + ring.width / 2;
+      const y = ring.y + ring.height / 2;
+      return x > box.left && x < box.right && y > box.top && y < box.bottom;
+    });
+  }, ids);
+}
+
+/**
+ * Makes the page's save dialog answer `paths[‹extension›]`, by the extension of its one
+ * filter, so an export writes there and no dialog opens. Tauri defines
+ * `window.__TAURI_INTERNALS__.invoke` read-only, so this wraps the `fetch` through which it
+ * sends each command to the app.
+ */
+async function answerSaveDialog(paths: Record<string, string>): Promise<void> {
+  await browser.execute((answers: Record<string, string>) => {
+    const { __TAURI_INTERNALS__: internals } = window as unknown as {
+      __TAURI_INTERNALS__: {
+        convertFileSrc(file: string, protocol: string): string;
+      };
+    };
+    const save = internals.convertFileSrc("plugin:dialog|save", "ipc");
+    const send = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (String(input) !== save) return send(input, init);
+      const { options } = JSON.parse(String(init?.body));
+      const answer = answers[options.filters[0].extensions[0]] ?? null;
+      return Promise.resolve(
+        new Response(JSON.stringify(answer), {
+          headers: {
+            "Content-Type": "application/json",
+            "Tauri-Response": "ok",
+          },
+        }),
+      );
+    };
+  }, paths);
+}
+
+/** Picks an item of the toolbar's Export menu and waits for its toast. */
+async function exportAs(format: "png" | "pdf", toast: string): Promise<void> {
+  const button = await shown("map-export");
+  await button.waitForEnabled({ timeout: 15000 });
+  await pointerClick(button);
+  await clickWhenShown(`map-export-${format}`);
+  await gone(`map-export-${format}`);
+  await expectToast(toast);
 }
 
 describe("resource map", () => {
@@ -479,6 +590,81 @@ describe("resource map", () => {
         });
       }
     }
+  });
+
+  it("links the ServiceAccount to its bindings and their roles, with the rules", async () => {
+    await clickWhenShown("nav-map");
+    await chooseLayout("layered");
+    await expectEdges(ACCESS);
+    await select(READER_ROLE, "Role web-config-reader");
+    const rule = $('[data-testid="map-fact"][data-label="configmaps"]');
+    await rule.waitForExist({
+      timeout: 15000,
+      timeoutMsg: "the Role's facts never listed its configmaps rule",
+    });
+    expect(await rule.$("dd").getText()).toBe("get, list");
+    expect(await node(LEADER_ROLE).getAttribute("data-status")).toBe(
+      "critical",
+    );
+    await select(LEADER_ROLE, "Role web-leader");
+    await until(
+      async () =>
+        (await byTestId("map-details").getText()).includes("Not found"),
+      "the missing Role never read Not found",
+    );
+    await clickWhenShown("map-details-close");
+  });
+
+  it("puts the ClusterRoleBinding and its ClusterRole in the Cluster-wide access box", async () => {
+    await chooseLayout("grouped");
+    await shown("map-access", 15000);
+    await until(
+      async () =>
+        JSON.stringify(
+          await inAccessBox([
+            VIEW_BINDING,
+            VIEW_ROLE,
+            READER_BINDING,
+            READER_ROLE,
+          ]),
+        ) === JSON.stringify([true, true, false, false]),
+      "the Access box never held just the ClusterRoleBinding and its ClusterRole",
+    );
+  });
+
+  it("shows the access chain on the Deployment's object map", async () => {
+    // Grouped draws the Deployment as a box, and `select` clicks a node's ring.
+    await chooseLayout("layered");
+    await select(DEPLOYMENT, "Deployment web");
+    await clickWhenShown("map-details-focus");
+    await until(
+      async () => (await focus()) === DEPLOYMENT,
+      "the object map never opened",
+    );
+    await expectEdges(ACCESS);
+    await browser.back();
+    await until(
+      async () =>
+        (await focus()) === null && (await byTestId("map-search").isExisting()),
+      "Back never returned to the cluster map",
+    );
+  });
+
+  it("exports the map as a PNG image and a PDF document", async () => {
+    fs.rmSync(EXPORT_DIR, { recursive: true, force: true });
+    fs.mkdirSync(EXPORT_DIR, { recursive: true });
+    await chooseLayout("grouped");
+    await shown("map-access", 15000);
+    await answerSaveDialog(EXPORTS);
+    await exportAs("png", "Map exported as PNG");
+    expect(fs.readFileSync(EXPORTS.png).subarray(0, 4).toString("latin1")).toBe(
+      "\x89PNG",
+    );
+    await exportAs("pdf", "Map exported as PDF");
+    expect(fs.readFileSync(EXPORTS.pdf).subarray(0, 5).toString("latin1")).toBe(
+      "%PDF-",
+    );
+    fs.rmSync(EXPORT_DIR, { recursive: true, force: true });
   });
 
   it("lists the Gateway's class and the HTTPRoute's parents", async () => {
