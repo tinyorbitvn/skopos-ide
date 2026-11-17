@@ -7,6 +7,8 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "../../design";
+import type { MapFormat } from "../../ipc/generated/MapFormat";
 import { resetGraphForTest } from "../../stores/graph";
 import {
   DEMO,
@@ -16,11 +18,15 @@ import {
   servedResource,
 } from "../../test/graph";
 import { flush } from "../../test/ipc";
+import { exportButton, MAP_IMAGE, pickExport } from "../../test/mapExport";
 import { mockElementSize } from "../../test/size";
+import { renderMapPng } from "./exportMap";
 import { resetMovedForTest } from "./MapCanvas";
 import { MapRoute } from "./MapRoute";
 import { trailOf } from "./ObjectMapScreen";
 import { objectMapPath } from "./paths";
+
+vi.mock("./exportMap", () => ({ renderMapPng: vi.fn() }));
 
 function Where() {
   const location = useLocation();
@@ -30,9 +36,14 @@ function Where() {
 let g: GraphBackend;
 let store: Record<string, unknown>;
 
-async function show(path: string, saved: Record<string, unknown> = {}) {
+async function show(
+  path: string,
+  saved: Record<string, unknown> = {},
+  handlers: Parameters<typeof graphBackend>[0] = {},
+) {
   store = { ...saved };
   g = graphBackend({
+    ...handlers,
     ui_state_get: (a: { key: string }) => store[a.key] ?? null,
     ui_state_set: (a: { key: string; value: unknown }) => {
       store[a.key] = a.value;
@@ -217,6 +228,136 @@ describe("ObjectMapScreen", () => {
     fireEvent.click(screen.getByTestId("map-retry"));
     await act(flush);
     expect(subscribed()).toEqual([["shop"], ["shop"]]);
+  });
+});
+
+describe("ObjectMapScreen Export", () => {
+  beforeEach(() => {
+    vi.mocked(renderMapPng).mockReset().mockResolvedValue(MAP_IMAGE);
+  });
+
+  it("sits before Reset layout, disabled while the map loads and on error", async () => {
+    await show(objectMapPath("c1", DEMO.deployment));
+    expect(exportButton().nextElementSibling?.getAttribute("data-testid")).toBe(
+      "map-reset",
+    );
+    expect(exportButton().disabled).toBe(true);
+    await g.send(demoSnapshot());
+    expect(exportButton().disabled).toBe(false);
+    await g.send({ type: "failure", message: "watch ended" });
+    expect(exportButton().disabled).toBe(true);
+  });
+
+  it("is disabled when the focus no longer exists", async () => {
+    await show(objectMapPath("c1", "Deployment/shop/gone"));
+    await g.send(demoSnapshot());
+    expect(exportButton().disabled).toBe(true);
+  });
+
+  it.each<[MapFormat, string, string]>([
+    ["png", "PNG image", "Map exported as PNG"],
+    ["pdf", "PDF document", "Map exported as PDF"],
+  ])(
+    "%s saves as ‹kind›-‹name›-map in lower case with the %s filter",
+    async (format, filter, done) => {
+      const success = vi.spyOn(toast, "success");
+      await show(
+        objectMapPath("c1", DEMO.deployment),
+        {},
+        {
+          "plugin:dialog|save": () => `/home/me/deployment-web-map.${format}`,
+          map_export: (a: { path: string }) => a.path,
+        },
+      );
+      await g.send(demoSnapshot());
+      await pickExport(format);
+      expect(g.backend.callsTo("plugin:dialog|save")).toEqual([
+        {
+          options: {
+            defaultPath: `deployment-web-map.${format}`,
+            filters: [{ name: filter, extensions: [format] }],
+          },
+        },
+      ]);
+      expect(renderMapPng).toHaveBeenCalledWith(
+        screen.getByTestId("map-canvas"),
+      );
+      expect(g.backend.callsTo("map_export")).toEqual([
+        {
+          path: `/home/me/deployment-web-map.${format}`,
+          format,
+          png: MAP_IMAGE.png,
+          scale: 2,
+        },
+      ]);
+      expect(success).toHaveBeenCalledWith(
+        done,
+        `/home/me/deployment-web-map.${format}`,
+      );
+    },
+  );
+
+  it("does nothing more, and says nothing, when the save dialog is cancelled", async () => {
+    const success = vi.spyOn(toast, "success");
+    const error = vi.spyOn(toast, "error");
+    await show(
+      objectMapPath("c1", DEMO.deployment),
+      {},
+      {
+        "plugin:dialog|save": () => null,
+      },
+    );
+    await g.send(demoSnapshot());
+    await pickExport("pdf");
+    expect(renderMapPng).not.toHaveBeenCalled();
+    expect(g.backend.callsTo("map_export")).toEqual([]);
+    expect(success).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("is disabled while an export runs, and a second one does nothing", async () => {
+    let finish: (path: string) => void = () => {};
+    await show(
+      objectMapPath("c1", DEMO.deployment),
+      {},
+      {
+        "plugin:dialog|save": () => "/home/me/web.pdf",
+        map_export: () =>
+          new Promise<string>((resolve) => {
+            finish = resolve;
+          }),
+      },
+    );
+    await g.send(demoSnapshot());
+    await pickExport("pdf");
+    expect(exportButton().disabled).toBe(true);
+    await pickExport("png");
+    expect(g.backend.callsTo("plugin:dialog|save")).toHaveLength(1);
+    await act(async () => {
+      finish("/home/me/web.pdf");
+      await flush();
+    });
+    expect(exportButton().disabled).toBe(false);
+  });
+
+  it("shows the reason when map_export fails", async () => {
+    const error = vi.spyOn(toast, "error");
+    await show(
+      objectMapPath("c1", DEMO.deployment),
+      {},
+      {
+        "plugin:dialog|save": () => "/home/me/web.png",
+        map_export: () => {
+          throw { code: "InvalidInput", message: "The map image is not valid" };
+        },
+      },
+    );
+    await g.send(demoSnapshot());
+    await pickExport("png");
+    expect(error).toHaveBeenCalledWith(
+      "Could not export the map",
+      "The map image is not valid",
+    );
   });
 });
 

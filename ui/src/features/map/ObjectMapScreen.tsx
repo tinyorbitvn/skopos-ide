@@ -1,11 +1,12 @@
 import { ArrowLeft, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Button } from "../../design/Button";
 import { Segmented } from "../../design/Segmented";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import styles from "./ClusterMapScreen.module.css";
+import { ExportMenu } from "./ExportMenu";
 import { idParts, parseDepth, useFocusMap } from "./focusMap";
 import type { Depth } from "./layout/neighborhood";
 import { MapCanvas } from "./MapCanvas";
@@ -62,6 +63,7 @@ export function ObjectMapScreen({ focusId }: { focusId: string }) {
   const { graph, model, ids, gone } = useFocusMap(clusterId, focusId, depth);
   const snapshot = graph.snapshot;
   const focus = idParts(focusId);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   // The focus is selected on load, and again when the focus moves.
   const [picked, setPicked] = useState<{ focus: string; id: string | null }>({
@@ -127,6 +129,7 @@ export function ObjectMapScreen({ focusId }: { focusId: string }) {
             onSelect={select}
             resetSignal={resetSignal}
             centre={centre}
+            canvasRef={canvasRef}
           />
         }
         details={
@@ -148,6 +151,8 @@ export function ObjectMapScreen({ focusId }: { focusId: string }) {
   }
 
   const drawing = model !== null && graph.error === null && !gone;
+  // Export needs a drawn canvas: none over the size limit (spec O19).
+  const exportable = drawing && !tooMany(ids);
   return (
     <section
       className={styles.page}
@@ -186,6 +191,11 @@ export function ObjectMapScreen({ focusId }: { focusId: string }) {
             {summaryText(model, ids, null)}
           </span>
         ) : null}
+        <ExportMenu
+          canvas={canvasRef}
+          stem={`${focus.kind}-${focus.name}`.toLowerCase()}
+          disabled={!exportable}
+        />
         <Button
           size="sm"
           data-testid="map-reset"

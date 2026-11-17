@@ -1,5 +1,11 @@
 import { RotateCcw } from "lucide-react";
-import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../../design/Button";
 import { Segmented } from "../../design/Segmented";
@@ -8,8 +14,10 @@ import type { GraphNamespaceCount } from "../../ipc/generated/GraphNamespaceCoun
 import { useGraph } from "../../stores/graph";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
+import { useClusterName } from "../workspace/clusters";
 import { bridgeEdges } from "./bridges";
 import styles from "./ClusterMapScreen.module.css";
+import { ExportMenu } from "./ExportMenu";
 import {
   filtersActive,
   graphTotal,
@@ -72,7 +80,9 @@ export function matchesSearch(
 /** The cluster map (spec E §9, H §10), at `cluster/:id/map`. */
 export function ClusterMapScreen() {
   const { clusterId, resources } = useClusterContext();
+  const clusterName = useClusterName(clusterId);
   const navigate = useNavigate();
+  const canvasRef = useRef<HTMLDivElement>(null);
   const [savedHidden, setSavedHidden, hiddenLoaded] = useUiState<
     string[] | null
   >(`map.hidden.${clusterId}`, null);
@@ -239,6 +249,7 @@ export function ClusterMapScreen() {
             onSelect={setSelected}
             resetSignal={resetSignal}
             centre={centre}
+            canvasRef={canvasRef}
           />
         }
         details={
@@ -260,6 +271,8 @@ export function ClusterMapScreen() {
 
   const drawing =
     drawn !== null && graph.error === null && !allHidden && !allKindsHidden;
+  // Export needs a drawn canvas: none over the size limit or with no node (spec O19).
+  const exportable = drawing && !tooMany(shownIds) && shownIds.length > 0;
   return (
     <section className={styles.page} data-testid="map-page">
       <header className={styles.toolbar}>
@@ -287,6 +300,11 @@ export function ClusterMapScreen() {
           testId="map-layout"
         />
         <div className={styles.grow} />
+        <ExportMenu
+          canvas={canvasRef}
+          stem={clusterName}
+          disabled={!exportable}
+        />
         <Button
           size="sm"
           data-testid="map-reset"

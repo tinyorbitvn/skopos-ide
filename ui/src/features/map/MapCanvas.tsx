@@ -1,6 +1,7 @@
 import { Info, Scan, ZoomIn, ZoomOut } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -59,6 +60,8 @@ export interface MapCanvasProps {
    * as the drawing so the drawer scrolls, with no zoom, no legend and no dragging.
    */
   compact?: boolean;
+  /** Pointed at the `map-canvas` element, for the page's Export (spec O §6.2). */
+  canvasRef?: RefObject<HTMLDivElement | null>;
 }
 
 const LEGEND_STATUS = [
@@ -125,6 +128,7 @@ export function MapCanvas({
   resetSignal = 0,
   centre,
   compact = false,
+  canvasRef,
 }: MapCanvasProps) {
   const options = useMemo(
     () => ({ layout, page, flow, focusId }),
@@ -147,6 +151,13 @@ export function MapCanvas({
   );
 
   const root = useRef<HTMLDivElement>(null);
+  const setRoot = useCallback(
+    (el: HTMLDivElement | null) => {
+      root.current = el;
+      if (canvasRef) canvasRef.current = el;
+    },
+    [canvasRef],
+  );
   const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 });
   const userMoved = useRef(false);
   const drag = useRef<Drag | null>(null);
@@ -466,7 +477,7 @@ export function MapCanvas({
   return (
     <div className={styles.frame}>
       <div
-        ref={root}
+        ref={setRoot}
         className={
           compact ? `${styles.canvas} ${styles.compact}` : styles.canvas
         }
