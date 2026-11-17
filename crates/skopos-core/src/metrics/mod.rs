@@ -161,6 +161,17 @@ impl MetricsProviderSetting {
             matcher: matcher_of(matcher)?,
         })
     }
+
+    /// Whether the setting sends a password or token, which the keychain keeps (spec I50).
+    pub(crate) fn needs_secret(&self) -> bool {
+        matches!(
+            self,
+            Self::Remote {
+                auth: RemoteAuth::Basic { .. } | RemoteAuth::Bearer,
+                ..
+            }
+        )
+    }
 }
 
 /// A `remote` setting as it is saved (spec I32 to I35); any other setting as it is.

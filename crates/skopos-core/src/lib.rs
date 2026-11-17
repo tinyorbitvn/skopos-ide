@@ -15,6 +15,7 @@ pub mod portforward;
 pub mod prefs;
 pub mod process;
 pub mod resources;
+pub mod secrets;
 pub mod sessions;
 pub mod shell_env;
 pub mod store;
