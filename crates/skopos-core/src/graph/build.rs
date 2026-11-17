@@ -1,5 +1,5 @@
-//! The whole graph from what the store holds (spec E §4.4 to §4.6), and one subscription's view
-//! of it (§4.7).
+//! The whole graph from what the store holds (spec E §4.4 to §4.6, O §4.3), and one
+//! subscription's view of it (E §4.7, O §4.5).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -207,7 +207,29 @@ fn load_balancer(address: &str) -> GraphNode {
     }
 }
 
-/// The whole graph (spec E §4.4 to §4.6).
+/// Adds the node of the object `target` names, unless there is one: the object, which joins
+/// `reached`, or a node for its absence (spec E §4.4). Returns the node's id.
+fn reach<'a>(
+    store: &'a Store,
+    target: &Target,
+    nodes: &mut BTreeMap<String, GraphNode>,
+    reached: &mut Vec<&'a Item>,
+) -> String {
+    let id = target.id();
+    if !nodes.contains_key(&id) {
+        let node = match store.get(target) {
+            Some(found) => {
+                reached.push(found);
+                node_of(found)
+            }
+            None => absent(target, store.listable(target.kind)),
+        };
+        nodes.insert(id.clone(), node);
+    }
+    id
+}
+
+/// The whole graph (spec E §4.4 to §4.6, O §4.3).
 pub(crate) fn build(store: &Store) -> Built {
     let mut pods_by_namespace: HashMap<&str, Vec<&Item>> = HashMap::new();
     let mut pod_owners = HashSet::new();
@@ -240,8 +262,9 @@ pub(crate) fn build(store: &Store) -> Built {
 
     let pods_listable = store.listable(Kind::Pod);
     let mut edges = BTreeSet::new();
-    // The ConfigMaps, Secrets, ServiceAccounts and claims shown because an edge points at them.
-    let mut leaves: Vec<&Item> = Vec::new();
+    // The objects shown because an edge reaches them: ConfigMaps, Secrets, ServiceAccounts and
+    // claims, then bindings and roles.
+    let mut reached: Vec<&Item> = Vec::new();
     for item in &members {
         let id = item.id();
         if let Some((kind, name)) = &item.owner {
@@ -267,17 +290,7 @@ pub(crate) fn build(store: &Store) -> Built {
             }
         }
         for reference in &item.refs {
-            let target = reference.target.id();
-            if !nodes.contains_key(&target) {
-                let node = match store.get(&reference.target) {
-                    Some(found) => {
-                        leaves.push(found);
-                        node_of(found)
-                    }
-                    None => absent(&reference.target, store.listable(reference.target.kind)),
-                };
-                nodes.insert(target.clone(), node);
-            }
+            let target = reach(store, &reference.target, &mut nodes, &mut reached);
             let (from, to) = if reference.inbound {
                 (&target, &id)
             } else {
@@ -294,12 +307,42 @@ pub(crate) fn build(store: &Store) -> Built {
         }
     }
 
+    // Spec O §4.3: after every other kind, so the ServiceAccount nodes are settled whatever
+    // order objects arrive in. A binding of a ServiceAccount node is a node, with `binds` edges
+    // to those nodes only, and the role it grants is a node too. RBAC never makes a
+    // ServiceAccount a node.
+    let bindings = store
+        .items(Kind::RoleBinding)
+        .chain(store.items(Kind::ClusterRoleBinding));
+    for binding in bindings {
+        let accounts: Vec<String> = binding
+            .refs
+            .iter()
+            .filter(|r| r.rel == GraphRel::Binds)
+            .map(|r| r.target.id())
+            .filter(|account| nodes.contains_key(account))
+            .collect();
+        if accounts.is_empty() {
+            continue;
+        }
+        let id = binding.id();
+        nodes.insert(id.clone(), node_of(binding));
+        reached.push(binding);
+        for account in &accounts {
+            edges.insert(edge(&id, account, GraphRel::Binds));
+        }
+        for grant in binding.refs.iter().filter(|r| r.rel == GraphRel::Grants) {
+            let role = reach(store, &grant.target, &mut nodes, &mut reached);
+            edges.insert(edge(&id, &role, GraphRel::Grants));
+        }
+    }
+
     // Spec E §4.5: any object's owner edge, so a claim a StatefulSet owns shows that too.
-    for leaf in leaves {
-        if let Some((kind, name)) = &leaf.owner {
-            let owner = node_id(kind, &leaf.namespace, name);
+    for item in reached {
+        if let Some((kind, name)) = &item.owner {
+            let owner = node_id(kind, &item.namespace, name);
             if nodes.contains_key(&owner) {
-                edges.insert(edge(&owner, &leaf.id(), GraphRel::Owns));
+                edges.insert(edge(&owner, &item.id(), GraphRel::Owns));
             }
         }
     }
@@ -321,10 +364,11 @@ pub(crate) fn build(store: &Store) -> Built {
     }
 }
 
-/// What one subscription sees (spec E §4.7). `None` is the whole graph. Otherwise: the nodes in
-/// those namespaces, then every node joined to the view by a `routes` or `class` edge, until
-/// nothing is added, and the edges between them. A GatewayClass or LoadBalancer is brought in
-/// but not expanded from, so a shared class or address does not pull in the whole cluster.
+/// What one subscription sees (spec E §4.7, O §4.5). `None` is the whole graph. Otherwise: the
+/// nodes in those namespaces, then, until nothing is added, every node joined to the view by a
+/// `routes` or `class` edge, every binding of a ServiceAccount in the view and every role of a
+/// binding in the view, and the edges between them. A GatewayClass or LoadBalancer is brought
+/// in but not expanded from, so a shared class or address does not pull in the whole cluster.
 /// Counts, missing kinds and the Gateway API flag always describe the whole graph.
 pub(crate) fn view(built: &Built, namespaces: Option<&[String]>) -> GraphEvent {
     let (nodes, edges) = match namespaces {
@@ -349,6 +393,18 @@ pub(crate) fn view(built: &Built, namespaces: Option<&[String]>) -> GraphEvent {
                 .filter(|node| node.kind == LOAD_BALANCER || node.kind == "GatewayClass")
                 .map(|node| node.id.as_str())
                 .collect();
+            // Access joins go one way, as (from, to): a ServiceAccount brings in the bindings
+            // that bind it, and a binding the role it grants. A role brings in nothing, and a
+            // binding no other ServiceAccount.
+            let leads: Vec<(&str, &str)> = built
+                .edges
+                .iter()
+                .filter_map(|edge| match edge.rel {
+                    GraphRel::Binds => Some((edge.to.as_str(), edge.from.as_str())),
+                    GraphRel::Grants => Some((edge.from.as_str(), edge.to.as_str())),
+                    _ => None,
+                })
+                .collect();
             loop {
                 let before = members.len();
                 for join in &joins {
@@ -358,6 +414,11 @@ pub(crate) fn view(built: &Built, namespaces: Option<&[String]>) -> GraphEvent {
                     }
                     if members.contains(to) && !ends.contains(to) {
                         members.insert(from);
+                    }
+                }
+                for (from, to) in &leads {
+                    if members.contains(from) {
+                        members.insert(to);
                     }
                 }
                 if members.len() == before {
@@ -1146,6 +1207,313 @@ mod tests {
         assert!(graph.nodes.is_empty(), "{:?}", ids(&graph));
         assert!(graph.edges.is_empty());
         assert!(graph.counts.is_empty());
+    }
+
+    /// A Pod in `namespace` that runs as ServiceAccount `web`.
+    fn runs_as_web(namespace: &str, name: &str) -> (Kind, Value) {
+        (Kind::Pod, pod(meta(namespace, name), json!({}), true))
+    }
+
+    fn account(namespace: &str, name: &str) -> (Kind, Value) {
+        (
+            Kind::ServiceAccount,
+            json!({ "metadata": meta(namespace, name) }),
+        )
+    }
+
+    #[test]
+    fn a_binding_of_a_service_account_node_is_a_node_and_so_is_its_role() {
+        let mut reader = role(Kind::Role, "a", "reader");
+        reader.1["metadata"] = owned("a", "reader", "Deployment", "web");
+        let graph = built(&[
+            (Kind::Deployment, json!({ "metadata": meta("a", "web") })),
+            runs_as_web("a", "p"),
+            account("a", "web"),
+            binding(
+                Kind::RoleBinding,
+                "a",
+                "reader",
+                ("Role", "reader"),
+                &[("a", "web")],
+            ),
+            reader,
+            binding(
+                Kind::ClusterRoleBinding,
+                "",
+                "web-view",
+                ("ClusterRole", "view"),
+                &[("a", "web")],
+            ),
+            role(Kind::ClusterRole, "", "view"),
+        ]);
+        for (from, to, rel) in [
+            (
+                "RoleBinding/a/reader",
+                "ServiceAccount/a/web",
+                GraphRel::Binds,
+            ),
+            ("RoleBinding/a/reader", "Role/a/reader", GraphRel::Grants),
+            (
+                "ClusterRoleBinding//web-view",
+                "ServiceAccount/a/web",
+                GraphRel::Binds,
+            ),
+            (
+                "ClusterRoleBinding//web-view",
+                "ClusterRole//view",
+                GraphRel::Grants,
+            ),
+            ("Deployment/a/web", "Role/a/reader", GraphRel::Owns),
+        ] {
+            assert!(has_edge(&graph, from, to, rel), "{from} {rel:?} {to}");
+        }
+        let reader = node(&graph, "Role/a/reader");
+        assert_eq!(
+            (
+                reader.group.as_str(),
+                reader.plural.as_str(),
+                reader.status,
+                reader.status_text.as_deref()
+            ),
+            (
+                "rbac.authorization.k8s.io",
+                "roles",
+                GraphStatus::Neutral,
+                None
+            )
+        );
+        assert_eq!(
+            reader.facts,
+            [("configmaps".to_owned(), "get, list".to_owned())]
+        );
+        assert_eq!(
+            node(&graph, "RoleBinding/a/reader").facts,
+            [
+                ("Role".to_owned(), "Role reader".to_owned()),
+                ("Subjects".to_owned(), "1 ServiceAccount".to_owned()),
+            ]
+        );
+        assert_eq!(
+            graph.counts,
+            [GraphNamespaceCount {
+                namespace: "a".into(),
+                nodes: 5
+            }],
+            "the Deployment, Pod, ServiceAccount, RoleBinding and Role, not the cluster-scoped ones"
+        );
+    }
+
+    #[test]
+    fn a_binding_of_two_service_accounts_one_a_node_gets_one_binds_edge() {
+        let graph = built(&[
+            runs_as_web("a", "p"),
+            account("a", "web"),
+            account("a", "idle"),
+            binding(
+                Kind::RoleBinding,
+                "a",
+                "both",
+                ("ClusterRole", "view"),
+                &[("a", "web"), ("a", "idle")],
+            ),
+        ]);
+        let binds: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|e| e.rel == GraphRel::Binds)
+            .map(|e| (e.from.as_str(), e.to.as_str()))
+            .collect();
+        assert_eq!(binds, [("RoleBinding/a/both", "ServiceAccount/a/web")]);
+        assert!(!ids(&graph).contains(&"ServiceAccount/a/idle"));
+    }
+
+    #[test]
+    fn a_granted_role_that_does_not_exist_is_marked_as_any_absent_object() {
+        let graph = build(&store_of(
+            &Kind::ALL,
+            &[Kind::ClusterRole],
+            &[
+                runs_as_web("a", "p"),
+                account("a", "web"),
+                binding(
+                    Kind::RoleBinding,
+                    "a",
+                    "gone",
+                    ("Role", "gone"),
+                    &[("a", "web")],
+                ),
+                binding(
+                    Kind::ClusterRoleBinding,
+                    "",
+                    "edit",
+                    ("ClusterRole", "edit"),
+                    &[("a", "web")],
+                ),
+            ],
+        ));
+        let gone = node(&graph, "Role/a/gone");
+        assert_eq!(
+            (gone.status, gone.status_text.as_deref()),
+            (GraphStatus::Critical, Some("Not found"))
+        );
+        assert!(gone.facts.is_empty());
+        let edit = node(&graph, "ClusterRole//edit");
+        assert_eq!(
+            (edit.status, edit.status_text.as_deref()),
+            (GraphStatus::Neutral, None)
+        );
+        assert!(edit.facts.is_empty());
+        assert_eq!(graph.missing, ["clusterroles"]);
+        assert!(has_edge(
+            &graph,
+            "ClusterRoleBinding//edit",
+            "ClusterRole//edit",
+            GraphRel::Grants
+        ));
+    }
+
+    #[test]
+    fn a_binding_of_a_service_account_that_is_not_found_is_a_node() {
+        let graph = built(&[
+            runs_as_web("a", "p"),
+            binding(
+                Kind::RoleBinding,
+                "a",
+                "reader",
+                ("Role", "reader"),
+                &[("a", "web")],
+            ),
+        ]);
+        assert_eq!(
+            node(&graph, "ServiceAccount/a/web").status_text.as_deref(),
+            Some("Not found")
+        );
+        assert!(has_edge(
+            &graph,
+            "RoleBinding/a/reader",
+            "ServiceAccount/a/web",
+            GraphRel::Binds
+        ));
+    }
+
+    #[test]
+    fn the_access_chain_does_not_depend_on_the_order_objects_arrive_in() {
+        let objects = [
+            runs_as_web("a", "p"),
+            account("a", "web"),
+            account("a", "idle"),
+            binding(
+                Kind::RoleBinding,
+                "a",
+                "reader",
+                ("Role", "reader"),
+                &[("a", "web"), ("a", "idle")],
+            ),
+            binding(
+                Kind::RoleBinding,
+                "a",
+                "idle",
+                ("Role", "idle"),
+                &[("a", "idle")],
+            ),
+            role(Kind::Role, "a", "reader"),
+            role(Kind::Role, "a", "idle"),
+            binding(
+                Kind::ClusterRoleBinding,
+                "",
+                "web-view",
+                ("ClusterRole", "view"),
+                &[("a", "web")],
+            ),
+            role(Kind::ClusterRole, "", "view"),
+        ];
+        let listed = build(&store_of(&Kind::ALL, &[], &objects));
+        let mut arrived = Store::new(&Kind::ALL);
+        for kind in Kind::ALL.iter().rev() {
+            arrived.apply(*kind, WatchEvent::Snapshot { items: vec![] });
+        }
+        for (kind, object) in objects.iter().rev() {
+            let upserts = vec![row(object)];
+            let deletes = vec![];
+            arrived.apply(*kind, WatchEvent::Batch { upserts, deletes });
+        }
+        assert_eq!(build(&arrived), listed);
+        assert_eq!(
+            ids(&listed),
+            [
+                "ClusterRole//view",
+                "ClusterRoleBinding//web-view",
+                "Pod/a/p",
+                "Role/a/reader",
+                "RoleBinding/a/reader",
+                "ServiceAccount/a/web",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_namespace_view_brings_in_bindings_and_roles_one_way() {
+        let graph = built(&[
+            runs_as_web("a", "p"),
+            account("a", "web"),
+            runs_as_web("b", "q"),
+            account("b", "web"),
+            binding(
+                Kind::RoleBinding,
+                "b",
+                "shared",
+                ("Role", "reader"),
+                &[("a", "web"), ("b", "web")],
+            ),
+            binding(
+                Kind::RoleBinding,
+                "b",
+                "other",
+                ("Role", "reader"),
+                &[("b", "web")],
+            ),
+            role(Kind::Role, "b", "reader"),
+            binding(
+                Kind::ClusterRoleBinding,
+                "",
+                "web-view",
+                ("ClusterRole", "view"),
+                &[("a", "web")],
+            ),
+            role(Kind::ClusterRole, "", "view"),
+        ]);
+
+        let event = view(&graph, Some(&["a".to_owned()][..]));
+        let (nodes, edges) = snapshot_ids(&event);
+        assert_eq!(
+            nodes,
+            [
+                "ClusterRole//view",
+                "ClusterRoleBinding//web-view",
+                "Pod/a/p",
+                "Role/b/reader",
+                "RoleBinding/b/shared",
+                "ServiceAccount/a/web",
+            ],
+            "a role brings in no other binding, and a binding no other ServiceAccount"
+        );
+        assert_eq!(
+            edges,
+            [
+                ("ClusterRoleBinding//web-view", "ClusterRole//view"),
+                ("ClusterRoleBinding//web-view", "ServiceAccount/a/web"),
+                ("Pod/a/p", "ServiceAccount/a/web"),
+                ("RoleBinding/b/shared", "Role/b/reader"),
+                ("RoleBinding/b/shared", "ServiceAccount/a/web"),
+            ]
+        );
+
+        let event = view(&graph, Some(&["b".to_owned()][..]));
+        let (nodes, edges) = snapshot_ids(&event);
+        assert!(!nodes.contains(&"ServiceAccount/a/web"));
+        assert!(!nodes.contains(&"ClusterRoleBinding//web-view"));
+        assert!(edges.contains(&("RoleBinding/b/shared", "ServiceAccount/b/web")));
+        assert!(!edges.contains(&("RoleBinding/b/shared", "ServiceAccount/a/web")));
     }
 
     /// Review Focus 2: even from objects that still hold them, no value reaches a snapshot.
