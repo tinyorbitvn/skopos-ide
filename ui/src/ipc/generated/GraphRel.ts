@@ -3,4 +3,4 @@
 /**
  * What an edge means. It points from the first object named to the second.
  */
-export type GraphRel = "owns" | "selects" | "routes" | "mounts" | "env" | "runsAs" | "claims" | "class";
+export type GraphRel = "owns" | "selects" | "routes" | "mounts" | "env" | "runsAs" | "claims" | "class" | "binds" | "grants";

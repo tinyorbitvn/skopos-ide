@@ -222,10 +222,12 @@ pub(crate) fn build(store: &Store) -> Built {
     }
 
     // Every object of a kind that is always shown, but a ReplicaSet scaled to zero that owns no
-    // Pod, so a Deployment's old revisions do not crowd the map.
+    // Pod, so a Deployment's old revisions do not crowd the map. Bindings and roles are shown
+    // only on a ServiceAccount's access chain (spec O §4.3).
     let mut nodes: BTreeMap<String, GraphNode> = BTreeMap::new();
     let mut members: Vec<&Item> = Vec::new();
-    for kind in Kind::ALL.into_iter().filter(|kind| !kind.is_leaf()) {
+    let shown = |kind: &Kind| !kind.is_leaf() && !kind.is_access();
+    for kind in Kind::ALL.into_iter().filter(shown) {
         for item in store.items(kind) {
             let id = item.id();
             if item.scaled_to_zero && !pod_owners.contains(&id) {
@@ -1084,6 +1086,66 @@ mod tests {
             };
             assert_eq!(counts, &graph.counts);
         }
+    }
+
+    fn binding(
+        kind: Kind,
+        namespace: &str,
+        name: &str,
+        role: (&str, &str),
+        accounts: &[(&str, &str)],
+    ) -> (Kind, Value) {
+        let subjects: Vec<Value> = accounts
+            .iter()
+            .map(|(namespace, name)| json!({ "kind": "ServiceAccount", "namespace": namespace, "name": name }))
+            .collect();
+        (
+            kind,
+            json!({
+                "metadata": meta(namespace, name),
+                "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": role.0, "name": role.1 },
+                "subjects": subjects,
+            }),
+        )
+    }
+
+    fn role(kind: Kind, namespace: &str, name: &str) -> (Kind, Value) {
+        (
+            kind,
+            json!({
+                "metadata": meta(namespace, name),
+                "rules": [{ "apiGroups": [""], "resources": ["configmaps"], "verbs": ["get", "list"] }],
+            }),
+        )
+    }
+
+    #[test]
+    fn rbac_never_makes_a_service_account_a_node() {
+        let graph = built(&[
+            (
+                Kind::ServiceAccount,
+                json!({ "metadata": meta("a", "idle") }),
+            ),
+            binding(
+                Kind::RoleBinding,
+                "a",
+                "idle",
+                ("Role", "idle"),
+                &[("a", "idle")],
+            ),
+            role(Kind::Role, "a", "idle"),
+            binding(
+                Kind::ClusterRoleBinding,
+                "",
+                "idle",
+                ("ClusterRole", "view"),
+                &[("a", "idle")],
+            ),
+            role(Kind::ClusterRole, "", "view"),
+        ]);
+        assert!(graph.nodes.is_empty(), "{:?}", ids(&graph));
+        assert!(graph.edges.is_empty());
+        assert!(graph.counts.is_empty());
     }
 
     /// Review Focus 2: even from objects that still hold them, no value reaches a snapshot.
