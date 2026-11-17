@@ -15,6 +15,7 @@ check: ui-build
 	pnpm -C ui typecheck
 	pnpm -C ui lint
 	pnpm -C ui test
+	node --test scripts/*.test.mjs
 	scripts/check-provenance.sh
 build:
 	pnpm tauri build --config crates/skopos-app/tauri.conf.json
