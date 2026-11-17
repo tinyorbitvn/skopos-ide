@@ -15,6 +15,7 @@ k8s-openapi.workspace = true
 kube.workspace = true
 notify = "8.2"
 notify-debouncer-full = "0.7"
+png = "0.18"
 portable-pty = "0.9"
 regex.workspace = true
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy", "stream"] }
