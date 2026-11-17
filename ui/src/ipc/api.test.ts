@@ -313,6 +313,16 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
     () => api.metricsUsage("c1", "pods", null),
     { clusterId: "c1", of: "pods", namespace: null },
   ],
+  [
+    "metrics_secret_set",
+    () => api.metricsSecretSet("c1", "s3cret"),
+    { clusterId: "c1", secret: "s3cret" },
+  ],
+  [
+    "metrics_secret_saved",
+    () => api.metricsSecretSaved("c1"),
+    { clusterId: "c1" },
+  ],
 ])("%s gets exactly its arguments", async (cmd, run, args) => {
   const backend = mockBackend({ [cmd]: () => null });
   await run();
