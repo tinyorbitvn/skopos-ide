@@ -22,6 +22,7 @@ import {
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
+import type { MetricsProviderSetting } from "../../ipc/generated/MetricsProviderSetting";
 import { useCatalog } from "../../stores/catalog";
 import { useClusterState } from "../../stores/clusters";
 import {
@@ -282,7 +283,11 @@ function SettingsForm(props: {
     setSaving(true);
     try {
       // The secret first: a keychain that refuses it leaves the settings unsaved (I59).
-      if (typedSecret !== "" && !(await saveSecret(typedSecret))) return;
+      if (
+        typedSecret !== "" &&
+        !(await saveSecret(typedSecret, next.metricsProvider))
+      )
+        return;
       await api.clusterSettingsSet(clusterId, next);
       toast.success(
         `Saved the settings for ${next.displayName ?? props.contextName}`,
@@ -314,11 +319,20 @@ function SettingsForm(props: {
   }
 
   /** Writes the typed password or token to the keychain; a refusal is toasted. */
-  async function saveSecret(value: string): Promise<boolean> {
+  async function saveSecret(
+    value: string,
+    provider: MetricsProviderSetting,
+  ): Promise<boolean> {
     try {
-      await api.metricsSecretSet(clusterId, value);
+      await api.metricsSecretSet(clusterId, value, provider);
       return true;
     } catch (error) {
+      // The core refuses the secret along with a setting it refuses (a bad file path).
+      const field = fileFieldOf(error);
+      if (field !== null) {
+        setFileErrors({ [field]: failureMessage(error) });
+        return false;
+      }
       const what = secretAuth === "basic" ? "password" : "token";
       toast.error(
         `Could not save the ${what} for ${props.name}`,

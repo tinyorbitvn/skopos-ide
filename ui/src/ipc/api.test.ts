@@ -315,8 +315,8 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   ],
   [
     "metrics_secret_set",
-    () => api.metricsSecretSet("c1", "s3cret"),
-    { clusterId: "c1", secret: "s3cret" },
+    () => api.metricsSecretSet("c1", "s3cret", { kind: "metricsServer" }),
+    { clusterId: "c1", secret: "s3cret", provider: { kind: "metricsServer" } },
   ],
   [
     "metrics_secret_saved",

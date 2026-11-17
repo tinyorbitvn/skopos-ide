@@ -32,6 +32,7 @@ import type { LogOptions } from "./generated/LogOptions";
 import type { LogTarget } from "./generated/LogTarget";
 import type { MapFormat } from "./generated/MapFormat";
 import type { MetricsProvider } from "./generated/MetricsProvider";
+import type { MetricsProviderSetting } from "./generated/MetricsProviderSetting";
 import type { MetricsRange } from "./generated/MetricsRange";
 import type { MetricsResult } from "./generated/MetricsResult";
 import type { MetricsTarget } from "./generated/MetricsTarget";
@@ -567,9 +568,16 @@ export const api = {
   /** metrics.k8s.io; null lists every namespace. NotFound "noMetricsServer" when not served. */
   metricsUsage: (clusterId: string, of: UsageOf, namespace: string | null) =>
     call<UsageSnapshot>("metrics_usage", { clusterId, of, namespace }),
-  /** Saves the metrics URL's password or token in the keychain, replacing the saved one. */
-  metricsSecretSet: (clusterId: string, secret: string) =>
-    call<void>("metrics_secret_set", { clusterId, secret }),
+  /**
+   * Saves the metrics URL's password or token in the keychain, replacing the saved one. The
+   * core validates `provider`, the setting about to be saved, first and refuses the secret
+   * when it refuses the setting.
+   */
+  metricsSecretSet: (
+    clusterId: string,
+    secret: string,
+    provider: MetricsProviderSetting,
+  ) => call<void>("metrics_secret_set", { clusterId, secret, provider }),
   /** Whether the keychain holds a password or token for the cluster's metrics URL. */
   metricsSecretSaved: (clusterId: string) =>
     call<boolean>("metrics_secret_saved", { clusterId }),
