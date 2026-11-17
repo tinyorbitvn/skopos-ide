@@ -5,6 +5,7 @@ use skopos_core::kubeconfig::ClusterId;
 use skopos_core::metrics::{
     MetricsProvider, MetricsRange, MetricsResult, MetricsTarget, UsageOf, UsageSnapshot,
 };
+use skopos_core::secrets::Secret;
 use tauri::State;
 
 use crate::state::AppState;
@@ -39,4 +40,22 @@ pub async fn metrics_usage(
         .core
         .metrics_usage(&cluster_id, of, namespace.as_deref())
         .await
+}
+
+/// The only command a secret crosses IPC in (spec I49).
+#[tauri::command]
+pub async fn metrics_secret_set(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    secret: Secret,
+) -> Result<(), IpcError> {
+    state.core.metrics_secret_set(&cluster_id, secret)
+}
+
+#[tauri::command]
+pub async fn metrics_secret_saved(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+) -> Result<bool, IpcError> {
+    state.core.metrics_secret_saved(&cluster_id)
 }

@@ -567,6 +567,12 @@ export const api = {
   /** metrics.k8s.io; null lists every namespace. NotFound "noMetricsServer" when not served. */
   metricsUsage: (clusterId: string, of: UsageOf, namespace: string | null) =>
     call<UsageSnapshot>("metrics_usage", { clusterId, of, namespace }),
+  /** Saves the metrics URL's password or token in the keychain, replacing the saved one. */
+  metricsSecretSet: (clusterId: string, secret: string) =>
+    call<void>("metrics_secret_set", { clusterId, secret }),
+  /** Whether the keychain holds a password or token for the cluster's metrics URL. */
+  metricsSecretSaved: (clusterId: string) =>
+    call<boolean>("metrics_secret_saved", { clusterId }),
   uiStateGet: (key: string) => call<JsonValue | null>("ui_state_get", { key }),
   uiStateSet: (key: string, value: JsonValue) =>
     call<void>("ui_state_set", { key, value }),

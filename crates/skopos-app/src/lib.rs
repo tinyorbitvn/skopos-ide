@@ -1,8 +1,12 @@
 mod commands;
 mod events;
+mod keychain;
 mod menu;
 mod state;
 
+use std::sync::Arc;
+
+use keychain::KeychainStore;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::IpcError;
 use skopos_core::paths::AppPaths;
@@ -65,7 +69,15 @@ pub fn run(shell_env_warning: Option<String>) {
         tracing::warn!("{warning}");
     }
     tracing::info!("starting skopos {}", skopos_core::VERSION);
-    let started = paths.and_then(|paths| tauri::async_runtime::block_on(AppCore::start(paths)));
+    let started = paths.and_then(|paths| {
+        let secrets = Arc::new(KeychainStore::new(keychain::SERVICE));
+        let kubeconfig_env = std::env::var_os("KUBECONFIG");
+        tauri::async_runtime::block_on(AppCore::start_with_secret_store(
+            paths,
+            kubeconfig_env,
+            secrets,
+        ))
+    });
     match started {
         Ok(core) => run_app(core, log_guard, context),
         Err(err) => {
@@ -183,6 +195,8 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::metrics::metrics_provider,
             commands::metrics::metrics_query,
             commands::metrics::metrics_usage,
+            commands::metrics::metrics_secret_set,
+            commands::metrics::metrics_secret_saved,
         ])
         .setup(move |app| {
             events::spawn_forwarder(app.handle().clone(), forwarded);
