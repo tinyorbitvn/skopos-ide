@@ -1,6 +1,6 @@
 import type { GraphNode } from "../../ipc/generated/GraphNode";
 import type { GraphRel } from "../../ipc/generated/GraphRel";
-import { USE } from "./layout/constants";
+import { ACCESS, USE } from "./layout/constants";
 import { layoutCluster } from "./layout/force";
 import { boxText, cellW, leafSize } from "./layout/geometry";
 import {
@@ -64,7 +64,7 @@ export interface SceneBox {
   sub: string;
 }
 
-export type EdgeStyle = "own" | "net" | "use" | "bridge";
+export type EdgeStyle = "own" | "net" | "use" | "access" | "bridge";
 
 export interface SceneEdge {
   key: string;
@@ -102,8 +102,15 @@ export interface Scene {
   tree: GroupTree | null;
 }
 
+/** An edge's style (spec E §8.1, O §5.1). */
 const styleOf = (rel: GraphRel): EdgeStyle =>
-  rel === "owns" ? "own" : USE.has(rel) ? "use" : "net";
+  rel === "owns"
+    ? "own"
+    : USE.has(rel)
+      ? "use"
+      : ACCESS.has(rel)
+        ? "access"
+        : "net";
 
 const f = (n: number) => n.toFixed(1);
 

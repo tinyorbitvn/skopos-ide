@@ -1,6 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEMO, demoGraph, drawnHiding, gedge, gnode } from "../../test/graph";
+import {
+  DEMO,
+  demoGraph,
+  drawnHiding,
+  gedge,
+  gnode,
+  RBAC,
+  rbacGraph,
+} from "../../test/graph";
 import { mockElementSize } from "../../test/size";
 import { MapCanvas, type MapCanvasProps, resetMovedForTest } from "./MapCanvas";
 import { buildModel } from "./model";
@@ -98,6 +106,31 @@ describe("MapCanvas", () => {
     draw({ layout: "force", memoryKey: "c1|cluster|force" });
     expect(edges()).not.toContain(`${DEMO.gateway} routes ${DEMO.route}`);
     expect(edges()).toContain(`${DEMO.route} routes ${DEMO.service}`);
+  });
+
+  it("draws binds and grants as dotted access links in every layout", () => {
+    const { nodes, edges: links } = rbacGraph();
+    const model = buildModel(nodes, links);
+    for (const layout of ["grouped", "layered", "force"] as const) {
+      const view = draw({ model, layout, memoryKey: `c1|cluster|${layout}` });
+      expect(edges(), layout).toEqual(
+        expect.arrayContaining([
+          `${RBAC.binding} binds ${DEMO.account}`,
+          `${RBAC.binding} grants ${RBAC.role}`,
+        ]),
+      );
+      const access = screen
+        .getAllByTestId("map-edge")
+        .filter((el) =>
+          ["binds", "grants"].includes(el.getAttribute("data-rel") ?? ""),
+        );
+      for (const el of access) {
+        expect(el.getAttribute("class")?.split(" "), layout).toContain(
+          "access",
+        );
+      }
+      view.unmount();
+    }
   });
 
   it("dims the nodes the search does not match", () => {
@@ -348,9 +381,19 @@ describe("MapCanvas", () => {
       "Owns",
       "Routes traffic: LB, Gateway, Route, Ingress, Service",
       "Mounts or uses (config, GatewayClass)",
+      "Grants access: binding to ServiceAccount and role",
     ]) {
       expect(legend.getByText(text)).toBeTruthy();
     }
+    const lines = [...screen.getByTestId("map-legend").querySelectorAll("li")];
+    const access = lines.findIndex(
+      (li) =>
+        li.textContent === "Grants access: binding to ServiceAccount and role",
+    );
+    expect(lines[access - 1].textContent).toBe(
+      "Mounts or uses (config, GatewayClass)",
+    );
+    expect(lines[access].querySelector(".key-access")).not.toBeNull();
   });
 
   it("draws a bridge dashed, with a via mark and its hidden kinds on hover", () => {

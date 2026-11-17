@@ -17,6 +17,10 @@ const FILE: Readonly<Record<string, K8sIconName>> = {
   ServiceAccount: "sa",
   PersistentVolumeClaim: "pvc",
   Namespace: "ns",
+  Role: "role",
+  RoleBinding: "rb",
+  ClusterRole: "c-role",
+  ClusterRoleBinding: "crb",
 };
 
 /** Kinds the set has no icon for: the set's frame with a white Lucide glyph. */

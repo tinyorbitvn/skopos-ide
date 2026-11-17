@@ -20,10 +20,14 @@ const SET = [
   "pvc",
   "ns",
   "crd",
+  "role",
+  "rb",
+  "c-role",
+  "crb",
 ] as const;
 
 describe("k8sIcons", () => {
-  it("packs the 15 icons of the set as path data", () => {
+  it("packs the 19 icons of the set as path data", () => {
     expect(Object.keys(K8S_ICONS).sort()).toEqual([...SET].sort());
     for (const name of SET) {
       const icon = K8S_ICONS[name];
@@ -45,6 +49,29 @@ describe("KindIcon", () => {
     expect(iconName("Pod")).toBe("pod");
     expect(iconName("PersistentVolumeClaim")).toBe("pvc");
     expect(iconName("Gateway")).toBe("Gateway");
+  });
+
+  it("draws the RBAC kinds with the set's role, rb, c-role and crb icons", () => {
+    const kinds = {
+      Role: "role",
+      RoleBinding: "rb",
+      ClusterRole: "c-role",
+      ClusterRoleBinding: "crb",
+    } as const;
+    for (const [kind, name] of Object.entries(kinds)) {
+      const { container, unmount } = render(
+        <svg aria-hidden="true">
+          <KindIcon kind={kind} size={44} />
+        </svg>,
+      );
+      const icon = container.querySelector("svg svg");
+      expect(icon?.getAttribute("data-icon"), kind).toBe(name);
+      expect(icon?.getAttribute("viewBox"), kind).toBe(K8S_ICONS[name].vb);
+      expect(icon?.querySelectorAll("path"), kind).toHaveLength(
+        K8S_ICONS[name].paths.length,
+      );
+      unmount();
+    }
   });
 
   it("draws an unknown kind with the crd icon", () => {

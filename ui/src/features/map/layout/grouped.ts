@@ -1,6 +1,15 @@
 import type { GraphRel } from "../../../ipc/generated/GraphRel";
 import { type MapModel, nodeOf } from "../model";
-import { BOX, FLOW, GAP, HEAD, LABEL_ROOM, PAD, USE } from "./constants";
+import {
+  ACCESS,
+  BOX,
+  FLOW,
+  GAP,
+  HEAD,
+  LABEL_ROOM,
+  PAD,
+  USE,
+} from "./constants";
 import { boxText, cellW, headW, leafSize } from "./geometry";
 
 /** `h` runs the flow left to right; `v` runs it top to bottom for narrow panels. */
@@ -609,7 +618,7 @@ export function boxRects(
 }
 
 /** The class an edge is drawn with; `own` is a bridged owns branch (spec H64). */
-export type EdgeClass = "net" | "use" | "own";
+export type EdgeClass = "net" | "use" | "access" | "own";
 
 /** A drawn Grouped edge, with the ids it stands for and its path and arrow head. */
 export interface GroupedEdge {
@@ -764,6 +773,16 @@ export function groupedEdges(
       (e) => e.to,
       (e) => e.from,
       false,
+    );
+  }
+  // Access links join no Pods, so each is drawn on its own (spec O §5.1).
+  for (const rel of ACCESS) {
+    fan(
+      "access",
+      all.filter((e) => e.rel === rel),
+      (e) => e.from,
+      (e) => e.to,
+      true,
     );
   }
 

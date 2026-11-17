@@ -6,7 +6,10 @@ import type { GraphStatus } from "../../../ipc/generated/GraphStatus";
  * (spec E §7.1). Argo CD Applications, "manages" and Pod traffic are not ported.
  */
 
-/** Level order: the way in first, then routes, Services, controllers, Pods and config. */
+/**
+ * Level order: the way in first, then routes, Services, controllers, Pods and config, then
+ * the bindings of ServiceAccounts and the roles they grant (spec O §5.1).
+ */
 export const ORDER: Readonly<Record<string, number>> = {
   LoadBalancer: 0,
   Gateway: 1,
@@ -25,6 +28,10 @@ export const ORDER: Readonly<Record<string, number>> = {
   Secret: 7,
   ServiceAccount: 8,
   PersistentVolumeClaim: 9,
+  RoleBinding: 10,
+  ClusterRoleBinding: 10,
+  Role: 11,
+  ClusterRole: 11,
 };
 
 /** A kind's level; a kind the map does not know sits with the Pods. */
@@ -39,6 +46,8 @@ export const LEAVES: ReadonlySet<string> = new Set([
   "ServiceAccount",
   "PersistentVolumeClaim",
   "GatewayClass",
+  "Role",
+  "ClusterRole",
 ]);
 
 /** The ownership chain the Layered layout ranks first. */
@@ -70,6 +79,9 @@ export const USE: ReadonlySet<GraphRel> = new Set([
   "claims",
   "class",
 ]);
+
+/** Relations drawn in the dotted "access" style: binding to ServiceAccount and role. */
+export const ACCESS: ReadonlySet<GraphRel> = new Set(["binds", "grants"]);
 
 /** Relations drawn in the traffic style. */
 export const TRAFFIC: ReadonlySet<GraphRel> = new Set(["routes", "selects"]);

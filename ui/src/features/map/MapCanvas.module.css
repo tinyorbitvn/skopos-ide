@@ -190,6 +190,17 @@
   fill: var(--border-strong-color);
 }
 
+/* A binding to its ServiceAccount and its role (spec O §5.1). */
+.access .line {
+  stroke: var(--text-secondary);
+  stroke-dasharray: 0.5 3.5;
+  stroke-linecap: round;
+}
+
+.access .head {
+  fill: var(--text-secondary);
+}
+
 /* An edge through a hidden kind (spec H64). */
 .bridge .line {
   stroke: var(--text-secondary);
@@ -315,6 +326,7 @@
 .key-own,
 .key-net,
 .key-use,
+.key-access,
 .key-bridge {
   height: 0;
   border-radius: var(--radius-none);
@@ -331,6 +343,10 @@
 
 .key-use {
   border-top: 2px dashed var(--border-strong-color);
+}
+
+.key-access {
+  border-top: 2px dotted var(--text-secondary);
 }
 
 .key-bridge {
