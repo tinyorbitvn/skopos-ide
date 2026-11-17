@@ -43,9 +43,9 @@ function GaugeRow(props: {
 }
 
 /**
- * The Overview's CPU and Memory gauges and its Metrics section. Under Prometheus
- * the gauges read the cluster query the panel watches too, so one poller serves
- * both; under metrics-server they sum the node snapshot against the Node watch.
+ * The Overview's CPU and Memory gauges and its Metrics section. Under Prometheus,
+ * or a Prometheus-compatible URL, the gauges read the cluster query the panel
+ * watches too, so one poller serves both; under metrics-server they sum the node snapshot against the Node watch.
  */
 export function OverviewMetrics(props: {
   clusterId: string;
@@ -54,12 +54,9 @@ export function OverviewMetrics(props: {
 }) {
   const { clusterId, info } = props;
   const kind = useProvider(clusterId)?.value?.kind ?? null;
+  const promql = kind === "prometheus" || kind === "remote";
   const range = useMetrics((s) => s.range);
-  const query = useQueryWatch(
-    clusterId,
-    kind === "prometheus" ? CLUSTER : null,
-    range,
-  );
+  const query = useQueryWatch(clusterId, promql ? CLUSTER : null, range);
   const usage = useUsageWatch(
     clusterId,
     "nodes",
@@ -73,7 +70,7 @@ export function OverviewMetrics(props: {
 
   let gauges: { cpu: Gauge; memory: Gauge } | null = null;
   let facts: TargetFacts = { ...NO_FACTS, nodeCount: info.nodeCount };
-  if (kind === "prometheus") {
+  if (promql) {
     const series = query?.value?.series;
     const source = SOURCE_NAME.prometheus;
     gauges = {

@@ -18,6 +18,7 @@ import {
   PROMETHEUS_DOWN,
   points,
   prometheus,
+  remote,
   T0,
   usageItem,
   usageSnapshot,
@@ -210,6 +211,18 @@ test.each([
     'Prometheus monitoring/prometheus-server:80, autodetected, through the API server proxy, label cluster="prod"',
   ],
   [
+    remote(),
+    "Prometheus API at mimir.example.com, set in the cluster settings",
+  ],
+  [
+    remote({
+      host: "127.0.0.1:9009",
+      tenant: "team-a",
+      matcher: { name: "cluster", value: "prod" },
+    }),
+    'Prometheus API at 127.0.0.1:9009, set in the cluster settings, tenant team-a, label cluster="prod"',
+  ],
+  [
     metricsServer("fallback"),
     "metrics-server, autodetected: no Prometheus Service found. Samples every 15 s while the cluster is connected",
   ],
@@ -367,6 +380,35 @@ test("a failed query keeps the last charts dimmed under the error block; Retry w
   expect(backend.callsTo("metrics_query")).toHaveLength(3);
   expect(screen.getByTestId("metrics-grid").classList.contains("dim")).toBe(
     false,
+  );
+});
+
+test("a Prometheus-compatible URL: the range picker and the charts, and a failed query's block names its host", async () => {
+  let answer: () => unknown = () => RESULT;
+  const backend = await show({
+    metrics_provider: () => remote(),
+    metrics_query: () => answer(),
+  });
+  expect(screen.getByTestId("metrics-range")).toBeTruthy();
+  expect(text("metrics-chart-cpu-now")).toBe("1.5 cores");
+  expect(backend.callsTo("metrics_query")).toEqual([
+    { clusterId: "c1", target: CLUSTER, range: "1h" },
+  ]);
+
+  answer = () => {
+    throw {
+      code: "Unreachable",
+      message: "Cannot reach mimir.example.com: connection refused.",
+      details: null,
+    };
+  };
+  await act(() => askQuery("c1", CLUSTER, "1h"));
+  const block = screen.getByTestId("metrics-error");
+  expect(block.querySelector("strong")?.textContent).toBe(
+    "mimir.example.com did not answer",
+  );
+  expect(block.textContent).toContain(
+    "Cannot reach mimir.example.com: connection refused.",
   );
 });
 

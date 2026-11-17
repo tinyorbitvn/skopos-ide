@@ -5,6 +5,7 @@ import {
   metricsServer,
   points,
   prometheus,
+  remote,
 } from "../../test/metrics";
 import {
   type ChartDef,
@@ -342,6 +343,10 @@ test("the no-samples note names the tenant and the label, only when nothing answ
   );
   expect(noSamplesNote(prometheus(), empty)).toBeNull();
   expect(noSamplesNote(metricsServer(), empty)).toBeNull();
+  expect(noSamplesNote(remote({ tenant: "team-a" }), empty)).toBe(
+    "No samples for tenant team-a: check the tenant in the cluster settings.",
+  );
+  expect(noSamplesNote(remote(), empty)).toBeNull();
 
   const mimir = prometheus({ tenant: "team-a", matcher: label });
   expect(

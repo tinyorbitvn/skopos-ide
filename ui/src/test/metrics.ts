@@ -53,6 +53,22 @@ export function prometheus(
   };
 }
 
+type RemoteProvider = Extract<MetricsProvider, { kind: "remote" }>;
+
+/** A Prometheus-compatible URL, as `metrics_provider` names it: by its host. */
+export function remote(
+  over: Partial<Omit<RemoteProvider, "kind">> = {},
+): MetricsProvider {
+  return {
+    kind: "remote",
+    host: "mimir.example.com",
+    tenant: null,
+    matcher: null,
+    chosenBy: "setting",
+    ...over,
+  };
+}
+
 export function metricsServer(
   chosenBy: "setting" | "fallback" = "fallback",
 ): MetricsProvider {

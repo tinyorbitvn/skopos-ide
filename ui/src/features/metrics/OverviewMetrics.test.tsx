@@ -15,6 +15,7 @@ import {
   noProvider,
   points,
   prometheus,
+  remote,
   usageItem,
   usageSnapshot,
 } from "../../test/metrics";
@@ -102,6 +103,28 @@ test("Prometheus: the gauges read the last usage against the allocatable, from t
       "of 4 cores on 2 nodes",
     ),
   ).toBeTruthy();
+});
+
+test("a Prometheus-compatible URL: the gauges read the cluster query too", async () => {
+  const backend = await show({
+    metrics_provider: () => remote(),
+    metrics_query: () =>
+      metricsResult({
+        cpuUsage: points([1, 1.5]),
+        cpuAllocatable: points([4, 4]),
+        memoryUsage: points([2 * GIB, 3 * GIB]),
+        memoryAllocatable: points([16 * GIB, 16 * GIB]),
+      }),
+  });
+  expect(text("overview-gauge-cpu-caption")).toBe(
+    "1.5 of 4 cores · Prometheus",
+  );
+  expect(text("overview-gauge-memory-caption")).toBe(
+    "3 of 16 GiB · Prometheus",
+  );
+  expect(backend.callsTo("metrics_query")).toEqual([
+    { clusterId: "c1", target: { kind: "cluster" }, range: "1h" },
+  ]);
 });
 
 test("Prometheus without usage or allocatable: no value and No data", async () => {
