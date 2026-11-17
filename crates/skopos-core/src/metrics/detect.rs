@@ -1,7 +1,7 @@
 //! Where a cluster's metrics come from (spec §5.4): the setting, or detection cached per
 //! cluster.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -11,15 +11,17 @@ use k8s_openapi::api::core::v1::{Service, ServicePort};
 use kube::api::ListParams;
 use kube::{Api, Client};
 
-use super::prometheus::{self, Endpoint};
+use super::prometheus::{Endpoint, Transport};
+use super::remote::{Remote, RemoteEndpoint};
 use super::{
-    MetricsProvider, MetricsProviderSetting, MetricsServerChoice, NoProviderChoice,
-    PrometheusChoice, METRICS_API,
+    remote_url_of, MetricsProvider, MetricsProviderSetting, MetricsServerChoice, NoProviderChoice,
+    PrometheusChoice, RemoteChoice, METRICS_API,
 };
 use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
+use crate::secrets::Secret;
 
 /// The waits of F16. Tests shorten them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +48,14 @@ impl Default for MetricsLimits {
 #[derive(Debug, Clone)]
 pub(crate) struct Chosen {
     pub(crate) provider: MetricsProvider,
-    pub(crate) endpoint: Option<Endpoint>,
+    pub(crate) api: Option<PrometheusApi>,
+}
+
+/// Where a Prometheus API is, by the transport that reaches it (spec I37).
+#[derive(Debug, Clone)]
+pub(crate) enum PrometheusApi {
+    ServiceProxy(Endpoint),
+    Remote(RemoteEndpoint),
 }
 
 struct Cached {
@@ -56,10 +65,11 @@ struct Cached {
     chosen: Chosen,
 }
 
-/// F16's state in `AppCore`: one detection per cluster, and the limits.
+/// F16's state in `AppCore`: one detection and one URL client per cluster, and the limits.
 #[derive(Default)]
 pub(crate) struct Metrics {
     cache: DashMap<ClusterId, Cached>,
+    remotes: DashMap<ClusterId, Arc<Remote>>,
     limits: Mutex<MetricsLimits>,
 }
 
@@ -93,6 +103,32 @@ impl Metrics {
     pub(crate) fn forget(&self, id: &ClusterId) {
         self.cache.remove(id);
     }
+
+    /// The cluster's client for `endpoint` and `secret`: the one kept, unless the setting or
+    /// the secret changed since it was built (spec I41).
+    pub(crate) fn remote(
+        &self,
+        id: &ClusterId,
+        endpoint: &RemoteEndpoint,
+        secret: Option<Secret>,
+    ) -> CoreResult<Arc<Remote>> {
+        let kept = self
+            .remotes
+            .get(id)
+            .filter(|remote| remote.serves(endpoint, secret.as_ref()))
+            .map(|remote| Arc::clone(&remote));
+        if let Some(remote) = kept {
+            return Ok(remote);
+        }
+        let remote = Arc::new(Remote::new(endpoint.clone(), secret)?);
+        self.remotes.insert(id.clone(), Arc::clone(&remote));
+        Ok(remote)
+    }
+
+    /// Drops the cluster's client, so the next query reads the files again.
+    pub(crate) fn forget_remote(&self, id: &ClusterId) {
+        self.remotes.remove(id);
+    }
 }
 
 impl AppCore {
@@ -117,7 +153,7 @@ impl AppCore {
     ) -> CoreResult<Chosen> {
         // `Unreachable` when the cluster is not connected.
         let epoch = self.connections().epoch(id)?;
-        if let Some(chosen) = from_setting(&self.cluster_settings_get(id).metrics_provider) {
+        if let Some(chosen) = from_setting(&self.cluster_settings_get(id).metrics_provider)? {
             return Ok(chosen);
         }
         let metrics = self.metrics();
@@ -137,10 +173,10 @@ impl AppCore {
     }
 }
 
-/// A pinned provider, used without a probe. `None` for `auto`.
-fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
+/// A pinned provider, used without a probe (spec I43). `None` for `auto`.
+fn from_setting(setting: &MetricsProviderSetting) -> CoreResult<Option<Chosen>> {
     let chosen = match setting {
-        MetricsProviderSetting::Auto => return None,
+        MetricsProviderSetting::Auto => return Ok(None),
         MetricsProviderSetting::Prometheus {
             namespace,
             service,
@@ -161,24 +197,47 @@ fn from_setting(setting: &MetricsProviderSetting) -> Option<Chosen> {
             };
             Chosen {
                 provider: prometheus_provider(&endpoint, PrometheusChoice::Setting),
-                endpoint: Some(endpoint),
+                api: Some(PrometheusApi::ServiceProxy(endpoint)),
+            }
+        }
+        MetricsProviderSetting::Remote {
+            url,
+            tenant,
+            matcher,
+            auth,
+            ca_path,
+        } => {
+            let endpoint = RemoteEndpoint {
+                url: remote_url_of(url)?.1,
+                tenant: tenant.clone(),
+                matcher: matcher.clone(),
+                auth: auth.clone(),
+                ca_path: ca_path.clone(),
+            };
+            Chosen {
+                provider: MetricsProvider::Remote {
+                    host: endpoint.host(),
+                    tenant: tenant.clone(),
+                    matcher: matcher.clone(),
+                    chosen_by: RemoteChoice::Setting,
+                },
+                api: Some(PrometheusApi::Remote(endpoint)),
             }
         }
         MetricsProviderSetting::MetricsServer => Chosen {
             provider: MetricsProvider::MetricsServer {
                 chosen_by: MetricsServerChoice::Setting,
             },
-            endpoint: None,
+            api: None,
         },
-        // No transport reaches a URL yet: shown as no provider.
-        MetricsProviderSetting::Remote { .. } | MetricsProviderSetting::Off => Chosen {
+        MetricsProviderSetting::Off => Chosen {
             provider: MetricsProvider::Off {
                 chosen_by: NoProviderChoice::Setting,
             },
-            endpoint: None,
+            api: None,
         },
     };
-    Some(chosen)
+    Ok(Some(chosen))
 }
 
 /// The first candidate that answers the probe; else the first one refused with 403 (so queries
@@ -191,7 +250,11 @@ async fn detect(
     let services = list_services(client, namespaces).await?;
     let mut refused: Option<Candidate> = None;
     for candidate in candidates(&services) {
-        match prometheus::probe(client, &candidate.endpoint, limits.probe).await {
+        let transport = Transport::ServiceProxy {
+            client,
+            endpoint: &candidate.endpoint,
+        };
+        match transport.probe(limits.probe).await {
             Ok(()) => return Ok(prometheus_chosen(candidate)),
             // Remember the first refusal: if nothing answers, the user must see
             // `Forbidden` naming the permission, not "no Prometheus".
@@ -215,14 +278,14 @@ async fn detect(
     };
     Ok(Chosen {
         provider,
-        endpoint: None,
+        api: None,
     })
 }
 
 fn prometheus_chosen(candidate: Candidate) -> Chosen {
     Chosen {
         provider: prometheus_provider(&candidate.endpoint, candidate.tier),
-        endpoint: Some(candidate.endpoint),
+        api: Some(PrometheusApi::ServiceProxy(candidate.endpoint)),
     }
 }
 
@@ -362,6 +425,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
+    use crate::metrics::{RemoteAuth, RemoteChoice};
 
     fn service(namespace: &str, name: &str, labels: Value, ports: Value) -> Service {
         serde_json::from_value(json!({
@@ -451,6 +515,36 @@ mod tests {
                 "Label a/numbered:9090",
             ]
         );
+    }
+
+    #[test]
+    fn a_remote_setting_is_used_as_it_is_and_shows_only_its_host() {
+        let setting = MetricsProviderSetting::Remote {
+            url: "https://mimir.example.com:8443/prometheus".to_owned(),
+            tenant: Some("team-a".to_owned()),
+            matcher: None,
+            auth: RemoteAuth::Bearer,
+            ca_path: None,
+        };
+        let chosen = from_setting(&setting).unwrap().unwrap();
+        assert_eq!(
+            chosen.provider,
+            MetricsProvider::Remote {
+                host: "mimir.example.com:8443".to_owned(),
+                tenant: Some("team-a".to_owned()),
+                matcher: None,
+                chosen_by: RemoteChoice::Setting,
+            }
+        );
+        let Some(PrometheusApi::Remote(endpoint)) = chosen.api else {
+            panic!("{:?}", chosen.api);
+        };
+        assert_eq!(
+            endpoint.url.as_str(),
+            "https://mimir.example.com:8443/prometheus"
+        );
+        assert_eq!(endpoint.tenant.as_deref(), Some("team-a"));
+        assert_eq!(endpoint.auth, RemoteAuth::Bearer);
     }
 
     #[test]

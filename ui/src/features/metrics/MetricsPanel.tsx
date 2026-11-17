@@ -473,8 +473,11 @@ export function MetricsPanel(props: MetricsPanelProps) {
       );
   } else if (value.kind === "prometheus") {
     body = <PrometheusMetrics {...props} provider={value} />;
-  } else {
+  } else if (value.kind === "metricsServer") {
     body = <ServerMetrics {...props} provider={value} />;
+  } else {
+    // A Prometheus-compatible URL has no panel yet.
+    body = null;
   }
 
   return (

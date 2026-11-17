@@ -9,7 +9,8 @@ use kube::api::{ApiResource, DynamicObject, ListParams};
 use kube::core::GroupVersionKind;
 use kube::{Api, Client};
 
-use super::prometheus;
+use super::detect::PrometheusApi;
+use super::prometheus::Transport;
 use super::templates::{queries, Scope};
 use super::{MetricName, MetricsRange, MetricsResult, MetricsTarget, WorkloadKind};
 use crate::app_core::AppCore;
@@ -36,7 +37,7 @@ impl AppCore {
     ) -> CoreResult<MetricsResult> {
         check_target(target)?;
         let chosen = self.chosen_provider(id, false).await?;
-        let Some(endpoint) = chosen.endpoint else {
+        let Some(api) = chosen.api else {
             return Err(IpcError::new(
                 ErrorCode::NotFound,
                 "no Prometheus is in use for this cluster",
@@ -44,6 +45,17 @@ impl AppCore {
             .with_details("noPrometheus"));
         };
         let client = self.cluster_client(id)?;
+        let remote;
+        let transport = match &api {
+            PrometheusApi::ServiceProxy(endpoint) => Transport::ServiceProxy {
+                client: &client,
+                endpoint,
+            },
+            PrometheusApi::Remote(endpoint) => {
+                remote = self.remote(id, endpoint)?;
+                Transport::Remote(&remote)
+            }
+        };
         let window = range.window(Timestamp::now().as_second());
         let pods = match target {
             MetricsTarget::Pod { name, .. } => vec![name.clone()],
@@ -65,7 +77,7 @@ impl AppCore {
             }
             MetricsTarget::Pvc { namespace, name } => Scope::Pvc { namespace, name },
         };
-        let planned = queries(&scope, window.step, endpoint.matcher.as_ref());
+        let planned = queries(&scope, window.step, transport.matcher());
         let mut result = MetricsResult {
             start: window.start,
             end: window.end,
@@ -81,10 +93,9 @@ impl AppCore {
         }
 
         let limit = self.metrics().limits().query;
-        let (client, endpoint) = (&client, &endpoint);
         let answers: Vec<(MetricName, CoreResult<Points>)> = stream::iter(planned)
             .map(|(name, query)| async move {
-                let points = prometheus::query_range(client, endpoint, &query, window, limit).await;
+                let points = transport.query_range(&query, window, limit).await;
                 (name, points)
             })
             .buffered(PARALLEL_QUERIES)
