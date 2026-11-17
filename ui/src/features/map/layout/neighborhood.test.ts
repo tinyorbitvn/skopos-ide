@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { DEMO, demoGraph, gedge, gnode, ownsCycle } from "../../../test/graph";
+import {
+  DEMO,
+  demoGraph,
+  gedge,
+  gnode,
+  ownsCycle,
+  RBAC,
+  rbacGraph,
+} from "../../../test/graph";
 import { buildModel } from "../model";
 import { boxText, cellW, headW, labelHalf } from "./geometry";
 import { neighborhood } from "./neighborhood";
@@ -106,6 +114,53 @@ describe("neighborhood", () => {
   it("keeps a CronJob's whole tree", () => {
     expect(sorted(neighborhood(demoModel(), DEMO.cronJob, 1))).toEqual(
       sorted([DEMO.cronJob, DEMO.job, DEMO.jobPod, DEMO.token]),
+    );
+  });
+});
+
+describe("neighborhood with access", () => {
+  const rbacModel = () => {
+    const { nodes, edges } = rbacGraph();
+    return buildModel(nodes, edges);
+  };
+  const chain = [
+    RBAC.binding,
+    RBAC.role,
+    RBAC.viewBinding,
+    RBAC.clusterBinding,
+    RBAC.clusterRole,
+  ];
+
+  it("brings the bindings of its Pods' ServiceAccount and their roles at depth 1", () => {
+    expect(sorted(neighborhood(rbacModel(), DEMO.deployment, 1))).toEqual(
+      sorted([...neighborhood(demoModel(), DEMO.deployment, 1), ...chain]),
+    );
+  });
+
+  it("walks from no binding to its other ServiceAccount, and from no role on", () => {
+    for (const depth of [1, 2, "all"] as const) {
+      const ids = neighborhood(rbacModel(), DEMO.deployment, depth);
+      expect(ids, String(depth)).toEqual(expect.arrayContaining(chain));
+      expect(ids, String(depth)).not.toContain(RBAC.nightly);
+      expect(ids, String(depth)).not.toContain(RBAC.nightlyBinding);
+    }
+  });
+
+  it("leads from a binding reached another way to its role only", () => {
+    const owner = gnode("Deployment/team/operator");
+    const binding = gnode("RoleBinding/team/operator");
+    const account = gnode("ServiceAccount/team/other");
+    const role = gnode("Role/team/operator");
+    const model = buildModel(
+      [owner, binding, account, role],
+      [
+        gedge(owner.id, "owns", binding.id),
+        gedge(binding.id, "binds", account.id),
+        gedge(binding.id, "grants", role.id),
+      ],
+    );
+    expect(sorted(neighborhood(model, owner.id, "all"))).toEqual(
+      sorted([owner.id, binding.id, role.id]),
     );
   });
 });

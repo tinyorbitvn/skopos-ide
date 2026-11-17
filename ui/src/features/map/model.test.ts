@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DEMO, demoGraph, gedge, gnode } from "../../test/graph";
+import {
+  DEMO,
+  demoGraph,
+  gedge,
+  gnode,
+  RBAC,
+  rbacGraph,
+} from "../../test/graph";
 import { levelOf } from "./layout/constants";
 import {
   autoHidden,
@@ -97,6 +104,53 @@ describe("namespaceView", () => {
     expect(ids).toContain(DEMO.ingressLb);
     expect(ids).not.toContain("Gateway/other/internal");
     expect(ids).not.toContain("Ingress/other/admin");
+  });
+
+  it("brings the bindings of shown ServiceAccounts and the roles of shown bindings, one way", () => {
+    const { nodes, edges } = rbacGraph();
+    const model = buildModel(nodes, edges);
+    // The ClusterRoleBinding of the nightly ServiceAccount comes in without the shop's
+    // ServiceAccount it also binds, and its ClusterRole brings no other binding.
+    expect(namespaceView(model, new Set(["shop", "edge"]))).toEqual([
+      DEMO.cronJob,
+      DEMO.job,
+      DEMO.jobPod,
+      DEMO.token,
+      RBAC.nightly,
+      RBAC.clusterBinding,
+      RBAC.clusterRole,
+      RBAC.nightlyBinding,
+    ]);
+    const shop = namespaceView(model, new Set(["edge", "jobs"]));
+    expect(shop).toEqual(
+      expect.arrayContaining([
+        RBAC.binding,
+        RBAC.role,
+        RBAC.viewBinding,
+        RBAC.clusterBinding,
+        RBAC.clusterRole,
+      ]),
+    );
+    expect(shop).not.toContain(RBAC.nightly);
+    expect(shop).not.toContain(RBAC.nightlyBinding);
+  });
+
+  it("brings a shown binding's role even when its ServiceAccounts are elsewhere", () => {
+    const { nodes, edges } = rbacGraph();
+    const editor = gnode("RoleBinding/jobs/web-editor");
+    const edit = gnode("ClusterRole//edit");
+    const model = buildModel(
+      [...nodes, editor, edit],
+      [
+        ...edges,
+        gedge(editor.id, "binds", DEMO.account),
+        gedge(editor.id, "grants", edit.id),
+      ],
+    );
+    const ids = namespaceView(model, new Set(["shop", "edge"]));
+    expect(ids).toContain(editor.id);
+    expect(ids).toContain(edit.id);
+    expect(ids).not.toContain(DEMO.account);
   });
 
   it("draws nothing when every namespace is hidden", () => {
