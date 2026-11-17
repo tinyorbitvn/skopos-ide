@@ -107,6 +107,8 @@ async function startHelmFixture() {
 }
 
 const MAP_NAMESPACE = "skopos-e2e-map";
+// Cluster-scoped, so deleting the namespace leaves it: it is deleted on its own.
+const MAP_CLUSTER_ROLE_BINDING = "skopos-e2e-map-web-view";
 const MAP_OBJECTS = path.resolve(__dirname, "..", "fixtures", "map.yaml");
 const GATEWAY_API_CRDS =
   "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml";
@@ -115,7 +117,8 @@ const GATEWAY_API_CRDS =
  * The kind cluster with the resource map's objects (spec E §18.3). The graph reads
  * discovery once, when it starts, so the Gateway API CRDs and the objects are in
  * place before the app connects. The CRDs stay installed, as the backend's kind
- * test leaves them; the namespace is deleted when the run ends.
+ * test leaves them; the namespace and the ClusterRoleBinding are deleted when the run
+ * ends.
  */
 async function startMapFixture() {
   await kubectl([
@@ -148,6 +151,12 @@ async function startMapFixture() {
     "--wait=true",
     "--timeout=120s",
   ]);
+  await kubectl([
+    "delete",
+    "clusterrolebinding",
+    MAP_CLUSTER_ROLE_BINDING,
+    "--ignore-not-found",
+  ]);
   await kubectl(["apply", "-f", MAP_OBJECTS]);
   await kubectl([
     "-n",
@@ -166,6 +175,12 @@ async function startMapFixture() {
         MAP_NAMESPACE,
         "--ignore-not-found",
         "--wait=false",
+      ]);
+      await kubectl([
+        "delete",
+        "clusterrolebinding",
+        MAP_CLUSTER_ROLE_BINDING,
+        "--ignore-not-found",
       ]);
     },
   };

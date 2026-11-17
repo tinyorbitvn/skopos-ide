@@ -132,3 +132,55 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: web-data
+---
+# The ServiceAccount's access (spec O §8.3): a Role it may use through a RoleBinding, the
+# built-in ClusterRole view through a ClusterRoleBinding, and a RoleBinding to a Role that
+# does not exist. e2e/helpers/fixtures.ts deletes the ClusterRoleBinding with the namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: web-config-reader
+  namespace: skopos-e2e-map
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: web-config-reader
+  namespace: skopos-e2e-map
+subjects:
+  - kind: ServiceAccount
+    name: web
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: web-config-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: skopos-e2e-map-web-view
+subjects:
+  - kind: ServiceAccount
+    name: web
+    namespace: skopos-e2e-map
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: web-leader
+  namespace: skopos-e2e-map
+subjects:
+  - kind: ServiceAccount
+    name: web
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: web-leader
