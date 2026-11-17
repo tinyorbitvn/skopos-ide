@@ -1,9 +1,10 @@
 //! What the graph keeps of one object: its node's status and facts, its owner, labels and
-//! selector, and the references it gives (spec E §4.4 to §4.6). Values are read leniently: a
-//! field of another type than expected counts as absent, and nothing here panics.
+//! selector, and the references it gives (spec E §4.4 to §4.6, O §4.2 and §4.4). Values are read
+//! leniently: a field of another type than expected counts as absent, and nothing here panics.
 
 mod config;
 mod network;
+mod rbac;
 mod workloads;
 
 use std::collections::BTreeMap;
@@ -230,6 +231,8 @@ pub(crate) fn extract(kind: Kind, object: &Value) -> Option<Item> {
         Kind::Secret => config::secret(&mut item, object),
         Kind::ServiceAccount => config::service_account(&mut item, object),
         Kind::PersistentVolumeClaim => config::claim(&mut item, object),
+        Kind::Role | Kind::ClusterRole => rbac::role(&mut item, object),
+        Kind::RoleBinding | Kind::ClusterRoleBinding => rbac::binding(&mut item, object),
     }
     Some(item)
 }
@@ -324,6 +327,9 @@ mod tests {
                 "startTime": 5, "phase": 4, "capacity": [],
             },
             "data": ["a"], "type": 1, "automountServiceAccountToken": "no",
+            "rules": [3, { "resources": "pods", "resourceNames": [1], "verbs": "get" }, { "nonResourceURLs": [2] }],
+            "subjects": [5, { "kind": 1 }, { "kind": "ServiceAccount", "name": ["web"] }],
+            "roleRef": "view", "aggregationRule": "yes",
         });
         for kind in Kind::ALL {
             let item = extract(kind, &odd).expect("the object has a name");

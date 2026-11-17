@@ -1,4 +1,4 @@
-//! What the graph sends to the interface (spec E §4.3 to §4.5).
+//! What the graph sends to the interface (spec E §4.3 to §4.5, O §4.2).
 
 use serde::Serialize;
 use ts_rs::TS;
@@ -27,6 +27,8 @@ pub enum GraphRel {
     RunsAs,
     Claims,
     Class,
+    Binds,
+    Grants,
 }
 
 /// An object, a referenced object that does not exist, or a load balancer address. `id` is
@@ -139,6 +141,14 @@ mod tests {
             })
             .unwrap(),
             json!({ "type": "failure", "message": "m" })
+        );
+    }
+
+    #[test]
+    fn access_relations_serialize_as_the_interface_reads_them() {
+        assert_eq!(
+            serde_json::to_value([GraphRel::Binds, GraphRel::Grants]).unwrap(),
+            json!(["binds", "grants"])
         );
     }
 }
