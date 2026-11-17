@@ -3,7 +3,8 @@
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::metrics::{
-    MetricsProvider, MetricsRange, MetricsResult, MetricsTarget, UsageOf, UsageSnapshot,
+    MetricsProvider, MetricsProviderSetting, MetricsRange, MetricsResult, MetricsTarget, UsageOf,
+    UsageSnapshot,
 };
 use skopos_core::secrets::Secret;
 use tauri::State;
@@ -48,8 +49,11 @@ pub async fn metrics_secret_set(
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     secret: Secret,
+    provider: MetricsProviderSetting,
 ) -> Result<(), IpcError> {
-    state.core.metrics_secret_set(&cluster_id, secret)
+    state
+        .core
+        .metrics_secret_set_for(&cluster_id, secret, provider)
 }
 
 #[tauri::command]

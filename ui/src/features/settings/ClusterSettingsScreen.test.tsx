@@ -926,7 +926,17 @@ test("Save writes the typed secret first, then the settings, and forgets the typ
     ["metrics_secret_set", "cluster_settings_set"].includes(c.cmd),
   );
   expect(writes).toEqual([
-    { cmd: "metrics_secret_set", args: { clusterId: "id-x", secret: "t0ken" } },
+    {
+      cmd: "metrics_secret_set",
+      args: {
+        clusterId: "id-x",
+        secret: "t0ken",
+        provider: expect.objectContaining({
+          kind: "remote",
+          auth: { kind: "bearer" },
+        }),
+      },
+    },
     {
       cmd: "cluster_settings_set",
       args: {
@@ -960,8 +970,16 @@ test("Save writes the typed secret first, then the settings, and forgets the typ
   expect(status()).toBe("Unsaved changes.");
   await save();
   expect(backend.callsTo("metrics_secret_set")).toEqual([
-    { clusterId: "id-x", secret: "t0ken" },
-    { clusterId: "id-x", secret: "t0ken-2" },
+    {
+      clusterId: "id-x",
+      secret: "t0ken",
+      provider: expect.objectContaining({ kind: "remote" }),
+    },
+    {
+      clusterId: "id-x",
+      secret: "t0ken-2",
+      provider: expect.objectContaining({ kind: "remote" }),
+    },
   ]);
 });
 
@@ -989,6 +1007,30 @@ test("a keychain that refuses the secret stops the save, toasts its error and ke
   expect(input("settings-remote-password").value).toBe("s3cret");
   expect(status()).toBe("Unsaved changes.");
   expect(button("settings-save").disabled).toBe(false);
+});
+
+test("a file the core refuses with the secret shows under its field and saves nothing", async () => {
+  const backend = await show({
+    saved: FULL,
+    handlers: {
+      metrics_secret_set: () => {
+        throw {
+          code: "InvalidInput",
+          message: "The CA file is not there.",
+          details: "caPath",
+        };
+      },
+    },
+  });
+  pickProvider("remote");
+  type("settings-remote-url", "https://mimir.example.com/prometheus");
+  pickAuth("basic");
+  type("settings-remote-username", "me");
+  type("settings-remote-password", "s3cret");
+  type("settings-remote-ca", "/nope.pem");
+  await save();
+  expect(errorOf("settings-remote-ca")).toBe("The CA file is not there.");
+  expect(backend.callsTo("cluster_settings_set")).toEqual([]);
 });
 
 test("the URL, its scheme and the user name show the core's errors under them", async () => {
@@ -1081,7 +1123,11 @@ test("a typed password is saved as typed, spaces included", async () => {
   expect(button("settings-save").disabled).toBe(false);
   await save();
   expect(backend.callsTo("metrics_secret_set")).toEqual([
-    { clusterId: "id-x", secret: "  pa ss  " },
+    {
+      clusterId: "id-x",
+      secret: "  pa ss  ",
+      provider: expect.objectContaining({ kind: "remote" }),
+    },
   ]);
 });
 
@@ -1105,7 +1151,11 @@ test("a keychain that cannot be read asks for the password, without a toast", as
   expect(button("settings-save").disabled).toBe(false);
   await save();
   expect(backend.callsTo("metrics_secret_set")).toEqual([
-    { clusterId: "id-x", secret: "s3cret" },
+    {
+      clusterId: "id-x",
+      secret: "s3cret",
+      provider: expect.objectContaining({ kind: "remote" }),
+    },
   ]);
   expect(error).not.toHaveBeenCalled();
 });

@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
+use crate::metrics::MetricsProviderSetting;
 
 /// A password or a token. Its `Debug` never shows it, and it is never serialized (spec I49).
 #[derive(Clone, PartialEq, Eq, Deserialize)]
@@ -132,6 +133,19 @@ impl AppCore {
     /// Saves the password or token of the cluster's metrics URL, replacing the one saved
     /// (spec I49, I51). `Unreachable` when the keychain cannot be used.
     pub fn metrics_secret_set(&self, id: &ClusterId, secret: Secret) -> CoreResult<()> {
+        self.secrets().set(id, secret)
+    }
+
+    /// `metrics_secret_set` for the page's save: the metrics setting the secret belongs to is
+    /// validated first, certificate files included, so a setting the core refuses leaves the
+    /// keychain as it was (spec I45, I58, I59).
+    pub fn metrics_secret_set_for(
+        &self,
+        id: &ClusterId,
+        secret: Secret,
+        intended: MetricsProviderSetting,
+    ) -> CoreResult<()> {
+        intended.normalized()?;
         self.secrets().set(id, secret)
     }
 
@@ -307,6 +321,27 @@ mod tests {
 
         core.metrics_secret_set(&id, Secret::new("pw-2")).unwrap();
         assert_eq!(store.inner.get(&id).unwrap(), Some(Secret::new("pw-2")));
+    }
+
+    #[tokio::test]
+    async fn a_refused_setting_leaves_the_saved_secret_alone() {
+        let store = Arc::new(MemorySecretStore::default());
+        let (core, _root) = core_with(store.clone()).await;
+        let id = cluster();
+        core.metrics_secret_set(&id, Secret::new("old")).unwrap();
+        let bad_ca = MetricsProviderSetting::Remote {
+            url: "https://b.example".into(),
+            tenant: None,
+            matcher: None,
+            auth: RemoteAuth::Basic {
+                username: "u".into(),
+            },
+            ca_path: Some("/nonexistent/ca.pem".into()),
+        };
+        assert!(core
+            .metrics_secret_set_for(&id, Secret::new("new"), bad_ca)
+            .is_err());
+        assert_eq!(store.get(&id).unwrap(), Some(Secret::new("old")));
     }
 
     #[tokio::test]
