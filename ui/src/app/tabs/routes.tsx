@@ -1,17 +1,4 @@
 import {
-  Blocks,
-  LayoutDashboard,
-  LayoutGrid,
-  List,
-  type LucideIcon,
-  Network,
-  Package,
-  PackageSearch,
-  Settings,
-  SlidersHorizontal,
-  SquareDashed,
-} from "lucide-react";
-import {
   matchPath,
   matchRoutes,
   Navigate,
@@ -21,9 +8,20 @@ import {
 } from "react-router";
 import {
   ArrowRightLeft,
+  Blocks,
   CircleArrowUp,
+  type IconComponent,
+  LayoutDashboard,
+  LayoutGrid,
+  List,
+  Network,
+  Package,
   PackagePlus,
-} from "../../design/glyphs";
+  PackageSearch,
+  Settings,
+  SlidersHorizontal,
+  SquareDashed,
+} from "../../design/icons";
 import { CatalogScreen } from "../../features/catalog/CatalogScreen";
 import { ClusterOverview } from "../../features/cluster/ClusterHome";
 import { ClusterScreen } from "../../features/cluster/ClusterScreen";
@@ -91,13 +89,13 @@ export interface TabInfo {
   clusterId: string | null;
   /** The catalog name, or "Cluster" while the id is not in the catalog; null off clusters. */
   clusterName: string | null;
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 interface Screen {
   pattern: string;
   name: (params: Params) => string;
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 const named = (name: string) => () => name;
@@ -198,7 +196,7 @@ export function tabInfo(
   const pathname = decoded(parsePath(path).pathname ?? "/");
   const clusterId = tabCluster(path);
   let screen = pathname;
-  let icon: LucideIcon = SquareDashed;
+  let icon: IconComponent = SquareDashed;
   for (const s of SCREENS) {
     const match = matchPath(s.pattern, pathname);
     if (match) {

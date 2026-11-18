@@ -1,4 +1,3 @@
-import { ChevronDown, Search } from "lucide-react";
 import {
   type ReactElement,
   type ReactNode,
@@ -9,6 +8,7 @@ import {
 } from "react";
 import { Button } from "./Button";
 import styles from "./FilterPopover.module.css";
+import { ChevronDown, Search } from "./icons";
 
 export interface FilterPopoverProps {
   /** The trigger's text and title. */

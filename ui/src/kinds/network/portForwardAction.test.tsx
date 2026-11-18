@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { expect, test } from "vitest";
-import { ArrowRightLeft } from "../../design/glyphs";
+import { ArrowRightLeft } from "../../design/icons";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { KubeObject } from "../objects";
 import { PODS } from "../refs";

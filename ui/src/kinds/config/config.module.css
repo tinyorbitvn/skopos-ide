@@ -37,15 +37,33 @@
   gap: var(--space-3);
 }
 
-.value {
+/* A masked value: a click on it reveals the value. */
+.masked {
+  width: 100%;
   padding: var(--space-3) var(--space-5);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   background: var(--surface-sunken);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.masked:hover:not(:disabled) {
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+
+.masked:focus-visible {
+  outline: none;
+  border-color: var(--border-accent);
+  box-shadow: var(--focus-ring);
+}
+
+.masked:disabled {
+  cursor: not-allowed;
 }
 
 .input {
@@ -56,6 +74,15 @@
   background: var(--surface-card);
   font-family: var(--font-mono);
   resize: vertical;
+}
+
+.invalid {
+  border-color: var(--status-critical);
+}
+
+.error {
+  color: var(--text-danger);
+  font: var(--type-caption);
 }
 
 .controls {
@@ -71,7 +98,8 @@
   gap: var(--space-3);
 }
 
-.addRow > button {
+.addRow > button,
+.addRow > [role="radiogroup"] {
   align-self: flex-start;
 }
 

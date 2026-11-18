@@ -14,7 +14,7 @@ mod service_account;
 mod trim;
 mod types;
 
-pub use actions::{DataChange, SecretValue};
+pub use actions::{DataChange, SecretChange, SecretData, SecretValue};
 pub use apply::ApplyResult;
 pub use argocd::{
     ArgoRollbackOptions, ArgoSyncOptions, ArgoSyncResource, ArgoSyncStrategy,

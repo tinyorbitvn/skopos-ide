@@ -1,6 +1,11 @@
-import { Activity, HardDrive, Link as LinkIcon, ListTree } from "lucide-react";
 import type { ReactElement } from "react";
 import { Badge, type TableColumn } from "../../design";
+import {
+  Activity,
+  HardDrive,
+  Link as LinkIcon,
+  ListTree,
+} from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import {

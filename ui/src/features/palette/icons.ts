@@ -1,4 +1,5 @@
 import {
+  ArrowRightLeft,
   Bell,
   Box,
   Boxes,
@@ -10,9 +11,10 @@ import {
   FolderTree,
   Globe,
   HardDrive,
+  type IconComponent,
+  KeyRound,
   Layers,
   LayoutDashboard,
-  type LucideIcon,
   Network,
   Package,
   PackageCheck,
@@ -21,11 +23,10 @@ import {
   ShieldCheck,
   Waypoints,
   Workflow,
-} from "lucide-react";
-import { ArrowRightLeft, KeyRound } from "../../design/glyphs";
+} from "../../design/icons";
 
 /** The kinds of `resources_names`, by plural. */
-export const KIND_ICONS: Partial<Record<string, LucideIcon>> = {
+export const KIND_ICONS: Partial<Record<string, IconComponent>> = {
   pods: Box,
   deployments: Rocket,
   statefulsets: Database,
@@ -43,7 +44,7 @@ export const KIND_ICONS: Partial<Record<string, LucideIcon>> = {
 };
 
 /** Pages of other kinds take their sidebar section's icon. */
-export const SECTION_ICONS: Partial<Record<string, LucideIcon>> = {
+export const SECTION_ICONS: Partial<Record<string, IconComponent>> = {
   nodes: Cpu,
   workloads: Boxes,
   config: FileCog,
@@ -56,12 +57,12 @@ export const SECTION_ICONS: Partial<Record<string, LucideIcon>> = {
   custom: Puzzle,
 };
 
-export const ROUTE_ICONS: Partial<Record<string, LucideIcon>> = {
+export const ROUTE_ICONS: Partial<Record<string, IconComponent>> = {
   "port-forwards": ArrowRightLeft,
   "helm/charts": Package,
   "helm/releases": PackageCheck,
 };
 
-export const OVERVIEW_ICON: LucideIcon = LayoutDashboard;
-export const CUSTOM_ICON: LucideIcon = Puzzle;
-export const FALLBACK_ICON: LucideIcon = Box;
+export const OVERVIEW_ICON: IconComponent = LayoutDashboard;
+export const CUSTOM_ICON: IconComponent = Puzzle;
+export const FALLBACK_ICON: IconComponent = Box;

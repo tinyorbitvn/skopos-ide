@@ -1,5 +1,5 @@
 import { toast } from "../../design";
-import { Zap } from "../../design/glyphs";
+import { Zap } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { KindAction } from "../registry";
 

@@ -1,0 +1,16 @@
+/* An icon's box: just its svg, at the size the caller asked for. */
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The animated set wraps its svg in a div of its own; the svg stays the icon's only box. */
+.motion {
+  display: contents;
+}
+
+/* Lucide's stroke in this app, as global.css draws svg.lucide; the animated set draws 2. */
+.icon svg {
+  stroke-width: 1.75;
+}

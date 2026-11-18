@@ -1,5 +1,5 @@
 import { toast, useNow } from "../../design";
-import { CirclePause, CirclePlay, Play } from "../../design/glyphs";
+import { CirclePause, CirclePlay, Play } from "../../design/icons";
 import { api } from "../../ipc/api";
 import {
   baseColumns,

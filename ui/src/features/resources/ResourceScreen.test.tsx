@@ -6,10 +6,10 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { Circle } from "lucide-react";
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "../../design";
+import { Box } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
@@ -866,18 +866,18 @@ test("a registered kind supplies its columns and row actions", async () => {
       },
     ],
     actions: [
-      { id: "poke", label: "Poke", icon: Circle, run },
+      { id: "poke", label: "Poke", icon: Box, run },
       {
         id: "never",
         label: "Never",
-        icon: Circle,
+        icon: Box,
         visible: () => false,
         run,
       },
       {
         id: "fail",
         label: "Explode",
-        icon: Circle,
+        icon: Box,
         run: () => Promise.reject(new Error("the gadget exploded")),
       },
     ],
@@ -912,7 +912,7 @@ test("an action can ask for confirmation", async () => {
       {
         id: "ask",
         label: "Ask",
-        icon: Circle,
+        icon: Box,
         run: async (ctx) => {
           answers.push(
             await ctx.confirm({
@@ -1041,7 +1041,7 @@ test("Edit YAML in a row's menu opens the object in the dock", async () => {
 
 test("a row's menu lists Edit YAML, the kind's actions, then Delete, each with an icon", async () => {
   registerKind("kinds.test", "sprockets", {
-    actions: [{ id: "spin", label: "Spin", icon: Circle, run: () => {} }],
+    actions: [{ id: "spin", label: "Spin", icon: Box, run: () => {} }],
   });
   const sprockets = info({
     group: "kinds.test",
@@ -1060,7 +1060,7 @@ test("a row's menu lists Edit YAML, the kind's actions, then Delete, each with a
     expect(entry.querySelector("svg")).not.toBeNull();
 });
 
-test("the drawer header opens Edit YAML, and its More actions offer Delete", async () => {
+test("the drawer header opens Edit YAML, and its Delete button asks to delete", async () => {
   const fake = fakeBackend();
   await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
   fireEvent.click(row("team-a", "web") as HTMLElement);
@@ -1073,12 +1073,14 @@ test("the drawer header opens Edit YAML, and its More actions offer Delete", asy
   });
   resetDockForTest();
 
-  openMenu("detail-more-actions");
+  // Edit YAML and Delete are both buttons, so there is nothing left for More actions.
+  expect(screen.queryByTestId("detail-more-actions")).toBeNull();
+  fireEvent.click(screen.getByTestId("detail-action-delete"));
+  const dialog = await screen.findByRole("dialog");
   expect(
-    screen.getAllByRole("menuitem").map((m) => m.getAttribute("data-testid")),
-  ).toEqual(["menu-item-edit", "menu-item-delete"]);
-  fireEvent.click(screen.getByTestId("menu-item-delete"));
-  expect(await screen.findByRole("dialog")).toBeTruthy();
+    within(dialog).getByText(/Delete Deployment team-a\/web/),
+  ).toBeTruthy();
+  expect(within(dialog).getByTestId("delete-confirm")).toBeTruthy();
 });
 
 const GADGET = { group: "example.com", plural: "gadgets", kind: "Gadget" };
@@ -1094,7 +1096,7 @@ test.each([
         {
           id: "go",
           label: "Go",
-          icon: Circle,
+          icon: Box,
           requires: "patch",
           run: () => {},
         },
@@ -1144,8 +1146,7 @@ test("a kind's own delete dialog serves the row menu, the drawer and bulk delete
   expect(screen.queryByTestId("own-delete")).toBeNull();
 
   fireEvent.click(row("default", "a") as HTMLElement);
-  openMenu("detail-more-actions");
-  fireEvent.click(screen.getByTestId("menu-item-delete"));
+  fireEvent.click(screen.getByTestId("detail-action-delete"));
   expect(screen.getByTestId("own-delete")).toBeTruthy();
   expect(opened.at(-1)).toEqual(["a"]);
   fireEvent.click(screen.getByText("Close own"));

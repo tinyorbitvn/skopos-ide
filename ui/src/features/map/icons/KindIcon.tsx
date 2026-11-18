@@ -1,4 +1,4 @@
-import { DoorOpen, Layers, type LucideIcon, Route, Split } from "lucide-react";
+import { SVG_ART, type SvgArt } from "../../../design/icons";
 import { type IconPath, K8S_ICONS, type K8sIconName } from "./k8sIcons";
 
 /** The Kubernetes Icons Set file of each kind that has one (spec E §14.1). */
@@ -24,10 +24,10 @@ const FILE: Readonly<Record<string, K8sIconName>> = {
 };
 
 /** Kinds the set has no icon for: the set's frame with a white Lucide glyph. */
-const FRAMED: Readonly<Record<string, LucideIcon>> = {
-  Gateway: DoorOpen,
-  HTTPRoute: Route,
-  GatewayClass: Layers,
+const FRAMED: Readonly<Record<string, SvgArt>> = {
+  Gateway: SVG_ART.DoorOpen,
+  HTTPRoute: SVG_ART.Route,
+  GatewayClass: SVG_ART.Layers,
 };
 
 /** The name of the icon a kind gets: its file, a framed glyph, the load balancer badge or `crd`. */
@@ -64,7 +64,7 @@ const GLYPH_X = 4.697;
 const GLYPH_Y = 4.43;
 const GLYPH_SIZE = 8.64;
 
-function Glyph({ icon: Icon, turn }: { icon: LucideIcon; turn?: number }) {
+function Glyph({ icon: Icon, turn }: { icon: SvgArt; turn?: number }) {
   const cx = GLYPH_X + GLYPH_SIZE / 2;
   const cy = GLYPH_Y + GLYPH_SIZE / 2;
   return (
@@ -93,7 +93,7 @@ export interface KindIconProps {
 export function KindIcon({ kind, size, x, y }: KindIconProps) {
   const name = iconName(kind);
   const file: K8sIconName | undefined = FILE[kind];
-  const framed: LucideIcon | undefined = FRAMED[kind];
+  const framed: SvgArt | undefined = FRAMED[kind];
   const packed = file
     ? K8S_ICONS[file]
     : name === "crd"
@@ -126,7 +126,7 @@ export function KindIcon({ kind, size, x, y }: KindIconProps) {
           {BADGE.map((p) => (
             <Path key={`${p.t}${p.d}`} path={p} />
           ))}
-          <Glyph icon={Split} turn={90} />
+          <Glyph icon={SVG_ART.Split} turn={90} />
         </>
       ) : null}
     </svg>

@@ -1,7 +1,7 @@
-import { CircleAlert, Info } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { useNavigate } from "react-router";
 import { Badge, Button, Segmented, Spinner } from "../../design";
+import { CircleAlert, Info } from "../../design/icons";
 import type { IpcFailure } from "../../ipc/client";
 import type { MetricName } from "../../ipc/generated/MetricName";
 import type { MetricsProvider } from "../../ipc/generated/MetricsProvider";

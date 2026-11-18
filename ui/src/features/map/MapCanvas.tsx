@@ -1,4 +1,3 @@
-import { Info, Scan, ZoomIn, ZoomOut } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -10,6 +9,7 @@ import {
   useState,
 } from "react";
 import { IconButton } from "../../design/IconButton";
+import { Info, Scan, ZoomIn, ZoomOut } from "../../design/icons";
 import { KindIcon } from "./icons/KindIcon";
 import type { Flow, Positions } from "./layout/grouped";
 import styles from "./MapCanvas.module.css";

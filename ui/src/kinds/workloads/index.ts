@@ -1,5 +1,5 @@
 import { toast } from "../../design";
-import { LogOut } from "../../design/glyphs";
+import { LogOut } from "../../design/icons";
 import { api } from "../../ipc/api";
 import {
   baseColumns,

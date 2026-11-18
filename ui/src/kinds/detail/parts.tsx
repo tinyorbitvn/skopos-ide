@@ -1,10 +1,4 @@
 import {
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  type LucideIcon,
-} from "lucide-react";
-import {
   createContext,
   type ReactElement,
   type ReactNode,
@@ -13,6 +7,12 @@ import {
   useState,
 } from "react";
 import { Link } from "react-router";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  type IconComponent,
+} from "../../design/icons";
 import { ownerTarget } from "../../features/details/ownerLinks";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { useUiState } from "../../stores/uiState";
@@ -62,7 +62,7 @@ interface PartProps {
   title: string;
   testId?: string;
   /** A lucide icon, 14 px, before the title. Defaults to FileText. */
-  icon?: LucideIcon;
+  icon?: IconComponent;
   /** A count pill after the title. */
   count?: number;
   children: ReactNode;

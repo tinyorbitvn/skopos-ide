@@ -1,6 +1,6 @@
 import * as RS from "@radix-ui/react-select";
-import { ChevronDown } from "lucide-react";
 import { useId } from "react";
+import { ChevronDown } from "./icons";
 import styles from "./Select.module.css";
 
 export function Select<T extends string>(props: {

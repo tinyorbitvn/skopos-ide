@@ -8,10 +8,20 @@ export function isValidDataKey(key: string): boolean {
   return DATA_KEY.test(key);
 }
 
+/** Whether two texts of a key hold the same value. */
+export type SameValue = (
+  key: string,
+  original: string,
+  edited: string,
+) => boolean;
+
+const sameText: SameValue = (_key, original, edited) => original === edited;
+
 /** What turns `original` into `edited`, by key. A `null` value removes the key. */
 export function dataChanges(
   original: Record<string, string>,
   edited: Record<string, string>,
+  same: SameValue = sameText,
 ): DataChange[] {
   const keys = [
     ...new Set([...Object.keys(original), ...Object.keys(edited)]),
@@ -20,7 +30,10 @@ export function dataChanges(
   for (const key of keys) {
     if (!Object.hasOwn(edited, key)) {
       changes.push({ key, value: null });
-    } else if (!Object.hasOwn(original, key) || original[key] !== edited[key]) {
+    } else if (
+      !Object.hasOwn(original, key) ||
+      !same(key, original[key], edited[key])
+    ) {
       changes.push({ key, value: edited[key] });
     }
   }
@@ -37,6 +50,81 @@ export function dataOf(field: unknown): Record<string, string> {
 
 export function keyCount(field: unknown): number {
   return Object.keys(dataOf(field)).length;
+}
+
+/** How a value's text is typed: as itself, or as the base64 of its bytes. */
+export type ValueForm = "raw" | "base64";
+
+export const NOT_BASE64 = "Not valid base64.";
+export const BINARY_HINT = "Binary value: edit it as base64.";
+
+/** The ASCII whitespace base64 may hold, the same the core ignores. */
+const BASE64_SPACE = /[\t\n\f\r ]/g;
+
+/** The standard base64 of the text's UTF-8 bytes. */
+export function textToBase64(text: string): string {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+/**
+ * The bytes standard base64 encodes, whitespace aside, or `null` for anything
+ * else, missing padding included, as the core refuses it too.
+ */
+export function base64Bytes(text: string): Uint8Array | null {
+  const compact = text.replace(BASE64_SPACE, "");
+  let binary: string;
+  try {
+    binary = atob(compact);
+  } catch {
+    return null;
+  }
+  if (btoa(binary) !== compact) return null;
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/** The text base64 encodes, or `null` when it is not base64 of UTF-8 bytes. */
+export function base64ToText(text: string): string | null {
+  const bytes = base64Bytes(text);
+  if (!bytes) return null;
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      bytes,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Whether two texts in one form hold the same value. */
+export function sameValue(form: ValueForm, a: string, b: string): boolean {
+  if (a === b) return true;
+  // Valid base64 without its whitespace is the one way to write its bytes.
+  return (
+    form === "base64" &&
+    base64Bytes(a) !== null &&
+    a.replace(BASE64_SPACE, "") === b.replace(BASE64_SPACE, "")
+  );
+}
+
+/** The text in the other form; text that does not convert stays as it is. */
+export function convertText(text: string, to: ValueForm): string {
+  return to === "base64" ? textToBase64(text) : (base64ToText(text) ?? text);
+}
+
+/** What is wrong with the text in this form, if anything. */
+export function valueError(form: ValueForm, text: string): string | undefined {
+  return form === "base64" && !base64Bytes(text) ? NOT_BASE64 : undefined;
+}
+
+/** Why Raw cannot be chosen for this text in this form, if it cannot. */
+export function rawHint(form: ValueForm, text: string): string | undefined {
+  if (form === "raw") return undefined;
+  if (!base64Bytes(text)) return NOT_BASE64;
+  return base64ToText(text) === null ? BINARY_HINT : undefined;
 }
 
 interface Baseline {
@@ -93,11 +181,13 @@ export function useDataEdits(options: {
   data: Record<string, string>;
   /** Values known beyond `data`, compared against as if they were the baseline's. */
   revealed?: Record<string, string>;
+  /** Whether a key's text holds its original value; plain equality by default. */
+  same?: SameValue;
   send(version: string, changes: DataChange[]): Promise<void>;
   /** What the baseline holds after a save, in place of the saved values. */
   afterSave?(saved: Record<string, string>): Record<string, string>;
 }): DataEditState {
-  const { version, data, revealed, send, afterSave } = options;
+  const { version, data, revealed, same, send, afterSave } = options;
   const [baseline, setBaseline] = useState<Baseline>({ version, data });
   const [edits, setEdits] = useState<Edits>(NO_EDITS);
   const [saving, setSaving] = useState(false);
@@ -112,7 +202,7 @@ export function useDataEdits(options: {
       ([key]) => !edits.removed.includes(key),
     ),
   );
-  const changes = dataChanges(original, edited);
+  const changes = dataChanges(original, edited, same);
   const dirty = changes.length > 0;
 
   if (!dirty) {

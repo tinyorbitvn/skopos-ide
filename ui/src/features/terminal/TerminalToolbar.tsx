@@ -1,8 +1,7 @@
-import { Unplug } from "lucide-react";
 import { useState } from "react";
 import { Button, ConfirmDialog, Select, StatusDot } from "../../design";
 import type { Tone } from "../../design/Badge";
-import { RefreshCw } from "../../design/glyphs";
+import { RefreshCw, Unplug } from "../../design/icons";
 import {
   type PodSessionDockTab,
   type SessionDockTab,

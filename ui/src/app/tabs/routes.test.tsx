@@ -1,5 +1,5 @@
-import { LayoutGrid, List, Settings } from "lucide-react";
 import { expect, test } from "vitest";
+import { LayoutGrid, List, Settings } from "../../design/icons";
 import { clusterEntry } from "../../test/ipc";
 import { isTabRoute, tabInfo } from "./routes";
 

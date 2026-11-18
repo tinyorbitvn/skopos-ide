@@ -16,7 +16,7 @@ use skopos_core::cluster::ConnectionState;
 use skopos_core::error::ErrorCode;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
-use skopos_core::resources::{DataChange, ResourceRef};
+use skopos_core::resources::{DataChange, ResourceRef, SecretChange, SecretData};
 use tempfile::TempDir;
 
 const CONTEXT: &str = "kind-skopos-e2e";
@@ -291,6 +291,13 @@ fn change(key: &str, value: &str) -> Vec<DataChange> {
     }]
 }
 
+fn secret_change(key: &str, value: SecretData) -> Vec<SecretChange> {
+    vec![SecretChange {
+        key: key.into(),
+        value: Some(value),
+    }]
+}
+
 #[tokio::test]
 #[ignore = "needs make test-kind"]
 async fn secret_round_trip() {
@@ -307,12 +314,24 @@ async fn secret_round_trip() {
             .as_str()
             .unwrap()
             .to_owned();
-        core.secret_update(&id, NAMESPACE, "s", &version, change("a", "new text"))
+        let text = secret_change("a", SecretData::Text("new text".into()));
+        core.secret_update(&id, NAMESPACE, "s", &version, text)
             .await
             .unwrap();
         let value = core.secret_reveal(&id, NAMESPACE, "s", "a").await.unwrap();
         assert_eq!(value.value, "new text");
         assert!(!value.binary);
+        let version = get(&core, &id, &secrets, "s").await["metadata"]["resourceVersion"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let bytes = secret_change("a", SecretData::Base64("/w==".into()));
+        core.secret_update(&id, NAMESPACE, "s", &version, bytes)
+            .await
+            .unwrap();
+        let value = core.secret_reveal(&id, NAMESPACE, "s", "a").await.unwrap();
+        assert_eq!(value.value, "/w==");
+        assert!(value.binary);
     })
     .await;
 }

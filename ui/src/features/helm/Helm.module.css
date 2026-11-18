@@ -8,7 +8,7 @@
   font: var(--type-body-sm);
 }
 
-.notice > svg {
+.notice > [data-icon] {
   flex: none;
   margin-top: 2px;
 }

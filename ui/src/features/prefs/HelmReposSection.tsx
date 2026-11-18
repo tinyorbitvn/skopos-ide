@@ -1,4 +1,3 @@
-import { Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import {
@@ -8,7 +7,7 @@ import {
   IconButton,
   Spinner,
 } from "../../design";
-import { RefreshCw, Trash2 } from "../../design/glyphs";
+import { Plus, RefreshCw, Trash2 } from "../../design/icons";
 import { isToolMissing, useHelm } from "../../stores/helm";
 import styles from "./PreferencesScreen.module.css";
 import { RepoAddDialog, RepoRemoveDialog } from "./RepoDialogs";

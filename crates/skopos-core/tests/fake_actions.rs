@@ -9,7 +9,7 @@ use skopos_core::cluster::ConnectionState;
 use skopos_core::error::ErrorCode;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
-use skopos_core::resources::{DataChange, ResourceRef};
+use skopos_core::resources::{DataChange, ResourceRef, SecretChange, SecretData};
 use skopos_fakekube::{DenyRule, FakeKube, FakeKubeConfig, FakeResource};
 use tempfile::TempDir;
 
@@ -318,11 +318,11 @@ async fn secret_update_encodes_values_and_removes_keys() {
         "s",
         &version,
         vec![
-            DataChange {
+            SecretChange {
                 key: "a".into(),
-                value: Some("value".into()),
+                value: Some(SecretData::Text("value".into())),
             },
-            DataChange {
+            SecretChange {
                 key: "gone".into(),
                 value: None,
             },
@@ -341,6 +341,61 @@ async fn secret_update_encodes_values_and_removes_keys() {
 }
 
 #[tokio::test]
+async fn secret_update_writes_base64_bytes_without_whitespace() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    upsert_secret(&fake, json!({ "a": "/w==" }));
+    let version = version_of(&core, &id, &secrets(), "s").await;
+    core.secret_update(
+        &id,
+        "default",
+        "s",
+        &version,
+        vec![SecretChange {
+            key: "a".into(),
+            value: Some(SecretData::Base64("/+4=\n".into())),
+        }],
+    )
+    .await
+    .unwrap();
+    let writes = fake.writes("PATCH", "/api/v1/namespaces/default/secrets/s");
+    assert_eq!(writes[0].body["data"], json!({ "a": "/+4=" }));
+    let value = core.secret_reveal(&id, "default", "s", "a").await.unwrap();
+    assert!(value.binary);
+    assert_eq!(value.value, "/+4=");
+}
+
+#[tokio::test]
+async fn secret_update_with_a_value_that_is_not_base64_writes_nothing() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    upsert_secret(&fake, json!({ "a": "eA==", "b": "eQ==" }));
+    let version = version_of(&core, &id, &secrets(), "s").await;
+    let error = core
+        .secret_update(
+            &id,
+            "default",
+            "s",
+            &version,
+            vec![
+                SecretChange {
+                    key: "a".into(),
+                    value: Some(SecretData::Text("fine".into())),
+                },
+                SecretChange {
+                    key: "b".into(),
+                    value: Some(SecretData::Base64("S3CRET!".into())),
+                },
+            ],
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert!(!error.message.contains("S3CRET"), "{}", error.message);
+    assert!(fake
+        .writes("PATCH", "/api/v1/namespaces/default/secrets/s")
+        .is_empty());
+}
+
+#[tokio::test]
 async fn secret_update_conflict_changes_nothing() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
     upsert_secret(&fake, json!({ "a": "eA==" }));
@@ -352,9 +407,9 @@ async fn secret_update_conflict_changes_nothing() {
             "default",
             "s",
             &stale,
-            vec![DataChange {
+            vec![SecretChange {
                 key: "a".into(),
-                value: Some("S3CRET".into()),
+                value: Some(SecretData::Text("S3CRET".into())),
             }],
         )
         .await
@@ -379,8 +434,12 @@ async fn update_without_a_resource_version_is_refused() {
             value: Some("x".into()),
         }]
     };
+    let secret_change = vec![SecretChange {
+        key: "a".into(),
+        value: Some(SecretData::Text("x".into())),
+    }];
     let secret = core
-        .secret_update(&id, "default", "s", "", change())
+        .secret_update(&id, "default", "s", "", secret_change)
         .await
         .unwrap_err();
     let map = core

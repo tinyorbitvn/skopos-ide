@@ -1,6 +1,6 @@
-import { ChevronLeft, PanelRightOpen } from "lucide-react";
 import type { ReactElement } from "react";
 import { Button, IconButton } from "../../design";
+import { ChevronLeft, PanelRightOpen } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { DetailsDockTab } from "../../stores/dock";
 import { findResource } from "../../stores/resources";

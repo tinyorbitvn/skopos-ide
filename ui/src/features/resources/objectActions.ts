@@ -1,6 +1,5 @@
-import type { LucideIcon } from "lucide-react";
 import { toast } from "../../design";
-import { FileCode, ShieldOff, Trash2 } from "../../design/glyphs";
+import { type IconComponent, Pen, ShieldOff, Trash2 } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
@@ -11,7 +10,7 @@ import type { ActionContext, KindAction } from "../../kinds/registry";
 export interface ObjectActionItem {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: IconComponent;
   danger: boolean;
   disabled: boolean;
   top: boolean;
@@ -29,6 +28,9 @@ export async function runAction(
     toast.error(`${label} failed`, failureMessage(error));
   }
 }
+
+/** The id of Delete, which the drawer header shows as its own button, not in More actions. */
+export const DELETE_ACTION_ID = "delete";
 
 /** Offered for every kind while `metadata.deletionTimestamp` is set. */
 export const forceFinalizeAction: KindAction = {
@@ -75,8 +77,9 @@ function allowed(
 }
 
 /**
- * The actions of one object, in the order every menu shows them: Edit YAML, the
+ * The actions of one object, in the order a row's menu shows them: Edit YAML, the
  * kind's own actions, Force finalize, the kind's `placement: "end"` actions, Delete.
+ * The drawer header shows Delete as a button of its own instead (`ObjectActionBar`).
  * Hidden actions are left out; actions the user may not run stay, disabled.
  */
 export function objectActions(args: {
@@ -90,12 +93,12 @@ export function objectActions(args: {
   const edit: KindAction = {
     id: "edit",
     label: "Edit YAML",
-    icon: FileCode,
+    icon: Pen,
     top: true,
     run: (ctx, o) => ctx.openEditor(o),
   };
   const remove: KindAction = {
-    id: "delete",
+    id: DELETE_ACTION_ID,
     label: "Delete",
     icon: Trash2,
     danger: true,

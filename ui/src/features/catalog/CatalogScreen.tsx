@@ -1,4 +1,3 @@
-import { FolderPlus } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import {
   Button,
@@ -9,6 +8,7 @@ import {
   Spinner,
   toast,
 } from "../../design";
+import { FolderPlus } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { CatalogFolder } from "../../ipc/generated/CatalogFolder";

@@ -1,5 +1,4 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import {
   Badge,
@@ -12,6 +11,7 @@ import {
   Spinner,
   toast,
 } from "../../design";
+import { X } from "../../design/icons";
 import { failureMessage } from "../../ipc/client";
 import type { SyncSource } from "../../ipc/generated/SyncSource";
 import type { Theme } from "../../ipc/generated/Theme";

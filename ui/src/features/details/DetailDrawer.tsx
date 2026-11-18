@@ -1,7 +1,7 @@
-import { ChevronLeft, Minimize2, X } from "lucide-react";
 import { type ReactElement, type ReactNode, useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import { IconButton, type TableColumn } from "../../design";
+import { ChevronLeft, Minimize2, X } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { KubeObject } from "../../kinds/objects";

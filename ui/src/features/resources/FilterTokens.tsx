@@ -1,4 +1,3 @@
-import { ChevronDown, X } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactElement,
@@ -9,6 +8,7 @@ import {
 } from "react";
 import { Button } from "../../design/Button";
 import { Input } from "../../design/Input";
+import { ChevronDown, X } from "../../design/icons";
 import { Segmented } from "../../design/Segmented";
 import styles from "./FilterTokens.module.css";
 import {

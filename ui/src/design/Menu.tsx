@@ -1,6 +1,6 @@
 import * as RM from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronRight } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
+import { Check, ChevronRight } from "./icons";
 import styles from "./Menu.module.css";
 
 export interface MenuItem {
