@@ -409,14 +409,20 @@ describe("build", () => {
     for (const id of used) assert.ok(html.includes(`<symbol id="${id}"`), id);
   });
 
-  test("copies the tokens, the five fonts and the icon, and writes no links", () => {
+  test("copies the tokens, the five fonts, the icon and the two scripts, and writes no links", () => {
     assert.deepEqual(
       fs.readFileSync(path.join(out, "tokens.css")),
       fs.readFileSync(path.join(ROOT, "ui", "src", "design", "tinyorbit.css")),
     );
     assert.deepEqual(fs.readdirSync(path.join(out, "fonts")).sort(), FONT_FILES);
     assert.ok(fs.existsSync(path.join(out, "icon.svg")));
-    assert.ok(fs.existsSync(path.join(out, "site.js")));
+    for (const script of ["site.js", "ribbon.js"]) {
+      assert.deepEqual(
+        fs.readFileSync(path.join(out, script)),
+        fs.readFileSync(path.join(ROOT, "site", script)),
+        script,
+      );
+    }
     for (const entry of fs.readdirSync(out, { recursive: true })) {
       assert.ok(!fs.lstatSync(path.join(out, entry)).isSymbolicLink(), entry);
     }
