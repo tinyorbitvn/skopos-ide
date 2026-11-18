@@ -37,6 +37,12 @@
   cursor: not-allowed;
 }
 
+.separator {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--border-subtle);
+}
+
 .danger {
   color: var(--text-danger);
 }

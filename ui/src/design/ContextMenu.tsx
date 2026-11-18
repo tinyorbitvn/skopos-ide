@@ -1,5 +1,5 @@
 import * as RC from "@radix-ui/react-context-menu";
-import type { ReactElement } from "react";
+import { Fragment, type ReactElement } from "react";
 import styles from "./Menu.module.css";
 
 export interface ContextMenuItem {
@@ -11,6 +11,10 @@ export interface ContextMenuItem {
   disabled?: boolean;
   /** Replaces the default test id, `menu-item-‹id›`. */
   testId?: string;
+  /** The item's tooltip, such as why it is disabled. */
+  tooltip?: string;
+  /** A line above the item starts a new group. */
+  separated?: boolean;
 }
 
 export function ContextMenu(props: {
@@ -25,16 +29,23 @@ export function ContextMenu(props: {
       <RC.Portal>
         <RC.Content className={styles.content} aria-label={props.label}>
           {props.items.map((it) => (
-            <RC.Item
-              key={it.id}
-              className={styles.item}
-              disabled={it.disabled}
-              onSelect={it.onSelect}
-              data-testid={it.testId ?? `menu-item-${it.id}`}
-            >
-              {it.label}
-              {it.hint ? <span className={styles.hint}>{it.hint}</span> : null}
-            </RC.Item>
+            <Fragment key={it.id}>
+              {it.separated ? (
+                <RC.Separator className={styles.separator} />
+              ) : null}
+              <RC.Item
+                className={styles.item}
+                disabled={it.disabled}
+                onSelect={it.onSelect}
+                title={it.tooltip}
+                data-testid={it.testId ?? `menu-item-${it.id}`}
+              >
+                {it.label}
+                {it.hint ? (
+                  <span className={styles.hint}>{it.hint}</span>
+                ) : null}
+              </RC.Item>
+            </Fragment>
           ))}
         </RC.Content>
       </RC.Portal>
