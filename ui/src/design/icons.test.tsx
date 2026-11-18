@@ -36,14 +36,18 @@ const kebab = (name: string) =>
 afterEach(() => vi.restoreAllMocks());
 
 async function packageHas(name: string): Promise<boolean> {
-  const specifier = "node:fs";
-  const { existsSync } = (await import(/* @vite-ignore */ specifier)) as {
+  const fsModule = "node:fs";
+  const urlModule = "node:url";
+  const { existsSync } = (await import(/* @vite-ignore */ fsModule)) as {
     existsSync(path: string): boolean;
+  };
+  const { fileURLToPath } = (await import(/* @vite-ignore */ urlModule)) as {
+    fileURLToPath(url: string): string;
   };
   // A variable, not a literal: Vite rewrites new URL("literal", import.meta.url) to an asset.
   const relative = `../../node_modules/@animateicons/react/dist/icons/lucide/${name}-icon.js`;
-  const file = new URL(relative, import.meta.url);
-  return existsSync(decodeURIComponent(file.pathname));
+  // fileURLToPath, not the URL's pathname, which on Windows is /D:/... and names no file.
+  return existsSync(fileURLToPath(new URL(relative, import.meta.url).href));
 }
 
 test("the module exports the icons, SVG_ART, and nothing else", () => {
