@@ -436,7 +436,8 @@ describe("resource map", () => {
       async () => (await summaryCount()) < twoHops,
       "1 hop never drew fewer resources",
     );
-    await browser.back();
+    // Back moves through the focused tab's own history (spec P3), not the page's.
+    await clickWhenShown("header-back");
     await until(
       async () =>
         (await focus()) === null && (await byTestId("map-search").isExisting()),
@@ -642,7 +643,8 @@ describe("resource map", () => {
       "the object map never opened",
     );
     await expectEdges(ACCESS);
-    await browser.back();
+    // Back moves through the focused tab's own history (spec P3), not the page's.
+    await clickWhenShown("header-back");
     await until(
       async () =>
         (await focus()) === null && (await byTestId("map-search").isExisting()),
