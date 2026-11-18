@@ -236,6 +236,12 @@ const FIXTURES: Record<string, SpecFixture> = {
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
   tabs: { kubeconfigs: {}, start: startKindFixture },
+  "tabs-restart-1-save": {
+    kubeconfigs: {},
+    envGroup: "tabs-restart",
+    start: startKindFixture,
+  },
+  "tabs-restart-2-verify": { kubeconfigs: {}, envGroup: "tabs-restart" },
   "catalog-folders": {
     kubeconfigs: { config: kubeconfig(["alpha", "beta", "gamma"]) },
   },
