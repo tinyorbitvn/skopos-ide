@@ -34,6 +34,7 @@ use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
 use crate::tools::{ToolProgress, Tools};
 use crate::ui_state::UiState;
+use crate::windows::{WindowLayout, Windows};
 
 const STORE_VERSION: u32 = 1;
 const PREFS_FILE: &str = "prefs.json";
@@ -42,6 +43,7 @@ const HOTBAR_FILE: &str = "hotbar.json";
 const PORTFORWARDS_FILE: &str = "portforwards.json";
 const UI_STATE_FILE: &str = "ui-state.json";
 const CATALOG_FOLDERS_FILE: &str = "catalog-folders.json";
+const WINDOWS_FILE: &str = "windows.json";
 /// The safety net under file events, which some filesystems never deliver.
 const SYNC_POLL: Duration = Duration::from_secs(10);
 const EVENT_BACKLOG: usize = 64;
@@ -71,6 +73,11 @@ pub enum CoreEvent {
     },
     /// The catalog folder tree or a placement changed; read `catalog_folders` again.
     CatalogFoldersChanged,
+    /// The core changed a window's layout, as a move between windows does; only that
+    /// window (`layout.label`) needs it.
+    WindowLayoutChanged {
+        layout: WindowLayout,
+    },
 }
 
 /// A cheap handle to the running core; clones share everything.
@@ -84,6 +91,7 @@ struct Inner {
     clusters: JsonStore<HashMap<ClusterId, ClusterSettings>>,
     hotbar: JsonStore<Vec<ClusterId>>,
     folders: JsonStore<CatalogFolders>,
+    windows: Windows,
     ui_state: UiState,
     pasted: PastedConfigs,
     connections: Arc<ClusterManager>,
@@ -241,6 +249,9 @@ impl AppCore {
         let clusters = open_store(&paths, CLUSTERS_FILE, &mut warnings);
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
         let folders = open_folders(&paths, &mut warnings);
+        let (windows, windows_warning) =
+            Windows::open(paths.config.join(WINDOWS_FILE), STORE_VERSION);
+        warnings.extend(windows_warning);
         let portforward_definitions = open_store(&paths, PORTFORWARDS_FILE, &mut warnings);
         let (ui_state, ui_warning) = UiState::open(paths.config.join(UI_STATE_FILE), STORE_VERSION);
         warnings.extend(ui_warning);
@@ -259,6 +270,7 @@ impl AppCore {
                 clusters,
                 hotbar,
                 folders,
+                windows,
                 ui_state,
                 pasted,
                 connections,
@@ -353,6 +365,10 @@ impl AppCore {
 
     pub(crate) fn folders(&self) -> &JsonStore<CatalogFolders> {
         &self.inner.folders
+    }
+
+    pub(crate) fn windows(&self) -> &Windows {
+        &self.inner.windows
     }
 
     pub fn ui_state_get(&self, key: &str) -> Option<serde_json::Value> {

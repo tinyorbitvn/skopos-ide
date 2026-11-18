@@ -6,7 +6,7 @@ use serde::Serialize;
 use skopos_core::app_core::{AppCore, CoreEvent};
 use skopos_core::cluster::ConnectionState;
 use skopos_core::kubeconfig::ClusterId;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, EventTarget};
 use tokio::sync::broadcast::error::RecvError;
 
 const CATALOG_CHANGED: &str = "catalog://changed";
@@ -16,6 +16,7 @@ const KUBECONFIG_WARNINGS: &str = "kubeconfig://warnings";
 const STORE_WARNING: &str = "store://warning";
 const PORTFORWARD_CHANGED: &str = "portforward://changed";
 const TOOLS_PROGRESS: &str = "tools://progress";
+const WINDOW_LAYOUT: &str = "window://layout";
 
 /// The page has loaded by the time this starts, but its listeners register
 /// asynchronously afterwards, and an event sent before that is lost.
@@ -38,6 +39,12 @@ fn emit(app: &AppHandle, event: CoreEvent) {
         CoreEvent::PortForwardsChanged { forwards } => app.emit(PORTFORWARD_CHANGED, forwards),
         CoreEvent::ToolProgress { progress } => app.emit(TOOLS_PROGRESS, progress),
         CoreEvent::CatalogFoldersChanged => app.emit(CATALOG_FOLDERS_CHANGED, ()),
+        // A layout concerns only its own window.
+        CoreEvent::WindowLayoutChanged { layout } => app.emit_to(
+            EventTarget::webview_window(layout.label.clone()),
+            WINDOW_LAYOUT,
+            layout,
+        ),
     };
     if let Err(e) = sent {
         tracing::warn!("cannot send an event to the window: {e}");
