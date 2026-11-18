@@ -8,6 +8,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 ## [Unreleased]
 
 - **One main view with tabs, splits and windows:** the Workspace page is gone. Every screen opens in a tab; tabs can be pinned, split side by side into up to three panes, and dragged into their own windows, and they come back after a restart. The sidebar follows the focused tab, and the Catalog can be sorted into nested folders.
+- **Project site:** the landing page is now dark: a ribbon in the app's orbit blues, drawn with WebGL, moves behind the headline and the closing call to action, and the features sit in a grid of cards. With reduced motion the ribbon stands still, and without WebGL a glow takes its place.
 
 ## [0.7.0] - 2026-11-18
 
