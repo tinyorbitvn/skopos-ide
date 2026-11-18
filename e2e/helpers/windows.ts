@@ -83,25 +83,42 @@ async function currentLabel(): Promise<string | null> {
   }
 }
 
+/** The driver's script timeout outside `switchToLabel`: the W3C default. */
+const SCRIPT_TIMEOUT = 30000;
+
+/**
+ * The script timeout while `switchToLabel` asks each window for its label. The embedded
+ * driver runs a script without waiting for the page, then polls the page for its result.
+ * A script sent to a new window before its page has loaded goes with the first document,
+ * so its result never comes and the call ends only at the script timeout. A short one
+ * lets the next try reach the loaded page.
+ */
+const SWITCH_SCRIPT_TIMEOUT = 3000;
+
 /** Switches the driver to the window `label`, waiting until it is open. */
 export async function switchToLabel(
   label: string,
   timeout = 30000,
 ): Promise<void> {
-  await browser.waitUntil(
-    async () => {
-      for (const handle of await browser.getWindowHandles()) {
-        try {
-          await browser.switchToWindow(handle);
-        } catch {
-          continue;
+  await browser.setTimeout({ script: SWITCH_SCRIPT_TIMEOUT });
+  try {
+    await browser.waitUntil(
+      async () => {
+        for (const handle of await browser.getWindowHandles()) {
+          try {
+            await browser.switchToWindow(handle);
+          } catch {
+            continue;
+          }
+          if ((await currentLabel()) === label) return true;
         }
-        if ((await currentLabel()) === label) return true;
-      }
-      return false;
-    },
-    { timeout, timeoutMsg: `window ${label} did not open` },
-  );
+        return false;
+      },
+      { timeout, timeoutMsg: `window ${label} did not open` },
+    );
+  } finally {
+    await browser.setTimeout({ script: SCRIPT_TIMEOUT });
+  }
 }
 
 /** Waits until the driver sees `count` windows. */
