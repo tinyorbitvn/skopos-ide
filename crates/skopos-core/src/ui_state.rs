@@ -29,6 +29,17 @@ impl UiState {
         })?;
         Ok(())
     }
+
+    /// Drops a key. An unset key writes nothing.
+    pub fn remove(&self, key: &str) -> CoreResult<()> {
+        if !self.store.get().contains_key(key) {
+            return Ok(());
+        }
+        self.store.update(|all| {
+            all.remove(key);
+        })?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -64,5 +75,23 @@ mod tests {
         let (reopened, warning) = UiState::open(path, 1);
         assert!(warning.is_none());
         assert_eq!(reopened.get("tab"), Some(json!(["a", 1, null])));
+    }
+
+    #[test]
+    fn a_removed_key_reads_as_none_after_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ui-state.json");
+        let (state, _) = UiState::open(path.clone(), 1);
+        state.set("gone", json!(1)).unwrap();
+        state.set("kept", json!(2)).unwrap();
+
+        state.remove("gone").unwrap();
+        state.remove("never-set").unwrap();
+
+        assert_eq!(state.get("gone"), None);
+        drop(state);
+        let (reopened, _) = UiState::open(path, 1);
+        assert_eq!(reopened.get("gone"), None);
+        assert_eq!(reopened.get("kept"), Some(json!(2)));
     }
 }

@@ -23,6 +23,8 @@ pub const MAX_HISTORY: usize = 50;
 const START_PATH: &str = "/catalog";
 const WINDOW_PREFIX: &str = "window-";
 const PANE_PREFIX: &str = "pane-";
+/// The ui-state key of a window's dock layout is this and the label (P37).
+const DOCK_LAYOUT_PREFIX: &str = "dock:layout:";
 /// The size of a new window when the one its tab came from has no bounds yet, as
 /// `main`'s entry in `tauri.conf.json`.
 const DEFAULT_SIZE: (u32, u32) = (1360, 860);
@@ -668,18 +670,25 @@ impl AppCore {
         Ok(outcome)
     }
 
-    /// Drops the layout of a closed window other than `main` (P34). Closing `main`
-    /// quits the app, and every layout stays for the next start. Closing a window
-    /// twice is fine.
+    /// Drops the layout and the dock layout of a closed window other than `main`
+    /// (P34, P37), so a later window with its label starts with an empty dock.
+    /// Closing `main` quits the app, and every layout stays for the next start.
+    /// Closing a window twice is fine.
     pub fn window_closed(&self, label: &str) -> CoreResult<()> {
-        if label == MAIN_WINDOW || find(&self.windows().get(), label).is_err() {
+        if label == MAIN_WINDOW {
             return Ok(());
         }
-        self.windows().change(|file| {
-            file.windows.retain(|w| w.label != label);
-            Ok(())
-        })?;
-        self.windows().focus().retain(|l| l != label);
+        if find(&self.windows().get(), label).is_ok() {
+            self.windows().change(|file| {
+                file.windows.retain(|w| w.label != label);
+                Ok(())
+            })?;
+            self.windows().focus().retain(|l| l != label);
+        }
+        // The window is gone either way; a dock layout left behind is logged.
+        if let Err(e) = self.ui_state_remove(&format!("{DOCK_LAYOUT_PREFIX}{label}")) {
+            tracing::warn!("ui-state.json: cannot drop the dock layout of {label}: {e}");
+        }
         Ok(())
     }
 }
