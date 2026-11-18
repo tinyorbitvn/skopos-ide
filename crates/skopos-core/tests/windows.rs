@@ -445,6 +445,39 @@ async fn a_layout_save_keeps_the_bounds_and_drops_tabs_another_window_holds() {
 }
 
 #[tokio::test]
+async fn a_maximized_window_keeps_the_bounds_it_returns_to() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    let screen = WindowBounds {
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1040,
+        maximized: true,
+    };
+    let bounds = |core: &AppCore| core.window_layout(MAIN_WINDOW).unwrap().bounds;
+
+    // Maximized before any other report: there is nothing else to keep.
+    core.window_bounds_set(MAIN_WINDOW, screen).unwrap();
+    assert_eq!(bounds(&core), Some(screen));
+
+    core.window_bounds_set(MAIN_WINDOW, BOUNDS).unwrap();
+    core.window_bounds_set(MAIN_WINDOW, screen).unwrap();
+    assert_eq!(
+        bounds(&core),
+        Some(WindowBounds {
+            maximized: true,
+            ..BOUNDS
+        })
+    );
+
+    let moved = WindowBounds { x: 300, ..BOUNDS };
+    core.window_bounds_set(MAIN_WINDOW, moved).unwrap();
+    assert_eq!(bounds(&core), Some(moved));
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn bounds_of_a_closed_window_are_refused() {
     let fixture = Fixture::new();
     let core = fixture.start().await;
