@@ -562,6 +562,7 @@ impl Drop for ReadOnly<'_> {
 }
 
 /// The files named by the `StoreWarning`s waiting in `events`.
+#[cfg(unix)]
 fn store_warnings(events: &mut Receiver<CoreEvent>) -> Vec<String> {
     let mut files = Vec::new();
     while let Ok(event) = events.try_recv() {
