@@ -1,7 +1,6 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Columns2,
   Info,
   Keyboard,
   LayoutGrid,
@@ -27,7 +26,6 @@ import type { Theme } from "../ipc/generated/Theme";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
 import { useShell } from "../stores/shell";
-import { openInWorkspace } from "../stores/workspace";
 import { type CurrentCluster, useCurrentCluster } from "./currentCluster";
 import { otherModalOpen } from "./shellKeys";
 import type { ShortcutId } from "./shortcuts";
@@ -54,9 +52,7 @@ export type CommandId =
   | "theme-light"
   | "theme-system"
   | "back"
-  | "forward"
-  | "workspace"
-  | "workspace-open";
+  | "forward";
 
 export interface AppCommand {
   id: CommandId;
@@ -218,25 +214,6 @@ export const COMMANDS: readonly AppCommand[] = [
     shortcut: "forward",
     available: always,
     run: (ctx) => ctx.navigate(1),
-  },
-  {
-    id: "workspace",
-    label: () => "Workspace",
-    icon: Columns2,
-    available: always,
-    run: (ctx) => go(ctx, "/workspace"),
-  },
-  {
-    // Spec E §5: as a Shift-click on the cluster's hotbar tile off the Workspace.
-    id: "workspace-open",
-    label: (ctx) => `Open ${clusterName(ctx)} in the Workspace`,
-    icon: Columns2,
-    available: onCluster,
-    run: (ctx) => {
-      if (!ctx.cluster) return;
-      void openInWorkspace(ctx.cluster.id, true);
-      go(ctx, "/workspace");
-    },
   },
 ];
 
