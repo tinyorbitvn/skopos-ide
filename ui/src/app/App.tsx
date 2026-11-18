@@ -1,13 +1,10 @@
-import { useState } from "react";
-import { RouterProvider } from "react-router";
-import { createAppRouter } from "./router";
+import { Shell } from "./Shell";
 import styles from "./Shell.module.css";
 
 export function App() {
-  const [router] = useState(createAppRouter);
   return (
     <div data-testid="app-root" className={styles.root}>
-      <RouterProvider router={router} />
+      <Shell />
     </div>
   );
 }

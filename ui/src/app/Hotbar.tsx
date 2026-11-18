@@ -25,7 +25,7 @@ import {
   Settings,
   TriangleAlert,
 } from "lucide-react";
-import { NavLink, useMatch, useNavigate } from "react-router";
+import { NavLink, useMatch } from "react-router";
 import {
   ContextMenu,
   IconButton,
@@ -40,11 +40,15 @@ import { useShell } from "../stores/shell";
 import { clusterStatus } from "./clusterStatus";
 import { clusterColor, clusterInitials } from "./clusterVisual";
 import styles from "./Hotbar.module.css";
+import { useNavItem } from "./tabs/navigation";
 
 function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
-  const navigate = useNavigate();
   const unpin = useCatalog((s) => s.unpin);
-  const active = useMatch(`/cluster/${encodeURIComponent(cluster.id)}`);
+  // Active while the focused tab is on this cluster (spec P2).
+  const shown = useMatch({ path: "/cluster/:id", end: false })?.params.id;
+  const active = shown === cluster.id;
+  // The tile is a navigation item for the cluster's Overview (P11 to P13).
+  const open = useNavItem(`/cluster/${encodeURIComponent(cluster.id)}`);
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: cluster.id });
   const status = clusterStatus(cluster.state);
@@ -84,9 +88,7 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
               aria-label={cluster.name}
               aria-current={active ? "page" : undefined}
               data-testid={`hotbar-item-${cluster.id}`}
-              onClick={() =>
-                navigate(`/cluster/${encodeURIComponent(cluster.id)}`)
-              }
+              {...open}
             >
               {cluster.icon ? (
                 <img src={cluster.icon} alt="" className={styles.icon} />
@@ -110,9 +112,11 @@ function RailLink(props: {
   testId: string;
   icon: React.ReactNode;
 }) {
+  const open = useNavItem(props.to);
   return (
     <Tooltip content={props.label}>
       <NavLink
+        {...open}
         to={props.to}
         aria-label={props.label}
         data-testid={props.testId}

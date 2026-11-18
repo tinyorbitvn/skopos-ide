@@ -60,7 +60,7 @@ test("the saved dock layout is applied on start", async () => {
   mockBackend({
     prefs_get: () => ({ theme: "dark", syncSources: [] }),
     ui_state_get: (a: { key: string }) =>
-      a.key === "dock:layout"
+      a.key === "dock:layout:main"
         ? {
             version: 1,
             height: 400,

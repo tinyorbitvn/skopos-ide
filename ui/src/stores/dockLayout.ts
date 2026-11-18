@@ -2,6 +2,7 @@ import { OVERVIEW } from "../features/details/drawerHistory";
 import { api } from "../ipc/api";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { JsonValue } from "../ipc/generated/serde_json/JsonValue";
+import { windowLabel } from "../ipc/window";
 import { type CatalogState, useCatalog } from "./catalog";
 import {
   clampDockHeight,
@@ -21,7 +22,11 @@ import {
   useDock,
 } from "./dock";
 
-export const DOCK_LAYOUT_KEY = "dock:layout";
+/** The ui-state key of a window's dock layout: each window has its own dock (spec P37). */
+export function dockLayoutKey(label: string = windowLabel()): string {
+  return `dock:layout:${label}`;
+}
+
 export const LAYOUT_SAVE_DELAY_MS = 300;
 
 /** A tab as saved (spec §7.1, B3 §7 for the session kinds, K12 for details): its title is rebuilt on load, and it comes back clean. */
@@ -299,7 +304,7 @@ export function serializeLayout(
  * `pagehide` when a write is pending. A failed write is ignored, as `useUiState`
  * does: the layout is a convenience, and the next change writes it again.
  */
-function startWriting(): () => void {
+function startWriting(key: string): () => void {
   let written = JSON.stringify(serializeLayout(useDock.getState()));
   let pending: SavedLayout | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -309,7 +314,7 @@ function startWriting(): () => void {
     timer = null;
     const next = pending;
     pending = null;
-    if (next) void api.uiStateSet(DOCK_LAYOUT_KEY, next).catch(() => {});
+    if (next) void api.uiStateSet(key, next).catch(() => {});
   }
 
   const unsubscribe = useDock.subscribe((state) => {
@@ -358,13 +363,16 @@ let stops: (() => void)[] = [];
  * before the first render, and the dock shows nothing until it is applied.
  */
 export function restoreDockLayout(): Promise<void> {
-  restoring ??= api
-    .uiStateGet(DOCK_LAYOUT_KEY)
-    .catch(() => null)
-    .then((value) => {
-      useDock.getState().restore(parseLayout(value));
-      stops = [startWriting(), pruneOnce()];
-    });
+  if (restoring === null) {
+    const key = dockLayoutKey();
+    restoring = api
+      .uiStateGet(key)
+      .catch(() => null)
+      .then((value) => {
+        useDock.getState().restore(parseLayout(value));
+        stops = [startWriting(key), pruneOnce()];
+      });
+  }
   return restoring;
 }
 

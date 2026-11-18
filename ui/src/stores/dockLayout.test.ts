@@ -1,3 +1,4 @@
+import { mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { JsonValue } from "../ipc/generated/serde_json/JsonValue";
@@ -17,7 +18,7 @@ import {
   writeDraft,
 } from "./dock";
 import {
-  DOCK_LAYOUT_KEY,
+  dockLayoutKey,
   LAYOUT_SAVE_DELAY_MS,
   parseLayout,
   resetDockLayoutForTest,
@@ -214,13 +215,30 @@ test("restore reads the key once and applies it", async () => {
     ui_state_set: () => null,
   });
   await Promise.all([restoreDockLayout(), restoreDockLayout()]);
-  expect(b.callsTo("ui_state_get")).toEqual([{ key: DOCK_LAYOUT_KEY }]);
+  expect(b.callsTo("ui_state_get")).toEqual([{ key: dockLayoutKey("main") }]);
   expect(useDock.getState()).toMatchObject({
     restored: true,
     height: 400,
     activeId: EDIT.id,
     tabs: [EDIT],
   });
+});
+
+test("each window keeps its dock under its own key (P37)", async () => {
+  expect(dockLayoutKey("main")).toBe("dock:layout:main");
+  mockWindows("window-2");
+  const b = mockBackend({
+    ui_state_get: () => saved([SAVED_EDIT], { activeId: EDIT.id }),
+    ui_state_set: () => null,
+  });
+  await restoreDockLayout();
+  expect(b.callsTo("ui_state_get")).toEqual([{ key: "dock:layout:window-2" }]);
+  vi.useFakeTimers();
+  useDock.getState().setHeight(450);
+  vi.advanceTimersByTime(LAYOUT_SAVE_DELAY_MS);
+  expect(
+    b.callsTo("ui_state_set").map((c) => (c as { key: string }).key),
+  ).toEqual(["dock:layout:window-2"]);
 });
 
 test("a layout that cannot be read gives the defaults", async () => {
@@ -251,7 +269,7 @@ test("changes are written 300 ms after the last one", async () => {
   vi.advanceTimersByTime(1);
   expect(b.callsTo("ui_state_set")).toEqual([
     {
-      key: DOCK_LAYOUT_KEY,
+      key: dockLayoutKey("main"),
       value: {
         version: 1,
         height: 400,

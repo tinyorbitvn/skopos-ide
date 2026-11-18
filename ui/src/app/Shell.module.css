@@ -16,10 +16,78 @@
   min-height: 0;
 }
 
+/* Under the header: the sidebar, then the panes over the dock (spec P1). */
+.body {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The sidebar and its resize handle, which sits on the right border. */
+.nav {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.nav > nav {
+  flex: 1;
+}
+
+/* Draws the sidebar's border, as the cluster navigation does. */
+.navNote {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-6);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.navName {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font: var(--type-label);
+}
+
+.navText {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+
+.work {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .content {
   flex: 1;
+  display: flex;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+}
+
+.loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The dock's links are caught here; the dock itself lays out as before. */
+.dock {
+  display: contents;
 }
 
 .status {
@@ -36,6 +104,19 @@
 
 .statusLine {
   font: var(--type-mono);
+}
+
+.statusCluster {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.statusRight {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-7);
+  margin-left: auto;
 }
 
 .placeholder {

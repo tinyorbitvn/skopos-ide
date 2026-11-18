@@ -1,18 +1,25 @@
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
 import type { PortForward } from "../ipc/generated/PortForward";
-import { resetCatalogForTest } from "../stores/catalog";
+import type { TabState } from "../ipc/generated/TabState";
+import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import {
   resetPortForwardsForTest,
   usePortForwards,
 } from "../stores/portForwards";
-import { flush, mockBackend } from "../test/ipc";
+import { resetWindowLayoutForTest } from "../stores/windowLayout";
+import { clusterEntry, flush, mockBackend } from "../test/ipc";
 import { forward } from "../test/portForwards";
 import { StatusBar } from "./StatusBar";
+
+function tab(id: string, path: string): TabState {
+  return { id, pinned: false, history: [path], index: 0 };
+}
 
 beforeEach(() => {
   resetCatalogForTest();
   resetPortForwardsForTest();
+  resetWindowLayoutForTest();
   mockBackend({});
 });
 
@@ -51,13 +58,64 @@ test.each<[string, PortForward[], string | null]>([
   else expect(item?.textContent).toBe(text);
 });
 
-test("the count sits between the connected count and the version", async () => {
+test("the focused screen, the port forwards, then the panes, tabs and version (P4)", async () => {
   await show([forward({ id: "a", state: "running" })]);
   expect(
     Array.from(screen.getByTestId("status-bar").children).map(
       (child) => child.textContent,
     ),
-  ).toEqual(["0 connected", "1 port forward running", "SkoposIDE 0.1.0"]);
+  ).toEqual([
+    "Catalog",
+    "1 port forward running",
+    "1 pane · 1 tabSkoposIDE 0.1.0",
+  ]);
+});
+
+test("names the focused tab's cluster and its connection state", async () => {
+  useCatalog.setState({
+    clusters: [
+      clusterEntry({
+        id: "c1",
+        contextName: "prod",
+        state: { status: "connecting" },
+      }),
+    ],
+  });
+  resetWindowLayoutForTest({
+    label: "main",
+    bounds: null,
+    panes: [
+      { id: "p1", width: 0.5, selected: "t1", tabs: [tab("t1", "/catalog")] },
+      {
+        id: "p2",
+        width: 0.5,
+        selected: "t2",
+        tabs: [tab("t2", "/cluster/c1/map"), tab("t3", "/preferences")],
+      },
+    ],
+    focusedPane: 1,
+  });
+  await show([]);
+  expect(screen.getByTestId("status-focused").textContent).toBe(
+    "prod · Connecting",
+  );
+  expect(screen.getByTestId("status-layout").textContent).toBe(
+    "2 panes · 3 tabs",
+  );
+});
+
+test("an empty window says so", async () => {
+  resetWindowLayoutForTest({
+    label: "main",
+    bounds: null,
+    panes: [{ id: "p1", width: 1, selected: "", tabs: [] }],
+    focusedPane: 0,
+  });
+  await show([]);
+  expect(screen.getByTestId("status-focused").textContent).toBe("No tabs open");
+  expect(screen.getByTestId("status-layout").textContent).toBe(
+    "1 pane · 0 tabs",
+  );
 });
 
 test("the count follows the store", async () => {

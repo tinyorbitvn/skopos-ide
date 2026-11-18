@@ -7,30 +7,28 @@ import {
   Settings,
   SquareTerminal,
 } from "lucide-react";
-import { matchPath } from "react-router";
+import { useMemo } from "react";
 import { Badge, Button, IconButton } from "../design";
+import { useCatalog } from "../stores/catalog";
 import { useConnect } from "../stores/clusters";
 import { useShell } from "../stores/shell";
+import { useWindowLayout } from "../stores/windowLayout";
 import styles from "./AppHeader.module.css";
 import { clusterStatus } from "./clusterStatus";
 import { runCommand, useCommandContext } from "./commands";
-import type { CurrentCluster } from "./currentCluster";
 import { IS_MAC, shortKeys } from "./shortcuts";
+import { focusedTab } from "./tabs/layout";
+import { tabInfo } from "./tabs/routes";
+import { useFocusedPath } from "./tabs/ShellRouter";
 
-function title(pathname: string, cluster: CurrentCluster | null): string {
-  if (cluster !== null) {
-    if (matchPath("/cluster/:id/settings", pathname) !== null) {
-      return `${cluster.name} · Settings`;
-    }
-    // The cluster map and the object maps share the path (spec E §5).
-    if (matchPath("/cluster/:id/map", pathname) !== null) {
-      return `${cluster.name} · Resource map`;
-    }
-    return cluster.name;
-  }
-  if (pathname === "/catalog") return "Catalog";
-  if (pathname === "/preferences") return "Preferences";
-  return "";
+/** The focused tab's title (spec P3, P9), or the empty window's. */
+function useFocusedTitle(): string {
+  const path = useFocusedPath();
+  const clusters = useCatalog((s) => s.clusters);
+  return useMemo(
+    () => (path === null ? "No tabs open" : tabInfo(path, clusters).title),
+    [path, clusters],
+  );
 }
 
 /** Terminal and Disconnect on a connected cluster route (spec C §5, item 7). */
@@ -62,6 +60,15 @@ function ConnectedActions({ id }: { id: string }) {
 export function AppHeader() {
   const ctx = useCommandContext();
   const { cluster, pathname } = ctx;
+  const title = useFocusedTitle();
+  // Back and forward move through the focused tab's own history (spec P3).
+  const canBack = useWindowLayout(
+    (s) => (focusedTab(s.layout)?.index ?? 0) > 0,
+  );
+  const canForward = useWindowLayout((s) => {
+    const tab = focusedTab(s.layout);
+    return tab !== null && tab.index < tab.history.length - 1;
+  });
   const status = cluster === null ? null : clusterStatus(cluster.state);
   const info =
     cluster?.state.status === "connected" ? cluster.state.info : null;
@@ -73,18 +80,20 @@ export function AppHeader() {
         <IconButton
           label={`Back (${shortKeys("back", IS_MAC)})`}
           icon={<ArrowLeft size={16} aria-hidden="true" />}
+          disabled={!canBack}
           onClick={() => ctx.navigate(-1)}
           data-testid="header-back"
         />
         <IconButton
           label={`Forward (${shortKeys("forward", IS_MAC)})`}
           icon={<ArrowRight size={16} aria-hidden="true" />}
+          disabled={!canForward}
           onClick={() => ctx.navigate(1)}
           data-testid="header-forward"
         />
       </div>
       <h1 className={styles.title} data-testid="header-title">
-        {title(pathname, cluster)}
+        {title}
       </h1>
       {status !== null ? (
         <span data-testid="connection-status">

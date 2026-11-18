@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Outlet, useOutletContext } from "react-router";
-import { PaneHandle } from "../../design";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { KubeObject } from "../../kinds/objects";
-import { NAV_PANE, usePaneSize } from "../../stores/paneSize";
 import {
   findResource,
   useApiResources,
   useResourceList,
 } from "../../stores/resources";
-import { Dock } from "../dock/Dock";
 import styles from "./ClusterLayout.module.css";
-import { Sidebar } from "./Sidebar";
 
 /** What the layout hands to the routes below it. */
 export interface ClusterOutletContext {
@@ -113,48 +109,42 @@ function useRefreshOnCrdChange(
   }, [behind, resources, error, refresh]);
 }
 
-/** The sidebar and the routed content of a connected cluster. */
+/**
+ * The served resources of a cluster, looked at again when its custom resource
+ * definitions change. The sidebar and each tab of the cluster keep their own copy.
+ */
+export function useClusterResources(clusterId: string): {
+  resources: ApiResourceInfo[];
+  loading: boolean;
+  error: string | null;
+  refresh(): Promise<void>;
+} {
+  const discovery = useApiResources(clusterId);
+  useRefreshOnCrdChange(
+    clusterId,
+    discovery.resources,
+    discovery.error,
+    discovery.refresh,
+  );
+  return discovery;
+}
+
+/**
+ * The routed content of a connected cluster's tab. The sidebar and the dock belong to
+ * the window's shell (spec P1, P23, P37).
+ */
 export function ClusterLayout(props: { clusterId: string }) {
   const { clusterId } = props;
-  const { resources, loading, error, refresh } = useApiResources(clusterId);
-  useRefreshOnCrdChange(clusterId, resources, error, refresh);
+  const { resources, loading, error } = useClusterResources(clusterId);
   const context: ClusterOutletContext = {
     clusterId,
     resources,
     resourcesLoading: loading,
     resourcesError: error,
   };
-  const [navWidth, setNavWidth] = usePaneSize(NAV_PANE);
   return (
-    <div
-      className={styles.layout}
-      style={{ gridTemplateColumns: `${navWidth}px minmax(0, 1fr)` }}
-    >
-      <div className={styles.nav}>
-        <Sidebar
-          clusterId={clusterId}
-          resources={resources}
-          loading={loading}
-          error={error}
-          onRetry={() => void refresh()}
-        />
-        <PaneHandle
-          label="Resize navigation"
-          edge="right"
-          value={navWidth}
-          min={NAV_PANE.min}
-          max={NAV_PANE.max}
-          initial={NAV_PANE.initial}
-          onChange={setNavWidth}
-          testId="nav-resize"
-        />
-      </div>
-      <div className={styles.main}>
-        <div className={styles.content}>
-          <Outlet context={context} />
-        </div>
-        <Dock clusterId={clusterId} resources={resources} />
-      </div>
+    <div className={styles.content}>
+      <Outlet context={context} />
     </div>
   );
 }
