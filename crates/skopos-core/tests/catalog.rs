@@ -865,6 +865,34 @@ async fn a_refused_folder_change_sends_nothing_and_writes_nothing() {
 }
 
 #[tokio::test]
+async fn a_folder_change_that_changes_nothing_writes_and_sends_nothing() {
+    let fixture = Fixture::with_kube_config(&["alpha"]);
+    let core = fixture.start().await;
+    wait_for_names(&core, &["alpha"]).await;
+    let id = id_of(&core, "alpha");
+    let file = fixture.paths.config.join("catalog-folders.json");
+    let mut events = core.subscribe();
+
+    core.catalog_cluster_place(&id, None).unwrap();
+
+    assert_eq!(folder_events(&mut events), 0);
+    assert!(!file.exists());
+
+    let prod = core.catalog_folder_create(None, "prod").unwrap();
+    core.catalog_cluster_place(&id, Some(&prod.id)).unwrap();
+    assert_eq!(folder_events(&mut events), 2);
+    let saved = core.catalog_folders();
+    std::fs::remove_file(&file).unwrap();
+
+    core.catalog_cluster_place(&id, Some(&prod.id)).unwrap();
+
+    assert_eq!(folder_events(&mut events), 0);
+    assert!(!file.exists());
+    assert_eq!(core.catalog_folders(), saved);
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn only_a_listed_cluster_goes_into_a_folder() {
     let fixture = Fixture::new();
     let core = fixture.start().await;

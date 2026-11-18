@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
@@ -180,6 +180,13 @@ where
         let mut guard = self.lock();
         let mut next = guard.clone();
         let out = f(&mut next)?;
+        let warning = self.keep(&mut guard, next);
+        Ok((out, warning))
+    }
+
+    /// Writes `next` and sends it, keeping it in memory even when the write fails;
+    /// the warning is the one `try_update_kept` gives back.
+    fn keep(&self, guard: &mut MutexGuard<'_, T>, next: T) -> Option<StoreWarning> {
         let warning = match self.write(&next) {
             Ok(()) => {
                 self.save_failing.store(false, Ordering::Relaxed);
@@ -197,16 +204,16 @@ where
                 })
             }
         };
-        *guard = next.clone();
+        **guard = next.clone();
         self.tx.send_replace(next);
-        Ok((out, warning))
+        warning
     }
 
     pub fn subscribe(&self) -> watch::Receiver<T> {
         self.tx.subscribe()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+    fn lock(&self) -> MutexGuard<'_, T> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
     }
 
@@ -233,6 +240,27 @@ where
         tmp.as_file().sync_all()?;
         tmp.persist(&self.path).map_err(|e| e.error)?;
         Ok(())
+    }
+}
+
+impl<T> JsonStore<T>
+where
+    T: Serialize + DeserializeOwned + Default + Clone + PartialEq + Send + Sync + 'static,
+{
+    /// As `try_update_kept`, but a change that leaves the value as it was is neither
+    /// written nor sent; the flag says whether the value changed.
+    pub fn try_update_kept_if_changed<R>(
+        &self,
+        f: impl FnOnce(&mut T) -> CoreResult<R>,
+    ) -> CoreResult<(R, bool, Option<StoreWarning>)> {
+        let mut guard = self.lock();
+        let mut next = guard.clone();
+        let out = f(&mut next)?;
+        if next == *guard {
+            return Ok((out, false, None));
+        }
+        let warning = self.keep(&mut guard, next);
+        Ok((out, true, warning))
     }
 }
 
@@ -457,6 +485,33 @@ mod tests {
         let (n, warning) = s.try_update_kept(|v| Ok(v.n + 1)).unwrap();
         assert_eq!(n, 3);
         assert!(warning.is_some(), "a new failing run warns again");
+    }
+
+    #[test]
+    fn a_kept_update_that_changes_nothing_writes_and_sends_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.json");
+        let (s, _) = JsonStore::<Sample>::open(p.clone(), 1);
+        let mut rx = s.subscribe();
+
+        let (n, changed, warning) = s.try_update_kept_if_changed(|v| Ok(v.n)).unwrap();
+
+        assert_eq!((n, changed), (0, false));
+        assert!(warning.is_none());
+        assert!(!p.exists());
+        assert!(!rx.has_changed().unwrap());
+
+        let (_, changed, _) = s
+            .try_update_kept_if_changed(|v| {
+                v.n = 1;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(changed);
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(rx.borrow_and_update().n, 1);
+        assert!(p.exists());
     }
 
     #[test]
