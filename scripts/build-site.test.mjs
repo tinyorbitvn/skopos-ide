@@ -636,8 +636,41 @@ describe("page", () => {
     assert.doesNotMatch(css, /outline:\s*(none|0)\s*;/);
   });
 
-  test("keeps a flipped feature's text on the left once its row stacks", () => {
-    // A wrapped row-reverse line packs from the right; flex-end packs it from the left.
-    assert.match(css, /\.feature--flip \{\n {2}flex-direction: row-reverse;\n {2}justify-content: flex-end;\n\}/);
+  test("fills no control with orbit: the primary action is the white pill", () => {
+    const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const filled = rules
+      .filter((m) => /\.button/.test(m[1]))
+      .filter((m) => /background(-color)?:[^;]*var\(--(orbit-500|orbit-600|surface-accent)\)/.test(m[2]))
+      .map((m) => m[1].trim());
+    assert.deepEqual(filled, []);
+    assert.match(css, /\n\.button--primary \{[^}]*background: var\(--surface-inverse\);[^}]*color: var\(--text-inverse\);/);
+  });
+
+  test("maps the drawn figures' raw grays to their dark counterparts", () => {
+    const rule = /\n\.mock \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    for (const [from, to] of [
+      ["50", "900"],
+      ["100", "800"],
+      ["200", "700"],
+      ["300", "600"],
+    ]) {
+      assert.match(rule, new RegExp(`--gray-${from}: var\\(--gray-${to}\\);`), `--gray-${from}`);
+    }
+  });
+
+  test("stops the gradient drift and the card hover under reduced motion", () => {
+    const block = /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.grad--move \{\s*animation: none;\s*\}/);
+    assert.match(block, /\.card,[^{]*\{\s*transition: none;\s*\}/);
+  });
+
+  test("keeps the gradient text readable in forced colors", () => {
+    const block = /@media \(forced-colors: active\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.grad \{\s*background: none;\s*color: CanvasText;\s*\}/);
+  });
+
+  test("hides the orbit frame and its stars on narrow screens", () => {
+    const block = /@media \(max-width: 760px\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.frame,\s*\.rule__star,\s*\.nav__links \{\s*display: none;\s*\}/);
   });
 });
