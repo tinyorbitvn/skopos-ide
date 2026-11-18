@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Columns2,
   Info,
   Keyboard,
   LayoutGrid,
@@ -9,12 +10,14 @@ import {
   Moon,
   Network,
   Package,
+  Pin,
   Plus,
   Power,
   Settings,
   SlidersHorizontal,
   SquareTerminal,
   Sun,
+  X,
 } from "lucide-react";
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router";
@@ -26,9 +29,12 @@ import type { Theme } from "../ipc/generated/Theme";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
 import { useShell } from "../stores/shell";
+import { useWindowLayout } from "../stores/windowLayout";
 import { type CurrentCluster, useCurrentCluster } from "./currentCluster";
 import { otherModalOpen } from "./shellKeys";
 import type { ShortcutId } from "./shortcuts";
+import { focusedTab, MAX_PANES } from "./tabs/layout";
+import { closeFocusedTab, splitFocusedTab } from "./tabs/tabKeys";
 
 /** What a command sees when it is listed and when it runs. */
 export interface CommandContext {
@@ -52,7 +58,10 @@ export type CommandId =
   | "theme-light"
   | "theme-system"
   | "back"
-  | "forward";
+  | "forward"
+  | "split-right"
+  | "close-tab"
+  | "pin-tab";
 
 export interface AppCommand {
   id: CommandId;
@@ -60,6 +69,11 @@ export interface AppCommand {
   label(ctx: CommandContext): string;
   icon: LucideIcon;
   shortcut?: ShortcutId;
+  /**
+   * The location the command opens, if it only opens one: a click on its palette row
+   * then opens it by the click's mode (spec P11 to P13). Null when it cannot here.
+   */
+  path?(ctx: CommandContext): string | null;
   available(ctx: CommandContext): boolean;
   run(ctx: CommandContext): void;
 }
@@ -76,6 +90,19 @@ function onCluster(ctx: CommandContext): boolean {
 
 function clusterName(ctx: CommandContext): string {
   return ctx.cluster?.name ?? "Cluster";
+}
+
+/** A location of the current cluster, or null off a cluster. */
+function clusterPath(
+  ctx: CommandContext,
+  path: (clusterId: string) => string,
+): string | null {
+  return ctx.cluster ? path(ctx.cluster.id) : null;
+}
+
+/** This window's focused tab, which the tab commands act on (spec P17). */
+function shownTab() {
+  return focusedTab(useWindowLayout.getState().layout);
 }
 
 /** Navigates unless the route is already there, so a key that reaches the app twice
@@ -111,6 +138,7 @@ export const COMMANDS: readonly AppCommand[] = [
     id: "catalog",
     label: () => "Go to the catalog",
     icon: LayoutGrid,
+    path: () => "/catalog",
     available: always,
     run: (ctx) => go(ctx, "/catalog"),
   },
@@ -119,6 +147,7 @@ export const COMMANDS: readonly AppCommand[] = [
     label: () => "Open Preferences",
     icon: Settings,
     shortcut: "preferences",
+    path: () => "/preferences",
     available: always,
     run: (ctx) => {
       useShell.getState().close();
@@ -139,6 +168,7 @@ export const COMMANDS: readonly AppCommand[] = [
     id: "install-chart",
     label: () => "Install a Helm chart",
     icon: Package,
+    path: (ctx) => clusterPath(ctx, chartsPath),
     available: connected,
     run: (ctx) => {
       if (ctx.cluster) go(ctx, chartsPath(ctx.cluster.id));
@@ -167,6 +197,7 @@ export const COMMANDS: readonly AppCommand[] = [
     id: "cluster-settings",
     label: (ctx) => `Cluster settings for ${clusterName(ctx)}`,
     icon: SlidersHorizontal,
+    path: (ctx) => clusterPath(ctx, settingsPath),
     available: onCluster,
     run: (ctx) => {
       if (ctx.cluster) go(ctx, settingsPath(ctx.cluster.id));
@@ -176,6 +207,7 @@ export const COMMANDS: readonly AppCommand[] = [
     id: "resource-map",
     label: (ctx) => `Resource map of ${clusterName(ctx)}`,
     icon: Network,
+    path: (ctx) => clusterPath(ctx, mapPath),
     available: connected,
     run: (ctx) => {
       if (ctx.cluster) go(ctx, mapPath(ctx.cluster.id));
@@ -214,6 +246,37 @@ export const COMMANDS: readonly AppCommand[] = [
     shortcut: "forward",
     available: always,
     run: (ctx) => ctx.navigate(1),
+  },
+  {
+    id: "split-right",
+    label: () => "Split right",
+    icon: Columns2,
+    shortcut: "splitRight",
+    available: () =>
+      shownTab() !== null &&
+      useWindowLayout.getState().layout.panes.length < MAX_PANES,
+    run: splitFocusedTab,
+  },
+  {
+    id: "close-tab",
+    label: () => "Close tab",
+    icon: X,
+    shortcut: "closeTab",
+    available: () => shownTab()?.pinned === false,
+    run: () => void closeFocusedTab(),
+  },
+  {
+    id: "pin-tab",
+    label: () => (shownTab()?.pinned ? "Unpin tab" : "Pin tab"),
+    icon: Pin,
+    available: () => shownTab() !== null,
+    run: () => {
+      const tab = shownTab();
+      if (tab === null) return;
+      useWindowLayout
+        .getState()
+        .dispatch({ type: tab.pinned ? "unpin" : "pin", tabId: tab.id });
+    },
   },
 ];
 

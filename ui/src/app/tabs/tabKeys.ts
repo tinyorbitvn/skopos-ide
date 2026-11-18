@@ -26,6 +26,27 @@ function focusSelected(): void {
   focusTabElement(pane?.selected);
 }
 
+/** Copies the focused tab into a new pane on the right (P16, P20); at 3 panes nothing. */
+export function splitFocusedTab(): void {
+  const pane = focusedPane(layout());
+  if (pane === null) return;
+  dispatch({
+    type: "split",
+    paneId: pane.id,
+    newTabId: crypto.randomUUID(),
+    newPaneId: crypto.randomUUID(),
+  });
+}
+
+/** Closes the focused tab unless it is pinned (P14); true when it closed. */
+export function closeFocusedTab(): boolean {
+  const tab = focusedTab(layout());
+  if (tab === null) return false;
+  const before = layout();
+  dispatch({ type: "close", tabId: tab.id });
+  return layout() !== before;
+}
+
 /** A modal dialog, the palette or a popover: the keys then belong to it. */
 function dialogOpen(): boolean {
   return (
@@ -61,24 +82,11 @@ export function installTabKeys(mac = IS_MAC): () => void {
       return;
     } else if (matchesShortcut("closeTab", event, mac) && !shellKeys) {
       run = () => {
-        const tab = focusedTab(layout());
-        if (tab === null) return;
-        const before = layout();
-        dispatch({ type: "close", tabId: tab.id });
         // The closed tab's screen had the focus: it goes to the tab shown now.
-        if (layout() !== before) focusSelected();
+        if (closeFocusedTab()) focusSelected();
       };
     } else if (matchesShortcut("splitRight", event, mac) && !shellKeys) {
-      run = () => {
-        const pane = focusedPane(layout());
-        if (pane === null) return;
-        dispatch({
-          type: "split",
-          paneId: pane.id,
-          newTabId: crypto.randomUUID(),
-          newPaneId: crypto.randomUUID(),
-        });
-      };
+      run = splitFocusedTab;
     } else if (matchesShortcut("focusPane", event, mac)) {
       const digit = /^Digit\d$/.test(event.code)
         ? event.code.slice(5)
