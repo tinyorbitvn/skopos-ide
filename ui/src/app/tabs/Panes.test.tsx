@@ -28,6 +28,21 @@ vi.mock("./TabView", () => ({
   ),
 }));
 
+// Each tab item draws its menu once per render, so this counts the renders of each
+// tab, by the menu's label.
+const tabRenders = vi.hoisted(() => new Map<string, number>());
+vi.mock("../../design", async (importOriginal) => {
+  const design = await importOriginal<typeof import("../../design")>();
+  return {
+    ...design,
+    ContextMenu: (props: Parameters<typeof design.ContextMenu>[0]) => {
+      const label = props.label ?? "";
+      tabRenders.set(label, (tabRenders.get(label) ?? 0) + 1);
+      return <design.ContextMenu {...props} />;
+    },
+  };
+});
+
 function tab(id: string, path: string, pinned = false): TabState {
   return { id, pinned, history: [path], index: 0 };
 }
@@ -182,6 +197,25 @@ test("the splitter moves by 2% per arrow key, and a double-click makes the panes
     fireEvent.doubleClick(splitter);
   });
   expect(layout().panes.map((p) => p.width)).toEqual([0.5, 0.5]);
+});
+
+test("a splitter move redraws no tab, and a change a tab shows redraws only its pane's", () => {
+  render(<Panes />);
+  tabRenders.clear();
+
+  fireEvent.keyDown(screen.getByTestId("pane-resize-0"), {
+    key: "ArrowRight",
+  });
+
+  expect(layout().panes[0].width).toBe(0.52);
+  expect(Object.fromEntries(tabRenders)).toEqual({});
+
+  act(() =>
+    useWindowLayout.getState().dispatch({ type: "select", tabId: "t2" }),
+  );
+
+  expect(tabRenders.get("Actions for Preferences")).toBeGreaterThan(0);
+  expect(tabRenders.has("Actions for Resource map · prod")).toBe(false);
 });
 
 test("a pane's width share is its flex grow", () => {
