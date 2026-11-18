@@ -68,7 +68,7 @@ function downloadButton() {
 }
 
 // The parts of the page site.js touches, as site/index.html lays them out.
-function page({ withoutAssets = [], withoutCta = false, withoutCards = false } = {}) {
+function page({ withoutAssets = [], withoutHero = false, withoutCta = false, withoutCards = false } = {}) {
   const links = {};
   for (const [suffix, size] of Object.entries(SIZES)) {
     if (withoutAssets.includes(suffix)) continue;
@@ -89,7 +89,7 @@ function page({ withoutAssets = [], withoutCta = false, withoutCards = false } =
       cards[os].tag.hidden = true;
     }
   }
-  const button = downloadButton();
+  const button = withoutHero ? null : downloadButton();
   const cta = withoutCta ? null : downloadButton();
   const file = element();
   const alt = element();
@@ -303,6 +303,14 @@ describe("site.js", () => {
     assert.equal(doc.links["aarch64.dmg"].classList.contains("button--primary"), true);
   });
 
+  test("a page without the hero's button still points the call to action and marks the card", async () => {
+    const doc = page({ withoutHero: true });
+    await loadSite().init(doc, CASES[0].nav);
+    assert.equal(doc.cta.getAttribute("href"), "https://downloads.test/aarch64.dmg");
+    assert.equal(doc.cta.label.textContent, "Download for macOS");
+    assert.equal(doc.cards.mac.classList.contains("platform--mine"), true);
+  });
+
   test("a page without the chosen installer's link keeps the plain button", async () => {
     const doc = page({ withoutAssets: ["x64-setup.exe"] });
     const windows = CASES.find((c) => c.primary === "x64-setup.exe").nav;
@@ -338,8 +346,29 @@ describe("site.js", () => {
     assert.equal(site.pickDownload(null, "x86"), null);
   });
 
-  test("makes no network request and starts only where there is a document", () => {
+  test("makes no network request", () => {
     assert.doesNotMatch(CODE, /fetch\(|XMLHttpRequest|sendBeacon|WebSocket|import\(/);
-    assert.equal(typeof loadSite().init, "function");
+  });
+
+  test("starts by itself only where there is a document", () => {
+    for (const [globals, starts] of [
+      [["document", "navigator"], true],
+      [["navigator"], false],
+      [["document"], false],
+    ]) {
+      let reads = 0;
+      const context = vm.createContext({});
+      if (globals.includes("document")) context.document = page();
+      if (globals.includes("navigator")) {
+        context.navigator = {
+          get userAgent() {
+            reads += 1;
+            return UA.linuxFirefox;
+          },
+        };
+      }
+      vm.runInContext(CODE, context, { filename: "site.js" });
+      assert.equal(reads > 0, starts, globals.join(" and "));
+    }
   });
 });
