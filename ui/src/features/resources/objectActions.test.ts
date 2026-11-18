@@ -1,6 +1,6 @@
-import { Circle } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import { Box } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { KubeObject } from "../../kinds/objects";
 import { CONFIGMAPS, NODES } from "../../kinds/refs";
@@ -40,7 +40,7 @@ function context(over: Partial<ActionContext> = {}): ActionContext {
 const action = (id: string, over: Partial<KindAction> = {}): KindAction => ({
   id,
   label: id,
-  icon: Circle,
+  icon: Box,
   run: () => {},
   ...over,
 });
@@ -169,7 +169,7 @@ test("Edit YAML is a top item that opens the editor, and top is carried through"
 
 test("each item carries its action's icon", () => {
   const [, item] = items({ kindActions: [action("x")] });
-  expect(item.icon).toBe(Circle);
+  expect(item.icon).toBe(Box);
 });
 
 test("a failed action shows '<label> failed' with the server's message", async () => {

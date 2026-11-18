@@ -6,7 +6,7 @@ import {
   RotateCw,
   Square,
   Trash2,
-} from "../../design/glyphs";
+} from "../../design/icons";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { mockBackend } from "../../test/ipc";
 import { forward } from "../../test/portForwards";

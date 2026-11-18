@@ -1,5 +1,4 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight } from "lucide-react";
 import {
   type KeyboardEvent,
   useEffect,
@@ -8,6 +7,7 @@ import {
   useState,
 } from "react";
 import { Badge, ErrorNotice, Input, Spinner } from "../../design";
+import { ChevronRight } from "../../design/icons";
 import { failureMessage, IpcFailure } from "../../ipc/client";
 import type { KindSchema } from "../../ipc/generated/KindSchema";
 import styles from "./ApiDocsPanel.module.css";

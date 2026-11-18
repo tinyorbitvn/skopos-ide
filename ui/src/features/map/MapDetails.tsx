@@ -1,9 +1,9 @@
-import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import type { Tone } from "../../design/Badge";
 import { Button } from "../../design/Button";
 import { IconButton } from "../../design/IconButton";
+import { ChevronDown, ChevronRight, X } from "../../design/icons";
 import { StatusDot } from "../../design/StatusDot";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { GraphNode } from "../../ipc/generated/GraphNode";

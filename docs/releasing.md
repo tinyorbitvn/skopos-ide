@@ -63,7 +63,7 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
 The project site at https://vanlongme.github.io/skopos-ide/ is built from `site/` by
 `scripts/build-site.mjs` and deployed by `.github/workflows/pages.yml`.
 
-- A push to `main` that changes `site/`, the build script, the tokens, the glyphs, the icon or
+- A push to `main` that changes `site/`, the build script, the tokens, the icon or
   the workflow redeploys it, and so does Run workflow on the `pages` workflow.
 - Every successful `release` run redeploys it. The version, dates, sizes and download links come
   from the latest published release, read with `gh api`, so a new release needs no edit. When an

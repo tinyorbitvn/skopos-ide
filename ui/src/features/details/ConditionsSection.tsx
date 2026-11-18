@@ -1,5 +1,5 @@
-import { ShieldCheck } from "lucide-react";
 import { Badge } from "../../design";
+import { ShieldCheck } from "../../design/icons";
 import { Part } from "../../kinds/detail/parts";
 import styles from "./DetailDrawer.module.css";
 

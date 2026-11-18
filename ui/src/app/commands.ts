@@ -1,12 +1,14 @@
+import { useMemo } from "react";
+import { useLocation, useNavigate } from "react-router";
 import {
   AppWindow,
   ArrowLeft,
   ArrowRight,
   Columns2,
+  type IconComponent,
   Info,
   Keyboard,
   LayoutGrid,
-  type LucideIcon,
   Monitor,
   Moon,
   Network,
@@ -19,9 +21,7 @@ import {
   SquareTerminal,
   Sun,
   X,
-} from "lucide-react";
-import { useMemo } from "react";
-import { useLocation, useNavigate } from "react-router";
+} from "../design/icons";
 import { openTerminal } from "../features/dock/openTerminal";
 import { chartsPath } from "../features/helm/helmText";
 import { mapPath } from "../features/map/paths";
@@ -70,7 +70,7 @@ export interface AppCommand {
   id: CommandId;
   /** A function, because some labels name the cluster. */
   label(ctx: CommandContext): string;
-  icon: LucideIcon;
+  icon: IconComponent;
   shortcut?: ShortcutId;
   /**
    * The location the command opens, if it only opens one: a click on its palette row
@@ -123,7 +123,7 @@ async function setTheme(theme: Theme): Promise<void> {
 function theme(
   id: CommandId,
   label: string,
-  icon: LucideIcon,
+  icon: IconComponent,
   value: Theme,
 ): AppCommand {
   return {

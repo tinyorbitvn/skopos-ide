@@ -1,6 +1,6 @@
-import { CalendarClock, Container as ContainerIcon } from "lucide-react";
 import { type ReactElement, type ReactNode, useState } from "react";
 import { Badge } from "../../design";
+import { CalendarClock, Container as ContainerIcon } from "../../design/icons";
 import { ForwardButton } from "../../features/portForward/ForwardButton";
 import { PortForwardDialog } from "../../features/portForward/PortForwardDialog";
 import { isTcp } from "../../features/portForward/ports";

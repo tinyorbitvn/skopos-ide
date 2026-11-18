@@ -1,7 +1,7 @@
-import { Check, CircleAlert, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import styles from "./CopyButton.module.css";
 import { copyText } from "./clipboard";
+import { Check, CircleAlert, Copy } from "./icons";
 
 type Outcome = "done" | "failed";
 const SHOWN_MS: Record<Outcome, number> = { done: 1400, failed: 4000 };

@@ -47,6 +47,7 @@ import type { Prefs } from "./generated/Prefs";
 import type { Propagation } from "./generated/Propagation";
 import type { ResourceRef } from "./generated/ResourceRef";
 import type { SavedKubeconfig } from "./generated/SavedKubeconfig";
+import type { SecretChange } from "./generated/SecretChange";
 import type { SecretValue } from "./generated/SecretValue";
 import type { SessionEvent } from "./generated/SessionEvent";
 import type { SyncWarning } from "./generated/SyncWarning";
@@ -324,7 +325,7 @@ export const api = {
     namespace: string,
     name: string,
     resourceVersion: string,
-    changes: DataChange[],
+    changes: SecretChange[],
   ) =>
     call<void>("secret_update", {
       clusterId,

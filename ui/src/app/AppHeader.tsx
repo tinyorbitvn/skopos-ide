@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { Badge, Button, IconButton } from "../design";
 import {
   ArrowLeft,
   ArrowRight,
@@ -6,9 +8,7 @@ import {
   Search,
   Settings,
   SquareTerminal,
-} from "lucide-react";
-import { useMemo } from "react";
-import { Badge, Button, IconButton } from "../design";
+} from "../design/icons";
 import { useCatalog } from "../stores/catalog";
 import { useConnect } from "../stores/clusters";
 import { useShell } from "../stores/shell";

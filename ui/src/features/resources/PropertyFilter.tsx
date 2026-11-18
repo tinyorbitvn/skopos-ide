@@ -1,4 +1,3 @@
-import { Search } from "lucide-react";
 import {
   type KeyboardEvent,
   type ReactElement,
@@ -9,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Search } from "../../design/icons";
 import { type FilterIndex, type ObjectFilter, parseFilter } from "./filter";
 import {
   type SuggestionOption,

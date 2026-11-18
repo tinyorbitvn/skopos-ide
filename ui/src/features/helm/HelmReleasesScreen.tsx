@@ -18,7 +18,7 @@ import {
   History,
   PackagePlus,
   Trash2,
-} from "../../design/glyphs";
+} from "../../design/icons";
 import type { HelmRelease } from "../../ipc/generated/HelmRelease";
 import {
   type HelmRun,

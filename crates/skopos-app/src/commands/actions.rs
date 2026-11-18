@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::resources::{
-    DataChange, DrainEvent, DrainOptions, ResourceRef, SavedKubeconfig, SecretValue,
+    DataChange, DrainEvent, DrainOptions, ResourceRef, SavedKubeconfig, SecretChange, SecretValue,
 };
 use tauri::ipc::Channel;
 use tauri::{State, WebviewWindow};
@@ -150,7 +150,7 @@ pub async fn secret_update(
     namespace: String,
     name: String,
     resource_version: String,
-    changes: Vec<DataChange>,
+    changes: Vec<SecretChange>,
 ) -> Result<(), IpcError> {
     state
         .core

@@ -190,3 +190,9 @@ test("a saved value stays on screen until the live object catches up", async () 
   expect(input().value).toBe("2");
   expect(screen.queryByTestId("data-changed-on-server")).toBeNull();
 });
+
+test("a ConfigMap value is text only, with no raw or base64 switch", () => {
+  show();
+  expect(screen.queryByRole("radiogroup")).toBeNull();
+  expect(screen.queryByTestId("data-new-form")).toBeNull();
+});

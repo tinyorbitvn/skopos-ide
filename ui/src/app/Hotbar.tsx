@@ -15,16 +15,6 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  CircleHelp,
-  Command,
-  Info,
-  Keyboard,
-  LayoutGrid,
-  Pin,
-  Settings,
-  TriangleAlert,
-} from "lucide-react";
 import { NavLink, useMatch } from "react-router";
 import {
   ContextMenu,
@@ -34,6 +24,16 @@ import {
   StatusDot,
   Tooltip,
 } from "../design";
+import {
+  CircleHelp,
+  Command,
+  Info,
+  Keyboard,
+  LayoutGrid,
+  Pin,
+  Settings,
+  TriangleAlert,
+} from "../design/icons";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { useCatalog } from "../stores/catalog";
 import { useShell } from "../stores/shell";

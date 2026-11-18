@@ -33,13 +33,33 @@ pub struct SecretValue {
     pub binary: bool,
 }
 
-/// A change to one key of a Secret or ConfigMap. `None` removes the key.
+/// A change to one key of a ConfigMap. `None` removes the key.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct DataChange {
     pub key: String,
     pub value: Option<String>,
+}
+
+/// A change to one key of a Secret. `None` removes the key.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretChange {
+    pub key: String,
+    pub value: Option<SecretData>,
+}
+
+/// The new value of a Secret key: `{ text }` is stored as its UTF-8 bytes,
+/// `{ base64 }` as the bytes it encodes.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretData {
+    Text(String),
+    /// Standard base64 with padding. Whitespace and line breaks are ignored.
+    Base64(String),
 }
 
 fn scalable(r: &ResourceRef) -> bool {
@@ -99,23 +119,47 @@ fn manual_job(cronjob: &Value, suffix: &str) -> CoreResult<Value> {
     }))
 }
 
+type DataMap = serde_json::Map<String, Value>;
+
 /// A merge patch of `data`. The `resourceVersion` makes the server refuse it when
 /// the object has changed since the user started editing.
-fn data_patch(resource_version: &str, changes: &[DataChange], encode: bool) -> Value {
-    let data: serde_json::Map<String, Value> = changes
+fn data_patch(resource_version: &str, data: DataMap) -> Value {
+    json!({ "metadata": { "resourceVersion": resource_version }, "data": data })
+}
+
+/// A ConfigMap's `data` keeps the text as it is.
+fn configmap_data(changes: &[DataChange]) -> DataMap {
+    changes
         .iter()
         .map(|change| {
-            let value = change.value.as_ref().map_or(Value::Null, |text| {
-                Value::String(if encode {
-                    STANDARD.encode(text)
-                } else {
-                    text.clone()
-                })
-            });
+            let value = change.value.clone().map_or(Value::Null, Value::String);
             (change.key.clone(), value)
         })
-        .collect();
-    json!({ "metadata": { "resourceVersion": resource_version }, "data": data })
+        .collect()
+}
+
+/// A Secret's `data` holds every value as base64 without whitespace. A value
+/// given as base64 that does not decode refuses the whole change.
+fn secret_data(changes: &[SecretChange]) -> CoreResult<DataMap> {
+    changes
+        .iter()
+        .map(|change| {
+            let bytes = match &change.value {
+                None => return Ok((change.key.clone(), Value::Null)),
+                Some(SecretData::Text(text)) => text.as_bytes().to_vec(),
+                Some(SecretData::Base64(encoded)) => {
+                    let compact: String = encoded
+                        .chars()
+                        .filter(|c| !c.is_ascii_whitespace())
+                        .collect();
+                    STANDARD.decode(compact).map_err(|_| {
+                        invalid(format!("the value of {} is not valid base64", change.key))
+                    })?
+                }
+            };
+            Ok((change.key.clone(), Value::String(STANDARD.encode(bytes))))
+        })
+        .collect()
 }
 
 fn core_resource(
@@ -454,19 +498,12 @@ impl AppCore {
         namespace: &str,
         name: &str,
         resource_version: &str,
-        changes: Vec<DataChange>,
+        changes: Vec<SecretChange>,
     ) -> CoreResult<()> {
         let secrets = core_resource("Secret", "secrets", "", "v1", true);
-        self.update_data(
-            id,
-            &secrets,
-            namespace,
-            name,
-            resource_version,
-            &changes,
-            true,
-        )
-        .await
+        let data = secret_data(&changes)?;
+        self.update_data(id, &secrets, namespace, name, resource_version, data)
+            .await
     }
 
     pub async fn configmap_update(
@@ -478,19 +515,11 @@ impl AppCore {
         changes: Vec<DataChange>,
     ) -> CoreResult<()> {
         let configmaps = core_resource("ConfigMap", "configmaps", "", "v1", true);
-        self.update_data(
-            id,
-            &configmaps,
-            namespace,
-            name,
-            resource_version,
-            &changes,
-            false,
-        )
-        .await
+        let data = configmap_data(&changes);
+        self.update_data(id, &configmaps, namespace, name, resource_version, data)
+            .await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn update_data(
         &self,
         id: &ClusterId,
@@ -498,13 +527,12 @@ impl AppCore {
         namespace: &str,
         name: &str,
         resource_version: &str,
-        changes: &[DataChange],
-        encode: bool,
+        data: DataMap,
     ) -> CoreResult<()> {
         if resource_version.is_empty() {
             return Err(invalid("the resource version is missing"));
         }
-        let patch = Patch::Merge(data_patch(resource_version, changes, encode));
+        let patch = Patch::Merge(data_patch(resource_version, data));
         self.patch_object(id, r, Some(namespace), name, patch).await
     }
 }
@@ -527,5 +555,54 @@ mod tests {
             job.pointer("/metadata/annotations"),
             Some(&json!({ INSTANTIATE: "manual" }))
         );
+    }
+
+    fn secret_change(key: &str, value: Option<SecretData>) -> SecretChange {
+        SecretChange {
+            key: key.into(),
+            value,
+        }
+    }
+
+    #[test]
+    fn secret_data_writes_text_and_base64_as_normalized_base64() {
+        let data = secret_data(&[
+            secret_change("text", Some(SecretData::Text("value".into()))),
+            secret_change("bytes", Some(SecretData::Base64(" /w\n=\r\n=\t".into()))),
+            secret_change("empty", Some(SecretData::Base64(String::new()))),
+            secret_change("gone", None),
+        ])
+        .unwrap();
+        assert_eq!(
+            Value::Object(data),
+            json!({ "text": "dmFsdWU=", "bytes": "/w==", "empty": "", "gone": null })
+        );
+    }
+
+    #[test]
+    fn secret_data_refuses_a_value_that_is_not_base64() {
+        for bad in ["S3CRET!", "YQ", "YR==", "YQ==YQ=="] {
+            let error = secret_data(&[
+                secret_change("a", Some(SecretData::Text("fine".into()))),
+                secret_change("b", Some(SecretData::Base64(bad.into()))),
+            ])
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput, "{bad}");
+            assert!(error.message.contains("base64"), "{}", error.message);
+            assert!(!error.message.contains(bad), "{}", error.message);
+        }
+    }
+
+    #[test]
+    fn a_secret_change_is_text_or_base64_by_its_field_name() {
+        let change: SecretChange =
+            serde_json::from_value(json!({ "key": "a", "value": { "base64": "/w==" } })).unwrap();
+        assert!(matches!(change.value, Some(SecretData::Base64(ref b)) if b == "/w=="));
+        let change: SecretChange =
+            serde_json::from_value(json!({ "key": "a", "value": { "text": "x" } })).unwrap();
+        assert!(matches!(change.value, Some(SecretData::Text(ref t)) if t == "x"));
+        let change: SecretChange =
+            serde_json::from_value(json!({ "key": "a", "value": null })).unwrap();
+        assert!(change.value.is_none());
     }
 }

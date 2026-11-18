@@ -100,6 +100,9 @@ gives the copyright notice the package states, under its license; the texts are 
 MIT:
 
 - `@radix-ui/*`: Copyright (c) 2022 WorkOS
+- `@animateicons/react`: Copyright (c) 2025 Avijit Dey; the `motion` library it bundles:
+  Copyright (c) 2024 Motion B.V. Its icons are Lucide's shapes (see `lucide-react` under ISC),
+  some of them derived from Feather (see below).
 - `@dnd-kit/*`: Copyright (c) 2021, Claudéric Demers
 - `@floating-ui/*`: Copyright (c) 2021-present Floating UI contributors
 - `@remix-run/route-pattern`: Copyright (c) 2025 Shopify Inc.
@@ -116,7 +119,8 @@ MIT:
 - `cookie-es`: Copyright (c) Pooya Parsa; Copyright (c) 2012-2014 Roman Shtylman; Copyright (c)
   2015 Douglas Christopher Wilson; Copyright (c) 2015 Nathan Friedly
 - `detect-node-es`: Copyright (c) 2017 Ilya Kantor
-- `lucide-react`, for the icons it derives from Feather: Copyright (c) 2013-present Cole Bemis
+- `lucide-react`, and the Lucide shapes of `@animateicons/react`, for the icons they derive from
+  Feather: Copyright (c) 2013-present Cole Bemis
 - `marked`, and its copy inside `monaco-editor`: Copyright (c) 2018+, MarkedJS; Copyright (c)
   2011-2018, Christopher Jeffrey
 - `monaco-editor`: Copyright (c) 2016 - present Microsoft Corporation; its Node.js path
@@ -128,9 +132,10 @@ MIT:
 
 ISC:
 
-- `lucide-react`: Copyright (c) 2026 Lucide Icons and Contributors. The app draws its icons
-  with it, and the resource map's Gateway, HTTPRoute and GatewayClass icons put a Lucide glyph
-  in the frame of the Kubernetes Ingress icon.
+- `lucide-react`: Copyright (c) 2026 Lucide Icons and Contributors. The app's icons are Lucide's
+  shapes, animated by `@animateicons/react` or drawn by `lucide-react`, and the resource map's
+  Gateway, HTTPRoute and GatewayClass icons put a Lucide glyph in the frame of the Kubernetes
+  Ingress icon.
 - `yaml`: Copyright Eemeli Aro
 
 Apache-2.0, the license in `LICENSE`:

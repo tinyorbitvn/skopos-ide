@@ -1,4 +1,3 @@
-import { ArrowRight, FileSearch } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Navigate,
@@ -15,7 +14,7 @@ import {
   Spinner,
   Switch,
 } from "../../design";
-import { Play, Square } from "../../design/glyphs";
+import { ArrowRight, FileSearch, Play, Square } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { IpcFailure } from "../../ipc/client";
 import type { HelmInstallRequest } from "../../ipc/generated/HelmInstallRequest";

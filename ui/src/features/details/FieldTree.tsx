@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { ChevronDown, ChevronRight } from "../../design/icons";
 import styles from "./DetailDrawer.module.css";
 
 /** Levels below the top that start expanded. */

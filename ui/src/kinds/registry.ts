@@ -1,5 +1,5 @@
-import type { LucideIcon } from "lucide-react";
 import { type ComponentType, createElement, type ReactNode } from "react";
+import type { IconComponent } from "../design/icons";
 import { type TableColumn, useNow } from "../design/VirtualTable";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
@@ -12,7 +12,7 @@ export interface KindAction {
   id: string;
   label: string;
   /** Drawn at 16 px in menus and on the drawer's header buttons. */
-  icon: LucideIcon;
+  icon: IconComponent;
   danger?: boolean;
   /** Also shown as an icon button in the drawer header. */
   top?: boolean;

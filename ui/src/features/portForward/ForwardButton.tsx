@@ -1,5 +1,5 @@
 import { Button } from "../../design";
-import { ArrowRightLeft } from "../../design/glyphs";
+import { ArrowRightLeft } from "../../design/icons";
 
 /** The per-port button of the Service and Pod details (spec §5.2). */
 export function ForwardButton(props: {

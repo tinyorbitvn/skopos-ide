@@ -1,6 +1,6 @@
-import { X } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { IconButton } from "../../design";
+import { X } from "../../design/icons";
 import styles from "../details/DetailDrawer.module.css";
 
 /**

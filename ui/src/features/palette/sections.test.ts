@@ -1,7 +1,7 @@
-import { Server } from "lucide-react";
 import { expect, test, vi } from "vitest";
 import type { CommandContext } from "../../app/commands";
 import { toast } from "../../design";
+import { Server } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import { clusterEntry, mockBackend } from "../../test/ipc";

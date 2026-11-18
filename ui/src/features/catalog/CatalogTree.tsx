@@ -1,4 +1,3 @@
-import { ChevronDown, ChevronRight, CornerLeftUp, Folder } from "lucide-react";
 import {
   type PointerEvent,
   type ReactNode,
@@ -17,7 +16,13 @@ import {
   StatusDot,
   toast,
 } from "../../design";
-import { Ellipsis } from "../../design/glyphs";
+import {
+  ChevronDown,
+  ChevronRight,
+  CornerLeftUp,
+  Ellipsis,
+  Folder,
+} from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { CatalogFolder } from "../../ipc/generated/CatalogFolder";

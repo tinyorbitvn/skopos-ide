@@ -1,4 +1,3 @@
-import { Columns2, LayoutGrid, Pin, X } from "lucide-react";
 import {
   Fragment,
   type KeyboardEvent,
@@ -13,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { Button, ContextMenu, IconButton, Tooltip } from "../../design";
 import type { ContextMenuItem } from "../../design/ContextMenu";
+import { Columns2, LayoutGrid, Pin, X } from "../../design/icons";
 import type { PaneState } from "../../ipc/generated/PaneState";
 import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";

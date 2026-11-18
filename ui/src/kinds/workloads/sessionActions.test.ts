@@ -1,7 +1,6 @@
-import type { LucideIcon } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
-import { Plug, Terminal } from "../../design/glyphs";
+import { type IconComponent, Plug, Terminal } from "../../design/icons";
 import {
   mountView,
   resetSessionsForTest,
@@ -127,7 +126,7 @@ test("Pods offer Logs, Shell, Attach and Port forward before Evict and Force del
   ]);
 });
 
-test.each<[string, KindAction, string, LucideIcon, boolean]>([
+test.each<[string, KindAction, string, IconComponent, boolean]>([
   ["shell", podShellAction, "Shell", Terminal, true],
   ["attach", podAttachAction, "Attach", Plug, false],
   ["nodeShell", nodeShellAction, "Shell", Terminal, true],

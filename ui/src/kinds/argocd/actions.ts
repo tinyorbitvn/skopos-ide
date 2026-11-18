@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { toast } from "../../design";
-import { CircleStop, History, RefreshCw, RotateCcw } from "../../design/glyphs";
+import { CircleStop, History, RefreshCw, RotateCcw } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { KindAction } from "../registry";
 import { canTerminate, isDeleting } from "./application";

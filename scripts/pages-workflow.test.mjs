@@ -24,7 +24,6 @@ test("pages runs on pushes to main that touch the site's sources, and by hand", 
     "site/**",
     "scripts/build-site.mjs",
     "ui/src/design/tinyorbit.css",
-    "ui/src/design/glyphPaths.ts",
     "assets/icon.svg",
     ".github/workflows/pages.yml",
   ]);

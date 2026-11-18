@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { HardDrive } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
+import { HardDrive } from "../../design/icons";
 import { flush, mockBackend } from "../../test/ipc";
 import {
   DrawerKindContext,
