@@ -2,7 +2,7 @@ import { OVERVIEW } from "../features/details/drawerHistory";
 import { api } from "../ipc/api";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { JsonValue } from "../ipc/generated/serde_json/JsonValue";
-import { windowLabel } from "../ipc/window";
+import { MAIN_WINDOW, windowLabel } from "../ipc/window";
 import { type CatalogState, useCatalog } from "./catalog";
 import {
   clampDockHeight,
@@ -26,6 +26,9 @@ import {
 export function dockLayoutKey(label: string = windowLabel()): string {
   return `dock:layout:${label}`;
 }
+
+/** The one dock layout key of earlier versions, which the main window takes over (P40). */
+export const OLD_DOCK_LAYOUT_KEY = "dock:layout";
 
 export const LAYOUT_SAVE_DELAY_MS = 300;
 
@@ -359,19 +362,37 @@ let restoring: Promise<void> | null = null;
 let stops: (() => void)[] = [];
 
 /**
+ * This window's saved layout. On the main window's first run of this version its key
+ * is empty, and the layout saved under the old key is copied to it, then the old key
+ * is cleared (P40). Other windows never read the old key, and a key that cannot be
+ * read brings nothing back.
+ */
+async function readSaved(key: string): Promise<JsonValue | null> {
+  let value: JsonValue | null;
+  try {
+    value = await api.uiStateGet(key);
+  } catch {
+    return null;
+  }
+  if (value !== null || windowLabel() !== MAIN_WINDOW) return value;
+  const old = await api.uiStateGet(OLD_DOCK_LAYOUT_KEY).catch(() => null);
+  if (old === null) return null;
+  await api.uiStateSet(key, old).catch(() => {});
+  void api.uiStateSet(OLD_DOCK_LAYOUT_KEY, null).catch(() => {});
+  return old;
+}
+
+/**
  * Reads the saved layout once, applies it, then keeps it saved. `bootstrap` calls it
  * before the first render, and the dock shows nothing until it is applied.
  */
 export function restoreDockLayout(): Promise<void> {
   if (restoring === null) {
     const key = dockLayoutKey();
-    restoring = api
-      .uiStateGet(key)
-      .catch(() => null)
-      .then((value) => {
-        useDock.getState().restore(parseLayout(value));
-        stops = [startWriting(key), pruneOnce()];
-      });
+    restoring = readSaved(key).then((value) => {
+      useDock.getState().restore(parseLayout(value));
+      stops = [startWriting(key), pruneOnce()];
+    });
   }
   return restoring;
 }
