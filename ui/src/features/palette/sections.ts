@@ -12,6 +12,7 @@ import {
   visibleSections,
 } from "../../kinds/nav";
 import { connectCluster } from "../../stores/clusters";
+import { clusterPath, type FolderTree } from "../catalog/folderTree";
 import { isBlank, matchEntry } from "./fuzzy";
 import {
   CUSTOM_ICON,
@@ -76,11 +77,18 @@ export function commandEntries(
   }));
 }
 
-export function clusterEntries(clusters: ClusterEntry[]): PaletteEntry[] {
+/**
+ * A row per cluster, labelled with its folder path (`prod / eu / prod-eu-1`, spec P30),
+ * so the search matches the folders' names too.
+ */
+export function clusterEntries(
+  clusters: ClusterEntry[],
+  tree: FolderTree = { folders: [], placements: {} },
+): PaletteEntry[] {
   return clusters.map((c) => ({
     key: c.id,
     testId: `palette-cluster-${c.id}`,
-    label: c.name,
+    label: clusterPath(tree, c),
     hint: clusterStatus(c.state).label,
     icon: Server,
     path: `/cluster/${encodeURIComponent(c.id)}`,

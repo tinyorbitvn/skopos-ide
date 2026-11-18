@@ -22,6 +22,7 @@ import { failureMessage } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ObjectNames } from "../../ipc/generated/ObjectNames";
 import { useCatalog } from "../../stores/catalog";
+import { useFolders } from "../../stores/folders";
 import { useShell } from "../../stores/shell";
 import { useWindowLayout } from "../../stores/windowLayout";
 import styles from "./CommandPalette.module.css";
@@ -158,7 +159,12 @@ function PaletteBody({ onDone }: { onDone(): void }) {
   const listId = useId();
 
   const commands = useMemo(() => commandEntries(ctx, IS_MAC), [ctx]);
-  const clusters = useMemo(() => clusterEntries(catalog), [catalog]);
+  const folders = useFolders((s) => s.folders);
+  const placements = useFolders((s) => s.placements);
+  const clusters = useMemo(
+    () => clusterEntries(catalog, { folders, placements }),
+    [catalog, folders, placements],
+  );
   const pages = useMemo(
     () => (connectedId === null ? null : pageEntries(connectedId, resources)),
     [connectedId, resources],

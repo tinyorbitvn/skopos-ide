@@ -196,6 +196,29 @@ test("cluster rows hint the connection state and open the cluster", () => {
   expect(ctx.navigate).toHaveBeenCalledWith("/cluster/a%2Fb");
 });
 
+test("a cluster row's label is its folder path and name (P30)", () => {
+  const tree = {
+    folders: [
+      { id: "f1", name: "prod", parent: null },
+      { id: "f2", name: "eu", parent: "f1" },
+    ],
+    placements: { "id-prod-eu-1": "f2" },
+  };
+  const rows = clusterEntries(
+    [
+      clusterEntry({ contextName: "prod-eu-1" }),
+      clusterEntry({ contextName: "demo" }),
+    ],
+    tree,
+  );
+  expect(rows.map((r) => r.label)).toEqual(["prod / eu / prod-eu-1", "demo"]);
+
+  const found = buildSections({ ...BASE, clusters: rows, query: "prod/eu" });
+  expect(
+    found.find((s) => s.id === "clusters")?.rows.map((r) => r.key),
+  ).toEqual(["id-prod-eu-1"]);
+});
+
 test("the open cluster's row connects it again after a disconnect", async () => {
   const ipc = mockBackend({
     cluster_connect: () => ({ status: "connecting" }),

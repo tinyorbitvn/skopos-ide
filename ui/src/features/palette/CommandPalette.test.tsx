@@ -14,6 +14,7 @@ import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import type { ObjectNames } from "../../ipc/generated/ObjectNames";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
+import { resetFoldersForTest, useFolders } from "../../stores/folders";
 import { resetShellForTest, useShell } from "../../stores/shell";
 import {
   resetWindowLayoutForTest,
@@ -170,6 +171,7 @@ function where(): string {
 
 beforeEach(() => {
   resetCatalogForTest();
+  resetFoldersForTest();
   resetShellForTest();
   resetWindowLayoutForTest();
 });
@@ -299,6 +301,30 @@ test("Enter on a cluster opens it", async () => {
 
   await waitFor(() => expect(where()).toBe("/cluster/c2"));
   expect(useShell.getState().dialog).toBeNull();
+});
+
+test("cluster rows show their folder path, and the search matches folder names (P30)", async () => {
+  useFolders.setState({
+    loaded: true,
+    folders: [
+      { id: "folder-1", name: "live", parent: null },
+      { id: "folder-2", name: "eu", parent: "folder-1" },
+    ],
+    placements: { c1: "folder-2" },
+  });
+  await show("/catalog");
+
+  expect(screen.getByTestId("palette-cluster-c1").textContent).toContain(
+    "live / eu / prod",
+  );
+  expect(screen.getByTestId("palette-cluster-c2").textContent).toContain(
+    "staging",
+  );
+
+  type("live/eu");
+  expect(rowIds("clusters")).toEqual(["palette-cluster-c1"]);
+  press("Enter");
+  await waitFor(() => expect(where()).toBe("/cluster/c1"));
 });
 
 test("Esc closes the palette and gives the focus back", async () => {
