@@ -25,6 +25,8 @@ import {
 
 const KIND = "kind-skopos-e2e";
 const NS = "skopos-test-e2e";
+/** A namespace of its own, so its Pods are exactly what the order test lists. */
+const ORDER_NS = "skopos-test-order";
 const WORKLOADS = path.resolve(__dirname, "..", "fixtures", "workloads.yaml");
 const PAUSE_IMAGE = "registry.k8s.io/pause:3.10";
 const SECRET_VALUE = "ZTJlLXNlY3JldA==";
@@ -124,6 +126,53 @@ async function nextCreationSecond(configMap: string): Promise<void> {
   await browser.waitUntil(async () => Date.now() >= after, { interval: 50 });
 }
 
+/** Deployment `alpha` and a bare Pod `zulu`, whose Pods list as alpha's, then zulu. */
+const ORDER_MANIFEST = `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alpha
+  namespace: ${ORDER_NS}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: alpha }
+  template:
+    metadata:
+      labels: { app: alpha }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: ${PAUSE_IMAGE}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: zulu
+  namespace: ${ORDER_NS}
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: main
+      image: ${PAUSE_IMAGE}
+`;
+
+/** The names of the Pods of Deployment `alpha`. */
+async function alphaPods(): Promise<string[]> {
+  const names = await kubectl([
+    "-n",
+    ORDER_NS,
+    "get",
+    "pods",
+    "-l",
+    "app=alpha",
+    "-o",
+    "jsonpath={.items[*].metadata.name}",
+  ]);
+  return names.split(" ").filter(Boolean);
+}
+
 async function clickSortHeader(header: string): Promise<void> {
   await byTestId("resource-table").$(`button=${header}`).click();
 }
@@ -156,6 +205,7 @@ describe("resource browsing on a real cluster", () => {
   });
 
   after(async () => {
+    await deleteTestNamespace(ORDER_NS);
     await deleteTestNamespace(NS);
   });
 
@@ -206,6 +256,58 @@ describe("resource browsing on a real cluster", () => {
       "--force",
     ]);
     await gone(rowId(NS, "live-pod"));
+  });
+
+  it("shows a Deployment's replacement Pod in its sorted place after its Pod is deleted", async () => {
+    await createTestNamespace(ORDER_NS);
+    await kubectl(["apply", "-f", "-"], ORDER_MANIFEST);
+    await kubectl([
+      "-n",
+      ORDER_NS,
+      "rollout",
+      "status",
+      "deployment/alpha",
+      "--timeout=120s",
+    ]);
+    const [old] = await alphaPods();
+    const zulu = rowId(ORDER_NS, "zulu");
+
+    // Opened again, the list starts from a snapshot of what is there now.
+    await openResource(CONFIGMAPS, "ConfigMap");
+    await openResource(PODS, "Pod");
+    await toggleInCheckMenu("namespace-filter", [
+      `namespace-option-${ORDER_NS}`,
+    ]);
+    try {
+      await expectRowsExactly([rowId(ORDER_NS, old), zulu]);
+
+      await kubectl(["-n", ORDER_NS, "delete", "pod", old, "--wait=false"]);
+      let last: string[] = [];
+      await browser
+        .waitUntil(
+          async () => {
+            last = await rowIds();
+            return (
+              last.length === 2 &&
+              last[0].startsWith(rowId(ORDER_NS, "alpha-")) &&
+              last[0] !== rowId(ORDER_NS, old) &&
+              last[1] === zulu
+            );
+          },
+          { timeout: 10000, interval: 100 },
+        )
+        .catch(() => {
+          throw new Error(
+            `the replacement of ${old} never showed before zulu; the table has ${last.join(", ")}`,
+          );
+        });
+    } finally {
+      // The later tests start from All namespaces.
+      await toggleInCheckMenu("namespace-filter", [
+        `namespace-option-${ORDER_NS}`,
+      ]);
+    }
+    await deleteTestNamespace(ORDER_NS);
   });
 
   it("filters by namespace, and the filter survives navigating away and back", async () => {

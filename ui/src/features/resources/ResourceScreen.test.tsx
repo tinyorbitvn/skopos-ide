@@ -534,6 +534,24 @@ test("the sort survives a search that matches nothing", async () => {
   expect(shownNames()).toEqual(["c", "b", "a"]);
 });
 
+test("a Pod recreated under a new name shows in its place, in view, without a sort", async () => {
+  const fake = fakeBackend();
+  const others = Array.from({ length: 59 }, (_, i) =>
+    pod(`p${String(i).padStart(2, "0")}`),
+  );
+  // As the core sends a snapshot: by namespace, then name.
+  await show(fake, [pod("web-aaaaa", "app"), ...others]);
+  expect(row("app", "web-aaaaa")?.getAttribute("aria-rowindex")).toBe("2");
+
+  await fake.send("pods", {
+    type: "batch",
+    upserts: [pod("web-bbbbb", "app")],
+    deletes: [{ namespace: "app", name: "web-aaaaa" }],
+  } as WatchEvent);
+  expect(row("app", "web-aaaaa")).toBeNull();
+  expect(row("app", "web-bbbbb")?.getAttribute("aria-rowindex")).toBe("2");
+});
+
 test("reconnecting shows an indicator and keeps rows", async () => {
   const fake = fakeBackend();
   await show(fake, [pod("a")]);
