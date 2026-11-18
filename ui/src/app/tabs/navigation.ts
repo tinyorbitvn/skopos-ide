@@ -127,13 +127,14 @@ export interface ScreenLinkHandlers {
 }
 
 /**
- * Catches the links inside a tab's screen at its pane body, in the capture phase: a
+ * Catches the links inside a tab's screen at its pane body (or inside the dock, for
+ * the focused tab, when `tabId` is absent), in the capture phase: a
  * plain click stays with the tab's router; Ctrl/Cmd+click opens a new tab, middle-click
  * beside, and a click with Shift or Alt stays in the tab instead of leaving the app.
  * A double-click pins the tab that shows the link's location (spec P11 to P13).
  */
 export function screenLinkHandlers(
-  tabId: string,
+  tabId?: string,
   mac = IS_MAC,
 ): ScreenLinkHandlers {
   return {

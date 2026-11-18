@@ -182,16 +182,21 @@ function decoded(pathname: string): string {
     .join("/");
 }
 
+/** The cluster a location is on, or null off clusters. */
+export function tabCluster(path: string): string | null {
+  const pathname = decoded(parsePath(path).pathname ?? "/");
+  return (
+    matchPath({ path: "/cluster/:id", end: false }, pathname)?.params.id ?? null
+  );
+}
+
 /** The title, label, cluster and icon of a tab at `path`. */
 export function tabInfo(
   path: string,
   clusters: readonly ClusterEntry[],
 ): TabInfo {
   const pathname = decoded(parsePath(path).pathname ?? "/");
-  const clusterId =
-    matchPath("/cluster/:id/*", pathname)?.params.id ??
-    matchPath("/cluster/:id", pathname)?.params.id ??
-    null;
+  const clusterId = tabCluster(path);
   let screen = pathname;
   let icon: LucideIcon = SquareDashed;
   for (const s of SCREENS) {
