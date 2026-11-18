@@ -33,9 +33,10 @@ const ELSEWHERE: Record<ShortcutId, string> = {
   mapZoom: "+ / -",
   mapFit: "0",
   mapClear: "Esc",
-  workspaceSplit: "Ctrl+\\",
-  workspaceTabs: "Left / Right",
-  workspaceClose: "Delete",
+  splitRight: "Ctrl+\\",
+  closeTab: "Ctrl+W",
+  cycleTabs: "Ctrl+Tab / Ctrl+Shift+Tab",
+  focusPane: "Ctrl+1 / Ctrl+2 / Ctrl+3",
 };
 
 /** Spec C §7.2, the On macOS column ("same" written out). */
@@ -62,9 +63,10 @@ const MAC: Record<ShortcutId, string> = {
   mapZoom: "+ / -",
   mapFit: "0",
   mapClear: "Esc",
-  workspaceSplit: "⌘\\",
-  workspaceTabs: "← / →",
-  workspaceClose: "Delete",
+  splitRight: "⌘\\",
+  closeTab: "⌘W",
+  cycleTabs: "⌃Tab / ⌃⇧Tab",
+  focusPane: "⌘1 / ⌘2 / ⌘3",
 };
 
 function key(init: KeyboardEventInit): KeyboardEvent {
@@ -80,7 +82,7 @@ test("the table holds the spec's rows in order", () => {
     "Dialogs and lists",
     "Charts",
     "Resource map",
-    "Workspace",
+    "Tabs and windows",
   ]);
   expect(SHORTCUTS.map((row) => [row.group, row.id, row.action])).toEqual([
     ["General", "palette", "Command palette"],
@@ -105,9 +107,14 @@ test("the table holds the spec's rows in order", () => {
     ["Resource map", "mapZoom", "Zoom in or out"],
     ["Resource map", "mapFit", "Fit to view"],
     ["Resource map", "mapClear", "Clear the selection"],
-    ["Workspace", "workspaceSplit", "Open the tab to the side"],
-    ["Workspace", "workspaceTabs", "Previous or next tab"],
-    ["Workspace", "workspaceClose", "Close the tab"],
+    [
+      "Tabs and windows",
+      "splitRight",
+      "Copy the tab into a new pane on the right",
+    ],
+    ["Tabs and windows", "closeTab", "Close the tab"],
+    ["Tabs and windows", "cycleTabs", "Next or previous tab of the pane"],
+    ["Tabs and windows", "focusPane", "Focus the first, second or third pane"],
   ]);
 });
 
@@ -250,15 +257,38 @@ test("the chart keys are the arrows, Home, End and Escape, without modifiers", (
   ]).toEqual([true, true, true, true, true, false, false]);
 });
 
-test("the Workspace keys: Mod+\\ to split, the arrows and Delete without modifiers", () => {
+test("the tab keys (spec P16): Ctrl+Tab on every platform, Mod for the others", () => {
+  const tab = (init: KeyboardEventInit) =>
+    key({ key: "Tab", code: "Tab", ...init });
   expect([
-    matchesShortcut("workspaceSplit", key({ key: "\\", ctrlKey: true }), false),
-    matchesShortcut("workspaceSplit", key({ key: "\\", metaKey: true }), true),
-    matchesShortcut("workspaceSplit", key({ key: "\\", ctrlKey: true }), true),
-    matchesShortcut("workspaceSplit", key({ key: "\\" }), false),
-    matchesShortcut("workspaceTabs", key({ key: "ArrowLeft" }), false),
-    matchesShortcut("workspaceTabs", key({ key: "ArrowRight" }), true),
-    matchesShortcut("workspaceClose", key({ key: "Delete" }), false),
-    matchesShortcut("workspaceClose", key({ key: "Backspace" }), false),
-  ]).toEqual([true, true, false, false, true, true, true, false]);
+    matchesShortcut("cycleTabs", tab({ ctrlKey: true }), false),
+    matchesShortcut("cycleTabs", tab({ ctrlKey: true }), true),
+    matchesShortcut("cycleTabs", tab({ ctrlKey: true, shiftKey: true }), true),
+    matchesShortcut("cycleTabs", tab({ metaKey: true }), true),
+    matchesShortcut("cycleTabs", tab({}), false),
+  ]).toEqual([true, true, true, false, false]);
+  const w = { key: "w", code: "KeyW" };
+  expect([
+    matchesShortcut("closeTab", key({ ...w, ctrlKey: true }), false),
+    matchesShortcut("closeTab", key({ ...w, metaKey: true }), true),
+    matchesShortcut("closeTab", key({ ...w, ctrlKey: true }), true),
+  ]).toEqual([true, true, false]);
+  expect(
+    matchesShortcut(
+      "splitRight",
+      key({ key: "\\", code: "Backslash", ctrlKey: true }),
+      false,
+    ),
+  ).toBe(true);
+});
+
+test("pane digits match the key, or the digit key on layouts that shift it", () => {
+  const digit = (init: KeyboardEventInit) =>
+    matchesShortcut("focusPane", key({ ctrlKey: true, ...init }), false);
+  expect([
+    digit({ key: "2", code: "Digit2" }),
+    digit({ key: "é", code: "Digit2" }),
+    digit({ key: "4", code: "Digit4" }),
+    digit({ key: "1", code: "Digit1", shiftKey: true }),
+  ]).toEqual([true, true, false, false]);
 });

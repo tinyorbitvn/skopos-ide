@@ -102,7 +102,7 @@ async fn pod_shell_runs_commands_resizes_and_reports_the_exit_code() {
         wait_running(&client, NAMESPACE, "shell").await;
         let (tx, mut rx) = mpsc::channel(32);
         let session = core
-            .pod_exec_start(&id, NAMESPACE, "shell", None, SIZE, tx)
+            .pod_exec_start(&id, NAMESPACE, "shell", None, SIZE, tx, "main")
             .await
             .unwrap();
         assert!(matches!(
@@ -152,7 +152,7 @@ async fn pod_shell_uses_the_default_container_annotation() {
         wait_running(&client, NAMESPACE, "two").await;
         let (tx, mut rx) = mpsc::channel(32);
         let session = core
-            .pod_exec_start(&id, NAMESPACE, "two", None, SIZE, tx)
+            .pod_exec_start(&id, NAMESPACE, "two", None, SIZE, tx, "main")
             .await
             .unwrap();
         core.session_write(&session, b"echo $WHICH\r".to_vec())
@@ -174,7 +174,7 @@ async fn a_flood_in_a_pod_stops_at_the_limit_until_acknowledged() {
         wait_running(&client, NAMESPACE, "flood").await;
         let (tx, mut rx) = mpsc::channel(32);
         let session = core
-            .pod_exec_start(&id, NAMESPACE, "flood", None, SIZE, tx)
+            .pod_exec_start(&id, NAMESPACE, "flood", None, SIZE, tx, "main")
             .await
             .unwrap();
         core.session_write(&session, b"yes\r".to_vec()).unwrap();
@@ -221,7 +221,7 @@ async fn attach_takes_input_only_when_the_container_has_a_tty_and_stdin() {
         wait_running(&client, NAMESPACE, "with-tty").await;
         let (tx, mut rx) = mpsc::channel(32);
         let session = core
-            .pod_attach_start(&id, NAMESPACE, "with-tty", None, SIZE, tx)
+            .pod_attach_start(&id, NAMESPACE, "with-tty", None, SIZE, tx, "main")
             .await
             .unwrap();
         assert!(matches!(
@@ -248,7 +248,7 @@ async fn attach_takes_input_only_when_the_container_has_a_tty_and_stdin() {
         wait_running(&client, NAMESPACE, "no-tty").await;
         let (tx, mut rx) = mpsc::channel(32);
         let session = core
-            .pod_attach_start(&id, NAMESPACE, "no-tty", None, SIZE, tx)
+            .pod_attach_start(&id, NAMESPACE, "no-tty", None, SIZE, tx, "main")
             .await
             .unwrap();
         assert!(matches!(
@@ -274,7 +274,7 @@ async fn a_shell_in_a_missing_pod_or_container_is_refused_with_the_reason() {
     in_namespace(&client, NAMESPACE, async {
         let (tx, _rx) = mpsc::channel(4);
         let error = core
-            .pod_exec_start(&id, NAMESPACE, "nope", None, SIZE, tx.clone())
+            .pod_exec_start(&id, NAMESPACE, "nope", None, SIZE, tx.clone(), "main")
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
@@ -282,7 +282,15 @@ async fn a_shell_in_a_missing_pod_or_container_is_refused_with_the_reason() {
 
         create_pod(&client, NAMESPACE, quiet_pod("real")).await;
         let error = core
-            .pod_exec_start(&id, NAMESPACE, "real", Some("other".into()), SIZE, tx)
+            .pod_exec_start(
+                &id,
+                NAMESPACE,
+                "real",
+                Some("other".into()),
+                SIZE,
+                tx,
+                "main",
+            )
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::NotFound);
@@ -348,7 +356,7 @@ async fn real_logs_carry_timestamps_and_a_restart_shows_a_marker() {
             pod: "restarts".into(),
             container: None,
         };
-        let session = core.logs_start(&id, target, follow(), tx).unwrap();
+        let session = core.logs_start(&id, target, follow(), tx, "main").unwrap();
         let first = wait_for_log(&mut rx, |event| has_text(event, "running")).await;
         let line = first
             .iter()
@@ -410,7 +418,7 @@ async fn a_workload_stream_moves_to_the_pod_that_replaces_a_deleted_one() {
             container: None,
         };
         let (tx, mut rx) = mpsc::channel(32);
-        let session = core.logs_start(&id, target, follow(), tx).unwrap();
+        let session = core.logs_start(&id, target, follow(), tx, "main").unwrap();
         wait_for_log(&mut rx, |event| has_text(event, "instance-")).await;
 
         let pods: Api<Pod> = Api::namespaced(client.clone(), NAMESPACE);

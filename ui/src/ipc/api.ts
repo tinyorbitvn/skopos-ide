@@ -5,6 +5,8 @@ import type { AppInfo } from "./generated/AppInfo";
 import type { ApplyResult } from "./generated/ApplyResult";
 import type { ArgoRollbackOptions } from "./generated/ArgoRollbackOptions";
 import type { ArgoSyncOptions } from "./generated/ArgoSyncOptions";
+import type { CatalogFolder } from "./generated/CatalogFolder";
+import type { CatalogFolders } from "./generated/CatalogFolders";
 import type { ChartSearch } from "./generated/ChartSearch";
 import type { ChartVersion } from "./generated/ChartVersion";
 import type { ClusterEntry } from "./generated/ClusterEntry";
@@ -36,6 +38,8 @@ import type { MetricsProviderSetting } from "./generated/MetricsProviderSetting"
 import type { MetricsRange } from "./generated/MetricsRange";
 import type { MetricsResult } from "./generated/MetricsResult";
 import type { MetricsTarget } from "./generated/MetricsTarget";
+import type { MoveOutcome } from "./generated/MoveOutcome";
+import type { MoveTarget } from "./generated/MoveTarget";
 import type { ObjectNames } from "./generated/ObjectNames";
 import type { PortForward } from "./generated/PortForward";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
@@ -53,6 +57,7 @@ import type { ToolStatus } from "./generated/ToolStatus";
 import type { UsageOf } from "./generated/UsageOf";
 import type { UsageSnapshot } from "./generated/UsageSnapshot";
 import type { WatchEvent } from "./generated/WatchEvent";
+import type { WindowLayout } from "./generated/WindowLayout";
 
 export const api = {
   /** Version facts for About (spec C §8.2). */
@@ -63,6 +68,22 @@ export const api = {
     call<string[]>("catalog_add_pasted", { yaml }),
   catalogRemovePasted: (id: string) =>
     call<void>("catalog_remove_pasted", { id }),
+  /** The folder tree of the Catalog and the cluster placements (spec P26). */
+  catalogFolders: () => call<CatalogFolders>("catalog_folders"),
+  /** `parent` null: at the top level. Name errors reject with InvalidInput (P27). */
+  catalogFolderCreate: (parent: string | null, name: string) =>
+    call<CatalogFolder>("catalog_folder_create", { parent, name }),
+  catalogFolderRename: (id: string, name: string) =>
+    call<void>("catalog_folder_rename", { id, name }),
+  /** `parent` null: to the top level. */
+  catalogFolderMove: (id: string, parent: string | null) =>
+    call<void>("catalog_folder_move", { id, parent }),
+  /** Its clusters and subfolders move to its parent (P28). */
+  catalogFolderDelete: (id: string) =>
+    call<void>("catalog_folder_delete", { id }),
+  /** `folder` null: to the top level. */
+  catalogClusterPlace: (cluster: string, folder: string | null) =>
+    call<void>("catalog_cluster_place", { cluster, folder }),
   clusterConnect: (id: string) =>
     call<ConnectionState>("cluster_connect", { id }),
   clusterDisconnect: (id: string) => call<void>("cluster_disconnect", { id }),
@@ -581,6 +602,27 @@ export const api = {
   /** Whether the keychain holds a password or token for the cluster's metrics URL. */
   metricsSecretSaved: (clusterId: string) =>
     call<boolean>("metrics_secret_saved", { clusterId }),
+  /** This window's layout; the backend knows which window asks (P32). */
+  windowLayoutGet: () => call<WindowLayout>("window_layout_get"),
+  /** Saves this window's layout. Its `label` must be this window's. */
+  windowLayoutSet: (layout: WindowLayout) =>
+    call<void>("window_layout_set", { layout }),
+  /** The layouts of every open window, `main` first. */
+  windowsList: () => call<WindowLayout[]>("windows_list"),
+  /** This window has sent its last layout before the app quits (P34). */
+  windowFlushed: () => call<void>("window_flushed"),
+  /**
+   * Moves a tab of this window to another window or into a new one (P31, P33).
+   * Rejects with NotFound "That window is closed." when the target has gone.
+   */
+  windowTabMove: (tabId: string, target: MoveTarget) =>
+    call<MoveOutcome>("window_tab_move", { tabId, target }),
+  /**
+   * A tab let go outside this window at `screenX`, `screenY` (logical pixels, as the
+   * pointer event gives them): it moves to the window under that point, or to a new one.
+   */
+  windowTabDrop: (tabId: string, screenX: number, screenY: number) =>
+    call<MoveOutcome>("window_tab_drop", { tabId, screenX, screenY }),
   uiStateGet: (key: string) => call<JsonValue | null>("ui_state_get", { key }),
   uiStateSet: (key: string, value: JsonValue) =>
     call<void>("ui_state_set", { key, value }),

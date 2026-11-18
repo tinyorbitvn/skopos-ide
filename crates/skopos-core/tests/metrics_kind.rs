@@ -183,7 +183,9 @@ async fn install_prometheus(core: &AppCore, id: &ClusterId, root: &Path) {
         wait: true,
     };
     let (tx, rx) = mpsc::channel(64);
-    core.helm_install_start(id, &request, tx).await.unwrap();
+    core.helm_install_start(id, &request, tx, "main")
+        .await
+        .unwrap();
     let (text, last) = session_output(rx).await;
     assert!(
         matches!(last, SessionEvent::Exited { code: Some(0) }),

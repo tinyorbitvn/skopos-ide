@@ -92,6 +92,44 @@ test("a Menu item carries its own test id when it has one", () => {
   expect(screen.queryByTestId("menu-item-b")).toBeNull();
 });
 
+test("a Menu item can open a submenu, whose disabled items say why", async () => {
+  const picked = vi.fn();
+  render(
+    <Menu
+      trigger={<button type="button">Open</button>}
+      items={[
+        {
+          id: "move",
+          label: "Move to",
+          sub: [
+            {
+              id: "move-top",
+              label: "Top level",
+              disabled: true,
+              hint: "Already here",
+              tooltip: "Already here",
+            },
+            { id: "move-f1", label: "prod", onSelect: picked },
+          ],
+        },
+      ]}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("button", { name: "Open" }), {
+    key: "Enter",
+  });
+  const trigger = screen.getByTestId("menu-item-move");
+  expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+  fireEvent.keyDown(trigger, { key: "ArrowRight" });
+
+  const top = await screen.findByTestId("menu-item-move-top");
+  expect(top.hasAttribute("data-disabled")).toBe(true);
+  expect(top.getAttribute("title")).toBe("Already here");
+  expect(top.textContent).toBe("Top levelAlready here");
+  fireEvent.click(screen.getByTestId("menu-item-move-f1"));
+  expect(picked).toHaveBeenCalled();
+});
+
 test("ConfirmDialog takes a test id, its own Cancel label and a disabled confirm", () => {
   const onCancel = vi.fn();
   render(

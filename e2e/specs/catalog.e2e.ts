@@ -138,8 +138,11 @@ describe("catalog", () => {
 
   it("opens a cluster from the hotbar", async () => {
     await (await hotbarItem("alpha")).click();
-    const heading = browser.$("h1=alpha");
-    await heading.waitForDisplayed({ timeout: 15000 });
+    // The header names the focused tab: its screen, then its cluster (spec P3, P9).
+    await browser.waitUntil(
+      async () => (await byTestId("header-title").getText()) === "Overview · alpha",
+      { timeout: 15000, timeoutMsg: "the hotbar never opened alpha" },
+    );
 
     await clickWhenShown("nav-catalog");
     await shown("catalog-row-alpha");

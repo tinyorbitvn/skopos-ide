@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,6 +37,8 @@ pub struct JsonStore<T> {
     version: u32,
     state: Mutex<T>,
     tx: watch::Sender<T>,
+    /// Set by a failed write of `try_update_kept`, cleared by a good one.
+    save_failing: AtomicBool,
 }
 
 fn unix_ts() -> u64 {
@@ -84,6 +87,7 @@ where
                 version,
                 state: Mutex::new(value),
                 tx,
+                save_failing: AtomicBool::new(false),
             },
             warning,
         )
@@ -145,13 +149,57 @@ where
     }
 
     pub fn update(&self, f: impl FnOnce(&mut T)) -> CoreResult<T> {
+        self.try_update(|value| {
+            f(value);
+            Ok(value.clone())
+        })
+    }
+
+    /// As `update`, but `f` may refuse the change: its error leaves the value and the
+    /// file as they were. The lock is held throughout, so a check in `f` sees the
+    /// value it changes.
+    pub fn try_update<R>(&self, f: impl FnOnce(&mut T) -> CoreResult<R>) -> CoreResult<R> {
         let mut guard = self.lock();
         let mut next = guard.clone();
-        f(&mut next);
+        let out = f(&mut next)?;
         self.write(&next)?;
         *guard = next.clone();
-        self.tx.send_replace(next.clone());
-        Ok(next)
+        self.tx.send_replace(next);
+        Ok(out)
+    }
+
+    /// As `try_update`, for a file whose changes must outlive a failed write (spec
+    /// P44): when the file cannot be written, the change is kept in memory and sent
+    /// to subscribers all the same, and the next good write saves it. Each failure is
+    /// logged; the first one since the store opened or since the last good write also
+    /// comes back as a warning to show the user, the others as `None`.
+    pub fn try_update_kept<R>(
+        &self,
+        f: impl FnOnce(&mut T) -> CoreResult<R>,
+    ) -> CoreResult<(R, Option<StoreWarning>)> {
+        let mut guard = self.lock();
+        let mut next = guard.clone();
+        let out = f(&mut next)?;
+        let warning = match self.write(&next) {
+            Ok(()) => {
+                self.save_failing.store(false, Ordering::Relaxed);
+                None
+            }
+            Err(e) => {
+                let file = file_label(&self.path);
+                tracing::warn!("{file}: changes kept in memory, the file cannot be saved: {e}");
+                let first = !self.save_failing.swap(true, Ordering::Relaxed);
+                first.then(|| StoreWarning {
+                    file,
+                    message: format!(
+                        "changes could not be saved ({e}); they are kept until the app quits"
+                    ),
+                })
+            }
+        };
+        *guard = next.clone();
+        self.tx.send_replace(next);
+        Ok((out, warning))
     }
 
     pub fn subscribe(&self) -> watch::Receiver<T> {
@@ -320,6 +368,30 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_try_update_keeps_the_value_and_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.json");
+        let (s, _) = JsonStore::<Sample>::open(p.clone(), 1);
+        s.update(|v| v.n = 1).unwrap();
+        let rx = s.subscribe();
+
+        let refused = s.try_update(|v| {
+            v.n = 2;
+            Err::<(), _>(IpcError::new(ErrorCode::InvalidInput, "no"))
+        });
+        let kept = s.try_update(|v| {
+            v.n += 10;
+            Ok(v.n)
+        });
+
+        assert_eq!(refused.unwrap_err().message, "no");
+        assert_eq!(kept.unwrap(), 11);
+        assert_eq!(rx.borrow().n, 11);
+        let (again, _) = JsonStore::<Sample>::open(p, 1);
+        assert_eq!(again.get().n, 11);
+    }
+
+    #[test]
     fn subscribers_see_updates() {
         let dir = tempfile::tempdir().unwrap();
         let (s, _) = JsonStore::<Sample>::open(dir.path().join("a.json"), 1);
@@ -338,6 +410,53 @@ mod tests {
         s.update(|v| v.n = 1).unwrap();
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn a_kept_update_survives_a_failed_write_and_warns_once_per_failing_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.json");
+        let (s, _) = JsonStore::<Sample>::open(p.clone(), 1);
+        let rx = s.subscribe();
+        // The target path is now a directory, so persist (rename over it) fails.
+        std::fs::create_dir(&p).unwrap();
+        std::fs::write(p.join("x"), "x").unwrap();
+
+        let first = s.try_update_kept(|v| {
+            v.n = 1;
+            Ok(v.n)
+        });
+        let second = s.try_update_kept(|v| {
+            v.n += 1;
+            Ok(v.n)
+        });
+        let refused = s.try_update_kept(|v| {
+            v.n = 99;
+            Err::<(), _>(IpcError::new(ErrorCode::InvalidInput, "no"))
+        });
+
+        let (n, warning) = first.unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(warning.unwrap().file, "a.json");
+        let (n, warning) = second.unwrap();
+        assert_eq!(n, 2);
+        assert!(warning.is_none(), "one warning per failing run");
+        assert_eq!(refused.unwrap_err().message, "no");
+        assert_eq!(s.get().n, 2);
+        assert_eq!(rx.borrow().n, 2);
+
+        std::fs::remove_dir_all(&p).unwrap();
+        let (n, warning) = s.try_update_kept(|v| Ok(v.n)).unwrap();
+        assert_eq!(n, 2);
+        assert!(warning.is_none());
+        let (again, _) = JsonStore::<Sample>::open(p.clone(), 1);
+        assert_eq!(again.get().n, 2);
+        std::fs::remove_file(&p).unwrap();
+        std::fs::create_dir(&p).unwrap();
+        std::fs::write(p.join("x"), "x").unwrap();
+        let (n, warning) = s.try_update_kept(|v| Ok(v.n + 1)).unwrap();
+        assert_eq!(n, 3);
+        assert!(warning.is_some(), "a new failing run warns again");
     }
 
     #[test]

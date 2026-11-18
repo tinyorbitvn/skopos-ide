@@ -103,6 +103,7 @@ impl AppCore {
         target: LogTarget,
         options: LogOptions,
         dest: &Path,
+        owner: &str,
     ) -> CoreResult<LogDownload> {
         check_target(&target)?;
         if !dest.is_absolute() {
@@ -113,7 +114,7 @@ impl AppCore {
             .ok_or_else(|| invalid("the destination path has no folder"))?;
         let client = self.cluster_client(id)?;
         let token = self.cluster_cancel_token(id)?;
-        let guard = self.sessions().register(token.clone(), None);
+        let guard = self.sessions().register(token.clone(), None, owner);
         let temp = NamedTempFile::new_in(parent).map_err(|error| {
             // The io error quotes the folder path, which must not reach the caller.
             IpcError::new(

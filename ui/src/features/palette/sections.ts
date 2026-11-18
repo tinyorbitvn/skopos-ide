@@ -12,6 +12,7 @@ import {
   visibleSections,
 } from "../../kinds/nav";
 import { connectCluster } from "../../stores/clusters";
+import { clusterPath, type FolderTree } from "../catalog/folderTree";
 import { isBlank, matchEntry } from "./fuzzy";
 import {
   CUSTOM_ICON,
@@ -32,6 +33,11 @@ export interface PaletteEntry {
   label: string;
   hint: string;
   icon: LucideIcon;
+  /**
+   * The location the row opens, when it opens one: a Ctrl/Cmd, middle or double
+   * click then opens it as the sidebar's items do (spec P11 to P13).
+   */
+  path?: string;
   run(ctx: CommandContext): void;
 }
 
@@ -66,17 +72,26 @@ export function commandEntries(
     label: c.label(ctx),
     hint: c.shortcut ? shortKeys(c.shortcut, mac) : "Command",
     icon: c.icon,
+    path: c.path?.(ctx) ?? undefined,
     run: (context) => c.run(context),
   }));
 }
 
-export function clusterEntries(clusters: ClusterEntry[]): PaletteEntry[] {
+/**
+ * A row per cluster, labelled with its folder path (`prod / eu / prod-eu-1`, spec P30),
+ * so the search matches the folders' names too.
+ */
+export function clusterEntries(
+  clusters: ClusterEntry[],
+  tree: FolderTree = { folders: [], placements: {} },
+): PaletteEntry[] {
   return clusters.map((c) => ({
     key: c.id,
     testId: `palette-cluster-${c.id}`,
-    label: c.name,
+    label: clusterPath(tree, c),
     hint: clusterStatus(c.state).label,
     icon: Server,
+    path: `/cluster/${encodeURIComponent(c.id)}`,
     run: (ctx) => {
       // A newly opened cluster screen connects a disconnected cluster itself. The
       // open screen does not connect again after a disconnect, so its row does.
@@ -107,6 +122,7 @@ export function pageEntries(
     label,
     hint: "Page",
     icon,
+    path: to,
     run: (ctx) => ctx.navigate(to),
   });
   const sections = visibleSections(resources);
@@ -157,14 +173,15 @@ export function objectEntries(
     // The key `ResourceScreen` compares with `?object=`.
     const objectKey = `${o.namespace ?? ""}/${o.name}`;
     const list = resourcePath(clusterId, o.group, o.plural);
+    const to = `${list}?object=${encodeURIComponent(objectKey)}`;
     return {
       key: `${o.group}/${o.plural}/${objectKey}`,
       testId: `palette-object-${o.plural}-${scoped}`,
       label: o.name,
       hint: o.namespace === null ? o.kind : `${o.kind} · ${o.namespace}`,
       icon: KIND_ICONS[o.plural] ?? FALLBACK_ICON,
-      run: (ctx) =>
-        ctx.navigate(`${list}?object=${encodeURIComponent(objectKey)}`),
+      path: to,
+      run: (ctx) => ctx.navigate(to),
     };
   });
 }

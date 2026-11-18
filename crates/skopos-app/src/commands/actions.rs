@@ -6,7 +6,7 @@ use skopos_core::resources::{
     DataChange, DrainEvent, DrainOptions, ResourceRef, SavedKubeconfig, SecretValue,
 };
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
@@ -96,6 +96,7 @@ pub async fn node_set_unschedulable(
 #[tauri::command]
 pub async fn node_drain_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     name: String,
     options: DrainOptions,
@@ -104,7 +105,7 @@ pub async fn node_drain_start(
     let (tx, mut rx) = mpsc::channel(DRAIN_BACKLOG);
     let id = state
         .core
-        .node_drain_start(&cluster_id, &name, options, tx)
+        .node_drain_start(&cluster_id, &name, options, tx, window.label())
         .await?;
     let core = state.core.clone();
     let drain = id.clone();

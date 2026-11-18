@@ -235,7 +235,17 @@ const FIXTURES: Record<string, SpecFixture> = {
   // e2e/helpers/metrics.ts installs the providers in the spec, which needs a longer timeout.
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
-  workspace: { kubeconfigs: {}, start: startKindFixture },
+  tabs: { kubeconfigs: {}, start: startKindFixture },
+  "tabs-restart-1-save": {
+    kubeconfigs: {},
+    envGroup: "tabs-restart",
+    start: startKindFixture,
+  },
+  "tabs-restart-2-verify": { kubeconfigs: {}, envGroup: "tabs-restart" },
+  windows: { kubeconfigs: {}, start: startKindFixture },
+  "catalog-folders": {
+    kubeconfigs: { config: kubeconfig(["alpha", "beta", "gamma"]) },
+  },
 };
 
 /** Specs with no entry start with an empty `~/.kube`. */

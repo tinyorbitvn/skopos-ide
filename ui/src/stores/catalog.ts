@@ -140,6 +140,13 @@ export const useCatalog: UseBoundStore<StoreApi<CatalogState>> =
     };
   });
 
+/** The catalog name of a cluster, or "Cluster" while the id is not in the catalog. */
+export function useClusterName(clusterId: string): string {
+  return useCatalog(
+    (s) => s.clusters.find((c) => c.id === clusterId)?.name ?? "Cluster",
+  );
+}
+
 /**
  * Puts the store back to its first-run state, for a test that mocks a fresh
  * backend, whose listeners start empty.

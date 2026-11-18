@@ -18,6 +18,8 @@ use crate::kubeconfig::{
 };
 use crate::prefs::ClusterSettings;
 
+pub mod folders;
+
 const PASTED_DIR: &str = "kubeconfigs";
 const PASTED_EXTENSION: &str = "yaml";
 const PASTED_NAME_HEX_LEN: usize = 16;

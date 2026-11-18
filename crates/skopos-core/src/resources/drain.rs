@@ -117,6 +117,8 @@ pub enum DrainEvent {
 pub(crate) struct RunningDrain {
     id: String,
     token: CancellationToken,
+    /// The label of the window that started the drain (P36).
+    owner: String,
 }
 
 #[derive(Debug)]
@@ -510,6 +512,7 @@ impl AppCore {
         node: &str,
         options: DrainOptions,
         tx: mpsc::Sender<DrainEvent>,
+        owner: &str,
     ) -> CoreResult<String> {
         if !is_path_segment(node) {
             return Err(invalid("the node name is not valid"));
@@ -530,6 +533,7 @@ impl AppCore {
                 slot.insert(RunningDrain {
                     id: drain.clone(),
                     token: token.clone(),
+                    owner: owner.to_owned(),
                 });
             }
         }
@@ -559,11 +563,18 @@ impl AppCore {
         }
     }
 
-    /// Stops every running drain, on all clusters. For when the page that started
-    /// them goes away: it took their ids with it, and a Tauri channel can still be
-    /// written after a reload, so nothing else would stop them.
+    /// Stops every running drain, on all clusters.
     pub fn node_drain_cancel_all(&self) {
         for running in self.drains().iter() {
+            running.token.cancel();
+        }
+    }
+
+    /// Stops the drains the window `owner` started, on all clusters. For when its page
+    /// loads again or it closes (P36): the page took their ids with it, and a Tauri
+    /// channel can still be written after a reload, so nothing else would stop them.
+    pub fn node_drain_cancel_owned(&self, owner: &str) {
+        for running in self.drains().iter().filter(|r| r.owner == owner) {
             running.token.cancel();
         }
     }
@@ -573,6 +584,35 @@ impl AppCore {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn a_window_cancels_only_its_own_drains() {
+        let root = tempfile::tempdir().unwrap();
+        let paths =
+            crate::paths::AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+        let core = AppCore::start_with_kubeconfig_env(paths, None)
+            .await
+            .unwrap();
+        let mut tokens = Vec::new();
+        for (node, owner) in [("n1", "main"), ("n2", "window-2"), ("n3", "window-2")] {
+            let token = CancellationToken::new();
+            core.drains().insert(
+                ("c".to_owned(), node.to_owned()),
+                RunningDrain {
+                    id: core.next_drain_id(),
+                    token: token.clone(),
+                    owner: owner.to_owned(),
+                },
+            );
+            tokens.push(token);
+        }
+
+        core.node_drain_cancel_owned("window-2");
+
+        let cancelled: Vec<bool> = tokens.iter().map(CancellationToken::is_cancelled).collect();
+        assert_eq!(cancelled, [false, true, true]);
+        core.shutdown().await;
+    }
 
     /// RFC 7386 merge, enough to build a pod from parts.
     fn json_patch_merge(target: &mut Value, patch: &Value) {

@@ -1,5 +1,5 @@
 /**
- * The keyboard shortcuts of spec C §7.2 and D2 §13: one table that the Keyboard
+ * The keyboard shortcuts of spec C §7.2, D2 §13 and P16: one table that the Keyboard
  * shortcuts dialog shows and the key handlers match, so the two cannot drift apart.
  * The Charts keys act only while a chart has focus; the chart reads them itself. The
  * Resource map keys (spec E §16) act only while the map's canvas has focus, and the
@@ -41,7 +41,7 @@ export const SHORTCUT_GROUPS = [
   "Dialogs and lists",
   "Charts",
   "Resource map",
-  "Workspace",
+  "Tabs and windows",
 ] as const;
 export type ShortcutGroup = (typeof SHORTCUT_GROUPS)[number];
 
@@ -68,9 +68,10 @@ export type ShortcutId =
   | "mapZoom"
   | "mapFit"
   | "mapClear"
-  | "workspaceSplit"
-  | "workspaceTabs"
-  | "workspaceClose";
+  | "splitRight"
+  | "closeTab"
+  | "cycleTabs"
+  | "focusPane";
 
 export interface ShortcutRow {
   id: ShortcutId;
@@ -103,7 +104,11 @@ function either(...texts: string[]): KeySpec {
 }
 
 function pair(first: string, second: string): KeySpec {
-  return { chords: [parseChord(first), parseChord(second)], join: "/" };
+  return all(first, second);
+}
+
+function all(...texts: string[]): KeySpec {
+  return { chords: texts.map(parseChord), join: "/" };
 }
 
 /** Keys as written, for what `parseChord` cannot read: "+", or "Arrow keys". */
@@ -249,22 +254,29 @@ export const SHORTCUTS: readonly ShortcutRow[] = [
     keys: one("Esc"),
   },
   {
-    id: "workspaceSplit",
-    group: "Workspace",
-    action: "Open the tab to the side",
+    id: "splitRight",
+    group: "Tabs and windows",
+    action: "Copy the tab into a new pane on the right",
     keys: one("Mod+\\"),
   },
   {
-    id: "workspaceTabs",
-    group: "Workspace",
-    action: "Previous or next tab",
-    keys: pair("Left", "Right"),
+    id: "closeTab",
+    group: "Tabs and windows",
+    action: "Close the tab",
+    keys: one("Mod+W"),
   },
   {
-    id: "workspaceClose",
-    group: "Workspace",
-    action: "Close the tab",
-    keys: one("Delete"),
+    // Ctrl on every platform (spec P16).
+    id: "cycleTabs",
+    group: "Tabs and windows",
+    action: "Next or previous tab of the pane",
+    keys: pair("Ctrl+Tab", "Ctrl+Shift+Tab"),
+  },
+  {
+    id: "focusPane",
+    group: "Tabs and windows",
+    action: "Focus the first, second or third pane",
+    keys: all("Mod+1", "Mod+2", "Mod+3"),
   },
 ];
 
@@ -339,6 +351,8 @@ function keyMatches(key: string, event: KeyboardEvent): boolean {
     return event.code === `Key${key}`;
   }
   if (key === "`") return event.code === "Backquote";
+  // The digit row, also on layouts where a digit needs Shift (the key is then a sign).
+  if (/^[0-9]$/.test(key) && event.code === `Digit${key}`) return true;
   return event.key === (EVENT_KEYS[key] ?? key);
 }
 

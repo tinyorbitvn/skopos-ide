@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useMatch, useParams } from "react-router";
-import { EmptyState, Spinner } from "../../design";
+import { useMatch, useParams } from "react-router";
+import { useTabContext } from "../../app/tabs/TabView";
+import { Button, EmptyState, Spinner } from "../../design";
 import { useCatalog } from "../../stores/catalog";
 import { useClusterState, useConnect } from "../../stores/clusters";
+import { useWindowLayout } from "../../stores/windowLayout";
 import { ClusterSettingsScreen } from "../settings/ClusterSettingsScreen";
 import { ClusterLayout } from "./ClusterLayout";
 import styles from "./ClusterScreen.module.css";
@@ -67,6 +69,29 @@ function ClusterView({ id }: { id: string }) {
   );
 }
 
+/** A tab whose cluster left the catalog (spec P10): its Close closes the tab, pinned or not. */
+function NotInCatalog() {
+  const tab = useTabContext();
+  function close(): void {
+    if (tab === null) return;
+    const { dispatch } = useWindowLayout.getState();
+    dispatch({ type: "unpin", tabId: tab.tabId });
+    dispatch({ type: "close", tabId: tab.tabId });
+  }
+  return (
+    <EmptyState
+      title="This cluster is no longer in the catalog."
+      action={
+        tab === null ? null : (
+          <Button data-testid="cluster-missing-close" onClick={close}>
+            Close
+          </Button>
+        )
+      }
+    />
+  );
+}
+
 export function ClusterScreen() {
   const { id = "" } = useParams();
   const cluster = useCatalog((s) => s.clusters.find((c) => c.id === id));
@@ -80,13 +105,7 @@ export function ClusterScreen() {
         </div>
       );
     }
-    return (
-      <EmptyState
-        title="Cluster not found"
-        body="This cluster is not in the catalog. It may have been removed."
-        action={<Link to="/catalog">Back to the catalog</Link>}
-      />
-    );
+    return <NotInCatalog />;
   }
   return <ClusterView key={id} id={id} />;
 }
