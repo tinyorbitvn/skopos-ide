@@ -161,11 +161,12 @@ fn open_folders(paths: &AppPaths, warnings: &mut Vec<StoreWarning>) -> JsonStore
     let repaired = loaded.clone().repaired();
     if repaired != loaded {
         tracing::warn!("{CATALOG_FOLDERS_FILE}: repaired folders with a missing parent or a cycle");
-        if let Err(e) = store.update(|all| *all = repaired) {
-            warnings.push(StoreWarning {
-                file: CATALOG_FOLDERS_FILE.to_owned(),
-                message: format!("the repaired folders could not be saved: {e}"),
-            });
+        // A failed save keeps the repaired tree in memory (P44).
+        if let Ok(((), Some(failed))) = store.try_update_kept(|all| {
+            *all = repaired;
+            Ok(())
+        }) {
+            warnings.push(failed);
         }
     }
     store
@@ -249,8 +250,11 @@ impl AppCore {
         let clusters = open_store(&paths, CLUSTERS_FILE, &mut warnings);
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
         let folders = open_folders(&paths, &mut warnings);
-        let (windows, windows_warning) =
-            Windows::open(paths.config.join(WINDOWS_FILE), STORE_VERSION);
+        let (windows, windows_warning) = Windows::open(
+            paths.config.join(WINDOWS_FILE),
+            STORE_VERSION,
+            events.clone(),
+        );
         warnings.extend(windows_warning);
         let portforward_definitions = open_store(&paths, PORTFORWARDS_FILE, &mut warnings);
         let (ui_state, ui_warning) = UiState::open(paths.config.join(UI_STATE_FILE), STORE_VERSION);

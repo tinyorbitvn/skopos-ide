@@ -431,3 +431,90 @@ async fn the_window_at_a_point_follows_the_focus_order() {
     assert_eq!(core.window_at(&both[1..], 200, 200), None);
     core.shutdown().await;
 }
+
+/// Makes a dir read-only until dropped (Unix only).
+#[cfg(unix)]
+struct ReadOnly<'a> {
+    dir: &'a std::path::Path,
+    mode: u32,
+}
+
+#[cfg(unix)]
+impl<'a> ReadOnly<'a> {
+    /// `None` when this user can write the dir anyway, as root can.
+    fn new(dir: &'a std::path::Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir).unwrap().permissions().mode();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let guard = Self { dir, mode };
+        let probe = dir.join(".probe");
+        if std::fs::write(&probe, "").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            return None;
+        }
+        Some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly<'_> {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(self.dir, std::fs::Permissions::from_mode(self.mode));
+    }
+}
+
+/// The files named by the `StoreWarning`s waiting in `events`.
+fn store_warnings(events: &mut Receiver<CoreEvent>) -> Vec<String> {
+    let mut files = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let CoreEvent::StoreWarning { warning } = event {
+            files.push(warning.file);
+        }
+    }
+    files
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_save_keeps_the_change_and_warns_once() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    core.window_layout_set(two_panes()).unwrap();
+    let mut events = core.subscribe();
+    let Some(read_only) = ReadOnly::new(&fixture.paths.config) else {
+        core.shutdown().await;
+        return;
+    };
+
+    let mut left_focused = two_panes();
+    left_focused.focused_pane = 0;
+    core.window_layout_set(left_focused).unwrap();
+    let outcome = core
+        .window_tab_move(MAIN_WINDOW, "b", MoveTarget::NewWindow { x: 0, y: 0 })
+        .unwrap();
+
+    assert_eq!(outcome.target, "window-2");
+    let windows = core.windows_list();
+    assert_eq!(labels(&windows), [MAIN_WINDOW, "window-2"]);
+    assert_eq!(windows[0].focused_pane, 0);
+    assert_eq!(tab_ids(&windows[0]), [vec!["a"], vec!["c"]]);
+    assert_eq!(store_warnings(&mut events), ["windows.json"]);
+    let on_disk = std::fs::read_to_string(fixture.windows_file()).unwrap();
+    assert!(!on_disk.contains("window-2"), "{on_disk}");
+
+    // The next change once the dir is writable saves everything kept meanwhile.
+    drop(read_only);
+    core.window_bounds_set(MAIN_WINDOW, BOUNDS).unwrap();
+    let on_disk = std::fs::read_to_string(fixture.windows_file()).unwrap();
+    assert!(on_disk.contains("window-2"), "{on_disk}");
+    assert!(store_warnings(&mut events).is_empty());
+
+    // After a save that worked, the next failure warns again.
+    let read_only = ReadOnly::new(&fixture.paths.config).unwrap();
+    core.window_bounds_set(MAIN_WINDOW, WindowBounds { x: 0, ..BOUNDS })
+        .unwrap();
+    assert_eq!(store_warnings(&mut events), ["windows.json"]);
+    drop(read_only);
+    core.shutdown().await;
+}

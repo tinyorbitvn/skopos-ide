@@ -240,7 +240,9 @@ impl CatalogFolders {
 }
 
 /// Each change is saved, then sends one `CatalogFoldersChanged` so every window
-/// reads the tree again. A refused change saves and sends nothing.
+/// reads the tree again. A refused change saves and sends nothing. A change whose
+/// save fails stays in memory; the first failure of a run also sends a
+/// `StoreWarning` (P44).
 impl AppCore {
     pub fn catalog_folders(&self) -> CatalogFolders {
         self.folders().get()
@@ -250,7 +252,10 @@ impl AppCore {
         &self,
         f: impl FnOnce(&mut CatalogFolders) -> CoreResult<R>,
     ) -> CoreResult<R> {
-        let out = self.folders().try_update(f)?;
+        let (out, warning) = self.folders().try_update_kept(f)?;
+        if let Some(warning) = warning {
+            self.emit(CoreEvent::StoreWarning { warning });
+        }
         self.emit(CoreEvent::CatalogFoldersChanged);
         Ok(out)
     }

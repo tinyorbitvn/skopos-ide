@@ -934,3 +934,81 @@ async fn a_folders_file_with_a_missing_parent_is_repaired_at_start() {
     assert!(!std::fs::read_to_string(&file).unwrap().contains("folder-9"));
     core.shutdown().await;
 }
+
+/// Makes a dir read-only until dropped (Unix only).
+#[cfg(unix)]
+struct ReadOnly<'a> {
+    dir: &'a Path,
+    mode: u32,
+}
+
+#[cfg(unix)]
+impl<'a> ReadOnly<'a> {
+    /// `None` when this user can write the dir anyway, as root can.
+    fn new(dir: &'a Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir).unwrap().permissions().mode();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let guard = Self { dir, mode };
+        let probe = dir.join(".probe");
+        if std::fs::write(&probe, "").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            return None;
+        }
+        Some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly<'_> {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(self.dir, std::fs::Permissions::from_mode(self.mode));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_folders_save_keeps_the_change_and_warns_once() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    core.catalog_folder_create(None, "prod").unwrap();
+    let file = fixture.paths.config.join("catalog-folders.json");
+    let mut events = core.subscribe();
+    let Some(read_only) = ReadOnly::new(&fixture.paths.config) else {
+        core.shutdown().await;
+        return;
+    };
+
+    let eu = core.catalog_folder_create(None, "eu").unwrap();
+    core.catalog_folder_rename(&eu.id, "EU").unwrap();
+
+    let mut names: Vec<String> = core
+        .catalog_folders()
+        .folders
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    names.sort();
+    assert_eq!(names, ["EU", "prod"]);
+    let (mut changed, mut warned) = (0, Vec::new());
+    while let Ok(event) = events.try_recv() {
+        match event {
+            CoreEvent::CatalogFoldersChanged => changed += 1,
+            CoreEvent::StoreWarning { warning } => warned.push(warning.file),
+            _ => {}
+        }
+    }
+    assert_eq!(changed, 2);
+    assert_eq!(warned, ["catalog-folders.json"]);
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("EU"));
+
+    drop(read_only);
+    core.catalog_folder_create(None, "dev").unwrap();
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        on_disk.contains("\"EU\"") && on_disk.contains("\"dev\""),
+        "{on_disk}"
+    );
+    core.shutdown().await;
+}
