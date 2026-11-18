@@ -397,14 +397,20 @@ describe("build", () => {
     for (const id of used) assert.ok(html.includes(`<symbol id="${id}"`), id);
   });
 
-  test("copies the tokens, the five fonts and the icon, and writes no links", () => {
+  test("copies the tokens, the five fonts, the icon and the two scripts, and writes no links", () => {
     assert.deepEqual(
       fs.readFileSync(path.join(out, "tokens.css")),
       fs.readFileSync(path.join(ROOT, "ui", "src", "design", "tinyorbit.css")),
     );
     assert.deepEqual(fs.readdirSync(path.join(out, "fonts")).sort(), FONT_FILES);
     assert.ok(fs.existsSync(path.join(out, "icon.svg")));
-    assert.ok(fs.existsSync(path.join(out, "site.js")));
+    for (const script of ["site.js", "ribbon.js"]) {
+      assert.deepEqual(
+        fs.readFileSync(path.join(out, script)),
+        fs.readFileSync(path.join(ROOT, "site", script)),
+        script,
+      );
+    }
     for (const entry of fs.readdirSync(out, { recursive: true })) {
       assert.ok(!fs.lstatSync(path.join(out, entry)).isSymbolicLink(), entry);
     }
@@ -452,6 +458,36 @@ describe("cli", () => {
     assert.throws(() => cli(["--out", "tmp/site", "--publish"], { root: ROOT }), /unknown argument/);
   });
 });
+// TinyOrbit colors as sRGB channels from 0 to 1, following var() references. A dark token falls
+// back to the palette in the first block.
+const TOKENS_CSS = fs.readFileSync(path.join(ROOT, "ui", "src", "design", "tinyorbit.css"), "utf8");
+function tokenRgb(name, theme = "light") {
+  const blocks = [...TOKENS_CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const light = blocks.filter((m) => /:root\b|\[data-theme="light"\]/.test(m[1]));
+  const dark = blocks.filter((m) => /\[data-theme="dark"\]/.test(m[1]));
+  for (const [, , body] of theme === "dark" ? [...dark, ...light] : light) {
+    const found = new RegExp(`(?:^|[\\s;])${name}:\\s*([^;]+);`).exec(body);
+    if (!found) continue;
+    const value = found[1].trim();
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    if (ref) return tokenRgb(ref[1], theme);
+    assert.match(value, /^#[0-9a-f]{6}$/i, name);
+    return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255);
+  }
+  throw new Error(`no token ${name}`);
+}
+
+function over(top, alpha, bottom) {
+  return top.map((channel, i) => alpha * channel + (1 - alpha) * bottom[i]);
+}
+
+function contrast(a, b) {
+  const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = ([r, g, bl]) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(bl);
+  const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (high + 0.05) / (low + 0.05);
+}
+
 describe("page", () => {
   const release = parseRelease(releaseJson());
   const template = fs.readFileSync(path.join(ROOT, "site", "index.html"), "utf8");
@@ -474,9 +510,60 @@ describe("page", () => {
     assert.ok(html.includes('<a class="skip" href="#main">Skip to content</a>'));
   });
 
-  test("has one Orbit-filled button and one dark band", () => {
-    assert.equal(html.match(/button--primary/g)?.length, 1);
-    assert.equal(html.match(/class="band"/g)?.length, 1);
+  test("is dark, with one screenshot in the light theme", () => {
+    assert.ok(html.includes('<html lang="en" data-theme="dark">'));
+    assert.equal(html.match(/data-theme="light"/g)?.length, 1);
+    assert.ok(html.includes('<figure class="shot themes__shot" data-theme="light">'));
+  });
+
+  test("draws two ribbons, each over its glow and hidden from assistive technology", () => {
+    assert.equal(html.match(/<canvas[\s>]/g)?.length, 2);
+    const ribbons = [
+      ...html.matchAll(
+        /<div class="glow" aria-hidden="true"><\/div>\s*<canvas class="ribbon" data-ribbon data-ribbon-angle="([0-9.]+)" data-ribbon-offset="([0-9.]+)" aria-hidden="true"><\/canvas>/g,
+      ),
+    ];
+    assert.deepEqual(
+      ribbons.map((m) => [m[1], m[2]]),
+      [
+        ["0.74", "4"],
+        ["0.32", "11"],
+      ],
+    );
+    assert.ok(html.includes('<script src="ribbon.js" defer></script>'));
+  });
+
+  test("lays the features out as six cards with figures and three small cards", () => {
+    const cards = [...html.matchAll(/<article class="card ([^"]+)">([\s\S]*?)<\/article>/g)];
+    assert.deepEqual(
+      cards.filter((m) => m[2].includes("<figure")).map((m) => m[1]),
+      ["card--half", "card--half", "card--third", "card--third", "card--third", "card--wide"],
+    );
+    assert.deepEqual(
+      cards.filter((m) => !m[2].includes("<figure")).map((m) => m[1]),
+      ["card--third card--small", "card--third card--small", "card--third card--small"],
+    );
+  });
+
+  test("hides the orbit frame, its stars and the wordmark from assistive technology", () => {
+    assert.ok(html.includes('<div class="frame" aria-hidden="true"></div>'));
+    const rules = html.match(/<div class="rule"[^>]*>/g) ?? [];
+    assert.equal(rules.length, 7);
+    for (const rule of rules) assert.equal(rule, '<div class="rule" aria-hidden="true">');
+    assert.equal(html.match(/class="rule__star /g)?.length, 14);
+    assert.ok(html.includes('<div class="wordmark" aria-hidden="true">SkoposIDE</div>'));
+  });
+
+  test("marks no download card without the script", () => {
+    assert.ok(!html.includes("platform--mine"));
+    for (const os of ["mac", "windows", "linux"]) {
+      assert.ok(html.includes(`<article class="platform" data-os="${os}">`), os);
+    }
+    assert.equal(html.match(/<span class="tag platform__tag" hidden>Your system<\/span>/g)?.length, 3);
+    // Every installer starts as a line pill; site.js turns the visitor's into the white pill.
+    for (const [tag] of html.matchAll(/<a\s[^>]*data-asset="[^"]+"[^>]*>/g)) {
+      assert.ok(tag.includes('class="button button--line button--sm"'), tag);
+    }
   });
 
   test("every in-page link has its target", () => {
@@ -492,11 +579,14 @@ describe("page", () => {
     assert.doesNotMatch(css, /https?:|@import/);
   });
 
-  test("the hero works without the script", () => {
-    assert.match(
-      html,
-      /<a class="button button--primary button--lg" id="hero-download" href="#download">.*<span data-label>Download<\/span><\/a>/,
-    );
+  test("the hero and the call to action work without the script", () => {
+    for (const id of ["hero-download", "cta-download"]) {
+      assert.match(
+        html,
+        new RegExp(`<a class="button button--primary" id="${id}" href="#download">[^\\n]*<span data-label>Download</span>[^\\n]*</a>`),
+        id,
+      );
+    }
     assert.ok(html.includes('v0.6.1<span id="hero-file"></span>'));
     assert.ok(html.includes('<p class="hero__alt" id="hero-alt" hidden></p>'));
   });
@@ -507,7 +597,8 @@ describe("page", () => {
       "Everything here is in release 0.6.1",
       '<span class="stats__value">9.8 MB</span>',
       "The Windows installer is 9.8 MB.",
-      "SkoposIDE 0.6.1</h2>",
+      'SkoposIDE <span class="grad">0.6.1</span></h2>',
+      'Download <span class="grad">SkoposIDE 0.6.1</span></h2>',
       "chmod +x SkoposIDE_0.6.1_amd64.AppImage",
       "latest: v0.6.1 · 2026-11-16",
     ]) {
@@ -533,7 +624,7 @@ describe("page", () => {
     for (const id of ["mock-dock", "mock-map", "mock-metrics", "mock-apps"]) {
       assert.match(
         template,
-        new RegExp(`<figure class="feature__media shot mock[^"]*" id="${id}" role="img" aria-label="[^"]{20,}">`),
+        new RegExp(`<figure class="card__media mock[^"]*" id="${id}" role="img" aria-label="[^"]{20,}">`),
         id,
       );
     }
@@ -560,11 +651,137 @@ describe("page", () => {
 
   test("keeps a focus outline that forced-colors mode can show", () => {
     // Forced colors drop box shadows, so the ring needs an outline; a transparent one shows there.
-    assert.doesNotMatch(css, /outline:\s*(none|0)\s*;/);
+    const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const removed = rules.flatMap((m) =>
+      [...m[2].matchAll(/(?:^|;)\s*(outline(?:-style|-width)?)\s*:\s*([^;]*)/g)]
+        .filter(([, , value]) => value.split(/\s+/).some((word) => /^(none|hidden|0[a-z%]*)$/i.test(word)))
+        .map(([, property, value]) => `${m[1].trim()} { ${property}: ${value.trim()} }`),
+    );
+    assert.deepEqual(removed, []);
+    assert.match(css, /\n:focus-visible \{[^}]*outline: 2px solid var\(--orbit-300\);/);
   });
 
-  test("keeps a flipped feature's text on the left once its row stacks", () => {
-    // A wrapped row-reverse line packs from the right; flex-end packs it from the left.
-    assert.match(css, /\.feature--flip \{\n {2}flex-direction: row-reverse;\n {2}justify-content: flex-end;\n\}/);
+  test("fills no control with orbit: the primary action is the white pill", () => {
+    const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const filled = rules
+      .filter((m) => /\.button/.test(m[1]))
+      .filter((m) => /background(-color)?:[^;]*var\(--(orbit-500|orbit-600|surface-accent)\)/.test(m[2]))
+      .map((m) => m[1].trim());
+    assert.deepEqual(filled, []);
+    assert.match(css, /\n\.button--primary \{[^}]*background: var\(--surface-inverse\);[^}]*color: var\(--text-inverse\);/);
+  });
+
+  test("maps the drawn figures' raw grays to their dark counterparts", () => {
+    const rule = /\n\.mock \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    for (const [from, to] of [
+      ["50", "900"],
+      ["100", "800"],
+      ["200", "700"],
+      ["300", "600"],
+    ]) {
+      assert.match(rule, new RegExp(`--gray-${from}: var\\(--gray-${to}\\);`), `--gray-${from}`);
+    }
+  });
+
+  test("stops the gradient drift and the card hover under reduced motion", () => {
+    const block = /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.grad--move \{\s*animation: none;\s*\}/);
+    assert.match(block, /\.card,[^{]*\{\s*transition: none;\s*\}/);
+  });
+
+  test("keeps the gradient text readable in forced colors", () => {
+    const block = /@media \(forced-colors: active\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.grad \{\s*background: none;\s*color: CanvasText;\s*\}/);
+  });
+
+  test("drops the ribbons in forced colors, so the text sits on the system background", () => {
+    // Forced colors repaint text in CanvasText but leave a canvas as drawn: dark under a light theme.
+    const block = /@media \(forced-colors: active\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.ribbon \{\s*display: none;\s*\}/);
+  });
+
+  test("backs the copy over each ribbon with a scrim that grows with it", () => {
+    // A fixed-size scrim left the copy's last lines on the bare ribbon once the copy grew taller.
+    assert.ok(!/class="scrim/.test(html), "no fixed-size scrim in the page");
+    for (const copy of ["hero__copy", "cta__copy"]) {
+      assert.match(css, new RegExp(`\\n\\.${copy} \\{[^}]*width: fit-content;`), copy);
+    }
+    const plate = /\n\.hero__copy::before,\n\.cta__copy::before \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    assert.match(plate, /position: absolute;/);
+    assert.match(plate, /z-index: -1;/);
+    const [, top, side] = /inset: -(\d+)px -(\d+)px;/.exec(plate) ?? [];
+    const [, blur] = /filter: blur\((\d+)px\);/.exec(plate) ?? [];
+    assert.ok(blur, "the plate has soft edges");
+    // Two blur radii in from both edges the plate keeps 97.7% of its color on each axis.
+    assert.ok(Number(top) >= 2 * blur && Number(side) >= 2 * blur, "the plate reaches past the copy");
+    // Opacity rather than color-mix(), which browsers before 2023 lack.
+    assert.match(plate, /background: var\(--gray-950\);/, "the plate is gray-950");
+    const [, share] = /opacity: (0\.\d+);/.exec(plate) ?? [];
+    assert.ok(share, "the plate lets the ribbon through");
+    // The ribbon's brightest pixels reach white.
+    const behind = over(tokenRgb("--gray-950"), Number(share) * 0.977 ** 2, [1, 1, 1]);
+    for (const name of ["--text-secondary", "--text-link"]) {
+      const ratio = contrast(tokenRgb(name, "dark"), behind);
+      assert.ok(ratio >= 4.5, `${name} at ${ratio.toFixed(2)}:1`);
+    }
+  });
+
+  test("mentions the Next release mark only when something on the page carries it", () => {
+    const marks = html.match(/class="badge next-release"/g)?.length ?? 0;
+    assert.equal(/marked Next release/.test(html), marks > 0);
+  });
+
+  test("lets the call to action grow with its copy, so zoomed text is not cut off", () => {
+    const rules = [...css.matchAll(/\n\s*\.cta \{([^}]*)\}/g)].map((m) => m[1]);
+    assert.ok(rules.length > 0);
+    assert.match(rules[0], /min-height: 540px;/);
+    for (const rule of rules) assert.doesNotMatch(rule, /(^|[;\s])height:/);
+  });
+
+  test("gives each color-mix() a fallback for browsers without it, except shadows", () => {
+    // A var() inside color-mix() defers the check to computed time, so a browser without it
+    // resets the property instead of keeping an earlier declaration: the fallbacks sit in an
+    // @supports block. A shadow or a filter that drops only loses its glow.
+    const condition = "@supports not (color: color-mix(in srgb, red 50%, transparent)) {";
+    const start = css.indexOf(condition);
+    assert.ok(start >= 0, "the fallback block");
+    let end = -1;
+    for (let i = start + condition.length - 1, depth = 0; i < css.length; i++) {
+      if (css[i] === "{") depth += 1;
+      if (css[i] === "}" && --depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+    const rulesOf = (text) =>
+      [...text.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+        selectors: m[1].split(",").map((s) => s.trim().replace(/\s+/g, " ")),
+        declarations: m[2]
+          .split(";")
+          .map((d) => d.trim())
+          .filter(Boolean)
+          .map((d) => [d.slice(0, d.indexOf(":")).trim(), d.slice(d.indexOf(":") + 1).trim()]),
+      }));
+    const fallbacks = rulesOf(css.slice(start + condition.length, end - 1));
+    const missing = [];
+    for (const rule of rulesOf(css.slice(0, start) + css.slice(end))) {
+      for (const [property, value] of rule.declarations) {
+        if (!value.includes("color-mix(") || /^(box-shadow|filter)$/.test(property)) continue;
+        for (const selector of rule.selectors) {
+          const covered = fallbacks.some(
+            (f) =>
+              f.selectors.includes(selector) &&
+              f.declarations.some(([p, v]) => p === property && !v.includes("color-mix(")),
+          );
+          if (!covered) missing.push(`${selector} { ${property} }`);
+        }
+      }
+    }
+    assert.deepEqual(missing, []);
+  });
+
+  test("hides the orbit frame and its stars on narrow screens", () => {
+    const block = /@media \(max-width: 760px\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.frame,\s*\.rule__star,\s*\.nav__links \{\s*display: none;\s*\}/);
   });
 });
