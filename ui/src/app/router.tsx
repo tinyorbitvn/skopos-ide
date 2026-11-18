@@ -14,7 +14,6 @@ import { PreferencesScreen } from "../features/prefs/PreferencesScreen";
 import { ResourceRoute } from "../features/resources/ResourceScreen";
 import { ClusterSettingsRoute } from "../features/settings/ClusterSettingsScreen";
 import { WorkloadsOverview } from "../features/workloads/WorkloadsOverview";
-import { WorkspaceScreen } from "../features/workspace/WorkspaceScreen";
 import { Shell } from "./Shell";
 
 /** A router over the current hash. */
@@ -46,7 +45,6 @@ export function createAppRouter() {
           ],
         },
         { path: "preferences", element: <PreferencesScreen /> },
-        { path: "workspace", element: <WorkspaceScreen /> },
       ],
     },
   ]);

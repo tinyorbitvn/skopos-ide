@@ -11,7 +11,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
-import { resetWorkspaceForTest, useWorkspace } from "../stores/workspace";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
 import { Hotbar } from "./Hotbar";
 
@@ -26,22 +25,16 @@ const beta = clusterEntry({
   state: { status: "connecting" },
 });
 
-async function show(
-  clusters: ClusterEntry[],
-  hotbar: string[],
-  path = "/catalog",
-) {
+async function show(clusters: ClusterEntry[], hotbar: string[]) {
   const ipc = mockBackend({
     catalog_list: () => clusters,
     catalog_warnings: () => [],
     hotbar_get: () => hotbar,
     hotbar_set: () => null,
-    ui_state_get: () => null,
-    ui_state_set: () => null,
   });
   await useCatalog.getState().init();
   render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={["/catalog"]}>
       <Hotbar />
       <Where />
     </MemoryRouter>,
@@ -59,7 +52,6 @@ function shownOrder(): (string | null)[] {
 beforeEach(() => {
   resetCatalogForTest();
   resetShellForTest();
-  resetWorkspaceForTest();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -105,6 +97,15 @@ test("click navigates to the cluster", async () => {
   await show([alpha], ["a"]);
 
   fireEvent.click(screen.getByTestId("hotbar-item-a"));
+
+  expect(screen.getByTestId("where").textContent).toBe("/cluster/a");
+});
+
+test("the rail has no Workspace link, and a Shift-click on a tile opens the cluster", async () => {
+  await show([alpha], ["a"]);
+
+  expect(screen.queryByTestId("nav-workspace")).toBeNull();
+  fireEvent.click(screen.getByTestId("hotbar-item-a"), { shiftKey: true });
 
   expect(screen.getByTestId("where").textContent).toBe("/cluster/a");
 });
@@ -214,77 +215,4 @@ test("the Help menu's items open the three shell dialogs", async () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   }
   expect(opened).toEqual(["palette", "shortcuts", "about"]);
-});
-
-/** Each pane's clusters, `*` before the active tab's, and the focused pane's index. */
-function workspaceShape(): string {
-  const { panes, focus } = useWorkspace.getState().layout;
-  const shown = panes
-    .map((p) =>
-      p.tabs
-        .map((t) => `${p.active === t.id ? "*" : ""}${t.clusterId}`)
-        .join(","),
-    )
-    .join(" | ");
-  return `${shown} @${panes.findIndex((p) => p.id === focus)}`;
-}
-
-function activeTiles(): string[] {
-  return ["a", "b"].filter(
-    (id) =>
-      screen.getByTestId(`hotbar-item-${id}`).getAttribute("aria-current") ===
-      "page",
-  );
-}
-
-test("the Workspace item comes right after Catalog", async () => {
-  await show([alpha], ["a"]);
-
-  const links = within(screen.getByTestId("hotbar"))
-    .getAllByRole("link")
-    .map((l) => l.getAttribute("data-testid"));
-  expect(links.slice(0, 2)).toEqual(["nav-catalog", "nav-workspace"]);
-  const workspace = screen.getByTestId("nav-workspace");
-  expect(workspace.getAttribute("aria-label")).toBe("Workspace");
-
-  fireEvent.click(workspace);
-
-  expect(screen.getByTestId("where").textContent).toBe("/workspace");
-});
-
-test("off the Workspace, a click opens the cluster screen and Shift-click opens it in the Workspace", async () => {
-  await show([alpha, beta], ["a", "b"]);
-
-  fireEvent.click(screen.getByTestId("hotbar-item-a"));
-  expect(screen.getByTestId("where").textContent).toBe("/cluster/a");
-  expect(activeTiles()).toEqual(["a"]);
-
-  fireEvent.click(screen.getByTestId("hotbar-item-b"), { shiftKey: true });
-
-  expect(screen.getByTestId("where").textContent).toBe("/workspace");
-  await waitFor(() => expect(workspaceShape()).toBe("*b @0"));
-  expect(activeTiles()).toEqual(["b"]);
-});
-
-test("on the Workspace, a click opens in the focused pane and Shift-click in a new pane", async () => {
-  await show([alpha, beta], ["a", "b"], "/workspace");
-
-  fireEvent.click(screen.getByTestId("hotbar-item-a"));
-  await waitFor(() => expect(workspaceShape()).toBe("*a @0"));
-  expect(activeTiles()).toEqual(["a"]);
-
-  fireEvent.click(screen.getByTestId("hotbar-item-b"), { shiftKey: true });
-  await waitFor(() => expect(workspaceShape()).toBe("*a | *b @1"));
-  expect(activeTiles()).toEqual(["b"]);
-
-  fireEvent.click(screen.getByTestId("hotbar-item-a"));
-  await waitFor(() => expect(workspaceShape()).toBe("*a | b,*a @1"));
-  expect(activeTiles()).toEqual(["a"]);
-
-  fireEvent.click(screen.getByTestId("hotbar-item-b"), { shiftKey: true });
-  await waitFor(() => expect(workspaceShape()).toBe("*a | b,*a | *b @2"));
-  // With 3 panes, Shift-click opens in the focused pane.
-  fireEvent.click(screen.getByTestId("hotbar-item-a"), { shiftKey: true });
-  await waitFor(() => expect(workspaceShape()).toBe("*a | b,*a | b,*a @2"));
-  expect(screen.getByTestId("where").textContent).toBe("/workspace");
 });

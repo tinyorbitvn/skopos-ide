@@ -161,9 +161,9 @@ const POD_GRAPH: Keep = Fields(&[
 ]);
 
 /// The Pods table, its filter and sort, the pod lists of the Node, Job and Rollout
-/// drawers, the Pods row-menu Port forward action (which reads the container ports) and the
-/// Workspace Pods view's Image column (spec E §4.9) read these. `uid` and `resourceVersion` let
-/// an action or a fetch name the object. The filter matches annotations, so they stay, cut.
+/// drawers and the Pods row-menu Port forward action (which reads the container ports) read
+/// these. `uid` and `resourceVersion` let an action or a fetch name the object. The filter
+/// matches annotations, so they stay, cut.
 const POD_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -189,7 +189,6 @@ const POD_ROW: Keep = Fields(&[
                 "containers",
                 Each(&Fields(&[
                     ("name", All),
-                    ("image", All),
                     (
                         "ports",
                         Each(&Fields(&[
@@ -410,7 +409,7 @@ mod tests {
                 "spec": {
                     "nodeName": "node-1",
                     "initContainers": [{ "name": "setup", "restartPolicy": "Always" }],
-                    "containers": [{ "name": "app", "image": "registry.example.com/app:1", "ports": [{ "name": "http", "containerPort": 8080, "protocol": "TCP" }] }],
+                    "containers": [{ "name": "app", "ports": [{ "name": "http", "containerPort": 8080, "protocol": "TCP" }] }],
                 },
                 "status": {
                     "phase": "Running",
