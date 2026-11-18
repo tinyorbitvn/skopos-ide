@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   ArrowLeft,
   ArrowRight,
   Columns2,
@@ -35,6 +36,7 @@ import { otherModalOpen } from "./shellKeys";
 import type { ShortcutId } from "./shortcuts";
 import { focusedTab, MAX_PANES } from "./tabs/layout";
 import { closeFocusedTab, splitFocusedTab } from "./tabs/tabKeys";
+import { openInNewWindow } from "./tabs/windowMoves";
 
 /** What a command sees when it is listed and when it runs. */
 export interface CommandContext {
@@ -61,7 +63,8 @@ export type CommandId =
   | "forward"
   | "split-right"
   | "close-tab"
-  | "pin-tab";
+  | "pin-tab"
+  | "new-window";
 
 export interface AppCommand {
   id: CommandId;
@@ -276,6 +279,17 @@ export const COMMANDS: readonly AppCommand[] = [
       useWindowLayout
         .getState()
         .dispatch({ type: tab.pinned ? "unpin" : "pin", tabId: tab.id });
+    },
+  },
+  {
+    id: "new-window",
+    label: () => "Open in new window",
+    icon: AppWindow,
+    available: () => shownTab() !== null,
+    run: () => {
+      const tab = shownTab();
+      // The core moves it and sends both windows their layouts (P31, P33).
+      if (tab !== null) void openInNewWindow(tab.id);
     },
   },
 ];

@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
 import { openTerminal } from "../features/dock/openTerminal";
@@ -69,6 +70,7 @@ test("the registry lists the spec's commands in order", () => {
       ["split-right", "Split right", "splitRight"],
       ["close-tab", "Close tab", "closeTab"],
       ["pin-tab", "Pin tab", null],
+      ["new-window", "Open in new window", null],
     ],
   );
 });
@@ -283,6 +285,42 @@ test("in a window without tabs the tab commands do not show", () => {
   expect(ids).not.toContain("split-right");
   expect(ids).not.toContain("close-tab");
   expect(ids).not.toContain("pin-tab");
+  expect(ids).not.toContain("new-window");
+});
+
+test("Open in new window sends the focused tab to a new window through the core (P17)", async () => {
+  const backend = mockBackend({
+    windows_list: () => [windowLayout()],
+    window_tab_move: () => ({
+      target: "window-2",
+      created: true,
+      sourceEmpty: false,
+    }),
+  });
+  const ctx = context();
+  const before = windowLayout();
+  const tabId = before.panes[0].tabs[0].id;
+  expect(commandById("new-window").available(ctx)).toBe(true);
+
+  runCommand("new-window", ctx);
+
+  // The window's bounds are not known yet: a step from its screen position.
+  const scale = window.devicePixelRatio;
+  const step = Math.round(32 * scale);
+  await waitFor(() =>
+    expect(backend.callsTo("window_tab_move")).toEqual([
+      {
+        tabId,
+        target: {
+          kind: "newWindow",
+          x: Math.round(window.screenX * scale) + step,
+          y: Math.round(window.screenY * scale) + step,
+        },
+      },
+    ]),
+  );
+  // The core's layout event takes the tab out of this window.
+  expect(windowLayout()).toBe(before);
 });
 
 test("the commands that open a location name it, so the click modes can open it (P11 to P13)", () => {
