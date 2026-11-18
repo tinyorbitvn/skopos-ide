@@ -168,6 +168,41 @@ async fn a_bad_windows_file_gives_the_start_layout_and_a_warning() {
 }
 
 #[tokio::test]
+async fn an_odd_windows_file_opens_only_the_windows_that_can_work() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(&fixture.paths.config).unwrap();
+    let one_pane = |label: &str, pane_id: &str, tabs: Vec<TabState>| WindowLayout {
+        label: label.to_owned(),
+        bounds: None,
+        panes: vec![pane(pane_id, 1.0, tabs)],
+        focused_pane: 0,
+    };
+    let windows = vec![
+        one_pane(MAIN_WINDOW, "pane-1", vec![tab("a", "/catalog")]),
+        one_pane("foo", "pane-2", vec![tab("b", "/catalog")]),
+        one_pane("window-2", "pane-3", Vec::new()),
+        one_pane("window-3", "pane-1", vec![tab("c", "/preferences")]),
+    ];
+    let text = serde_json::json!({ "version": 1, "data": { "windows": windows } });
+    std::fs::write(fixture.windows_file(), text.to_string()).unwrap();
+
+    let core = fixture.start().await;
+
+    let restored = core.windows_restore();
+    assert_eq!(labels(&restored), [MAIN_WINDOW, "window-3"]);
+    assert_eq!(restored[0].panes[0].id, "pane-1");
+    assert_eq!(restored[1].panes[0].id, "pane-2");
+    assert_eq!(tab_ids(&restored[1]), [vec!["c"]]);
+    assert!(core.take_startup_warnings().is_empty());
+    let saved = std::fs::read_to_string(fixture.windows_file()).unwrap();
+    assert!(
+        !saved.contains("foo") && !saved.contains("window-2"),
+        "{saved}"
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_tab_moves_into_a_new_window_with_its_history_and_pin() {
     let fixture = Fixture::new();
     let core = fixture.start().await;

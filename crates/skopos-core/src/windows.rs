@@ -393,29 +393,71 @@ fn with_main(mut file: WindowsFile) -> WindowsFile {
     file
 }
 
-/// The file as read from disk made whole: one layout per label, each normalized,
-/// no tab in two windows; a layout that cannot be made whole is dropped.
-fn repaired(file: WindowsFile) -> WindowsFile {
-    let mut held = HashSet::new();
-    let mut labels = HashSet::new();
-    let mut windows = Vec::new();
-    for layout in file.windows {
-        if !labels.insert(layout.label.clone()) {
+/// A label the app can open a window for: `main`, or `window-<n>` with n from 2
+/// written as `next_window_label` writes it (digits only, no leading zero).
+fn is_window_label(label: &str) -> bool {
+    if label == MAIN_WINDOW {
+        return true;
+    }
+    label.strip_prefix(WINDOW_PREFIX).is_some_and(|n| {
+        !n.starts_with('0')
+            && n.bytes().all(|b| b.is_ascii_digit())
+            && n.parse::<u64>().is_ok_and(|n| n >= 2)
+    })
+}
+
+/// Gives each later use of a pane id the smallest `pane-<n>` no pane uses.
+fn fresh_pane_ids(windows: &mut [WindowLayout]) {
+    let mut used: HashSet<String> = windows
+        .iter()
+        .flat_map(|w| w.panes.iter().map(|p| p.id.clone()))
+        .collect();
+    let mut seen = HashSet::new();
+    for pane in windows.iter_mut().flat_map(|w| w.panes.iter_mut()) {
+        if seen.insert(pane.id.clone()) {
             continue;
         }
-        if let Ok(layout) = normalized(layout, &held) {
-            held.extend(
-                layout
-                    .panes
-                    .iter()
-                    .flat_map(|p| p.tabs.iter().map(|t| t.id.clone())),
-            );
-            windows.push(layout);
-        }
+        let id = (1..)
+            .map(|n| format!("{PANE_PREFIX}{n}"))
+            .find(|id| !used.contains(id))
+            .unwrap_or_default();
+        used.insert(id.clone());
+        pane.id = id;
     }
-    let mut file = WindowsFile { windows };
+}
+
+/// The file as read from disk made whole (P39), `main` first: a window whose label
+/// the app cannot open (not `main` nor `window-<n>`) or that repeats a label is
+/// dropped; a pane id used twice gets a fresh id for its later uses; each layout is
+/// normalized with no tab in two windows; a layout that cannot be made whole, or a
+/// window other than `main` left with no tab, is dropped.
+fn repaired(mut file: WindowsFile) -> WindowsFile {
     sort_windows(&mut file);
-    file
+    let mut labels = HashSet::new();
+    let mut openable: Vec<WindowLayout> = file
+        .windows
+        .into_iter()
+        .filter(|w| is_window_label(&w.label) && labels.insert(w.label.clone()))
+        .collect();
+    fresh_pane_ids(&mut openable);
+    let mut held = HashSet::new();
+    let mut windows = Vec::new();
+    for layout in openable {
+        let Ok(layout) = normalized(layout, &held) else {
+            continue;
+        };
+        let tabs: Vec<String> = layout
+            .panes
+            .iter()
+            .flat_map(|p| p.tabs.iter().map(|t| t.id.clone()))
+            .collect();
+        if tabs.is_empty() && layout.label != MAIN_WINDOW {
+            continue;
+        }
+        held.extend(tabs);
+        windows.push(layout);
+    }
+    WindowsFile { windows }
 }
 
 fn tab_ids_except(file: &WindowsFile, label: &str) -> HashSet<String> {
@@ -1071,5 +1113,88 @@ mod tests {
         file.windows
             .push(window("window-2", vec![pane("p8", 1.0, vec![])], 0));
         assert_eq!(next_window_label(&file), "window-4");
+    }
+
+    fn file_labels(file: &WindowsFile) -> Vec<&str> {
+        file.windows.iter().map(|w| w.label.as_str()).collect()
+    }
+
+    fn one_tab(label: &str, tab_id: &str) -> WindowLayout {
+        window(
+            label,
+            vec![pane(&format!("pane-{tab_id}"), 1.0, vec![tab(tab_id)])],
+            0,
+        )
+    }
+
+    #[test]
+    fn only_main_and_numbered_windows_from_2_are_kept() {
+        let labels = [
+            "main",
+            "foo",
+            "window-1",
+            "window-02",
+            "window-2x",
+            "window-",
+            "Window-3",
+            "window-+4",
+            "window-99999999999999999999999",
+            "window-3",
+            "window-2",
+        ];
+        let windows = labels
+            .iter()
+            .enumerate()
+            .map(|(at, label)| one_tab(label, &format!("t{at}")))
+            .collect();
+
+        let fixed = repaired(WindowsFile { windows });
+
+        assert_eq!(file_labels(&fixed), ["main", "window-2", "window-3"]);
+    }
+
+    #[test]
+    fn a_window_other_than_main_left_without_tabs_is_dropped() {
+        let no_history = TabState {
+            history: Vec::new(),
+            ..tab("x")
+        };
+        let windows = vec![
+            window("main", vec![pane("p1", 1.0, vec![])], 0),
+            window("window-2", vec![pane("p2", 1.0, vec![])], 0),
+            window("window-3", vec![pane("p3", 1.0, vec![no_history])], 0),
+            one_tab("window-4", "a"),
+            // Its one tab is window-4's.
+            one_tab("window-5", "a"),
+        ];
+
+        let fixed = repaired(WindowsFile { windows });
+
+        assert_eq!(file_labels(&fixed), ["main", "window-4"]);
+        assert_eq!(shape(&fixed.windows[0]), "p1: @0");
+    }
+
+    #[test]
+    fn a_pane_id_used_twice_gets_a_fresh_one_for_its_later_uses() {
+        let windows = vec![
+            window("window-3", vec![pane("pane-2", 1.0, vec![tab("d")])], 0),
+            window(
+                "main",
+                vec![
+                    pane("pane-1", 0.5, vec![tab("a")]),
+                    pane("pane-1", 0.5, vec![tab("b")]),
+                ],
+                1,
+            ),
+            window("window-2", vec![pane("pane-1", 1.0, vec![tab("c")])], 0),
+        ];
+
+        let fixed = repaired(WindowsFile { windows });
+
+        let shapes: Vec<String> = fixed.windows.iter().map(shape).collect();
+        assert_eq!(
+            shapes,
+            ["pane-1:*a | pane-3:*b @1", "pane-4:*c @0", "pane-2:*d @0"]
+        );
     }
 }
