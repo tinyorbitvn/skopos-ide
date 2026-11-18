@@ -26,12 +26,23 @@ function loadSite() {
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function element(attrs = {}, text = "") {
+  const classes = new Set();
   return {
     attrs: { ...attrs },
     textContent: text,
     hidden: false,
     children: [],
     label: null,
+    tag: null,
+    classList: {
+      add: (name) => {
+        classes.add(name);
+      },
+      remove: (name) => {
+        classes.delete(name);
+      },
+      contains: (name) => classes.has(name),
+    },
     getAttribute(name) {
       return Object.hasOwn(this.attrs, name) ? this.attrs[name] : null;
     },
@@ -43,13 +54,21 @@ function element(attrs = {}, text = "") {
       return child;
     },
     querySelector(selector) {
-      return selector === "[data-label]" ? this.label : null;
+      if (selector === "[data-label]") return this.label;
+      if (selector === ".platform__tag") return this.tag;
+      return null;
     },
   };
 }
 
-// The parts of the page site.js touches, as Task 4's index.html lays them out.
-function page({ withoutAssets = [] } = {}) {
+function downloadButton() {
+  const button = element({ href: "#download" });
+  button.label = element({}, "Download");
+  return button;
+}
+
+// The parts of the page site.js touches, as site/index.html lays them out.
+function page({ withoutAssets = [], withoutCta = false, withoutCards = false } = {}) {
   const links = {};
   for (const [suffix, size] of Object.entries(SIZES)) {
     if (withoutAssets.includes(suffix)) continue;
@@ -59,21 +78,37 @@ function page({ withoutAssets = [] } = {}) {
       "data-name": `SkoposIDE_0.6.1_${suffix}`,
       "data-size": size,
     });
+    for (const name of ["button", "button--line", "button--sm"]) links[suffix].classList.add(name);
   }
-  const button = element({ href: "#download" });
-  button.label = element({}, "Download");
+  const cards = {};
+  if (!withoutCards) {
+    for (const os of ["mac", "windows", "linux"]) {
+      cards[os] = element({ "data-os": os });
+      cards[os].classList.add("platform");
+      cards[os].tag = element({}, "Your system");
+      cards[os].tag.hidden = true;
+    }
+  }
+  const button = downloadButton();
+  const cta = withoutCta ? null : downloadButton();
   const file = element();
   const alt = element();
   alt.hidden = true;
-  const ids = { "hero-download": button, "hero-file": file, "hero-alt": alt };
+  const ids = { "hero-download": button, "cta-download": cta, "hero-file": file, "hero-alt": alt };
   return {
     button,
+    cta,
+    links,
+    cards,
     file,
     alt,
     getElementById: (id) => ids[id] ?? null,
     querySelector(selector) {
-      const match = /^#download a\[data-asset="([^"]+)"\]$/.exec(selector);
-      return match ? (links[match[1]] ?? null) : null;
+      const asset = /^#download a\[data-asset="([^"]+)"\]$/.exec(selector);
+      if (asset) return links[asset[1]] ?? null;
+      const card = /^\.platform\[data-os="([^"]+)"\]$/.exec(selector);
+      if (card) return cards[card[1]] ?? null;
+      return null;
     },
     createElement: () => element(),
   };
@@ -169,6 +204,9 @@ const CASES = [
   },
 ];
 
+// The data-os of the card each label belongs to.
+const OS = { "Download for macOS": "mac", "Download for Windows": "windows", "Download for Linux": "linux" };
+
 const NO_INSTALLER = [
   { name: "iPad asking for the desktop site", nav: { userAgent: UA.macSafari, platform: "MacIntel", maxTouchPoints: 5 } },
   { name: "iPhone", nav: { userAgent: UA.iphone, platform: "iPhone", maxTouchPoints: 5 } },
@@ -212,6 +250,25 @@ describe("site.js", () => {
     });
   }
 
+  for (const c of CASES) {
+    test(`${c.name}: the call to action matches the hero and only the ${OS[c.label]} card is marked`, async () => {
+      const doc = page();
+      await loadSite().init(doc, c.nav);
+      assert.equal(doc.cta.getAttribute("href"), `https://downloads.test/${c.primary}`);
+      assert.equal(doc.cta.label.textContent, c.label);
+      for (const [os, card] of Object.entries(doc.cards)) {
+        const mine = os === OS[c.label];
+        assert.equal(card.classList.contains("platform--mine"), mine, os);
+        assert.equal(card.tag.hidden, !mine, os);
+      }
+      for (const [suffix, link] of Object.entries(doc.links)) {
+        const picked = suffix === c.primary;
+        assert.equal(link.classList.contains("button--primary"), picked, suffix);
+        assert.equal(link.classList.contains("button--line"), !picked, suffix);
+      }
+    });
+  }
+
   for (const c of NO_INSTALLER) {
     test(`${c.name}: the hero keeps the plain Download button`, async () => {
       const doc = page();
@@ -223,12 +280,39 @@ describe("site.js", () => {
     });
   }
 
+  for (const c of NO_INSTALLER) {
+    test(`${c.name}: no card is marked and the call to action stays plain`, async () => {
+      const doc = page();
+      await loadSite().init(doc, c.nav);
+      assert.equal(doc.cta.getAttribute("href"), "#download");
+      assert.equal(doc.cta.label.textContent, "Download");
+      for (const card of Object.values(doc.cards)) {
+        assert.equal(card.classList.contains("platform--mine"), false);
+        assert.equal(card.tag.hidden, true);
+      }
+      for (const link of Object.values(doc.links)) {
+        assert.equal(link.classList.contains("button--primary"), false);
+      }
+    });
+  }
+
+  test("a page without the call to action or the cards still points the hero", async () => {
+    const doc = page({ withoutCta: true, withoutCards: true });
+    await loadSite().init(doc, CASES[0].nav);
+    assert.equal(doc.button.getAttribute("href"), "https://downloads.test/aarch64.dmg");
+    assert.equal(doc.links["aarch64.dmg"].classList.contains("button--primary"), true);
+  });
+
   test("a page without the chosen installer's link keeps the plain button", async () => {
     const doc = page({ withoutAssets: ["x64-setup.exe"] });
     const windows = CASES.find((c) => c.primary === "x64-setup.exe").nav;
     assert.equal(await loadSite().init(doc, windows), null);
     assert.equal(doc.button.getAttribute("href"), "#download");
     assert.equal(doc.button.label.textContent, "Download");
+    assert.equal(doc.cta.getAttribute("href"), "#download");
+    for (const card of Object.values(doc.cards)) {
+      assert.equal(card.classList.contains("platform--mine"), false);
+    }
   });
 
   test("without the other installer's link the extra line stays hidden", async () => {

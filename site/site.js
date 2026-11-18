@@ -1,6 +1,7 @@
 /*
- * Points the hero's Download button at the installer for the visitor's system.
- * The page works without this script: the button then leads to the download section.
+ * Points the hero's and the call to action's Download buttons at the installer for the
+ * visitor's system, and marks that system's card in the download section. The page works
+ * without this script: both buttons then lead to the download section and no card is marked.
  * The targets come from the download section's own links; nothing is fetched.
  */
 (function (global) {
@@ -72,6 +73,18 @@
     return null;
   }
 
+  // Shows the visitor's card as theirs and turns its picked installer into the white pill.
+  function markCard(doc, os, link) {
+    const card = doc.querySelector(`.platform[data-os="${os}"]`);
+    if (card) {
+      card.classList.add("platform--mine");
+      const tag = card.querySelector(".platform__tag");
+      if (tag) tag.hidden = false;
+    }
+    link.classList.remove("button--line");
+    link.classList.add("button--primary");
+  }
+
   function init(doc, nav) {
     const os = detectOs(nav);
     if (!os) return Promise.resolve(null);
@@ -81,9 +94,12 @@
       const button = doc.getElementById("hero-download");
       const target = pick && link(pick.primary);
       if (!button || !target) return null;
-      button.setAttribute("href", target.getAttribute("href"));
-      const label = button.querySelector("[data-label]");
-      if (label) label.textContent = `Download for ${pick.label}`;
+      for (const each of [button, doc.getElementById("cta-download")]) {
+        if (!each) continue;
+        each.setAttribute("href", target.getAttribute("href"));
+        const label = each.querySelector("[data-label]");
+        if (label) label.textContent = `Download for ${pick.label}`;
+      }
       const file = doc.getElementById("hero-file");
       if (file) {
         file.textContent = ` · ${target.getAttribute("data-name")} · ${target.getAttribute("data-size")}`;
@@ -98,6 +114,7 @@
         box.appendChild(a);
         box.hidden = false;
       }
+      markCard(doc, os, target);
       return pick;
     });
   }
