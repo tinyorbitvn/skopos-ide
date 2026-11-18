@@ -2,10 +2,12 @@ import { Columns2, LayoutGrid, Pin, X } from "lucide-react";
 import {
   Fragment,
   type KeyboardEvent,
+  memo,
   type PointerEvent,
   useEffect,
   useMemo,
   useRef,
+  useState,
   type WheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -95,6 +97,30 @@ function menuItems(tabId: string, items: TabMenuItem[]): ContextMenuItem[] {
   }));
 }
 
+/**
+ * The tab menu's items, built from the layout and the other windows while the menu is
+ * open, so the windows read as it opens show up. Closed, the tab follows neither, and
+ * a layout change does not redraw it.
+ */
+function useMenuItems(tabId: string, open: boolean): ContextMenuItem[] {
+  const layout = useWindowLayout((s) => (open ? s.layout : null));
+  const layouts = useWindowList((s) => (open ? s.layouts : null));
+  const clusters = useCatalog((s) => s.clusters);
+  // The pane "Move to a new pane on the right" makes, named once per opening.
+  const newPaneId = useMemo(() => (open ? crypto.randomUUID() : ""), [open]);
+  return useMemo(() => {
+    if (layout === null) return [];
+    const windows = windowChoices(layouts ?? [], layout.label, clusters);
+    return menuItems(tabId, tabMenu(layout, tabId, newPaneId, { windows }));
+  }, [layout, layouts, clusters, tabId, newPaneId]);
+}
+
+/** The tabs of a pane as they are now, for a key pressed on one of them. */
+function paneTabs(paneId: string): TabState[] {
+  const { layout } = useWindowLayout.getState();
+  return layout.panes.find((p) => p.id === paneId)?.tabs ?? [];
+}
+
 /** Shift+F10 and the context-menu key open the menu under the tab, as a right-click does. */
 function openMenuAt(button: HTMLElement): void {
   const box = button.getBoundingClientRect();
@@ -141,30 +167,24 @@ function onTabKey(
 /**
  * A tab in a pane's strip: its icon, screen and cluster chip; pinned tabs show a pin
  * and no Close (P9, P14). A double-click pins or unpins it, a middle-click closes it,
- * a right-click opens its menu (P13 to P15), and a press drags it (P22).
+ * a right-click opens its menu (P13 to P15), and a press drags it (P22). It takes only
+ * the values it shows, so a change elsewhere in the layout, such as a splitter drag,
+ * does not redraw it.
  */
-function TabItem(props: {
+const TabItem = memo(function TabItem(props: {
   paneId: string;
-  tabs: TabState[];
+  tabId: string;
+  path: string;
+  pinned: boolean;
   index: number;
   selected: boolean;
 }) {
-  const { paneId, tabs, index, selected } = props;
-  const tab = tabs[index];
-  const dragging = useTabDrag((s) => s.drag?.tabId === tab.id);
+  const { paneId, tabId, path, pinned, index, selected } = props;
+  const dragging = useTabDrag((s) => s.drag?.tabId === tabId);
   const clusters = useCatalog((s) => s.clusters);
-  const layout = useWindowLayout((s) => s.layout);
-  const layouts = useWindowList((s) => s.layouts);
-  const path = tabPath(tab);
   const info = useMemo(() => tabInfo(path, clusters), [path, clusters]);
-  const windows = useMemo(
-    () => windowChoices(layouts, layout.label, clusters),
-    [layouts, layout.label, clusters],
-  );
-  const items = menuItems(
-    tab.id,
-    tabMenu(layout, tab.id, crypto.randomUUID(), { windows }),
-  );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const items = useMenuItems(tabId, menuOpen);
   const Icon = info.icon;
   return (
     <ContextMenu
@@ -172,6 +192,7 @@ function TabItem(props: {
       items={items}
       // The other windows are read when the menu opens (P15).
       onOpenChange={(open) => {
+        setMenuOpen(open);
         if (open) void refreshWindowList();
       }}
     >
@@ -179,7 +200,7 @@ function TabItem(props: {
         className={styles.tab}
         role="presentation"
         data-selected={selected}
-        data-pinned={tab.pinned}
+        data-pinned={pinned}
         data-dragging={dragging}
         data-drop-pane={paneId}
         data-drop-index={index}
@@ -187,19 +208,19 @@ function TabItem(props: {
         <button
           type="button"
           role="tab"
-          id={tabElementId(tab.id)}
+          id={tabElementId(tabId)}
           className={styles.tabButton}
           aria-selected={selected}
           aria-label={info.title}
           title={info.title}
           tabIndex={selected ? 0 : -1}
-          data-testid={`tab-${tab.id}`}
-          onClick={() => dispatch({ type: "select", tabId: tab.id })}
+          data-testid={`tab-${tabId}`}
+          onClick={() => dispatch({ type: "select", tabId })}
           onPointerDown={(event) =>
-            startTabDrag(event.nativeEvent, tab.id, info.title)
+            startTabDrag(event.nativeEvent, tabId, info.title)
           }
           onDoubleClick={() =>
-            dispatch({ type: tab.pinned ? "unpin" : "pin", tabId: tab.id })
+            dispatch({ type: pinned ? "unpin" : "pin", tabId })
           }
           onMouseDown={(event) => {
             // A middle press would start the browser's autoscroll.
@@ -208,11 +229,11 @@ function TabItem(props: {
           onAuxClick={(event) => {
             if (event.button !== 1) return;
             event.preventDefault();
-            dispatch({ type: "close", tabId: tab.id });
+            dispatch({ type: "close", tabId });
           }}
-          onKeyDown={(event) => onTabKey(event, tabs, index)}
+          onKeyDown={(event) => onTabKey(event, paneTabs(paneId), index)}
         >
-          {tab.pinned ? (
+          {pinned ? (
             <Pin size={12} aria-hidden="true" className={styles.pin} />
           ) : null}
           <Icon size={14} aria-hidden="true" className={styles.icon} />
@@ -227,15 +248,15 @@ function TabItem(props: {
             </span>
           ) : null}
         </button>
-        {tab.pinned ? null : (
+        {pinned ? null : (
           <button
             type="button"
             className={styles.close}
             aria-label={`Close ${info.title}`}
             title="Close tab"
             tabIndex={-1}
-            data-testid={`tab-close-${tab.id}`}
-            onClick={() => dispatch({ type: "close", tabId: tab.id })}
+            data-testid={`tab-close-${tabId}`}
+            onClick={() => dispatch({ type: "close", tabId })}
           >
             <X size={12} aria-hidden="true" />
           </button>
@@ -243,7 +264,7 @@ function TabItem(props: {
       </div>
     </ContextMenu>
   );
-}
+});
 
 /** A vertical wheel over a strip too long for its pane scrolls it sideways. */
 function scrollStrip(event: WheelEvent<HTMLDivElement>): void {
@@ -401,7 +422,9 @@ function Pane(props: {
               {mark === at ? <DropMark /> : null}
               <TabItem
                 paneId={pane.id}
-                tabs={pane.tabs}
+                tabId={tab.id}
+                path={tabPath(tab)}
+                pinned={tab.pinned}
                 index={at}
                 selected={tab.id === pane.selected}
               />
