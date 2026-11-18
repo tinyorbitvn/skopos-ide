@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { type LayoutAction, prune, reduce } from "../app/tabs/layout";
 import { api } from "../ipc/api";
+import { failureMessage } from "../ipc/client";
 import { events } from "../ipc/events";
 import type { WindowLayout } from "../ipc/generated/WindowLayout";
 import { MAIN_WINDOW, windowLabel } from "../ipc/window";
@@ -12,6 +13,8 @@ export interface WindowLayoutState {
   layout: WindowLayout;
   /** True once the layout came from the core, or the core could not give one. */
   ready: boolean;
+  /** Why the window could not start syncing its layout, until a start runs again. */
+  failure: string | null;
   /** Applies a layout change; a refused or empty change leaves the state as it is. */
   dispatch(action: LayoutAction): void;
 }
@@ -38,6 +41,7 @@ export const useWindowLayout = create<WindowLayoutState>()((set, get) => ({
   label: MAIN_WINDOW,
   layout: startLayout(MAIN_WINDOW),
   ready: false,
+  failure: null,
   dispatch(action) {
     const previous = get().layout;
     const next = reduce(previous, action);
@@ -98,63 +102,78 @@ function queueSave(layout: WindowLayout): void {
  * listener is in place before the layout is asked for, so a layout the core sends
  * meanwhile (a tab moved in while the window loads) is kept, and the newest one wins
  * over the answer. Runs once per page; later calls return the first one's promise.
+ * When the listeners cannot be set up, the promise rejects, the store keeps the
+ * failure, nothing is saved, and the next call starts again.
  */
 export function startWindowLayout(
   isRoute: (path: string) => boolean,
 ): Promise<void> {
-  started ??= (async () => {
-    const label = windowLabel();
-    let loading = true;
-    let sentMeanwhile: WindowLayout | null = null;
-    const unlisten = await events.onWindowLayout((incoming) => {
-      if (loading) {
-        sentMeanwhile = incoming;
-        return;
-      }
-      cancelSave();
-      const kept = prune(incoming, isRoute);
-      applying = true;
-      try {
-        useWindowLayout.setState({ layout: kept });
-      } finally {
-        applying = false;
-      }
-      if (kept !== incoming) queueSave(kept);
+  if (started === null) {
+    useWindowLayout.setState({ failure: null });
+    started = syncWindowLayout(isRoute).catch((error: unknown) => {
+      for (const stop of stops) stop();
+      stops = [];
+      started = null;
+      useWindowLayout.setState({ failure: failureMessage(error) });
+      throw error;
     });
-    stops.push(unlisten);
-    // The app quits once every window has answered (P34): the pending save goes first.
-    stops.push(
-      await events.onWindowFlush(() => {
-        void flushWindowLayout()
-          .then(() => api.windowFlushed())
-          .catch(() => {});
-      }),
-    );
-
-    let answer: WindowLayout;
-    try {
-      answer = await api.windowLayoutGet();
-    } catch {
-      answer = startLayout(label);
-    }
-    loading = false;
-    const loaded = sentMeanwhile ?? answer;
-    const layout = prune(loaded, isRoute);
-    useWindowLayout.setState({ label, layout, ready: true });
-    if (layout !== loaded) void api.windowLayoutSet(layout).catch(() => {});
-
-    stops.push(
-      useWindowLayout.subscribe((state, previous) => {
-        if (state.layout !== previous.layout && !applying) {
-          queueSave(state.layout);
-        }
-      }),
-    );
-    const onPageHide = () => void flushWindowLayout();
-    window.addEventListener("pagehide", onPageHide);
-    stops.push(() => window.removeEventListener("pagehide", onPageHide));
-  })();
+  }
   return started;
+}
+
+async function syncWindowLayout(
+  isRoute: (path: string) => boolean,
+): Promise<void> {
+  const label = windowLabel();
+  let loading = true;
+  let sentMeanwhile: WindowLayout | null = null;
+  const unlisten = await events.onWindowLayout((incoming) => {
+    if (loading) {
+      sentMeanwhile = incoming;
+      return;
+    }
+    cancelSave();
+    const kept = prune(incoming, isRoute);
+    applying = true;
+    try {
+      useWindowLayout.setState({ layout: kept });
+    } finally {
+      applying = false;
+    }
+    if (kept !== incoming) queueSave(kept);
+  });
+  stops.push(unlisten);
+  // The app quits once every window has answered (P34): the pending save goes first.
+  stops.push(
+    await events.onWindowFlush(() => {
+      void flushWindowLayout()
+        .then(() => api.windowFlushed())
+        .catch(() => {});
+    }),
+  );
+
+  let answer: WindowLayout;
+  try {
+    answer = await api.windowLayoutGet();
+  } catch {
+    answer = startLayout(label);
+  }
+  loading = false;
+  const loaded = sentMeanwhile ?? answer;
+  const layout = prune(loaded, isRoute);
+  useWindowLayout.setState({ label, layout, ready: true });
+  if (layout !== loaded) void api.windowLayoutSet(layout).catch(() => {});
+
+  stops.push(
+    useWindowLayout.subscribe((state, previous) => {
+      if (state.layout !== previous.layout && !applying) {
+        queueSave(state.layout);
+      }
+    }),
+  );
+  const onPageHide = () => void flushWindowLayout();
+  window.addEventListener("pagehide", onPageHide);
+  stops.push(() => window.removeEventListener("pagehide", onPageHide));
 }
 
 /** Puts the store back to a fresh window, with `layout` when given, ready, and stops syncing. */
@@ -165,5 +184,10 @@ export function resetWindowLayoutForTest(layout?: WindowLayout): void {
   cancelSave();
   applying = false;
   const next = layout ?? startLayout(MAIN_WINDOW);
-  useWindowLayout.setState({ label: next.label, layout: next, ready: true });
+  useWindowLayout.setState({
+    label: next.label,
+    layout: next,
+    ready: true,
+    failure: null,
+  });
 }

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
-import { Button, PaneHandle, Spinner, StatusDot } from "../design";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Button, EmptyState, PaneHandle, Spinner, StatusDot } from "../design";
 import { AboutDialog } from "../features/about/AboutDialog";
 import { ClusterNav } from "../features/cluster/ClusterNav";
 import { Dock } from "../features/dock/Dock";
@@ -199,19 +199,26 @@ function ShellEffects() {
  */
 export function Shell() {
   const ready = useWindowLayout((s) => s.ready);
+  const failure = useWindowLayout((s) => s.failure);
+  const [attempt, setAttempt] = useState(0);
 
   // The hash is applied to the layout loaded from the core, not to the one before it.
+  // A failed start is kept in the store and shown below; nothing is saved meanwhile.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` starts again on Try again.
   useEffect(() => {
     let live = true;
     let stop = () => {};
-    void startWindowLayout(isTabRoute).then(() => {
-      if (live) stop = installHashMirror(isTabRoute);
-    });
+    void startWindowLayout(isTabRoute).then(
+      () => {
+        if (live) stop = installHashMirror(isTabRoute);
+      },
+      () => {},
+    );
     return () => {
       live = false;
       stop();
     };
-  }, []);
+  }, [attempt]);
 
   return (
     <div className={styles.shell}>
@@ -230,6 +237,21 @@ export function Shell() {
             <main className={styles.content}>
               {ready ? (
                 <Panes />
+              ) : failure !== null ? (
+                <div
+                  className={styles.loading}
+                  data-testid="window-load-failed"
+                >
+                  <EmptyState
+                    title="Could not load this window's tabs."
+                    body={failure}
+                    action={
+                      <Button onClick={() => setAttempt((n) => n + 1)}>
+                        Try again
+                      </Button>
+                    }
+                  />
+                </div>
               ) : (
                 <div className={styles.loading}>
                   <Spinner label="Loading" />

@@ -5,7 +5,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { events } from "../ipc/events";
 import type { TabState } from "../ipc/generated/TabState";
 import type { WindowLayout } from "../ipc/generated/WindowLayout";
 import { resetCatalogForTest } from "../stores/catalog";
@@ -141,6 +142,41 @@ test("tabs the routes do not know are dropped and the result sent back (P39)", a
   expect(layout.panes[0].tabs.map((t) => t.id)).toEqual(["t2"]);
   expect(screen.queryByTestId("tab-t1")).toBeNull();
   expect(await screen.findByTestId("tab-t2")).toBeTruthy();
+});
+
+test("a window whose tabs cannot load says so, saves nothing, and Try again shows the panes", async () => {
+  const backend = mockBackend({
+    catalog_list: () => [clusterEntry({ contextName: "alpha" })],
+    catalog_warnings: () => [],
+    hotbar_get: () => [],
+    window_layout_get: () => windowOf([[tab("t1", ["/catalog"])]]),
+    window_layout_set: () => null,
+  });
+  useWindowLayout.setState({ ready: false });
+  const listenSpy = vi
+    .spyOn(events, "onWindowLayout")
+    .mockRejectedValueOnce(new Error("no event channel"));
+  try {
+    render(<App />);
+
+    expect(
+      await screen.findByText("Could not load this window's tabs."),
+    ).toBeTruthy();
+    expect(screen.getByText("no event channel")).toBeTruthy();
+    expect(screen.queryByText("Loading")).toBeNull();
+    expect(screen.queryByTestId("tab-t1")).toBeNull();
+    expect(backend.callsTo("window_layout_get")).toEqual([]);
+    expect(backend.callsTo("window_layout_set")).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByTestId("tab-t1")).toBeTruthy();
+    expect(screen.queryByText("Could not load this window's tabs.")).toBeNull();
+    expect(backend.callsTo("window_layout_set")).toEqual([]);
+    await waitFor(() => expect(window.location.hash).toBe("#/catalog"));
+  } finally {
+    listenSpy.mockRestore();
+  }
 });
 
 test("the main window without tabs shows the empty state (P21)", async () => {

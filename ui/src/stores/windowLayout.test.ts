@@ -2,6 +2,7 @@ import { mockWindows } from "@tauri-apps/api/mocks";
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { focusedTab, tabPath } from "../app/tabs/layout";
+import { events } from "../ipc/events";
 import type { TabState } from "../ipc/generated/TabState";
 import type { WindowLayout } from "../ipc/generated/WindowLayout";
 import { emitEvent, flush, mockBackend } from "../test/ipc";
@@ -101,6 +102,43 @@ test("a window that the core cannot answer for starts with a Catalog tab", async
   const shown = focusedTab(useWindowLayout.getState().layout);
   expect(shown && tabPath(shown)).toBe("/catalog");
   expect(useWindowLayout.getState().ready).toBe(true);
+});
+
+test("a start whose listeners cannot be set up keeps the failure, saves nothing and can run again", async () => {
+  const saved = layoutOf("main", [tab("t1", "/preferences")]);
+  const backend = mockBackend({
+    window_layout_get: () => saved,
+    window_layout_set: () => null,
+  });
+  useWindowLayout.setState({ ready: false });
+  const flushSpy = vi
+    .spyOn(events, "onWindowFlush")
+    .mockRejectedValueOnce(new Error("no event channel"));
+  try {
+    await expect(startWindowLayout(isRoute)).rejects.toThrow(
+      "no event channel",
+    );
+    expect(useWindowLayout.getState()).toMatchObject({
+      ready: false,
+      failure: "no event channel",
+    });
+    // The layout listener set up before the failure is gone.
+    await emitEvent("window://layout", layoutOf("main", []));
+    openTab("/a");
+    await flush();
+    expect(backend.callsTo("window_layout_get")).toEqual([]);
+    expect(backend.callsTo("window_layout_set")).toEqual([]);
+
+    await startWindowLayout(isRoute);
+    expect(useWindowLayout.getState()).toMatchObject({
+      layout: saved,
+      ready: true,
+      failure: null,
+    });
+    expect(backend.callsTo("window_layout_set")).toEqual([]);
+  } finally {
+    flushSpy.mockRestore();
+  }
 });
 
 test("uses this window's label", async () => {
