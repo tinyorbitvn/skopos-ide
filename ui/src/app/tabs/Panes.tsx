@@ -37,7 +37,19 @@ import { tabInfo } from "./routes";
 import { TabView } from "./TabView";
 import { startTabDrag, useTabDrag } from "./tabDrag";
 import { focusTabElement, tabElementId } from "./tabKeys";
-import { type TabMenuId, type TabMenuItem, tabMenu } from "./tabMenu";
+import {
+  type TabMenuId,
+  type TabMenuItem,
+  type TabMenuWindow,
+  tabMenu,
+} from "./tabMenu";
+import {
+  moveTabToWindow,
+  openInNewWindow,
+  refreshWindowList,
+  useWindowList,
+  windowChoices,
+} from "./windowMoves";
 
 /** One Left or Right press moves a splitter by 2% of the width. */
 const KEY_STEP = 0.02;
@@ -51,7 +63,22 @@ function dispatch(action: LayoutAction): void {
 /** The items that start a group in the tab menu: the moves, then the closes. */
 const MENU_GROUPS: ReadonlySet<TabMenuId> = new Set(["left", "close"]);
 
-function menuItems(items: TabMenuItem[]): ContextMenuItem[] {
+/** "Move to window ▸" goes through the core, which sends the new layouts (P31, P33). */
+function windowItems(tabId: string, items: TabMenuWindow[]): ContextMenuItem[] {
+  return items.map((w) => ({
+    id: w.id,
+    label: w.label,
+    hint: w.hint,
+    testId: `tab-menu-${w.id}`,
+    onSelect: () => {
+      if (w.target.kind === "window")
+        void moveTabToWindow(tabId, w.target.label);
+      else void openInNewWindow(tabId);
+    },
+  }));
+}
+
+function menuItems(tabId: string, items: TabMenuItem[]): ContextMenuItem[] {
   return items.map((it) => ({
     id: it.id,
     label: it.label,
@@ -61,6 +88,7 @@ function menuItems(items: TabMenuItem[]): ContextMenuItem[] {
     disabled: it.reason !== null,
     separated: MENU_GROUPS.has(it.id),
     testId: `tab-menu-${it.id}`,
+    sub: it.windows ? windowItems(tabId, it.windows) : undefined,
     onSelect: () => {
       if (it.action !== null) dispatch(it.action);
     },
@@ -126,12 +154,27 @@ function TabItem(props: {
   const dragging = useTabDrag((s) => s.drag?.tabId === tab.id);
   const clusters = useCatalog((s) => s.clusters);
   const layout = useWindowLayout((s) => s.layout);
+  const layouts = useWindowList((s) => s.layouts);
   const path = tabPath(tab);
   const info = useMemo(() => tabInfo(path, clusters), [path, clusters]);
-  const items = menuItems(tabMenu(layout, tab.id, crypto.randomUUID()));
+  const windows = useMemo(
+    () => windowChoices(layouts, layout.label, clusters),
+    [layouts, layout.label, clusters],
+  );
+  const items = menuItems(
+    tab.id,
+    tabMenu(layout, tab.id, crypto.randomUUID(), { windows }),
+  );
   const Icon = info.icon;
   return (
-    <ContextMenu label={`Actions for ${info.title}`} items={items}>
+    <ContextMenu
+      label={`Actions for ${info.title}`}
+      items={items}
+      // The other windows are read when the menu opens (P15).
+      onOpenChange={(open) => {
+        if (open) void refreshWindowList();
+      }}
+    >
       <div
         className={styles.tab}
         role="presentation"

@@ -3,6 +3,7 @@ import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
 import { reduce } from "./layout";
 import { tabMenu } from "./tabMenu";
+import type { WindowChoice } from "./windowMoves";
 
 function tab(id: string, pinned = false): TabState {
   return { id, pinned, history: [`/cluster/${id}`], index: 0 };
@@ -22,9 +23,17 @@ function layoutOf(panes: TabState[][]): WindowLayout {
   };
 }
 
-/** `id: label (reason)` per item, or `id: label [hint]` when it applies. */
-function read(layout: WindowLayout, tabId: string, mac = false): string[] {
-  return tabMenu(layout, tabId, "p-new", mac).map(
+/**
+ * `id: label (reason)` per item, or `id: label [hint]` when it applies; a submenu's
+ * items follow `>`.
+ */
+function read(
+  layout: WindowLayout,
+  tabId: string,
+  mac = false,
+  windows: WindowChoice[] = [],
+): string[] {
+  return tabMenu(layout, tabId, "p-new", { mac, windows }).map(
     (item) =>
       `${item.id}: ${item.label}${
         item.reason !== null
@@ -32,6 +41,16 @@ function read(layout: WindowLayout, tabId: string, mac = false): string[] {
           : item.hint
             ? ` [${item.hint}]`
             : ""
+      }${
+        item.windows
+          ? ` > ${item.windows
+              .map((w) =>
+                w.hint
+                  ? `${w.id} ${w.label} [${w.hint}]`
+                  : `${w.id} ${w.label}`,
+              )
+              .join(", ")}`
+          : ""
       }`,
   );
 }
@@ -43,10 +62,11 @@ test("one pane with two tabs: no pane on either side (P15)", () => {
     "left: Move to the left pane (No pane on the left)",
     "right: Move to the right pane (No pane on the right)",
     "new-pane: Move to a new pane on the right",
+    "window: Move to window > window-new New window",
     "close: Close [Ctrl+W]",
     "close-others: Close other tabs [Keeps pinned tabs]",
   ]);
-  expect(read(layout, "a", true)[4]).toBe("close: Close [⌘W]");
+  expect(read(layout, "a", true)[5]).toBe("close: Close [⌘W]");
 });
 
 test("a pinned tab unpins and cannot be closed; Close other tabs keeps pinned ones (P14, P15)", () => {
@@ -56,6 +76,7 @@ test("a pinned tab unpins and cannot be closed; Close other tabs keeps pinned on
     "left: Move to the left pane (No pane on the left)",
     "right: Move to the right pane (No pane on the right)",
     "new-pane: Move to a new pane on the right",
+    "window: Move to window > window-new New window",
     "close: Close (Pinned tabs cannot be closed)",
     "close-others: Close other tabs (No other tabs to close)",
   ]);
@@ -68,6 +89,7 @@ test("a tab alone in its pane cannot move to a new pane, and has no other tabs t
     "left: Move to the left pane",
     "right: Move to the right pane (No pane on the right)",
     "new-pane: Move to a new pane on the right (It is the only tab in its pane)",
+    "window: Move to window > window-new New window",
     "close: Close [Ctrl+W]",
     "close-others: Close other tabs (No other tabs to close)",
   ]);
@@ -126,6 +148,8 @@ test("an item that applies has an action that changes the layout; one that does 
     for (const pane of layout.panes) {
       for (const t of pane.tabs) {
         for (const item of tabMenu(layout, t.id, "p-new")) {
+          // "Move to window" opens a submenu; its moves go through the core.
+          if (item.windows) continue;
           const changes =
             item.action !== null && reduce(layout, item.action) !== layout;
           expect([t.id, item.id, changes, item.action === null]).toEqual([
@@ -138,6 +162,26 @@ test("an item that applies has an action that changes the layout; one that does 
       }
     }
   }
+});
+
+test("Move to window lists the other windows by their focused tab, then a new window (P15)", () => {
+  const layout = layoutOf([[tab("a"), tab("b")]]);
+  const windows: WindowChoice[] = [
+    { label: "main", name: "Main window", title: "Catalog" },
+    { label: "window-3", name: "Window 3", title: "No tabs" },
+  ];
+  expect(read(layout, "a", false, windows)[4]).toBe(
+    "window: Move to window > window-main Main window [Catalog], window-window-3 Window 3 [No tabs], window-new New window",
+  );
+  const item = tabMenu(layout, "a", "p-new", { windows }).find(
+    (i) => i.id === "window",
+  );
+  expect([item?.reason, item?.action]).toEqual([null, null]);
+  expect(item?.windows?.map((w) => w.target)).toEqual([
+    { kind: "window", label: "main" },
+    { kind: "window", label: "window-3" },
+    { kind: "new" },
+  ]);
 });
 
 test("an unknown tab has no menu", () => {

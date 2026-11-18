@@ -14,7 +14,7 @@ import {
   resetWindowLayoutForTest,
   useWindowLayout,
 } from "../../stores/windowLayout";
-import { clusterEntry } from "../../test/ipc";
+import { clusterEntry, mockBackend } from "../../test/ipc";
 import { focusedTab, tabPath } from "./layout";
 import { Panes } from "./Panes";
 import { tabElementId } from "./tabKeys";
@@ -341,6 +341,7 @@ test("the tab menu shows why an item does not apply, and runs the others (P15)",
     ],
     ["tab-menu-right", "Move to the right pane", false, null],
     ["tab-menu-new-pane", "Move to a new pane on the right", false, null],
+    ["tab-menu-window", "Move to window", false, null],
     ["tab-menu-close", "CloseCtrl+W", false, null],
     // The other tab of its pane is pinned.
     [
@@ -355,6 +356,82 @@ test("the tab menu shows why an item does not apply, and runs the others (P15)",
     "p1:*/catalog^ | p2:/cluster/c1/map,/cluster/c1,*/preferences",
   );
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+});
+
+test("Move to window lists the other windows and moves the tab through the core (P15, P31)", async () => {
+  const other: WindowLayout = {
+    label: "window-2",
+    bounds: null,
+    panes: [
+      {
+        id: "q1",
+        width: 1,
+        selected: "t9",
+        tabs: [tab("t9", "/cluster/c1/map")],
+      },
+    ],
+    focusedPane: 0,
+  };
+  const backend = mockBackend({
+    windows_list: () => [twoPanes(), other],
+    window_tab_move: () => ({
+      target: "window-2",
+      created: false,
+      sourceEmpty: false,
+    }),
+  });
+  const before = layout();
+  render(<Panes />);
+  fireEvent.contextMenu(screen.getByTestId("tab-t2"));
+  const trigger = await screen.findByTestId("tab-menu-window");
+  expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+  fireEvent.keyDown(trigger, { key: "ArrowRight" });
+  const target = await screen.findByTestId("tab-menu-window-window-2");
+  expect(target.textContent).toBe("Window 2Resource map · prod");
+  // This window is not offered.
+  expect(screen.queryByTestId("tab-menu-window-main")).toBeNull();
+  expect(screen.getByTestId("tab-menu-window-new").textContent).toBe(
+    "New window",
+  );
+  fireEvent.click(target);
+  await waitFor(() =>
+    expect(backend.callsTo("window_tab_move")).toEqual([
+      { tabId: "t2", target: { kind: "window", label: "window-2" } },
+    ]),
+  );
+  // The core's layout event takes the tab out; the menu changes nothing itself.
+  expect(layout()).toBe(before);
+});
+
+test("New window in the tab menu opens the tab in a new window beside this one (P15)", async () => {
+  const backend = mockBackend({
+    windows_list: () => [twoPanes()],
+    window_tab_move: () => ({
+      target: "window-2",
+      created: true,
+      sourceEmpty: false,
+    }),
+  });
+  render(<Panes />);
+  fireEvent.contextMenu(screen.getByTestId("tab-t3"));
+  fireEvent.keyDown(await screen.findByTestId("tab-menu-window"), {
+    key: "ArrowRight",
+  });
+  fireEvent.click(await screen.findByTestId("tab-menu-window-new"));
+  // Bounds not known yet: a step from the window's screen position.
+  const step = Math.round(32 * window.devicePixelRatio);
+  await waitFor(() =>
+    expect(backend.callsTo("window_tab_move")).toEqual([
+      {
+        tabId: "t3",
+        target: {
+          kind: "newWindow",
+          x: Math.round(window.screenX * window.devicePixelRatio) + step,
+          y: Math.round(window.screenY * window.devicePixelRatio) + step,
+        },
+      },
+    ]),
+  );
 });
 
 test("a pinned tab's menu cannot close it, and Close other tabs keeps it (P14)", async () => {
