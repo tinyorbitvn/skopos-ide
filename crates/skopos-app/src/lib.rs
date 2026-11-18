@@ -98,8 +98,9 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState { core: core.clone() })
+        .manage(windows::WindowTracker::default())
+        .on_window_event(windows::on_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::app::app_info,
             commands::catalog::catalog_list,
@@ -211,6 +212,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::windows::window_tab_drop,
         ])
         .setup(move |app| {
+            windows::restore(app.handle(), &forwarded);
             events::spawn_forwarder(app.handle().clone(), forwarded);
             #[cfg(target_os = "macos")]
             menu::install(app.handle())?;
@@ -219,14 +221,14 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
         .on_page_load(|webview, payload| {
             let state = webview.state::<AppState>();
             match payload.event() {
-                // The one window is replacing its page, and the new one cannot know
-                // the old one's drains or sessions. Route changes use the hash, so they
-                // load nothing. Port-forwards go on: the new page lists them.
-                // No automated test reaches this hook. The core's `sessions_stop_all`
-                // and `node_drain_cancel_all` have their own tests.
+                // This window is replacing its page, and the new one cannot know the old
+                // one's drains or sessions; other windows keep theirs (P36). Route
+                // changes use the hash, so they load nothing. Port-forwards go on: the
+                // new page lists them. No automated test reaches this hook. The core's
+                // `sessions_stop_owned` and `node_drain_cancel_owned` have their own tests.
                 PageLoadEvent::Started => {
-                    state.core.node_drain_cancel_all();
-                    state.core.sessions_stop_all();
+                    state.core.node_drain_cancel_owned(webview.label());
+                    state.core.sessions_stop_owned(webview.label());
                 }
                 PageLoadEvent::Finished => {
                     events::send_startup_warnings(webview.app_handle(), &state.core);
@@ -242,11 +244,15 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             std::process::exit(1);
         }
     };
-    app.run(move |_, event| {
-        if let RunEvent::Exit = event {
+    app.run(move |app, event| match event {
+        // Windows that close from here on keep their layouts for the next start (P34).
+        RunEvent::ExitRequested { .. } => windows::quitting(app),
+        RunEvent::Exit => {
+            windows::quitting(app);
             tauri::async_runtime::block_on(core.shutdown());
             log_guard.take();
         }
+        _ => {}
     });
 }
 
@@ -281,6 +287,28 @@ mod capability_tests {
             !raw.contains("opener"),
             "the webview must not hold an opener permission (spec 5.5)"
         );
+    }
+
+    /// Spec P32: every window has the same permissions, the test driver's included.
+    #[test]
+    fn every_window_has_the_same_capabilities() {
+        for raw in [
+            include_str!("../capabilities/default.json"),
+            include_str!("../capabilities-e2e/e2e.json"),
+        ] {
+            let capability: serde_json::Value = serde_json::from_str(raw).unwrap();
+            assert_eq!(
+                capability["windows"],
+                serde_json::json!(["main", "window-*"])
+            );
+        }
+    }
+
+    /// Spec P35: the core owns window bounds, so the window-state plugin is gone.
+    #[test]
+    fn the_window_state_plugin_is_gone() {
+        assert!(!include_str!("../capabilities/default.json").contains("window-state"));
+        assert!(!include_str!("../Cargo.toml").contains("window-state"));
     }
 }
 

@@ -33,7 +33,8 @@ pub async fn window_layout_get(
     state.core.window_layout(window.label())
 }
 
-/// Keeps the calling window's layout; the core keeps its own bounds.
+/// Keeps the calling window's layout; the core keeps its own bounds. A window other
+/// than `main` whose last tab has gone closes (P21).
 #[tauri::command]
 pub async fn window_layout_set(
     state: State<'_, AppState>,
@@ -41,13 +42,28 @@ pub async fn window_layout_set(
     layout: WindowLayout,
 ) -> Result<(), IpcError> {
     own_layout(window.label(), &layout)?;
-    state.core.window_layout_set(layout)
+    state.core.window_layout_set(layout)?;
+    windows::close_if_empty(&window, &state.core);
+    Ok(())
 }
 
 /// The layouts of every open window, `main` first (the "Move to window" list).
 #[tauri::command]
 pub async fn windows_list(state: State<'_, AppState>) -> Result<Vec<WindowLayout>, IpcError> {
     Ok(state.core.windows_list())
+}
+
+/// Moves a tab and settles the windows: a new window opens, an emptied one closes.
+fn move_tab(
+    state: &AppState,
+    window: &WebviewWindow,
+    tab_id: &str,
+    target: MoveTarget,
+) -> Result<MoveOutcome, IpcError> {
+    let from = window.label();
+    let outcome = state.core.window_tab_move(from, tab_id, target)?;
+    windows::settle_move(window.app_handle(), &state.core, from, tab_id, &outcome)?;
+    Ok(outcome)
 }
 
 /// Moves a tab of the calling window to another window or to a new one.
@@ -58,7 +74,7 @@ pub async fn window_tab_move(
     tab_id: String,
     target: MoveTarget,
 ) -> Result<MoveOutcome, IpcError> {
-    state.core.window_tab_move(window.label(), &tab_id, target)
+    move_tab(&state, &window, &tab_id, target)
 }
 
 /// A tab let go outside the calling window at `screen_x`, `screen_y` (that window's
@@ -79,7 +95,7 @@ pub async fn window_tab_drop(
         Some(label) => MoveTarget::Window { label },
         None => MoveTarget::NewWindow { x, y },
     };
-    state.core.window_tab_move(window.label(), &tab_id, target)
+    move_tab(&state, &window, &tab_id, target)
 }
 
 #[cfg(test)]

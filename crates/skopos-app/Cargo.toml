@@ -19,7 +19,6 @@ tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2.5"
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2.7"
-tauri-plugin-window-state = "2.5"
 keyring = "4.2"
 skopos-core = { path = "../skopos-core" }
 serde.workspace = true
