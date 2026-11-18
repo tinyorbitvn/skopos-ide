@@ -46,7 +46,6 @@ import { EllipsisIcon } from "@animateicons/react/lucide/ellipsis-icon";
 import { ExternalLinkIcon } from "@animateicons/react/lucide/external-link-icon";
 import { EyeIcon } from "@animateicons/react/lucide/eye-icon";
 import { EyeOffIcon } from "@animateicons/react/lucide/eye-off-icon";
-import { FileCodeIcon } from "@animateicons/react/lucide/file-code-icon";
 import { FilePlusIcon } from "@animateicons/react/lucide/file-plus-icon";
 import { FileSearchIcon } from "@animateicons/react/lucide/file-search-icon";
 import { FileTextIcon } from "@animateicons/react/lucide/file-text-icon";
@@ -321,7 +320,6 @@ export const ExternalLink = /* @__PURE__ */ animated(
 );
 export const Eye = /* @__PURE__ */ animated("eye", EyeIcon);
 export const EyeOff = /* @__PURE__ */ animated("eye-off", EyeOffIcon);
-export const FileCode = /* @__PURE__ */ animated("file-code", FileCodeIcon);
 export const FilePlus = /* @__PURE__ */ animated("file-plus", FilePlusIcon);
 export const FileSearch = /* @__PURE__ */ animated(
   "file-search",

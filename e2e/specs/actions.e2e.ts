@@ -185,6 +185,17 @@ describe("object actions on the kind cluster", () => {
     await gone(rowId(NS, "held"), 30000);
   });
 
+  it("deletes a ConfigMap with the Delete button of its drawer's toolbar", async () => {
+    await kubectl(["-n", NS, "create", "configmap", "binned"]);
+    await openDrawer("nav-item-core-configmaps", "ConfigMap", "binned");
+    // Delete left More actions, which a ConfigMap then has no use for.
+    expect(await byTestId("detail-more-actions").isExisting()).toBe(false);
+    await clickWhenShown("detail-action-delete");
+    await clickWhenShown("delete-confirm");
+    await gone(rowId(NS, "binned"), 30000);
+    expect(await kubectl(["-n", NS, "get", "configmaps", "-o", "name"])).not.toContain("configmap/binned");
+  });
+
   it("suspends and resumes a Job", async () => {
     await openResource("nav-item-batch-jobs", "Job");
     await searchResources("batch");
