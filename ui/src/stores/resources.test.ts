@@ -126,6 +126,96 @@ test("cluster-scoped delete matches a null namespace", async () => {
   expect(result.current.items).toEqual([]);
 });
 
+const keysOf = (items: KubeObject[]) =>
+  items.map((o) => `${o.metadata.namespace ?? ""}/${o.metadata.name}`);
+
+test("a batch lists a new object where a snapshot would: by namespace, then name", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  await subs[0].send(
+    snapshot(
+      pod("web-aaaaa", "app"),
+      pod("coredns", "kube-system"),
+      pod("other", "zz"),
+    ),
+  );
+  await subs[0].send({
+    type: "batch",
+    upserts: [pod("web-bbbbb", "app")],
+    deletes: [{ namespace: "app", name: "web-aaaaa" }],
+  });
+  expect(keysOf(result.current.items)).toEqual([
+    "app/web-bbbbb",
+    "kube-system/coredns",
+    "zz/other",
+  ]);
+});
+
+test("an object deleted and re-created in two batches keeps its place", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  const db = (uid: string): KubeObject => ({
+    metadata: { name: "db-0", namespace: "app", resourceVersion: "1", uid },
+  });
+  await subs[0].send(snapshot(db("old"), pod("web", "app"), pod("x", "zz")));
+  await subs[0].send({
+    type: "batch",
+    upserts: [],
+    deletes: [{ namespace: "app", name: "db-0" }],
+  });
+  await subs[0].send({ type: "batch", upserts: [db("new")], deletes: [] });
+  expect(keysOf(result.current.items)).toEqual(["app/db-0", "app/web", "zz/x"]);
+  expect(result.current.items[0].metadata.uid).toBe("new");
+});
+
+test("several new objects in one batch are listed in order", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  await subs[0].send(snapshot());
+  await subs[0].send({
+    type: "batch",
+    upserts: [pod("x", "b"), pod("y", "a")],
+    deletes: [],
+  });
+  expect(keysOf(result.current.items)).toEqual(["a/y", "b/x"]);
+});
+
+test("an update of an existing object keeps its place", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  await subs[0].send(snapshot(pod("a"), pod("b"), pod("c")));
+  await subs[0].send({
+    type: "batch",
+    upserts: [pod("a", "default", "2")],
+    deletes: [],
+  });
+  expect(keysOf(result.current.items)).toEqual([
+    "default/a",
+    "default/b",
+    "default/c",
+  ]);
+  expect(result.current.items[0].metadata.resourceVersion).toBe("2");
+});
+
+test("cluster-scoped objects are ordered by name", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  const node = (name: string): KubeObject => ({ metadata: { name } });
+  await subs[0].send(snapshot(node("node-a"), node("node-c")));
+  await subs[0].send({
+    type: "batch",
+    upserts: [node("node-b"), node("Node-z")],
+    deletes: [],
+  });
+  // Plain code units, as the core compares bytes: upper case sorts before lower.
+  expect(keysOf(result.current.items)).toEqual([
+    "/Node-z",
+    "/node-a",
+    "/node-b",
+    "/node-c",
+  ]);
+});
+
 test("clusters_do_not_share_rows", async () => {
   const { subs } = setup();
   const first = await mount("a");

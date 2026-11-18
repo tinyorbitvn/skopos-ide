@@ -346,6 +346,74 @@ test("every clock reading comes from one shared 30 s timer", () => {
   expect(clear).toHaveBeenCalledTimes(1);
 });
 
+interface Aged {
+  id: string;
+  created: string;
+}
+
+function Age(props: { from: string }) {
+  return <>{`${Math.floor((useNow() - Date.parse(props.from)) / 1000)}s`}</>;
+}
+
+const ageColumns: TableColumn<Aged>[] = [
+  {
+    id: "age",
+    header: "Age",
+    width: 80,
+    render: (r) => <Age from={r.created} />,
+  },
+];
+
+/** A table of rows the given numbers of seconds old, on a fake clock. */
+function showAges(...seconds: number[]) {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-18T12:00:00Z"));
+  const rows = seconds.map((s, i) => ({
+    id: `r${i}`,
+    created: new Date(Date.now() - s * 1000).toISOString(),
+  }));
+  render(
+    <VirtualTable
+      rows={rows}
+      columns={ageColumns}
+      rowKey={(r) => r.id}
+      rowTestId={(r) => `row-${r.id}`}
+      rowCreated={(r) => r.created}
+    />,
+  );
+}
+
+const ageOf = (id: string) => screen.getByTestId(`row-${id}`).textContent;
+
+function advance(ms: number) {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
+test("while a row is under a minute old, the ages count every second", () => {
+  showAges(5, 3600);
+  expect([ageOf("r0"), ageOf("r1")]).toEqual(["5s", "3600s"]);
+  advance(1000);
+  expect([ageOf("r0"), ageOf("r1")]).toEqual(["6s", "3601s"]);
+
+  // A minute old, it counts every 30 s again, never backwards.
+  advance(54_000);
+  expect(ageOf("r0")).toBe("60s");
+  advance(4000);
+  expect(ageOf("r0")).toBe("60s");
+  advance(1000);
+  expect(ageOf("r0")).toBe("65s");
+});
+
+test("with only rows a minute old or more, the ages count every 30 s", () => {
+  showAges(60, 3600);
+  advance(29_999);
+  expect([ageOf("r0"), ageOf("r1")]).toEqual(["60s", "3600s"]);
+  advance(1);
+  expect([ageOf("r0"), ageOf("r1")]).toEqual(["90s", "3630s"]);
+});
+
 test("a hidden column does not keep sorting the rows", () => {
   render(
     <VirtualTable
