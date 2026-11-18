@@ -663,7 +663,14 @@ describe("page", () => {
 
   test("keeps a focus outline that forced-colors mode can show", () => {
     // Forced colors drop box shadows, so the ring needs an outline; a transparent one shows there.
-    assert.doesNotMatch(css, /outline:\s*(none|0)\s*;/);
+    const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+    const removed = rules.flatMap((m) =>
+      [...m[2].matchAll(/(?:^|;)\s*(outline(?:-style|-width)?)\s*:\s*([^;]*)/g)]
+        .filter(([, , value]) => value.split(/\s+/).some((word) => /^(none|hidden|0[a-z%]*)$/i.test(word)))
+        .map(([, property, value]) => `${m[1].trim()} { ${property}: ${value.trim()} }`),
+    );
+    assert.deepEqual(removed, []);
+    assert.match(css, /\n:focus-visible \{[^}]*outline: 2px solid var\(--orbit-300\);/);
   });
 
   test("fills no control with orbit: the primary action is the white pill", () => {
@@ -719,14 +726,70 @@ describe("page", () => {
     assert.ok(blur, "the plate has soft edges");
     // Two blur radii in from both edges the plate keeps 97.7% of its color on each axis.
     assert.ok(Number(top) >= 2 * blur && Number(side) >= 2 * blur, "the plate reaches past the copy");
-    const [, share] = /background: color-mix\(in srgb, var\(--gray-950\) (\d+)%, transparent\);/.exec(plate) ?? [];
-    assert.ok(share, "the plate is gray-950");
+    // Opacity rather than color-mix(), which browsers before 2023 lack.
+    assert.match(plate, /background: var\(--gray-950\);/, "the plate is gray-950");
+    const [, share] = /opacity: (0\.\d+);/.exec(plate) ?? [];
+    assert.ok(share, "the plate lets the ribbon through");
     // The ribbon's brightest pixels reach white.
-    const behind = over(tokenRgb("--gray-950"), (Number(share) / 100) * 0.977 ** 2, [1, 1, 1]);
+    const behind = over(tokenRgb("--gray-950"), Number(share) * 0.977 ** 2, [1, 1, 1]);
     for (const name of ["--text-secondary", "--text-link"]) {
       const ratio = contrast(tokenRgb(name, "dark"), behind);
       assert.ok(ratio >= 4.5, `${name} at ${ratio.toFixed(2)}:1`);
     }
+  });
+
+  test("mentions the Next release mark only when something on the page carries it", () => {
+    const marks = html.match(/class="badge next-release"/g)?.length ?? 0;
+    assert.equal(/marked Next release/.test(html), marks > 0);
+  });
+
+  test("lets the call to action grow with its copy, so zoomed text is not cut off", () => {
+    const rules = [...css.matchAll(/\n\s*\.cta \{([^}]*)\}/g)].map((m) => m[1]);
+    assert.ok(rules.length > 0);
+    assert.match(rules[0], /min-height: 540px;/);
+    for (const rule of rules) assert.doesNotMatch(rule, /(^|[;\s])height:/);
+  });
+
+  test("gives each color-mix() a fallback for browsers without it, except shadows", () => {
+    // A var() inside color-mix() defers the check to computed time, so a browser without it
+    // resets the property instead of keeping an earlier declaration: the fallbacks sit in an
+    // @supports block. A shadow or a filter that drops only loses its glow.
+    const condition = "@supports not (color: color-mix(in srgb, red 50%, transparent)) {";
+    const start = css.indexOf(condition);
+    assert.ok(start >= 0, "the fallback block");
+    let end = -1;
+    for (let i = start + condition.length - 1, depth = 0; i < css.length; i++) {
+      if (css[i] === "{") depth += 1;
+      if (css[i] === "}" && --depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+    const rulesOf = (text) =>
+      [...text.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+        selectors: m[1].split(",").map((s) => s.trim().replace(/\s+/g, " ")),
+        declarations: m[2]
+          .split(";")
+          .map((d) => d.trim())
+          .filter(Boolean)
+          .map((d) => [d.slice(0, d.indexOf(":")).trim(), d.slice(d.indexOf(":") + 1).trim()]),
+      }));
+    const fallbacks = rulesOf(css.slice(start + condition.length, end - 1));
+    const missing = [];
+    for (const rule of rulesOf(css.slice(0, start) + css.slice(end))) {
+      for (const [property, value] of rule.declarations) {
+        if (!value.includes("color-mix(") || /^(box-shadow|filter)$/.test(property)) continue;
+        for (const selector of rule.selectors) {
+          const covered = fallbacks.some(
+            (f) =>
+              f.selectors.includes(selector) &&
+              f.declarations.some(([p, v]) => p === property && !v.includes("color-mix(")),
+          );
+          if (!covered) missing.push(`${selector} { ${property} }`);
+        }
+      }
+    }
+    assert.deepEqual(missing, []);
   });
 
   test("hides the orbit frame and its stars on narrow screens", () => {
