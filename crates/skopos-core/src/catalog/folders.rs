@@ -216,11 +216,15 @@ impl CatalogFolders {
         self.placements.remove(cluster).is_some()
     }
 
-    /// The tree as read from a file someone may have edited: a folder whose parent is
-    /// missing, or that sits in a cycle, goes to the top level, and a placement in a
-    /// missing folder is dropped.
+    /// The tree as read from a file someone may have edited: a folder whose id an
+    /// earlier one has is dropped, so what names that id goes to the first; a folder
+    /// whose parent is missing, or that sits in a cycle, goes to the top level; a
+    /// placement in a missing folder is dropped; and a folder named as an earlier
+    /// sibling, ignoring case, is renamed "‹name› 2", "‹name› 3", …, the first that no
+    /// sibling has.
     pub fn repaired(mut self) -> Self {
-        let ids: HashSet<String> = self.folders.iter().map(|f| f.id.clone()).collect();
+        let mut ids = HashSet::new();
+        self.folders.retain(|f| ids.insert(f.id.clone()));
         for folder in &mut self.folders {
             if folder.parent.as_ref().is_some_and(|p| !ids.contains(p)) {
                 folder.parent = None;
@@ -235,7 +239,37 @@ impl CatalogFolders {
             }
         }
         self.placements.retain(|_, folder| ids.contains(folder));
+        self.number_clashing_names();
         self
+    }
+
+    fn number_clashing_names(&mut self) {
+        for i in 0..self.folders.len() {
+            let CatalogFolder { name, parent, .. } = self.folders[i].clone();
+            let sibling_has = |folders: &[CatalogFolder], candidate: &str| {
+                folders
+                    .iter()
+                    .any(|f| f.parent == parent && same_name(&f.name, candidate))
+            };
+            if !sibling_has(&self.folders[..i], &name) {
+                continue;
+            }
+            // The number replaces the name's last characters when the name is too long
+            // to take it, so a repaired name keeps the 64-character rule.
+            let numbered = |n: u32| {
+                let suffix = format!(" {n}");
+                let keep = MAX_NAME_CHARS.saturating_sub(suffix.chars().count());
+                let base: String = name.chars().take(keep).collect();
+                format!("{}{suffix}", base.trim_end())
+            };
+            let mut n = 2;
+            let mut free = numbered(n);
+            while sibling_has(&self.folders, &free) {
+                n += 1;
+                free = numbered(n);
+            }
+            self.folders[i].name = free;
+        }
     }
 }
 
@@ -586,6 +620,84 @@ mod tests {
             fixed.placements,
             BTreeMap::from([("x".to_owned(), "folder-4".to_owned())])
         );
+    }
+
+    #[test]
+    fn a_repeated_folder_id_keeps_the_first_folder() {
+        let mut all = tree(&[
+            ("folder-1", "a", None),
+            ("folder-2", "b", None),
+            ("folder-1", "c", Some("folder-2")),
+            ("folder-3", "d", Some("folder-1")),
+        ]);
+        all.placements.insert("x".into(), "folder-1".into());
+
+        let fixed = all.repaired();
+
+        assert_eq!(
+            fixed.folders,
+            [
+                folder("folder-1", "a", None),
+                folder("folder-2", "b", None),
+                folder("folder-3", "d", Some("folder-1")),
+            ]
+        );
+        assert_eq!(
+            fixed.placements,
+            BTreeMap::from([("x".to_owned(), "folder-1".to_owned())])
+        );
+    }
+
+    #[test]
+    fn sibling_names_that_clash_ignoring_case_are_numbered() {
+        let all = tree(&[
+            ("folder-1", "prod", None),
+            ("folder-2", "PROD", None),
+            ("folder-3", "Prod 2", None),
+            ("folder-4", "prod", None),
+            ("folder-5", "eu", Some("folder-1")),
+            ("folder-6", "EU", Some("folder-1")),
+            ("folder-7", "eu", Some("folder-2")),
+            // At the top level once its missing parent is repaired.
+            ("folder-8", "Prod", Some("folder-9")),
+        ]);
+
+        let fixed = all.repaired();
+
+        let names: Vec<_> = fixed
+            .folders
+            .iter()
+            .map(|f| (f.id.as_str(), f.name.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("folder-1", "prod"),
+                ("folder-2", "PROD 3"),
+                ("folder-3", "Prod 2"),
+                ("folder-4", "prod 4"),
+                ("folder-5", "eu"),
+                ("folder-6", "EU 2"),
+                ("folder-7", "eu"),
+                ("folder-8", "Prod 5"),
+            ]
+        );
+        assert_eq!(fixed.clone().repaired(), fixed);
+    }
+
+    #[test]
+    fn a_numbered_name_keeps_within_64_characters() {
+        let long = "é".repeat(64);
+        let all = tree(&[
+            ("folder-1", long.as_str(), None),
+            ("folder-2", long.as_str(), None),
+        ]);
+
+        let fixed = all.repaired();
+
+        let numbered = &fixed.folders[1].name;
+        assert_eq!(numbered, &format!("{} 2", "é".repeat(62)));
+        assert_eq!(numbered.chars().count(), 64);
     }
 
     #[test]
