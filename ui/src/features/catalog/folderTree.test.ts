@@ -4,6 +4,7 @@ import {
   deleteSummary,
   type FolderTree,
   folderCount,
+  freeName,
   moveProblem,
   moveTargets,
   placementOf,
@@ -224,4 +225,19 @@ test("a delete whose subfolder's name the parent has already is refused (P28)", 
   expect(deleteSummary(clash, CLUSTERS, "folder-1").clash).toBe(
     "Top level already has a folder named eu. Rename one of them first.",
   );
+});
+
+test("a new folder takes the first free name among its siblings", () => {
+  expect(freeName(TREE, null, "New folder")).toBe("New folder");
+  const taken: FolderTree = {
+    ...TREE,
+    folders: [
+      ...TREE.folders,
+      { id: "f7", name: "new folder", parent: null },
+      { id: "f8", name: "New folder 2", parent: null },
+      { id: "f9", name: "New folder", parent: "folder-1" },
+    ],
+  };
+  expect(freeName(taken, null, "New folder")).toBe("New folder 3");
+  expect(freeName(taken, "folder-1", "New folder")).toBe("New folder 2");
 });
