@@ -1060,7 +1060,7 @@ test("a row's menu lists Edit YAML, the kind's actions, then Delete, each with a
     expect(entry.querySelector("svg")).not.toBeNull();
 });
 
-test("the drawer header opens Edit YAML, and its More actions offer Delete", async () => {
+test("the drawer header opens Edit YAML, and its Delete button asks to delete", async () => {
   const fake = fakeBackend();
   await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
   fireEvent.click(row("team-a", "web") as HTMLElement);
@@ -1073,12 +1073,14 @@ test("the drawer header opens Edit YAML, and its More actions offer Delete", asy
   });
   resetDockForTest();
 
-  openMenu("detail-more-actions");
+  // Edit YAML and Delete are both buttons, so there is nothing left for More actions.
+  expect(screen.queryByTestId("detail-more-actions")).toBeNull();
+  fireEvent.click(screen.getByTestId("detail-action-delete"));
+  const dialog = await screen.findByRole("dialog");
   expect(
-    screen.getAllByRole("menuitem").map((m) => m.getAttribute("data-testid")),
-  ).toEqual(["menu-item-edit", "menu-item-delete"]);
-  fireEvent.click(screen.getByTestId("menu-item-delete"));
-  expect(await screen.findByRole("dialog")).toBeTruthy();
+    within(dialog).getByText(/Delete Deployment team-a\/web/),
+  ).toBeTruthy();
+  expect(within(dialog).getByTestId("delete-confirm")).toBeTruthy();
 });
 
 const GADGET = { group: "example.com", plural: "gadgets", kind: "Gadget" };
@@ -1144,8 +1146,7 @@ test("a kind's own delete dialog serves the row menu, the drawer and bulk delete
   expect(screen.queryByTestId("own-delete")).toBeNull();
 
   fireEvent.click(row("default", "a") as HTMLElement);
-  openMenu("detail-more-actions");
-  fireEvent.click(screen.getByTestId("menu-item-delete"));
+  fireEvent.click(screen.getByTestId("detail-action-delete"));
   expect(screen.getByTestId("own-delete")).toBeTruthy();
   expect(opened.at(-1)).toEqual(["a"]);
   fireEvent.click(screen.getByText("Close own"));

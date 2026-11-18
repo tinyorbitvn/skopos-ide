@@ -45,10 +45,7 @@ test("a linked object gets its own kind's action bar and delete dialog", async (
     </MemoryRouter>,
   );
   expect(screen.getByTestId("detail-actions")).toBeTruthy();
-  fireEvent.keyDown(screen.getByTestId("detail-more-actions"), {
-    key: "Enter",
-  });
-  fireEvent.click(screen.getByTestId("menu-item-delete"));
+  fireEvent.click(screen.getByTestId("detail-action-delete"));
   const dialog = await screen.findByRole("dialog");
   expect(
     within(dialog).getByText(/Delete ConfigMap n\/app-config/),

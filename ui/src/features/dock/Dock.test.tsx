@@ -2,10 +2,10 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
-  FileCode,
   FilePlus,
   type IconComponent,
   PanelBottom,
+  Pen,
   Plug,
   ScrollText,
   SquareTerminal,
@@ -332,7 +332,7 @@ test("each tab shows its kind's 14 px icon before its title", async () => {
   await show();
 
   for (const [tab, Icon] of [
-    [WEB, FileCode],
+    [WEB, Pen],
     [create, FilePlus],
     [logs, ScrollText],
     [terminal, SquareTerminal],

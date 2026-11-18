@@ -23,11 +23,11 @@ import { Button, ConfirmDialog, IconButton } from "../../design";
 import {
   ChevronDown,
   ChevronUp,
-  FileCode,
   FilePlus,
   type IconComponent,
   PanelBottom,
   PanelRightOpen,
+  Pen,
   Plug,
   Plus,
   ScrollText,
@@ -63,7 +63,7 @@ const DRAG_DISTANCE = 4;
 const NO_RESOURCES: ApiResourceInfo[] = [];
 
 const TAB_ICONS: Record<DockTab["kind"], IconComponent> = {
-  edit: FileCode,
+  edit: Pen,
   create: FilePlus,
   logs: ScrollText,
   terminal: SquareTerminal,
