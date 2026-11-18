@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
 const CATALOG_CHANGED: &str = "catalog://changed";
+const CATALOG_FOLDERS_CHANGED: &str = "catalog://folders-changed";
 const CLUSTER_STATE: &str = "cluster://state";
 const KUBECONFIG_WARNINGS: &str = "kubeconfig://warnings";
 const STORE_WARNING: &str = "store://warning";
@@ -36,6 +37,7 @@ fn emit(app: &AppHandle, event: CoreEvent) {
         CoreEvent::StoreWarning { warning } => app.emit(STORE_WARNING, warning),
         CoreEvent::PortForwardsChanged { forwards } => app.emit(PORTFORWARD_CHANGED, forwards),
         CoreEvent::ToolProgress { progress } => app.emit(TOOLS_PROGRESS, progress),
+        CoreEvent::CatalogFoldersChanged => app.emit(CATALOG_FOLDERS_CHANGED, ()),
     };
     if let Err(e) = sent {
         tracing::warn!("cannot send an event to the window: {e}");
@@ -52,6 +54,7 @@ pub fn spawn_forwarder(app: AppHandle, core: AppCore) {
                 Err(RecvError::Lagged(missed)) => {
                     tracing::warn!("missed {missed} core events");
                     emit(&app, CoreEvent::CatalogChanged);
+                    emit(&app, CoreEvent::CatalogFoldersChanged);
                     let warnings = core.catalog_warnings();
                     emit(&app, CoreEvent::KubeconfigWarnings { warnings });
                     let forwards = core.portforward_list();

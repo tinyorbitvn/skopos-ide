@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
+use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState};
 use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -40,6 +41,7 @@ const CLUSTERS_FILE: &str = "clusters.json";
 const HOTBAR_FILE: &str = "hotbar.json";
 const PORTFORWARDS_FILE: &str = "portforwards.json";
 const UI_STATE_FILE: &str = "ui-state.json";
+const CATALOG_FOLDERS_FILE: &str = "catalog-folders.json";
 /// The safety net under file events, which some filesystems never deliver.
 const SYNC_POLL: Duration = Duration::from_secs(10);
 const EVENT_BACKLOG: usize = 64;
@@ -67,6 +69,8 @@ pub enum CoreEvent {
     ToolProgress {
         progress: ToolProgress,
     },
+    /// The catalog folder tree or a placement changed; read `catalog_folders` again.
+    CatalogFoldersChanged,
 }
 
 /// A cheap handle to the running core; clones share everything.
@@ -79,6 +83,7 @@ struct Inner {
     prefs: JsonStore<Prefs>,
     clusters: JsonStore<HashMap<ClusterId, ClusterSettings>>,
     hotbar: JsonStore<Vec<ClusterId>>,
+    folders: JsonStore<CatalogFolders>,
     ui_state: UiState,
     pasted: PastedConfigs,
     connections: Arc<ClusterManager>,
@@ -139,6 +144,23 @@ fn open_prefs(
         });
     }
     (prefs, sources)
+}
+
+/// The folder tree, repaired if someone edited the file into a shape the UI cannot show.
+fn open_folders(paths: &AppPaths, warnings: &mut Vec<StoreWarning>) -> JsonStore<CatalogFolders> {
+    let store: JsonStore<CatalogFolders> = open_store(paths, CATALOG_FOLDERS_FILE, warnings);
+    let loaded = store.get();
+    let repaired = loaded.clone().repaired();
+    if repaired != loaded {
+        tracing::warn!("{CATALOG_FOLDERS_FILE}: repaired folders with a missing parent or a cycle");
+        if let Err(e) = store.update(|all| *all = repaired) {
+            warnings.push(StoreWarning {
+                file: CATALOG_FOLDERS_FILE.to_owned(),
+                message: format!("the repaired folders could not be saved: {e}"),
+            });
+        }
+    }
+    store
 }
 
 fn open_store<T>(paths: &AppPaths, file: &str, warnings: &mut Vec<StoreWarning>) -> JsonStore<T>
@@ -218,6 +240,7 @@ impl AppCore {
         let (prefs, sources) = open_prefs(&paths, kubeconfig_env.as_deref(), &mut warnings);
         let clusters = open_store(&paths, CLUSTERS_FILE, &mut warnings);
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
+        let folders = open_folders(&paths, &mut warnings);
         let portforward_definitions = open_store(&paths, PORTFORWARDS_FILE, &mut warnings);
         let (ui_state, ui_warning) = UiState::open(paths.config.join(UI_STATE_FILE), STORE_VERSION);
         warnings.extend(ui_warning);
@@ -235,6 +258,7 @@ impl AppCore {
                 prefs,
                 clusters,
                 hotbar,
+                folders,
                 ui_state,
                 pasted,
                 connections,
@@ -296,6 +320,7 @@ impl AppCore {
     pub fn catalog_remove_pasted(&self, id: &ClusterId) -> CoreResult<()> {
         if self.inner.pasted.remove(id)? {
             self.inner.secrets.delete(id);
+            self.catalog_folders_forget(id);
             return Ok(());
         }
         // A pasted entry can still be listed here until the sync catches up.
@@ -314,6 +339,20 @@ impl AppCore {
         } else {
             IpcError::new(ErrorCode::NotFound, format!("no pasted cluster {id}"))
         })
+    }
+
+    /// Whether the catalog lists `id` right now.
+    pub(crate) fn catalog_lists(&self, id: &ClusterId) -> bool {
+        self.inner
+            .snapshots
+            .borrow()
+            .entries
+            .iter()
+            .any(|entry| entry.id == *id)
+    }
+
+    pub(crate) fn folders(&self) -> &JsonStore<CatalogFolders> {
+        &self.inner.folders
     }
 
     pub fn ui_state_get(&self, key: &str) -> Option<serde_json::Value> {

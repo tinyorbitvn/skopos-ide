@@ -145,13 +145,23 @@ where
     }
 
     pub fn update(&self, f: impl FnOnce(&mut T)) -> CoreResult<T> {
+        self.try_update(|value| {
+            f(value);
+            Ok(value.clone())
+        })
+    }
+
+    /// As `update`, but `f` may refuse the change: its error leaves the value and the
+    /// file as they were. The lock is held throughout, so a check in `f` sees the
+    /// value it changes.
+    pub fn try_update<R>(&self, f: impl FnOnce(&mut T) -> CoreResult<R>) -> CoreResult<R> {
         let mut guard = self.lock();
         let mut next = guard.clone();
-        f(&mut next);
+        let out = f(&mut next)?;
         self.write(&next)?;
         *guard = next.clone();
-        self.tx.send_replace(next.clone());
-        Ok(next)
+        self.tx.send_replace(next);
+        Ok(out)
     }
 
     pub fn subscribe(&self) -> watch::Receiver<T> {
@@ -317,6 +327,30 @@ mod tests {
             })
             .count();
         assert_eq!(kept, 1);
+    }
+
+    #[test]
+    fn a_refused_try_update_keeps_the_value_and_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.json");
+        let (s, _) = JsonStore::<Sample>::open(p.clone(), 1);
+        s.update(|v| v.n = 1).unwrap();
+        let rx = s.subscribe();
+
+        let refused = s.try_update(|v| {
+            v.n = 2;
+            Err::<(), _>(IpcError::new(ErrorCode::InvalidInput, "no"))
+        });
+        let kept = s.try_update(|v| {
+            v.n += 10;
+            Ok(v.n)
+        });
+
+        assert_eq!(refused.unwrap_err().message, "no");
+        assert_eq!(kept.unwrap(), 11);
+        assert_eq!(rx.borrow().n, 11);
+        let (again, _) = JsonStore::<Sample>::open(p, 1);
+        assert_eq!(again.get().n, 11);
     }
 
     #[test]
