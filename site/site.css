@@ -359,8 +359,8 @@ a:hover {
   gap: 12px;
 }
 
-/* Ribbons: ribbon.js draws on the canvas; the glow behind it shows when it cannot, and the
-   scrim keeps the text over it readable. */
+/* Ribbons: ribbon.js draws on the canvas; the glow behind it shows when it cannot, and a
+   plate behind the copy keeps the text over it readable. */
 
 .glow {
   position: absolute;
@@ -378,19 +378,19 @@ a:hover {
   height: 100%;
 }
 
-.scrim {
+/* The plate is the copy's own box, so it grows with the copy at every width. Its middle
+   holds 88% gray-950, enough for secondary text over the ribbon's brightest pixels, and it
+   reaches past the copy by more than twice its blur, so the soft edge never thins it behind
+   the text. */
+.hero__copy::before,
+.cta__copy::before {
+  content: "";
   position: absolute;
-  left: 50%;
-  width: 940px;
-  max-width: 100%;
-  height: 540px;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(
-    closest-side,
-    color-mix(in srgb, var(--gray-950) 86%, transparent),
-    color-mix(in srgb, var(--gray-950) 50%, transparent) 55%,
-    transparent
-  );
+  z-index: -1;
+  inset: -56px -64px;
+  background: color-mix(in srgb, var(--gray-950) 88%, transparent);
+  filter: blur(24px);
+  pointer-events: none;
 }
 
 /* Hero: pulled up under the glass navigation, so the ribbon runs behind it */
@@ -402,14 +402,11 @@ a:hover {
   padding-top: 57px;
 }
 
-.hero__scrim {
-  top: 360px;
-}
-
 .hero__copy {
   position: relative;
   z-index: 1;
-  padding-top: 104px;
+  width: fit-content;
+  margin-top: 104px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1495,14 +1492,10 @@ a:hover {
   justify-content: center;
 }
 
-.cta__scrim {
-  top: 50%;
-  height: 420px;
-}
-
 .cta__copy {
   position: relative;
   z-index: 1;
+  width: fit-content;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1620,7 +1613,7 @@ a:hover {
   }
 
   .hero__copy {
-    padding-top: 72px;
+    margin-top: 72px;
   }
 
   .hero__title {
@@ -1656,6 +1649,10 @@ a:hover {
 }
 
 @media (forced-colors: active) {
+  .ribbon {
+    display: none;
+  }
+
   .grad {
     background: none;
     color: CanvasText;
