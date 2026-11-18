@@ -492,9 +492,60 @@ describe("page", () => {
     assert.ok(html.includes('<a class="skip" href="#main">Skip to content</a>'));
   });
 
-  test("has one Orbit-filled button and one dark band", () => {
-    assert.equal(html.match(/button--primary/g)?.length, 1);
-    assert.equal(html.match(/class="band"/g)?.length, 1);
+  test("is dark, with one screenshot in the light theme", () => {
+    assert.ok(html.includes('<html lang="en" data-theme="dark">'));
+    assert.equal(html.match(/data-theme="light"/g)?.length, 1);
+    assert.ok(html.includes('<figure class="shot themes__shot" data-theme="light">'));
+  });
+
+  test("draws two ribbons, each over its glow and hidden from assistive technology", () => {
+    assert.equal(html.match(/<canvas[\s>]/g)?.length, 2);
+    const ribbons = [
+      ...html.matchAll(
+        /<div class="glow" aria-hidden="true"><\/div>\s*<canvas class="ribbon" data-ribbon data-ribbon-angle="([0-9.]+)" data-ribbon-offset="([0-9.]+)" aria-hidden="true"><\/canvas>/g,
+      ),
+    ];
+    assert.deepEqual(
+      ribbons.map((m) => [m[1], m[2]]),
+      [
+        ["0.74", "4"],
+        ["0.32", "11"],
+      ],
+    );
+    assert.ok(html.includes('<script src="ribbon.js" defer></script>'));
+  });
+
+  test("lays the features out as six cards with figures and three small cards", () => {
+    const cards = [...html.matchAll(/<article class="card ([^"]+)">([\s\S]*?)<\/article>/g)];
+    assert.deepEqual(
+      cards.filter((m) => m[2].includes("<figure")).map((m) => m[1]),
+      ["card--half", "card--half", "card--third", "card--third", "card--third", "card--wide"],
+    );
+    assert.deepEqual(
+      cards.filter((m) => !m[2].includes("<figure")).map((m) => m[1]),
+      ["card--third card--small", "card--third card--small", "card--third card--small"],
+    );
+  });
+
+  test("hides the orbit frame, its stars and the wordmark from assistive technology", () => {
+    assert.ok(html.includes('<div class="frame" aria-hidden="true"></div>'));
+    const rules = html.match(/<div class="rule"[^>]*>/g) ?? [];
+    assert.equal(rules.length, 7);
+    for (const rule of rules) assert.equal(rule, '<div class="rule" aria-hidden="true">');
+    assert.equal(html.match(/class="rule__star /g)?.length, 14);
+    assert.ok(html.includes('<div class="wordmark" aria-hidden="true">SkoposIDE</div>'));
+  });
+
+  test("marks no download card without the script", () => {
+    assert.ok(!html.includes("platform--mine"));
+    for (const os of ["mac", "windows", "linux"]) {
+      assert.ok(html.includes(`<article class="platform" data-os="${os}">`), os);
+    }
+    assert.equal(html.match(/<span class="tag platform__tag" hidden>Your system<\/span>/g)?.length, 3);
+    // Every installer starts as a line pill; site.js turns the visitor's into the white pill.
+    for (const [tag] of html.matchAll(/<a\s[^>]*data-asset="[^"]+"[^>]*>/g)) {
+      assert.ok(tag.includes('class="button button--line button--sm"'), tag);
+    }
   });
 
   test("every in-page link has its target", () => {
@@ -510,11 +561,14 @@ describe("page", () => {
     assert.doesNotMatch(css, /https?:|@import/);
   });
 
-  test("the hero works without the script", () => {
-    assert.match(
-      html,
-      /<a class="button button--primary button--lg" id="hero-download" href="#download">.*<span data-label>Download<\/span><\/a>/,
-    );
+  test("the hero and the call to action work without the script", () => {
+    for (const id of ["hero-download", "cta-download"]) {
+      assert.match(
+        html,
+        new RegExp(`<a class="button button--primary" id="${id}" href="#download">[^\\n]*<span data-label>Download</span>[^\\n]*</a>`),
+        id,
+      );
+    }
     assert.ok(html.includes('v0.6.1<span id="hero-file"></span>'));
     assert.ok(html.includes('<p class="hero__alt" id="hero-alt" hidden></p>'));
   });
@@ -525,7 +579,8 @@ describe("page", () => {
       "Everything here is in release 0.6.1",
       '<span class="stats__value">9.8 MB</span>',
       "The Windows installer is 9.8 MB.",
-      "SkoposIDE 0.6.1</h2>",
+      'SkoposIDE <span class="grad">0.6.1</span></h2>',
+      'Download <span class="grad">SkoposIDE 0.6.1</span></h2>',
       "chmod +x SkoposIDE_0.6.1_amd64.AppImage",
       "latest: v0.6.1 · 2026-11-16",
     ]) {
@@ -551,7 +606,7 @@ describe("page", () => {
     for (const id of ["mock-dock", "mock-map", "mock-metrics", "mock-apps"]) {
       assert.match(
         template,
-        new RegExp(`<figure class="feature__media shot mock[^"]*" id="${id}" role="img" aria-label="[^"]{20,}">`),
+        new RegExp(`<figure class="card__media mock[^"]*" id="${id}" role="img" aria-label="[^"]{20,}">`),
         id,
       );
     }
