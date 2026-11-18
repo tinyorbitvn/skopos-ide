@@ -3,8 +3,10 @@ import {
   Fragment,
   type KeyboardEvent,
   type PointerEvent,
+  useEffect,
   useMemo,
   useRef,
+  type WheelEvent,
 } from "react";
 import { Button, IconButton, Tooltip } from "../../design";
 import type { PaneState } from "../../ipc/generated/PaneState";
@@ -26,6 +28,8 @@ import { TabView } from "./TabView";
 
 /** One Left or Right press moves a splitter by 2% of the width. */
 const KEY_STEP = 0.02;
+/** Pixels per line of a wheel that counts in lines. */
+const WHEEL_LINE_PX = 16;
 
 function dispatch(action: LayoutAction): void {
   useWindowLayout.getState().dispatch(action);
@@ -88,6 +92,14 @@ function TabItem(props: { tab: TabState; selected: boolean }) {
   );
 }
 
+/** A vertical wheel over a strip too long for its pane scrolls it sideways. */
+function scrollStrip(event: WheelEvent<HTMLDivElement>): void {
+  const strip = event.currentTarget;
+  if (event.deltaX !== 0 || strip.scrollWidth <= strip.clientWidth) return;
+  const lines = event.deltaMode === 1;
+  strip.scrollLeft += lines ? event.deltaY * WHEEL_LINE_PX : event.deltaY;
+}
+
 /** The main window without tabs (P21). */
 function EmptyPane() {
   return (
@@ -118,6 +130,16 @@ function Pane(props: {
   const { pane, index, focused, count } = props;
   const selected = pane.tabs.find((t) => t.id === pane.selected) ?? null;
   const selectedId = selected?.id ?? null;
+  const selectedAt = selected === null ? -1 : pane.tabs.indexOf(selected);
+  const strip = useRef<HTMLDivElement>(null);
+  // The selected tab stays in sight in a strip too long for the pane, wherever it
+  // came from (a click, a new tab at the end, a move, a restore); focus stays put.
+  useEffect(() => {
+    if (selectedAt < 0) return;
+    strip.current
+      ?.querySelector(':scope > [data-selected="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selectedAt]);
   // Ctrl/Cmd and middle clicks on links inside the screen (P11, P12).
   const links = useMemo(
     () => (selectedId === null ? {} : screenLinkHandlers(selectedId)),
@@ -140,9 +162,11 @@ function Pane(props: {
     >
       <div className={styles.strip}>
         <div
+          ref={strip}
           className={styles.tabs}
           role="tablist"
           aria-label={`Tabs of pane ${index + 1}`}
+          onWheel={scrollStrip}
         >
           {pane.tabs.map((tab) => (
             <TabItem
