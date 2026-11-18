@@ -2,8 +2,10 @@
 
 SkoposIDE is new code, written for this project. Parts of its logic are adapted from the
 open-source projects below, whose license requires this notice to stay with the code.
-Libraries that SkoposIDE depends on carry their own licenses in `Cargo.lock` and
-`pnpm-lock.yaml`.
+The app also bundles fonts, icons and npm packages. Their sections below, from
+[Fonts](#fonts) on, carry the copyright notices and license texts that their licenses ask
+every copy to keep. The Rust crates that the app links, pinned in `Cargo.lock`, are not
+listed here yet.
 
 ## Freelens
 
@@ -65,7 +67,7 @@ The resource map draws 19 of these icons (`pod`, `deploy`, `rs`, `sts`, `ds`, `j
 `crb`). `ui/scripts/packK8sIcons.mjs` packs them into path data in
 `ui/src/features/map/icons/k8sIcons.ts` and leaves their shapes and colours unchanged. The
 Gateway, HTTPRoute and GatewayClass icons put a Lucide glyph in the frame of the set's Ingress
-icon.
+icon; see [Lucide](#lucide).
 
 The Kubernetes logo is a registered trademark of The Linux Foundation; its use here does not
 imply endorsement by The Linux Foundation or the CNCF.
@@ -201,3 +203,230 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
+
+## Lucide
+
+- Source: https://github.com/lucide-icons/lucide
+- Package: `lucide-react` 1.69
+- License: ISC. The icons that Lucide derives from Feather are under MIT; the license below
+  lists them.
+
+The interface draws its icons from `lucide-react`, and the resource map's Gateway, HTTPRoute
+and GatewayClass icons put a Lucide glyph in the frame of the Kubernetes Ingress icon. The
+package's license follows unchanged.
+
+```text
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## npm packages
+
+The interface (`ui/`) is built by Vite from the npm packages below: the production
+dependencies that `pnpm -C ui licenses list --prod` reports, less the type declarations
+(`@types/*` and `csstype`), which do not ship. The fonts and Lucide have their own sections
+above. Run that command again when the dependencies change.
+
+### MIT License
+
+These packages are under the MIT License. The Tauri packages offer MIT or Apache-2.0, and
+SkoposIDE takes MIT. The copyright notices follow as each package states them; the
+Tauri plugins and `react-remove-scroll-bar` ship no license file, so theirs come from the
+package's SPDX file and `package.json`. The license text after the notices is the same for
+every package.
+
+```text
+@radix-ui/* (every package of the Radix Primitives scope)
+  Copyright (c) 2022 WorkOS
+
+@dnd-kit/accessibility, @dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities
+  Copyright (c) 2021, Claudéric Demers
+
+@floating-ui/core, @floating-ui/dom, @floating-ui/react-dom, @floating-ui/utils
+  Copyright (c) 2021-present Floating UI contributors
+
+@remix-run/route-pattern
+  Copyright (c) 2025 Shopify Inc.
+
+@tanstack/react-virtual, @tanstack/virtual-core
+  Copyright (c) 2021-present Tanner Linsley
+
+@tauri-apps/api
+  Copyright (c) 2017 - Present Tauri Apps Contributors
+  Copyright 2019-2025, The Tauri Programme in the Commons Conservancy
+
+@tauri-apps/plugin-clipboard-manager, @tauri-apps/plugin-dialog
+  Copyright 2019-2022, The Tauri Programme in the Commons Conservancy
+
+@xterm/xterm
+  Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
+  Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com)
+  Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)
+
+@xterm/addon-fit
+  Copyright (c) 2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
+
+aria-hidden, react-remove-scroll, react-style-singleton, use-callback-ref, use-sidecar
+  Copyright (c) 2017 Anton Korzunov
+
+get-nonce
+  Copyright (c) 2020 Anton Korzunov
+
+react-remove-scroll-bar
+  Author: Anton Korzunov <thekashey@gmail.com>
+
+cookie-es
+  Cookie-es copyright (c) Pooya Parsa <pooya@pi0.io>
+
+  Cookie parsing based on https://github.com/jshttp/cookie
+  Copyright (c) 2012-2014 Roman Shtylman <shtylman@gmail.com>
+  Copyright (c) 2015 Douglas Christopher Wilson <doug@somethingdoug.com>
+
+  Set-Cookie parsing based on https://github.com/nfriedly/set-cookie-parser
+  Copyright (c) 2015 Nathan Friedly <nathan@nfriedly.com> (http://nfriedly.com/)
+
+detect-node-es
+  Copyright (c) 2017 Ilya Kantor
+
+marked, and its copy inside monaco-editor
+  Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+  Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+  Copyright (c) 2011-2024, Christopher Jeffrey.
+
+monaco-editor
+  Copyright (c) 2016 - present Microsoft Corporation
+
+The Node.js path library inside monaco-editor
+  Copyright Joyent, Inc. and other Node contributors.
+
+react, react-dom, scheduler
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+
+react-router
+  Copyright (c) React Training LLC 2015-2019
+  Copyright (c) Remix Software Inc. 2020-2021
+  Copyright (c) Shopify Inc. 2022-2023
+
+zustand
+  Copyright (c) 2019 Paul Henschel
+```
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Markdown, in marked
+
+The license file of `marked` also carries the license of Markdown:
+
+```text
+Copyright © 2004, John Gruber
+http://daringfireball.net/
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+* Neither the name “Markdown” nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+This software is provided by the copyright holders and contributors “as is” and any express or implied warranties, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose are disclaimed. In no event shall the copyright owner or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
+```
+
+### ISC License
+
+The `yaml` package is under the ISC License:
+
+```text
+Copyright Eemeli Aro <eemeli@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+
+### DOMPurify
+
+- Source: https://github.com/cure53/DOMPurify
+- License: Apache-2.0, the license in `LICENSE`, chosen of the two it offers (Apache-2.0 and
+  MPL-2.0). Copyright (c) Cure53 and other contributors. The package has no NOTICE file.
+
+The app bundles the copy that `monaco-editor` carries in `esm/vs/base/browser/dompurify/`.
+The `dompurify` package in the dependency tree is under the same terms.
+
+### monaco-editor's own notices
+
+`monaco-editor` ships a `ThirdPartyNotices.txt` for components inside it. The app's build
+holds two of them, credited above: the Node.js path library and marked. The others
+(TypeScript, the HTML 5.1 W3C Working Draft, JS Beautifier, the Ionic documentation and
+vscode-swift) belong to language services and languages that the app does not bundle.
+
+### No notice required
+
+- **tslib** (0BSD): Copyright (c) Microsoft Corporation. Its license grants use with no
+  conditions, so it asks for no notice; it is listed so the list is complete.
