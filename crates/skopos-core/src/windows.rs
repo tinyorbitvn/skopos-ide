@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use ts_rs::TS;
 
 use crate::app_core::{AppCore, CoreEvent};
@@ -458,27 +459,35 @@ pub(crate) struct Windows {
     store: JsonStore<WindowsFile>,
     /// Labels, the most recently focused first.
     focus: Mutex<Vec<String>>,
+    /// Where a failed save is reported (P44).
+    events: broadcast::Sender<CoreEvent>,
 }
 
 impl Windows {
     /// A missing, unreadable or newer file gives the start layout and, but for a
     /// missing one, a warning; a file with a damaged layout is repaired and saved.
-    pub(crate) fn open(path: PathBuf, version: u32) -> (Self, Option<StoreWarning>) {
+    /// A save that fails keeps the change in memory and warns once (P44).
+    pub(crate) fn open(
+        path: PathBuf,
+        version: u32,
+        events: broadcast::Sender<CoreEvent>,
+    ) -> (Self, Option<StoreWarning>) {
         let (store, mut warning) = JsonStore::<WindowsFile>::open(path, version);
         let loaded = store.get();
         let fixed = repaired(loaded.clone());
         if fixed != loaded {
             tracing::warn!("windows.json: repaired window layouts the UI could not show");
-            if let Err(e) = store.update(|file| *file = fixed) {
-                warning.get_or_insert(StoreWarning {
-                    file: "windows.json".to_owned(),
-                    message: format!("the repaired window layouts could not be saved: {e}"),
-                });
+            if let Ok(((), Some(failed))) = store.try_update_kept(|file| {
+                *file = fixed;
+                Ok(())
+            }) {
+                warning.get_or_insert(failed);
             }
         }
         let windows = Self {
             store,
             focus: Mutex::new(Vec::new()),
+            events,
         };
         (windows, warning)
     }
@@ -487,13 +496,19 @@ impl Windows {
         with_main(self.store.get())
     }
 
+    /// A change that `f` accepts stays in memory even when `windows.json` cannot be
+    /// written; the first failure of a run is sent as a `StoreWarning` (P44).
     fn change<R>(&self, f: impl FnOnce(&mut WindowsFile) -> CoreResult<R>) -> CoreResult<R> {
-        self.store.try_update(|file| {
+        let (out, warning) = self.store.try_update_kept(|file| {
             *file = with_main(std::mem::take(file));
             let out = f(file)?;
             sort_windows(file);
             Ok(out)
-        })
+        })?;
+        if let Some(warning) = warning {
+            let _ = self.events.send(CoreEvent::StoreWarning { warning });
+        }
+        Ok(out)
     }
 
     fn focus(&self) -> MutexGuard<'_, Vec<String>> {
