@@ -76,7 +76,7 @@ test("saving sends plain text for the changed key only and hides values again", 
   await waitFor(() => expect(backend.callsTo("secret_update")).toHaveLength(1));
   expect(backend.callsTo("secret_update")[0]).toMatchObject({
     resourceVersion: "5",
-    changes: [{ key: "a", value: "new" }],
+    changes: [{ key: "a", value: { text: "new" } }],
   });
   await waitFor(() =>
     expect(screen.getByTestId("secret-value-a").textContent).toBe("••••••"),
@@ -105,7 +105,7 @@ test("a key can be added and removed without revealing the others", async () => 
   await waitFor(() => expect(backend.callsTo("secret_update")).toHaveLength(1));
   expect(backend.callsTo("secret_update")[0].changes).toEqual([
     { key: "b", value: null },
-    { key: "c", value: "x" },
+    { key: "c", value: { text: "x" } },
   ]);
   expect(backend.callsTo("secret_reveal")).toHaveLength(0);
 });
