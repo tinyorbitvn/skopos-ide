@@ -217,7 +217,7 @@ test("at 3 panes another pane's body only takes the tab (P22)", () => {
   );
 });
 
-test("Esc cancels the drag", () => {
+test("Esc cancels the drag, and the click after the release selects nothing", async () => {
   render(<Panes />);
   down("t2");
   move(20, 10);
@@ -228,8 +228,14 @@ test("Esc cancels the drag", () => {
   expect(screen.queryByTestId("tab-drag-label")).toBeNull();
   expect(screen.queryAllByTestId(/^pane-drop-/)).toEqual([]);
   up(400, 300);
+  fireEvent.click(screen.getByTestId("tab-t4"));
   expect(shape()).toBe(
     "*/catalog^,/preferences | */cluster/c1/map,/cluster/c1",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fireEvent.click(screen.getByTestId("tab-t4"));
+  expect(shape()).toBe(
+    "*/catalog^,/preferences | /cluster/c1/map,*/cluster/c1",
   );
 });
 

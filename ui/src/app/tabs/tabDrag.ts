@@ -55,6 +55,34 @@ function swallowNextClick(): void {
   setTimeout(() => window.removeEventListener("click", swallow, true), 0);
 }
 
+/**
+ * After Esc ends a drag, the release still ends with a click, which must not select
+ * the tab under it either. A cancelled pointer, a lost focus, a move without a button
+ * or a new press means that release is not coming.
+ */
+function swallowClickAfterRelease(pointerId: number): void {
+  function onRelease(event: PointerEvent): void {
+    if (event.pointerId !== pointerId) return;
+    end();
+    swallowNextClick();
+  }
+  function onMove(event: PointerEvent): void {
+    if (event.pointerId === pointerId && event.buttons === 0) end();
+  }
+  function end(): void {
+    window.removeEventListener("pointerup", onRelease);
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerdown", end, true);
+    window.removeEventListener("pointercancel", end);
+    window.removeEventListener("blur", end);
+  }
+  window.addEventListener("pointerup", onRelease);
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerdown", end, true);
+  window.addEventListener("pointercancel", end);
+  window.addEventListener("blur", end);
+}
+
 function sameOver(a: DropOver | null, b: DropOver | null): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -141,11 +169,11 @@ export function startTabDrag(
 
   function onKey(event: KeyboardEvent): void {
     if (event.key !== "Escape") return;
-    if (live) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
     stop();
+    if (!live) return;
+    event.preventDefault();
+    event.stopPropagation();
+    swallowClickAfterRelease(press.pointerId);
   }
 
   window.addEventListener("pointermove", onMove);
