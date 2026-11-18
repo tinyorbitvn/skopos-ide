@@ -335,7 +335,7 @@ test("the row menu offers Settings above Remove, and it opens the cluster's Sett
   await screen.findByTestId("menu-item-settings");
   expect(
     screen.getAllByRole("menuitem").map((item) => item.textContent),
-  ).toEqual(["Pin to hotbar", "Settings", "Remove"]);
+  ).toEqual(["Pin to hotbar", "Settings", "Move to", "Remove"]);
   fireEvent.click(screen.getByTestId("menu-item-settings"));
 
   await waitFor(() =>

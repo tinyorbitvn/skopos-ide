@@ -311,3 +311,19 @@ export function deleteSummary(
       : null,
   };
 }
+
+/** `base`, or `base 2`, `base 3`… : the first name no folder in `parent` has, ignoring case. */
+export function freeName(
+  tree: FolderTree,
+  parent: string | null,
+  base: string,
+): string {
+  const taken = new Set(
+    tree.folders
+      .filter((f) => f.parent === parent)
+      .map((f) => f.name.toLowerCase()),
+  );
+  let name = base;
+  for (let n = 2; taken.has(name.toLowerCase()); n += 1) name = `${base} ${n}`;
+  return name;
+}

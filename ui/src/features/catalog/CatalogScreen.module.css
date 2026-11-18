@@ -100,3 +100,184 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+/* The tree table (P29), drawn as the design's DataTable. */
+.tree {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tree th {
+  position: sticky;
+  top: 0;
+  height: 34px;
+  padding: 0 var(--space-7);
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: var(--type-caption);
+  text-align: left;
+}
+
+.tree td {
+  height: 34px;
+  padding: 0 var(--space-7);
+  border-bottom: 1px solid var(--divider);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clusterRow {
+  cursor: pointer;
+}
+
+.clusterRow:hover,
+.folderRow:hover {
+  background: var(--surface-hover);
+}
+
+.folderRow td:first-child {
+  font: var(--type-label);
+}
+
+/* A folder row under a dragged item: it takes it, or not (P29). */
+.folderRow[data-drop="ok"],
+.topRow[data-drop="ok"] {
+  background: var(--surface-selected);
+  box-shadow: inset 0 0 0 2px var(--focus-ring-color);
+}
+
+.folderRow[data-drop="refused"],
+.topRow[data-drop="refused"] {
+  cursor: not-allowed;
+  background: var(--surface-sunken);
+}
+
+.folderRow[data-dragging],
+.clusterRow[data-dragging] {
+  color: var(--text-tertiary);
+}
+
+.topRow td {
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font: var(--type-caption);
+}
+
+.topText {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.nameCell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.nameCell > .name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.chevron {
+  flex: none;
+  width: 14px;
+  color: var(--text-secondary);
+}
+
+.folderIcon {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.toggle:focus-visible,
+.renameInput:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font: var(--type-caption);
+  text-align: center;
+}
+
+.rename {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) 0;
+}
+
+.renameInput {
+  width: 220px;
+  max-width: 100%;
+  height: var(--control-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+
+.renameInput[aria-invalid="true"] {
+  border-color: var(--status-critical);
+}
+
+.renameError {
+  color: var(--text-danger);
+  font: var(--type-caption);
+  white-space: normal;
+}
+
+/* Beside the pointer while a folder or cluster is dragged. */
+.dragLabel {
+  position: fixed;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 320px;
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-3);
+  color: var(--text-secondary);
+  font: var(--type-caption);
+  pointer-events: none;
+}
+
+.dragLabel strong {
+  color: var(--text-primary);
+  font: var(--type-label);
+}
+
+.dragLabel[data-drop="refused"] span {
+  color: var(--text-danger);
+}
