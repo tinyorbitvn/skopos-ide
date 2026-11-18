@@ -53,6 +53,7 @@ test("onWindowLayout hands over this window's layout and no other window's", asy
 test.each<[string, () => Promise<unknown>]>([
   ["window://layout", () => events.onWindowLayout(() => {})],
   ["menu://command", () => events.onMenuCommand(() => {})],
+  ["window://flush", () => events.onWindowFlush(() => {})],
 ])("%s is listened to on this window only", async (name, subscribe) => {
   const listens: unknown[] = [];
   mockIPC((cmd, args) => {
@@ -92,4 +93,16 @@ test("onCatalogFoldersChanged fires on every catalog://folders-changed", async (
   await emitEvent("catalog://folders-changed");
 
   expect(count).toBe(2);
+});
+
+test("onWindowFlush fires on every window://flush", async () => {
+  mockBackend({});
+  let count = 0;
+  await events.onWindowFlush(() => {
+    count += 1;
+  });
+
+  await emitEvent("window://flush");
+
+  expect(count).toBe(1);
 });

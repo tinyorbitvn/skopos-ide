@@ -609,6 +609,8 @@ export const api = {
     call<void>("window_layout_set", { layout }),
   /** The layouts of every open window, `main` first. */
   windowsList: () => call<WindowLayout[]>("windows_list"),
+  /** This window has sent its last layout before the app quits (P34). */
+  windowFlushed: () => call<void>("window_flushed"),
   /**
    * Moves a tab of this window to another window or into a new one (P31, P33).
    * Rejects with NotFound "That window is closed." when the target has gone.

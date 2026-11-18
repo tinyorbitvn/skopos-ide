@@ -92,8 +92,9 @@ function queueSave(layout: WindowLayout): void {
 
 /**
  * Loads this window's layout from the core, drops the tabs no route knows and sends
- * the result back (P39), then keeps it in sync: each change is saved after 300 ms and
- * at once on `pagehide`, and a layout the core sends replaces this one (P38). The
+ * the result back (P39), then keeps it in sync: each change is saved after 300 ms, and
+ * at once on `pagehide` and when the app asks before quitting (P34), and a layout the
+ * core sends replaces this one (P38). The
  * listener is in place before the layout is asked for, so a layout the core sends
  * meanwhile (a tab moved in while the window loads) is kept, and the newest one wins
  * over the answer. Runs once per page; later calls return the first one's promise.
@@ -121,6 +122,14 @@ export function startWindowLayout(
       if (kept !== incoming) queueSave(kept);
     });
     stops.push(unlisten);
+    // The app quits once every window has answered (P34): the pending save goes first.
+    stops.push(
+      await events.onWindowFlush(() => {
+        void flushWindowLayout()
+          .then(() => api.windowFlushed())
+          .catch(() => {});
+      }),
+    );
 
     let answer: WindowLayout;
     try {

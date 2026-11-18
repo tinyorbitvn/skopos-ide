@@ -408,6 +408,7 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   ["window_layout_get", () => api.windowLayoutGet(), {}],
   ["window_layout_set", () => api.windowLayoutSet(LAYOUT), { layout: LAYOUT }],
   ["windows_list", () => api.windowsList(), {}],
+  ["window_flushed", () => api.windowFlushed(), {}],
   [
     "window_tab_move",
     () => api.windowTabMove("tab-1", { kind: "window", label: "main" }),

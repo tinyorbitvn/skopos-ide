@@ -53,6 +53,12 @@ export const events = {
    * This window's layout as the core now holds it: after a tab moved in or out, or
    * when the core changed a layout this window saved. It replaces the window's layout.
    */
+  /**
+   * The app is about to quit: save this window's layout now, then answer with
+   * `api.windowFlushed` (P34). The app quits without an answer after 500 ms.
+   */
+  onWindowFlush: (handler: () => void) =>
+    onOwn<unknown>("window://flush", () => handler()),
   onWindowLayout: (handler: (layout: WindowLayout) => void) => {
     const label = windowLabel();
     return onOwn<WindowLayout>("window://layout", (layout) => {
