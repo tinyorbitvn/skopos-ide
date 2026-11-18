@@ -1,6 +1,6 @@
 import { mockWindows } from "@tauri-apps/api/mocks";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
@@ -184,4 +184,83 @@ test("a pane's width share is its flex grow", () => {
   });
   expect(screen.getByTestId("pane-0").style.flexGrow).toBe("0.52");
   expect(screen.getByTestId("pane-1").style.flexGrow).toBe("0.48");
+});
+
+describe("a strip longer than its pane", () => {
+  const original = Element.prototype.scrollIntoView;
+  const scrolled = vi.fn();
+
+  beforeEach(() => {
+    scrolled.mockClear();
+    Element.prototype.scrollIntoView = scrolled;
+    const tabs = Array.from({ length: 20 }, (_, i) =>
+      tab(`t${i + 1}`, `/cluster/c1/r/apps/deployments?n=${i + 1}`),
+    );
+    resetWindowLayoutForTest({
+      label: "main",
+      bounds: null,
+      panes: [{ id: "p1", width: 1, selected: "t1", tabs }],
+      focusedPane: 0,
+    });
+  });
+
+  afterEach(() => {
+    Element.prototype.scrollIntoView = original;
+  });
+
+  /** The strip elements `scrollIntoView` was called on, in order. */
+  function scrolledTo(): Element[] {
+    return scrolled.mock.contexts as Element[];
+  }
+
+  /** A tab's element in its strip: its button and its Close. */
+  function tabElement(id: string): Element | null {
+    return screen.getByTestId(`tab-${id}`).parentElement;
+  }
+
+  test("selecting the last tab scrolls it into sight without moving focus (P19)", () => {
+    render(<Panes />);
+    const focusedBefore = document.activeElement;
+    scrolled.mockClear();
+
+    act(() =>
+      useWindowLayout.getState().dispatch({ type: "select", tabId: "t20" }),
+    );
+
+    expect(scrolledTo()).toEqual([tabElement("t20")]);
+    expect(scrolled).toHaveBeenCalledWith({
+      block: "nearest",
+      inline: "nearest",
+    });
+    expect(document.activeElement).toBe(focusedBefore);
+  });
+
+  test("a new tab opened at the end of the strip is scrolled into sight (P12)", () => {
+    render(<Panes />);
+    scrolled.mockClear();
+
+    act(() =>
+      useWindowLayout.getState().dispatch({
+        type: "open",
+        path: "/preferences",
+        mode: "newTab",
+        newTabId: "t21",
+        newPaneId: "p2",
+      }),
+    );
+
+    expect(scrolledTo()).toEqual([tabElement("t21")]);
+  });
+
+  test("a vertical wheel over an overflowing strip scrolls it sideways", () => {
+    render(<Panes />);
+    const strip = screen.getByRole("tablist", { name: "Tabs of pane 1" });
+    Object.defineProperty(strip, "scrollWidth", { value: 2400 });
+    Object.defineProperty(strip, "clientWidth", { value: 600 });
+
+    fireEvent.wheel(strip, { deltaY: 120 });
+    fireEvent.wheel(strip, { deltaY: 3, deltaMode: 1 });
+
+    expect(strip.scrollLeft).toBe(120 + 3 * 16);
+  });
 });
