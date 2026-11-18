@@ -30,6 +30,7 @@ import {
   shellNavigator,
   useFocusedPath,
 } from "./tabs/ShellRouter";
+import { installTabKeys } from "./tabs/tabKeys";
 
 /** The focused tab's cluster, or null on a tab without one. */
 function useFocusedCluster(): string | null {
@@ -138,7 +139,10 @@ function ShellDock() {
   return <ConnectedDock key={clusterId} clusterId={clusterId} />;
 }
 
-/** The catalog, the history keys and mouse buttons, the shell keys and the menu's commands. */
+/**
+ * The catalog, the history keys and mouse buttons, the shell and tab keys, and the
+ * menu's commands.
+ */
 function ShellEffects() {
   const init = useCatalog((s) => s.init);
 
@@ -148,6 +152,9 @@ function ShellEffects() {
 
   // Back and forward move the focused tab (spec P3).
   useEffect(() => installHistoryShortcuts((d) => shellNavigator.go(d)), []);
+
+  // Mod+\, Mod+W, Ctrl+Tab and Mod+1 to Mod+3 (spec P16).
+  useEffect(() => installTabKeys(IS_MAC), []);
 
   // The listeners are installed once and read the latest context through a ref.
   const context = useCommandContext();
