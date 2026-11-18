@@ -5,4 +5,4 @@ import type { StoreWarning } from "./StoreWarning";
 import type { SyncWarning } from "./SyncWarning";
 import type { ToolProgress } from "./ToolProgress";
 
-export type CoreEvent = { "type": "catalogChanged" } | { "type": "clusterState", id: string, state: ConnectionState, } | { "type": "kubeconfigWarnings", warnings: Array<SyncWarning>, } | { "type": "storeWarning", warning: StoreWarning, } | { "type": "portForwardsChanged", forwards: Array<PortForward>, } | { "type": "toolProgress", progress: ToolProgress, };
+export type CoreEvent = { "type": "catalogChanged" } | { "type": "clusterState", id: string, state: ConnectionState, } | { "type": "kubeconfigWarnings", warnings: Array<SyncWarning>, } | { "type": "storeWarning", warning: StoreWarning, } | { "type": "portForwardsChanged", forwards: Array<PortForward>, } | { "type": "toolProgress", progress: ToolProgress, } | { "type": "catalogFoldersChanged" };
