@@ -6,13 +6,19 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router";
+import { useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
+import {
+  resetWindowLayoutForTest,
+  useWindowLayout,
+} from "../stores/windowLayout";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
 import { Hotbar } from "./Hotbar";
+import { tabPath } from "./tabs/layout";
+import { ShellRouter } from "./tabs/ShellRouter";
 
 function Where() {
   return <output data-testid="where">{useLocation().pathname}</output>;
@@ -34,10 +40,10 @@ async function show(clusters: ClusterEntry[], hotbar: string[]) {
   });
   await useCatalog.getState().init();
   render(
-    <MemoryRouter initialEntries={["/catalog"]}>
+    <ShellRouter>
       <Hotbar />
       <Where />
-    </MemoryRouter>,
+    </ShellRouter>,
   );
   return ipc;
 }
@@ -52,7 +58,13 @@ function shownOrder(): (string | null)[] {
 beforeEach(() => {
   resetCatalogForTest();
   resetShellForTest();
+  // One Catalog tab, focused.
+  resetWindowLayoutForTest();
 });
+
+function shownPaths(): string[] {
+  return useWindowLayout.getState().layout.panes[0].tabs.map(tabPath);
+}
 afterEach(() => vi.restoreAllMocks());
 
 test("renders pinned clusters with initials and status dot", async () => {
@@ -93,12 +105,41 @@ test("rail links keep their class and mark the current page", async () => {
   ).toBeNull();
 });
 
-test("click navigates to the cluster", async () => {
-  await show([alpha], ["a"]);
+test("click navigates the focused tab to the cluster, and its tile is then active (P2)", async () => {
+  await show([alpha, beta], ["a", "b"]);
+  expect(
+    screen.getByTestId("hotbar-item-a").getAttribute("aria-current"),
+  ).toBeNull();
 
   fireEvent.click(screen.getByTestId("hotbar-item-a"));
 
   expect(screen.getByTestId("where").textContent).toBe("/cluster/a");
+  expect(shownPaths()).toEqual(["/cluster/a"]);
+  expect(screen.getByTestId("hotbar-item-a").getAttribute("aria-current")).toBe(
+    "page",
+  );
+  expect(
+    screen.getByTestId("hotbar-item-b").getAttribute("aria-current"),
+  ).toBeNull();
+  expect(
+    screen.getByTestId("nav-catalog").getAttribute("aria-current"),
+  ).toBeNull();
+});
+
+test("Ctrl+click on a tile or a rail link opens a new tab; middle-click opens beside (P2, P12)", async () => {
+  await show([alpha], ["a"]);
+
+  fireEvent.click(screen.getByTestId("hotbar-item-a"), { ctrlKey: true });
+  expect(shownPaths()).toEqual(["/catalog", "/cluster/a"]);
+  fireEvent.click(screen.getByTestId("nav-preferences"), { ctrlKey: true });
+  expect(shownPaths()).toEqual(["/catalog", "/cluster/a", "/preferences"]);
+  fireEvent(
+    screen.getByTestId("hotbar-item-a"),
+    new MouseEvent("auxclick", { bubbles: true, button: 1 }),
+  );
+  const panes = useWindowLayout.getState().layout.panes;
+  expect(panes).toHaveLength(2);
+  expect(panes[1].tabs.map(tabPath)).toEqual(["/cluster/a"]);
 });
 
 test("the rail has no Workspace link, and a Shift-click on a tile opens the cluster", async () => {

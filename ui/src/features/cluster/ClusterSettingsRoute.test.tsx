@@ -76,7 +76,8 @@ test("a connected cluster shows the Settings page inside its layout", async () =
   await show(CONNECTED);
   expect(await screen.findByTestId("cluster-settings")).toBeTruthy();
   expect(screen.getByTestId("settings-back").textContent).toBe("Back to x");
-  expect(screen.getByTestId("nav-overview")).toBeTruthy();
+  // The sidebar is the window's, not the cluster layout's (P1).
+  expect(screen.queryByTestId("cluster-sidebar")).toBeNull();
 });
 
 test("a draft survives the cluster connecting while the page is open", async () => {
@@ -92,7 +93,6 @@ test("a draft survives the cluster connecting while the page is open", async () 
   await act(flush);
 
   // The page moved into the cluster layout, so it mounted again and read the settings again.
-  expect(screen.getByTestId("nav-overview")).toBeTruthy();
   expect(ipc.callsTo("cluster_settings_get")).toHaveLength(2);
   expect(screen.getByTestId("settings-back").textContent).toBe("Back to x");
   expect(proxy().value).toBe("http://proxy.example:3128");

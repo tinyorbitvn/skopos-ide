@@ -1,31 +1,4 @@
-.layout {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  flex: 1;
-  min-height: 0;
-}
-
-/* Holds the sidebar and its resize handle, which sits on the right border. */
-.nav {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-.nav > nav {
-  flex: 1;
-}
-
-.main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
+/* The routed screen of a cluster tab fills its pane's body and scrolls itself. */
 .content {
   flex: 1;
   min-height: 0;

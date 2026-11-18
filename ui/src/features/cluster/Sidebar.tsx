@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useMemo } from "react";
-import { NavLink, useLocation } from "react-router";
+import { NavLink, type NavLinkProps, useLocation } from "react-router";
+import { useNavItem } from "../../app/tabs/navigation";
 import { ErrorNotice, Spinner } from "../../design";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import {
@@ -18,6 +19,15 @@ import {
 import { useUiState } from "../../stores/uiState";
 import styles from "./Sidebar.module.css";
 
+/**
+ * A navigation item: a click, Ctrl/Cmd+click, middle-click or double-click opens its
+ * location in a tab (spec P11 to P13), and it is active on the focused tab's location.
+ */
+function NavItemLink(props: Omit<NavLinkProps, "to"> & { to: string }) {
+  const handlers = useNavItem(props.to);
+  return <NavLink {...props} {...handlers} />;
+}
+
 function Item(props: {
   clusterId: string;
   group: string;
@@ -32,7 +42,7 @@ function Item(props: {
     : styles.link;
   return (
     <li>
-      <NavLink
+      <NavItemLink
         to={resourcePath(clusterId, group, plural)}
         className={({ isActive }) =>
           isActive ? `${base} ${styles.active}` : base
@@ -41,7 +51,7 @@ function Item(props: {
         title={label}
       >
         {label}
-      </NavLink>
+      </NavItemLink>
     </li>
   );
 }
@@ -50,7 +60,7 @@ function RouteItem(props: { clusterId: string; path: string; label: string }) {
   const { clusterId, path, label } = props;
   return (
     <li>
-      <NavLink
+      <NavItemLink
         to={`/cluster/${encodeURIComponent(clusterId)}/${path}`}
         className={({ isActive }) =>
           isActive ? `${styles.link} ${styles.active}` : styles.link
@@ -59,7 +69,7 @@ function RouteItem(props: { clusterId: string; path: string; label: string }) {
         title={label}
       >
         {label}
-      </NavLink>
+      </NavItemLink>
     </li>
   );
 }
@@ -336,7 +346,7 @@ function SectionItems(props: { clusterId: string; section: NavSection }) {
   if (overview === undefined) return items;
   return [
     <li key="overview">
-      <NavLink
+      <NavItemLink
         end
         to={`/cluster/${encodeURIComponent(clusterId)}/${overview}`}
         className={({ isActive }) =>
@@ -345,7 +355,7 @@ function SectionItems(props: { clusterId: string; section: NavSection }) {
         data-testid={`nav-overview-${overview}`}
       >
         Overview
-      </NavLink>
+      </NavItemLink>
     </li>,
     ...items,
   ];
@@ -411,7 +421,7 @@ export function Sidebar(props: {
       aria-label="Cluster navigation"
       data-testid="cluster-sidebar"
     >
-      <NavLink
+      <NavItemLink
         end
         to={`/cluster/${encodeURIComponent(clusterId)}`}
         className={({ isActive }) =>
@@ -420,8 +430,8 @@ export function Sidebar(props: {
         data-testid="nav-overview"
       >
         Overview
-      </NavLink>
-      <NavLink
+      </NavItemLink>
+      <NavItemLink
         to={`/cluster/${encodeURIComponent(clusterId)}/map`}
         className={({ isActive }) =>
           isActive ? `${styles.link} ${styles.active}` : styles.link
@@ -430,7 +440,7 @@ export function Sidebar(props: {
         title="Resource map"
       >
         Resource map
-      </NavLink>
+      </NavItemLink>
       {/* A failed refresh keeps the last resources, so the error sits above them. */}
       {props.error !== null ? (
         <div className={styles.state}>
