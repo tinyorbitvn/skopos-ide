@@ -26,11 +26,11 @@ spec:
       command: ["/bin/sh", "-c", "while true; do echo keeper line; sleep 1; done"]
 `;
 
-/** The dock layout as the app saved it in this spec's config dir, or null. */
+/** The main window's dock layout (spec P37) as the app saved it in this spec's config dir, or null. */
 function savedLayout(): any {
   const file = path.join(process.env.SKOPOS_CONFIG_DIR ?? "", "config", "ui-state.json");
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8")).data?.["dock:layout"] ?? null;
+    return JSON.parse(fs.readFileSync(file, "utf8")).data?.["dock:layout:main"] ?? null;
   } catch {
     return null;
   }
