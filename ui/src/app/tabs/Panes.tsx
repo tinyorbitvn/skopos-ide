@@ -8,14 +8,23 @@ import {
   useRef,
   type WheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { Button, ContextMenu, IconButton, Tooltip } from "../../design";
 import type { ContextMenuItem } from "../../design/ContextMenu";
 import type { PaneState } from "../../ipc/generated/PaneState";
 import type { TabState } from "../../ipc/generated/TabState";
+import type { WindowLayout } from "../../ipc/generated/WindowLayout";
 import { MAIN_WINDOW } from "../../ipc/window";
 import { useCatalog } from "../../stores/catalog";
 import { useWindowLayout } from "../../stores/windowLayout";
 import { clusterColor } from "../clusterVisual";
+import {
+  type DropOver,
+  dropLabel,
+  dropZones,
+  markIndex,
+  type ZoneKind,
+} from "./drag";
 import {
   type LayoutAction,
   MAX_PANES,
@@ -26,6 +35,7 @@ import { openPath, screenLinkHandlers } from "./navigation";
 import styles from "./Panes.module.css";
 import { tabInfo } from "./routes";
 import { TabView } from "./TabView";
+import { startTabDrag, useTabDrag } from "./tabDrag";
 import { focusTabElement, tabElementId } from "./tabKeys";
 import { type TabMenuId, type TabMenuItem, tabMenu } from "./tabMenu";
 
@@ -103,15 +113,17 @@ function onTabKey(
 /**
  * A tab in a pane's strip: its icon, screen and cluster chip; pinned tabs show a pin
  * and no Close (P9, P14). A double-click pins or unpins it, a middle-click closes it,
- * and a right-click opens its menu (P13 to P15).
+ * a right-click opens its menu (P13 to P15), and a press drags it (P22).
  */
 function TabItem(props: {
+  paneId: string;
   tabs: TabState[];
   index: number;
   selected: boolean;
 }) {
-  const { tabs, index, selected } = props;
+  const { paneId, tabs, index, selected } = props;
   const tab = tabs[index];
+  const dragging = useTabDrag((s) => s.drag?.tabId === tab.id);
   const clusters = useCatalog((s) => s.clusters);
   const layout = useWindowLayout((s) => s.layout);
   const path = tabPath(tab);
@@ -125,6 +137,9 @@ function TabItem(props: {
         role="presentation"
         data-selected={selected}
         data-pinned={tab.pinned}
+        data-dragging={dragging}
+        data-drop-pane={paneId}
+        data-drop-index={index}
       >
         <button
           type="button"
@@ -137,6 +152,9 @@ function TabItem(props: {
           tabIndex={selected ? 0 : -1}
           data-testid={`tab-${tab.id}`}
           onClick={() => dispatch({ type: "select", tabId: tab.id })}
+          onPointerDown={(event) =>
+            startTabDrag(event.nativeEvent, tab.id, info.title)
+          }
           onDoubleClick={() =>
             dispatch({ type: tab.pinned ? "unpin" : "pin", tabId: tab.id })
           }
@@ -212,14 +230,83 @@ function EmptyPane() {
   );
 }
 
+/** What a body zone says while a tab is dragged (P22). */
+const ZONE_LABELS: Record<ZoneKind, string> = {
+  left: "New pane on the left",
+  right: "New pane on the right",
+  here: "Move to this pane (3 panes at most)",
+};
+
+function zoneIsOver(
+  over: DropOver | null,
+  paneId: string,
+  zone: ZoneKind,
+): boolean {
+  return (
+    over?.kind === "inside" &&
+    over.target.kind === "body" &&
+    over.target.paneId === paneId &&
+    (zone === "here" || over.target.side === zone)
+  );
+}
+
+/** The line in a strip where a dragged tab would land (P22). */
+function DropMark() {
+  return (
+    <span
+      className={styles.mark}
+      aria-hidden="true"
+      data-testid="tab-drop-mark"
+    />
+  );
+}
+
+/** The width the drag label keeps from the right edge of the window. */
+const DRAG_LABEL_ROOM = 260;
+
+/** The dragged tab's title and what letting go does, beside the pointer (P22). */
+function DragLabel() {
+  const drag = useTabDrag((s) => s.drag);
+  if (drag === null) return null;
+  const left = Math.max(
+    0,
+    Math.min(drag.x + 14, window.innerWidth - DRAG_LABEL_ROOM),
+  );
+  const top = Math.max(0, Math.min(drag.y + 16, window.innerHeight - 64));
+  return createPortal(
+    <div
+      className={styles.dragLabel}
+      style={{ left, top }}
+      aria-hidden="true"
+      data-drop={drag.over !== null}
+      data-testid="tab-drag-label"
+    >
+      <span className={styles.dragTitle}>{drag.title}</span>
+      <span className={styles.dragHint}>{dropLabel(drag.over)}</span>
+    </div>,
+    document.body,
+  );
+}
+
 function Pane(props: {
+  layout: WindowLayout;
   pane: PaneState;
   index: number;
   focused: boolean;
   count: number;
   label: string;
 }) {
-  const { pane, index, focused, count } = props;
+  const { layout, pane, index, focused, count } = props;
+  const draggedId = useTabDrag((s) => s.drag?.tabId ?? null);
+  const over = useTabDrag((s) => s.drag?.over ?? null);
+  const zones = draggedId === null ? [] : dropZones(layout, draggedId, pane.id);
+  const mark =
+    draggedId !== null &&
+    over?.kind === "inside" &&
+    over.target.kind === "strip" &&
+    over.target.paneId === pane.id
+      ? markIndex(layout, draggedId, over.target)
+      : null;
   const selected = pane.tabs.find((t) => t.id === pane.selected) ?? null;
   const selectedId = selected?.id ?? null;
   const selectedAt = selected === null ? -1 : pane.tabs.indexOf(selected);
@@ -252,7 +339,11 @@ function Pane(props: {
       onPointerDownCapture={focus}
       onFocusCapture={focus}
     >
-      <div className={styles.strip}>
+      <div
+        className={styles.strip}
+        data-drop-pane={pane.id}
+        data-drop-count={pane.tabs.length}
+      >
         <div
           ref={strip}
           className={styles.tabs}
@@ -261,13 +352,17 @@ function Pane(props: {
           onWheel={scrollStrip}
         >
           {pane.tabs.map((tab, at) => (
-            <TabItem
-              key={tab.id}
-              tabs={pane.tabs}
-              index={at}
-              selected={tab.id === pane.selected}
-            />
+            <Fragment key={tab.id}>
+              {mark === at ? <DropMark /> : null}
+              <TabItem
+                paneId={pane.id}
+                tabs={pane.tabs}
+                index={at}
+                selected={tab.id === pane.selected}
+              />
+            </Fragment>
           ))}
+          {mark === pane.tabs.length ? <DropMark /> : null}
         </div>
         <IconButton
           label={
@@ -287,15 +382,33 @@ function Pane(props: {
           }
         />
       </div>
-      <div
-        className={styles.body}
-        data-testid={`pane-body-${index}`}
-        {...links}
-      >
-        {selected !== null ? (
-          <TabView key={selected.id} tab={selected} />
-        ) : props.label === MAIN_WINDOW ? (
-          <EmptyPane />
+      <div className={styles.bodyArea}>
+        <div
+          className={styles.body}
+          data-testid={`pane-body-${index}`}
+          {...links}
+        >
+          {selected !== null ? (
+            <TabView key={selected.id} tab={selected} />
+          ) : props.label === MAIN_WINDOW ? (
+            <EmptyPane />
+          ) : null}
+        </div>
+        {zones.length > 0 ? (
+          <div className={styles.zones}>
+            {zones.map((zone) => (
+              <div
+                key={zone}
+                className={styles.zone}
+                data-drop-zone={zone}
+                data-drop-pane={pane.id}
+                data-over={zoneIsOver(over, pane.id, zone)}
+                data-testid={`pane-drop-${zone}-${index}`}
+              >
+                {ZONE_LABELS[zone]}
+              </div>
+            ))}
+          </div>
         ) : null}
       </div>
     </section>
@@ -385,6 +498,7 @@ export function Panes() {
             <Splitter index={index - 1} share={layout.panes[index - 1].width} />
           ) : null}
           <Pane
+            layout={layout}
             pane={pane}
             index={index}
             focused={index === layout.focusedPane}
@@ -393,6 +507,7 @@ export function Panes() {
           />
         </Fragment>
       ))}
+      <DragLabel />
     </div>
   );
 }
