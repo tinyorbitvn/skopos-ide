@@ -7,8 +7,10 @@ import type { HelmInstallRequest } from "./generated/HelmInstallRequest";
 import type { HelmRepoAdd } from "./generated/HelmRepoAdd";
 import type { HelmUpgradeRequest } from "./generated/HelmUpgradeRequest";
 import type { MetricsTarget } from "./generated/MetricsTarget";
+import type { MoveOutcome } from "./generated/MoveOutcome";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
 import type { SessionEvent } from "./generated/SessionEvent";
+import type { WindowLayout } from "./generated/WindowLayout";
 
 const SIZE = { cols: 120, rows: 32 };
 const noop = () => {};
@@ -355,4 +357,89 @@ test("resource_graph_unsubscribe names the subscription", async () => {
   expect(backend.calls).toEqual([
     { cmd: "resource_graph_unsubscribe", args: { subscriptionId: "g1" } },
   ]);
+});
+
+const LAYOUT: WindowLayout = {
+  label: "window-2",
+  bounds: null,
+  panes: [
+    {
+      id: "pane-1",
+      width: 1,
+      selected: "tab-1",
+      tabs: [{ id: "tab-1", pinned: false, history: ["/catalog"], index: 0 }],
+    },
+  ],
+  focusedPane: 0,
+};
+
+test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
+  ["catalog_folders", () => api.catalogFolders(), {}],
+  [
+    "catalog_folder_create",
+    () => api.catalogFolderCreate("folder-1", "eu"),
+    { parent: "folder-1", name: "eu" },
+  ],
+  [
+    "catalog_folder_create",
+    () => api.catalogFolderCreate(null, "prod"),
+    { parent: null, name: "prod" },
+  ],
+  [
+    "catalog_folder_rename",
+    () => api.catalogFolderRename("folder-1", "staging"),
+    { id: "folder-1", name: "staging" },
+  ],
+  [
+    "catalog_folder_move",
+    () => api.catalogFolderMove("folder-2", null),
+    { id: "folder-2", parent: null },
+  ],
+  [
+    "catalog_folder_delete",
+    () => api.catalogFolderDelete("folder-2"),
+    { id: "folder-2" },
+  ],
+  [
+    "catalog_cluster_place",
+    () => api.catalogClusterPlace("c1", "folder-1"),
+    { cluster: "c1", folder: "folder-1" },
+  ],
+  ["window_layout_get", () => api.windowLayoutGet(), {}],
+  ["window_layout_set", () => api.windowLayoutSet(LAYOUT), { layout: LAYOUT }],
+  ["windows_list", () => api.windowsList(), {}],
+  [
+    "window_tab_move",
+    () => api.windowTabMove("tab-1", { kind: "window", label: "main" }),
+    { tabId: "tab-1", target: { kind: "window", label: "main" } },
+  ],
+  [
+    "window_tab_move",
+    () => api.windowTabMove("tab-1", { kind: "newWindow", x: 40, y: -8 }),
+    { tabId: "tab-1", target: { kind: "newWindow", x: 40, y: -8 } },
+  ],
+  [
+    "window_tab_drop",
+    () => api.windowTabDrop("tab-1", 1210.5, 88),
+    { tabId: "tab-1", screenX: 1210.5, screenY: 88 },
+  ],
+])(
+  "folders and windows: %s gets exactly its arguments",
+  async (cmd, run, args) => {
+    const backend = mockBackend({ [cmd]: () => null });
+    await run();
+    expect(backend.calls).toEqual([{ cmd, args }]);
+  },
+);
+
+test("a move between windows gives the core's outcome", async () => {
+  const outcome: MoveOutcome = {
+    target: "window-2",
+    created: true,
+    sourceEmpty: false,
+  };
+  mockBackend({ window_tab_move: () => outcome });
+  await expect(
+    api.windowTabMove("tab-1", { kind: "newWindow", x: 0, y: 0 }),
+  ).resolves.toEqual(outcome);
 });
