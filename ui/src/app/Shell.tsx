@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Button, PaneHandle, Spinner, StatusDot } from "../design";
 import { AboutDialog } from "../features/about/AboutDialog";
 import { ClusterNav } from "../features/cluster/ClusterNav";
@@ -8,11 +8,13 @@ import { ShortcutsDialog } from "../features/shortcuts/ShortcutsDialog";
 import { events } from "../ipc/events";
 import { useCatalog } from "../stores/catalog";
 import { useClusterState, useConnect } from "../stores/clusters";
+import { useFolders } from "../stores/folders";
 import { NAV_PANE, usePaneSize } from "../stores/paneSize";
 import { useApiResources } from "../stores/resources";
 import { useShell } from "../stores/shell";
 import { startWindowLayout, useWindowLayout } from "../stores/windowLayout";
 import { AppHeader } from "./AppHeader";
+import { ClusterSwitcher, useSidebarCluster } from "./ClusterSwitcher";
 import { clusterStatus } from "./clusterStatus";
 import { runCommand, runMenuCommand, useCommandContext } from "./commands";
 import { Hotbar } from "./Hotbar";
@@ -36,21 +38,6 @@ import { installTabKeys } from "./tabs/tabKeys";
 function useFocusedCluster(): string | null {
   const path = useFocusedPath();
   return path === null ? null : tabCluster(path);
-}
-
-/**
- * The cluster the sidebar shows: the focused tab's; on a tab without a cluster, the
- * one it showed before (spec P23). A cluster gone from the catalog is dropped.
- */
-function useSidebarCluster(): string | null {
-  const focused = useFocusedCluster();
-  const [kept, setKept] = useState(focused);
-  if (focused !== null && focused !== kept) setKept(focused);
-  const id = focused ?? kept;
-  const known = useCatalog(
-    (s) => id === null || s.loading || s.clusters.some((c) => c.id === id),
-  );
-  return known ? id : null;
 }
 
 /** The sidebar of a cluster that is not connected: its name, state and Connect. */
@@ -91,16 +78,25 @@ function SidebarCluster(props: { clusterId: string }) {
   );
 }
 
-/** The sidebar column, between the rail and the panes, with its resize handle (P1, P23). */
+/**
+ * The sidebar column, between the rail and the panes, with its resize handle: the
+ * cluster switcher on top of the shown cluster's navigation (P1, P23 to P25).
+ */
 function SidebarColumn() {
-  const clusterId = useSidebarCluster();
+  const { clusterId, focused, pick, follow } = useSidebarCluster();
   const [navWidth, setNavWidth] = usePaneSize(NAV_PANE);
   return (
     <div className={styles.nav} style={{ width: navWidth }}>
+      <ClusterSwitcher
+        clusterId={clusterId}
+        focused={focused}
+        onPick={pick}
+        onFollow={follow}
+      />
       {clusterId === null ? (
         <div className={styles.navNote} data-testid="sidebar-empty">
           <p className={styles.navText}>
-            Open a cluster to see its navigation here.
+            Pick a cluster above, or open one, to see its navigation here.
           </p>
         </div>
       ) : (
@@ -145,10 +141,16 @@ function ShellDock() {
  */
 function ShellEffects() {
   const init = useCatalog((s) => s.init);
+  const initFolders = useFolders((s) => s.init);
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  // The switcher, the Catalog and the palette show the folder tree (P24, P29, P30).
+  useEffect(() => {
+    void initFolders();
+  }, [initFolders]);
 
   // Back and forward move the focused tab (spec P3).
   useEffect(() => installHistoryShortcuts((d) => shellNavigator.go(d)), []);
