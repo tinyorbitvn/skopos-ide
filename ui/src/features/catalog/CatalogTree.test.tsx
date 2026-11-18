@@ -357,6 +357,52 @@ test("the cluster menu keeps today's items and adds Move to (P29)", async () => 
   );
 });
 
+test("a folder closed while a Move to is on its way stays closed, and the target opens (P29)", async () => {
+  let placed: (value: null) => void = () => {};
+  const { ipc } = await show({
+    ui_state_get: ({ key }: { key: string }) =>
+      key === "catalog:folders:closed" ? ["folder-3"] : null,
+    catalog_cluster_place: () =>
+      new Promise<null>((resolve) => {
+        placed = resolve;
+      }),
+  });
+  await waitFor(() =>
+    expect(screen.queryByTestId("catalog-row-kind-a")).toBeNull(),
+  );
+
+  openMenu("catalog-menu-demo");
+  await openMoveTo();
+  fireEvent.click(screen.getByTestId("menu-item-move-folder-3"));
+  await waitFor(() =>
+    expect(ipc.callsTo("catalog_cluster_place")).toHaveLength(1),
+  );
+  const prod = screen.getByTestId("catalog-folder-toggle-folder-1");
+  fireEvent.click(prod);
+  expect(prod.getAttribute("aria-expanded")).toBe("false");
+
+  await act(async () => placed(null));
+
+  await waitFor(() =>
+    expect(
+      screen
+        .getByTestId("catalog-folder-toggle-folder-3")
+        .getAttribute("aria-expanded"),
+    ).toBe("true"),
+  );
+  expect(
+    screen
+      .getByTestId("catalog-folder-toggle-folder-1")
+      .getAttribute("aria-expanded"),
+  ).toBe("false");
+  await waitFor(() =>
+    expect(ipc.callsTo("ui_state_set").at(-1)).toEqual({
+      key: "catalog:folders:closed",
+      value: ["folder-1"],
+    }),
+  );
+});
+
 test("Delete: an empty folder goes at once, another asks first with what moves where (P28, P29)", async () => {
   const tree: CatalogFolders = {
     ...TREE,
