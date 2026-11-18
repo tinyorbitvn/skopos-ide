@@ -352,6 +352,31 @@ test("Ctrl+Shift+P opens the palette from a text field", async () => {
   ).toBeTruthy();
 });
 
+test("the tab keys act on this window's layout: Ctrl+\\, Ctrl+Tab and Ctrl+W (P16)", async () => {
+  mockBackend({
+    catalog_list: () => [clusterEntry({ contextName: "alpha" })],
+    catalog_warnings: () => [],
+    hotbar_get: () => [],
+    prefs_get: () => ({ theme: "system", syncSources: [] }),
+    window_layout_get: () =>
+      windowOf([[tab("t1", ["/catalog"]), tab("t2", ["/preferences"])]]),
+    window_layout_set: () => null,
+  });
+
+  render(<App />);
+  await screen.findByTestId("catalog-row-alpha");
+  const search = screen.getByTestId("catalog-search");
+  fireEvent.keyDown(search, { key: "\\", code: "Backslash", ctrlKey: true });
+  expect(await screen.findByTestId("pane-1")).toBeTruthy();
+  fireEvent.keyDown(document.body, { key: "Tab", code: "Tab", ctrlKey: true });
+  expect(focusedTab(useWindowLayout.getState().layout)?.history).toEqual([
+    "/catalog",
+  ]);
+  fireEvent.keyDown(document.body, { key: "w", code: "KeyW", ctrlKey: true });
+  await waitFor(() => expect(screen.queryByTestId("pane-1")).toBeNull());
+  expect(useWindowLayout.getState().layout.panes[0].tabs).toHaveLength(2);
+});
+
 test("menu commands open the dialogs and Preferences", async () => {
   mockBackend({
     catalog_list: () => [clusterEntry({ contextName: "alpha" })],
