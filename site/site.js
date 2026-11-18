@@ -91,10 +91,9 @@
     return detectArch(nav).then((arch) => {
       const pick = pickDownload(os, arch);
       const link = (suffix) => doc.querySelector(`#download a[data-asset="${suffix}"]`);
-      const button = doc.getElementById("hero-download");
       const target = pick && link(pick.primary);
-      if (!button || !target) return null;
-      for (const each of [button, doc.getElementById("cta-download")]) {
+      if (!target) return null;
+      for (const each of [doc.getElementById("hero-download"), doc.getElementById("cta-download")]) {
         if (!each) continue;
         each.setAttribute("href", target.getAttribute("href"));
         const label = each.querySelector("[data-label]");
