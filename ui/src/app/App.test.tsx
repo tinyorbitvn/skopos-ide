@@ -223,6 +223,63 @@ test("the sidebar shows the focused tab's cluster, and keeps it on a Catalog tab
   expect(screen.queryByTestId("sidebar-empty")).toBeNull();
 });
 
+test("a cluster picked in the switcher shows in the sidebar until focus moves to another tab (P24, P25)", async () => {
+  const backend = mockBackend({
+    catalog_list: () => [
+      clusterEntry({
+        contextName: "alpha",
+        state: { status: "connected", info: INFO },
+      }),
+      clusterEntry({ contextName: "beta" }),
+    ],
+    catalog_warnings: () => [],
+    catalog_folders: () => ({
+      folders: [{ id: "folder-1", name: "prod", parent: null }],
+      placements: { "id-beta": "folder-1" },
+    }),
+    cluster_connect: () => null,
+    hotbar_get: () => [],
+    resources_discover: () => [],
+    ui_state_get: () => null,
+    ui_state_set: () => null,
+    window_layout_get: () =>
+      windowOf([
+        [tab("t1", ["/cluster/id-alpha"])],
+        [tab("t2", ["/cluster/id-alpha/map"])],
+      ]),
+    window_layout_set: () => null,
+  });
+
+  render(<App />);
+  expect(await screen.findByTestId("cluster-sidebar")).toBeTruthy();
+  const before = useWindowLayout.getState().layout;
+
+  fireEvent.click(screen.getByTestId("switcher-trigger"));
+  fireEvent.click(await screen.findByTestId("switcher-cluster-beta"));
+
+  // Only the sidebar changed; beta is not connected, so it connects.
+  expect(await screen.findByTestId("sidebar-waiting")).toBeTruthy();
+  expect(backend.callsTo("cluster_connect")).toEqual([{ id: "id-beta" }]);
+  expect(useWindowLayout.getState().layout).toBe(before);
+  expect(screen.getByTestId("switcher-follow").textContent).toContain(
+    "The focused tab is on alpha.",
+  );
+
+  fireEvent.click(screen.getByTestId("switcher-follow-show"));
+  expect(await screen.findByTestId("cluster-sidebar")).toBeTruthy();
+  expect(screen.queryByTestId("switcher-follow")).toBeNull();
+
+  // A pick lasts until focus moves to another tab.
+  fireEvent.click(screen.getByTestId("switcher-trigger"));
+  fireEvent.click(await screen.findByTestId("switcher-cluster-beta"));
+  expect(await screen.findByTestId("sidebar-waiting")).toBeTruthy();
+  act(() =>
+    useWindowLayout.getState().dispatch({ type: "focusPane", paneId: "p2" }),
+  );
+  expect(await screen.findByTestId("cluster-sidebar")).toBeTruthy();
+  expect(screen.queryByTestId("switcher-follow")).toBeNull();
+});
+
 test("a sidebar item navigates the focused tab, and Ctrl+click opens a new tab (P11, P12)", async () => {
   mockBackend({
     catalog_list: () => [
