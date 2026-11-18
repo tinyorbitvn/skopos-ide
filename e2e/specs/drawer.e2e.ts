@@ -190,14 +190,21 @@ describe("the details drawer on a real cluster", () => {
 
   it("shows a Pod's six sections in order and keeps a collapsed one collapsed", async () => {
     await openPod(0);
-    expect(await sectionToggles()).toEqual([
+    const sections = [
       "detail-section-toggle-summary",
       "detail-section-toggle-metadata",
       "detail-section-toggle-relations",
       "detail-section-toggle-volumes",
       "detail-section-toggle-scheduling",
       "detail-section-toggle-containers",
-    ]);
+    ];
+    // The band shows the Pod's name before its sections are drawn, so wait for them.
+    let seen: string[] = [];
+    await until(async () => {
+      seen = await sectionToggles();
+      return seen.length >= sections.length;
+    }, "the Pod's sections were never drawn");
+    expect(seen).toEqual(sections);
     const expanded = () =>
       byTestId("detail-section-toggle-volumes").getAttribute("aria-expanded");
     await clickWhenShown("detail-section-toggle-volumes");

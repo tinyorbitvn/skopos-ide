@@ -110,9 +110,15 @@ describe("editing config in the drawer", () => {
       async () => (await kubectl(["-n", NS, "get", "secret", "creds", "-o", "jsonpath={.data.password}"])) === "/wAB",
       "the Secret never changed",
     );
+    // The panel masks its values once the saved version arrives; until then the input
+    // still holds the typed text, which reveal() would take for the saved value.
+    await shown("secret-value-password");
     await reveal("password", "/wAB");
-    const raw = await shown("secret-form-password-raw");
-    expect(await raw.$("input").isEnabled()).toBe(false);
+    // One query, read again on each try: a re-render may replace the switch's elements.
+    await until(async () => {
+      const raw = browser.$('[data-testid="secret-form-password-raw"] input');
+      return (await raw.isExisting()) && !(await raw.isEnabled());
+    }, "Raw was never offered as disabled for a binary value");
     await clickWhenShown("detail-close");
   });
 
