@@ -102,14 +102,16 @@ export function startCatalogDrag(
 
   function onMove(event: PointerEvent): void {
     if (event.pointerId !== press.pointerId) return;
+    if (event.buttons === 0) {
+      // The release happened where it was not reported, before or after the drag
+      // started.
+      stop();
+      return;
+    }
     if (!live) {
       const moved = Math.hypot(event.clientX - fromX, event.clientY - fromY);
       if (moved < DRAG_THRESHOLD) return;
       live = true;
-    } else if (event.buttons === 0) {
-      // The release happened where it was not reported.
-      stop();
-      return;
     }
     useCatalogDrag.setState({
       drag: {

@@ -104,11 +104,11 @@ function press(testId: string): void {
   });
 }
 
-function move(x: number, y: number): void {
+function move(x: number, y: number, buttons = 1): void {
   fireEvent.pointerMove(window, {
     clientX: x,
     clientY: y,
-    buttons: 1,
+    buttons,
     pointerId: 1,
   });
 }
@@ -522,6 +522,23 @@ test("a cluster dragged onto a folder row goes into it; the click after the drop
   );
   expect(screen.queryByTestId("catalog-drag-label")).toBeNull();
   expect(screen.getByTestId("where").textContent).toBe("/catalog");
+});
+
+test("a press whose release was missed before the drag started starts none (P29)", async () => {
+  const { ipc } = await show({ catalog_cluster_place: () => null });
+
+  press("catalog-row-demo");
+  move(12, 10, 0);
+  under(screen.getByTestId("catalog-folder-folder-3"));
+  move(30, 30, 0);
+  move(40, 40);
+
+  expect(screen.queryByTestId("catalog-drag-label")).toBeNull();
+  release(40, 40);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(ipc.callsTo("catalog_cluster_place")).toEqual([]);
 });
 
 test("a drag that starts moves no row: the Top level strip is not a body row (P29)", async () => {
