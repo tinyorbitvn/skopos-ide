@@ -269,6 +269,7 @@ impl AppCore {
         id: &ClusterId,
         size: TerminalSize,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         let kubeconfig = self.cluster_kubeconfig_path(id)?;
         let token = self.cluster_cancel_token(id)?;
@@ -304,6 +305,7 @@ impl AppCore {
                 resize,
                 flow: flow.clone(),
             }),
+            owner,
         );
         let session = guard.id().to_owned();
         spawn_writer(writer, input_rx);

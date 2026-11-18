@@ -81,7 +81,10 @@ async fn the_shell_runs_on_the_node_and_stopping_deletes_the_pod() {
     let (core, id, _root) = connected_kind().await;
     let client = client_of(&core, &id);
     let (tx, mut rx) = mpsc::channel(32);
-    let session = core.node_shell_start(&id, WORKER, SIZE, tx).await.unwrap();
+    let session = core
+        .node_shell_start(&id, WORKER, SIZE, tx, "main")
+        .await
+        .unwrap();
     wait_for_started(&core, &session, &mut rx).await;
     assert_eq!(shell_pod_count(&client).await, 1);
     core.session_write(&session, b"echo host=$(cat /etc/hostname)\r".to_vec())
@@ -107,7 +110,9 @@ async fn an_image_that_cannot_be_pulled_fails_with_the_pods_events() {
     .unwrap();
     core.set_node_shell_start_limit_for_test(Duration::from_secs(15));
     let (tx, mut rx) = mpsc::channel(32);
-    core.node_shell_start(&id, WORKER, SIZE, tx).await.unwrap();
+    core.node_shell_start(&id, WORKER, SIZE, tx, "main")
+        .await
+        .unwrap();
     let last = tokio::time::timeout(WAIT, async {
         loop {
             match rx.recv().await {
@@ -136,7 +141,10 @@ async fn app_quit_leaves_no_pod_behind() {
     let (core, id, _root) = connected_kind().await;
     let client = client_of(&core, &id);
     let (tx, mut rx) = mpsc::channel(32);
-    let session = core.node_shell_start(&id, WORKER, SIZE, tx).await.unwrap();
+    let session = core
+        .node_shell_start(&id, WORKER, SIZE, tx, "main")
+        .await
+        .unwrap();
     wait_for_started(&core, &session, &mut rx).await;
     core.shutdown().await;
     assert_eq!(shell_pod_count(&client).await, 0);

@@ -7,7 +7,7 @@ use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::sessions::{SessionEvent, SessionOutput, TerminalSize};
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
@@ -51,13 +51,17 @@ pub(crate) fn forward_output(
 #[tauri::command]
 pub async fn terminal_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     size: TerminalSize,
     on_data: Channel<InvokeResponseBody>,
     on_event: Channel<SessionEvent>,
 ) -> Result<String, IpcError> {
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
-    let id = state.core.terminal_start(&cluster_id, size, tx).await?;
+    let id = state
+        .core
+        .terminal_start(&cluster_id, size, tx, window.label())
+        .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)
 }
@@ -67,6 +71,7 @@ pub async fn terminal_start(
 #[tauri::command]
 pub async fn pod_exec_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     namespace: String,
     pod: String,
@@ -78,7 +83,15 @@ pub async fn pod_exec_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .pod_exec_start(&cluster_id, &namespace, &pod, container, size, tx)
+        .pod_exec_start(
+            &cluster_id,
+            &namespace,
+            &pod,
+            container,
+            size,
+            tx,
+            window.label(),
+        )
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)
@@ -88,6 +101,7 @@ pub async fn pod_exec_start(
 #[tauri::command]
 pub async fn pod_attach_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     namespace: String,
     pod: String,
@@ -99,7 +113,15 @@ pub async fn pod_attach_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .pod_attach_start(&cluster_id, &namespace, &pod, container, size, tx)
+        .pod_attach_start(
+            &cluster_id,
+            &namespace,
+            &pod,
+            container,
+            size,
+            tx,
+            window.label(),
+        )
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)
@@ -108,6 +130,7 @@ pub async fn pod_attach_start(
 #[tauri::command]
 pub async fn node_shell_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     node: String,
     size: TerminalSize,
@@ -117,7 +140,7 @@ pub async fn node_shell_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .node_shell_start(&cluster_id, &node, size, tx)
+        .node_shell_start(&cluster_id, &node, size, tx, window.label())
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)

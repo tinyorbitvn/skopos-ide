@@ -274,6 +274,7 @@ impl AppCore {
         node: &str,
         size: TerminalSize,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         if !is_path_segment(node) {
             return Err(invalid("the node name is not valid"));
@@ -293,7 +294,9 @@ impl AppCore {
         let manifest: Pod = serde_json::from_value(pod_manifest(&name, node, &image))
             .map_err(|error| IpcError::new(ErrorCode::Internal, error.to_string()))?;
         let (streams, control) = RemoteStreams::new(size, true, output.clone(), token.clone());
-        let guard = self.sessions().register(token.clone(), Some(control));
+        let guard = self
+            .sessions()
+            .register(token.clone(), Some(control), owner);
         let session = guard.id().to_owned();
         let core = self.clone();
         let id = id.clone();

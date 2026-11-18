@@ -405,7 +405,9 @@ async fn release_lifecycle(core: &AppCore, id: &ClusterId, client: &Client, name
     );
 
     let (tx, rx) = mpsc::channel(64);
-    core.helm_install_start(id, &install, tx).await.unwrap();
+    core.helm_install_start(id, &install, tx, "main")
+        .await
+        .unwrap();
     let text = exited(rx).await;
     assert!(text.contains("Release rel holds hi."), "{text}");
     assert_eq!(
@@ -492,7 +494,9 @@ async fn release_lifecycle(core: &AppCore, id: &ClusterId, client: &Client, name
         Some("hi")
     );
     let (tx, rx) = mpsc::channel(64);
-    core.helm_upgrade_start(id, &upgrade, tx).await.unwrap();
+    core.helm_upgrade_start(id, &upgrade, tx, "main")
+        .await
+        .unwrap();
     exited(rx).await;
     assert_eq!(
         config_message(client, namespace).await.as_deref(),
@@ -521,7 +525,7 @@ async fn release_lifecycle(core: &AppCore, id: &ClusterId, client: &Client, name
     );
 
     let (tx, rx) = mpsc::channel(64);
-    core.helm_rollback_start(id, namespace, RELEASE, 1, true, tx)
+    core.helm_rollback_start(id, namespace, RELEASE, 1, true, tx, "main")
         .await
         .unwrap();
     exited(rx).await;
@@ -537,7 +541,7 @@ async fn release_lifecycle(core: &AppCore, id: &ClusterId, client: &Client, name
 
     // Keeping the history removes the objects and lists the release as uninstalled.
     let (tx, rx) = mpsc::channel(64);
-    core.helm_uninstall_start(id, namespace, RELEASE, true, true, tx)
+    core.helm_uninstall_start(id, namespace, RELEASE, true, true, tx, "main")
         .await
         .unwrap();
     exited(rx).await;
@@ -555,7 +559,7 @@ async fn release_lifecycle(core: &AppCore, id: &ClusterId, client: &Client, name
 
     // A plain uninstall then purges that history.
     let (tx, rx) = mpsc::channel(64);
-    core.helm_uninstall_start(id, namespace, RELEASE, true, false, tx)
+    core.helm_uninstall_start(id, namespace, RELEASE, true, false, tx, "main")
         .await
         .unwrap();
     exited(rx).await;
@@ -608,7 +612,9 @@ async fn viewer_install(version: Version) {
         request.create_namespace = false;
         request.wait = false;
         let (tx, rx) = mpsc::channel(64);
-        core.helm_install_start(&id, &request, tx).await.unwrap();
+        core.helm_install_start(&id, &request, tx, "main")
+            .await
+            .unwrap();
         let (text, last) = session_output(rx).await;
         let SessionEvent::Failed { error, .. } = last else {
             panic!("{last:?}\n{text}");
@@ -640,7 +646,10 @@ async fn stop_while_waiting(version: Version) {
         let mut request = install_request(&namespace);
         request.values = "stuck: true\n".into();
         let (tx, rx) = mpsc::channel(64);
-        let session = core.helm_install_start(&id, &request, tx).await.unwrap();
+        let session = core
+            .helm_install_start(&id, &request, tx, "main")
+            .await
+            .unwrap();
         // Once the Deployment exists, helm waits for a pod that never becomes ready.
         let deployments: Api<Deployment> = Api::namespaced(client.clone(), &namespace);
         let started = Instant::now();
