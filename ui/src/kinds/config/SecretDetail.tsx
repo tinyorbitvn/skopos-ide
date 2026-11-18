@@ -49,7 +49,16 @@ function SecretPanel({ clusterId, object }: DetailProps) {
       [...reveal.values].map(([key, secretValue]) => [key, secretValue.value]),
     ),
     send: (version, changes) =>
-      api.secretUpdate(clusterId, namespace, name, version, changes),
+      api.secretUpdate(
+        clusterId,
+        namespace,
+        name,
+        version,
+        changes.map(({ key, value }) => ({
+          key,
+          value: value === null ? null : { text: value },
+        })),
+      ),
     afterSave: blankValues,
   });
 
