@@ -1,5 +1,5 @@
 import { FolderPlus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Button,
   ConfirmDialog,
@@ -65,6 +65,10 @@ export function CatalogScreen() {
   } | null>(null);
   const [renaming, setRenaming] = useState<Renaming | null>(null);
   const [closed, setClosed] = useUiState<string[]>(CLOSED_FOLDERS_KEY, []);
+  // A move or a new folder opens its target when the core answers, by then perhaps
+  // after another change to the list: it reads the list as it is then.
+  const closedNow = useRef(closed);
+  closedNow.current = closed;
 
   const tree = useMemo<FolderTree>(
     () => ({ folders, placements }),
@@ -81,7 +85,10 @@ export function CatalogScreen() {
   }, [tree, clusters, query, closed]);
 
   function expand(id: string): void {
-    if (closed.includes(id)) setClosed(closed.filter((c) => c !== id));
+    const now = closedNow.current;
+    if (!now.includes(id)) return;
+    closedNow.current = now.filter((c) => c !== id);
+    setClosed(closedNow.current);
   }
 
   async function newFolder(parent: string | null): Promise<void> {
