@@ -1,3 +1,4 @@
+use skopos_core::catalog::folders::{CatalogFolder, CatalogFolders};
 use skopos_core::catalog::ClusterEntry;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::{ClusterId, SyncWarning};
@@ -29,4 +30,56 @@ pub async fn catalog_remove_pasted(
     id: ClusterId,
 ) -> Result<(), IpcError> {
     state.core.catalog_remove_pasted(&id)
+}
+
+#[tauri::command]
+pub async fn catalog_folders(state: State<'_, AppState>) -> Result<CatalogFolders, IpcError> {
+    Ok(state.core.catalog_folders())
+}
+
+/// `parent` `None`: at the top level.
+#[tauri::command]
+pub async fn catalog_folder_create(
+    state: State<'_, AppState>,
+    parent: Option<String>,
+    name: String,
+) -> Result<CatalogFolder, IpcError> {
+    state.core.catalog_folder_create(parent.as_deref(), &name)
+}
+
+#[tauri::command]
+pub async fn catalog_folder_rename(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<(), IpcError> {
+    state.core.catalog_folder_rename(&id, &name)
+}
+
+/// `parent` `None`: to the top level.
+#[tauri::command]
+pub async fn catalog_folder_move(
+    state: State<'_, AppState>,
+    id: String,
+    parent: Option<String>,
+) -> Result<(), IpcError> {
+    state.core.catalog_folder_move(&id, parent.as_deref())
+}
+
+/// Its clusters and subfolders move to its parent.
+#[tauri::command]
+pub async fn catalog_folder_delete(state: State<'_, AppState>, id: String) -> Result<(), IpcError> {
+    state.core.catalog_folder_delete(&id)
+}
+
+/// `folder` `None`: to the top level.
+#[tauri::command]
+pub async fn catalog_cluster_place(
+    state: State<'_, AppState>,
+    cluster: ClusterId,
+    folder: Option<String>,
+) -> Result<(), IpcError> {
+    state
+        .core
+        .catalog_cluster_place(&cluster, folder.as_deref())
 }

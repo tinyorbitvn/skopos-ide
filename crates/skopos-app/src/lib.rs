@@ -3,6 +3,7 @@ mod events;
 mod keychain;
 mod menu;
 mod state;
+mod windows;
 
 use std::sync::Arc;
 
@@ -105,6 +106,12 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::catalog::catalog_warnings,
             commands::catalog::catalog_add_pasted,
             commands::catalog::catalog_remove_pasted,
+            commands::catalog::catalog_folders,
+            commands::catalog::catalog_folder_create,
+            commands::catalog::catalog_folder_rename,
+            commands::catalog::catalog_folder_move,
+            commands::catalog::catalog_folder_delete,
+            commands::catalog::catalog_cluster_place,
             commands::cluster::cluster_connect,
             commands::cluster::cluster_disconnect,
             commands::cluster::cluster_state,
@@ -197,6 +204,11 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::metrics::metrics_usage,
             commands::metrics::metrics_secret_set,
             commands::metrics::metrics_secret_saved,
+            commands::windows::window_layout_get,
+            commands::windows::window_layout_set,
+            commands::windows::windows_list,
+            commands::windows::window_tab_move,
+            commands::windows::window_tab_drop,
         ])
         .setup(move |app| {
             events::spawn_forwarder(app.handle().clone(), forwarded);
