@@ -478,6 +478,28 @@ test("a cluster dragged onto a folder row goes into it; the click after the drop
   expect(screen.getByTestId("where").textContent).toBe("/catalog");
 });
 
+test("a drag that starts moves no row: the Top level strip is not a body row (P29)", async () => {
+  await show();
+  /** Each body row's test id, top to bottom, "" for a row without one. */
+  const bodyRows = () =>
+    Array.from(
+      screen.getByTestId("catalog-table").querySelectorAll("tbody > tr"),
+      (row) => row.getAttribute("data-testid") ?? "",
+    );
+  const firstItem = () =>
+    bodyRows().findIndex((id) => /^catalog-(folder|row)-/.test(id));
+  const before = bodyRows();
+  expect(firstItem()).toBe(0);
+
+  press("catalog-row-demo");
+  move(30, 30);
+  await screen.findByTestId("catalog-drag-label");
+
+  expect(screen.getByTestId("catalog-drop-top")).toBeTruthy();
+  expect(bodyRows()).toEqual(before);
+  expect(firstItem()).toBe(0);
+});
+
 test("a refused target shows as not allowed and takes nothing; the Top level strip takes a folder out (P28, P29)", async () => {
   const { ipc } = await show({ catalog_folder_move: () => null });
 

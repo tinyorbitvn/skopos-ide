@@ -487,23 +487,23 @@ function ClusterRow(props: {
   );
 }
 
-/** While a drag is on: the strip that takes a folder or cluster out to the top level. */
-function TopLevelRow() {
+/**
+ * While a drag is on: the strip that takes a folder or cluster out to the top level.
+ * It lies over the table head and takes no room, so no row moves under the pointer
+ * when the drag starts.
+ */
+function TopLevelStrip() {
   const drop = useDropState(null);
   return (
-    <tr
-      className={styles.topRow}
+    <div
+      className={styles.topStrip}
       data-catalog-drop="top"
       data-drop={drop}
       data-testid="catalog-drop-top"
     >
-      <td colSpan={5}>
-        <span className={styles.topText}>
-          <CornerLeftUp size={14} aria-hidden="true" />
-          Top level: drop here to take it out of its folder
-        </span>
-      </td>
-    </tr>
+      <CornerLeftUp size={14} aria-hidden="true" />
+      Top level: drop here to take it out of its folder
+    </div>
   );
 }
 
@@ -539,6 +539,7 @@ export function CatalogTree(props: {
   const dragging = useCatalogDrag((s) => s.drag !== null);
   return (
     <>
+      {dragging ? <TopLevelStrip /> : null}
       <table
         className={styles.tree}
         // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: a table whose rows open and close is the ARIA treegrid pattern.
@@ -556,7 +557,6 @@ export function CatalogTree(props: {
           </tr>
         </thead>
         <tbody>
-          {dragging ? <TopLevelRow /> : null}
           {props.rows.map((row) =>
             row.kind === "folder" ? (
               <FolderRow

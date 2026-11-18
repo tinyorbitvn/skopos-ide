@@ -141,15 +141,15 @@
   font: var(--type-label);
 }
 
-/* A folder row under a dragged item: it takes it, or not (P29). */
+/* A folder row or the Top level strip under a dragged item: it takes it, or not (P29). */
 .folderRow[data-drop="ok"],
-.topRow[data-drop="ok"] {
+.topStrip[data-drop="ok"] {
   background: var(--surface-selected);
   box-shadow: inset 0 0 0 2px var(--focus-ring-color);
 }
 
 .folderRow[data-drop="refused"],
-.topRow[data-drop="refused"] {
+.topStrip[data-drop="refused"] {
   cursor: not-allowed;
   background: var(--surface-sunken);
 }
@@ -159,16 +159,24 @@
   color: var(--text-tertiary);
 }
 
-.topRow td {
-  background: var(--surface-sunken);
-  color: var(--text-secondary);
-  font: var(--type-caption);
-}
-
-.topText {
-  display: inline-flex;
+/*
+ * Over the table head while a drag is on (P29). Its negative margin gives back the
+ * room it takes, so the rows stay where they were; sticky like the head.
+ */
+.topStrip {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
   align-items: center;
   gap: var(--space-3);
+  height: 34px;
+  margin-bottom: -34px;
+  padding: 0 var(--space-7);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: var(--type-caption);
 }
 
 .nameCell {
