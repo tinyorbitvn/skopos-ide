@@ -860,6 +860,8 @@ impl AppCore {
 }
 
 /// The store's objects in a stable order: by namespace (cluster-scoped first), then name.
+/// The UI puts objects a batch adds in this same order (`compareListed` in
+/// `ui/src/stores/resources.ts`); keep the two the same.
 fn sorted_items(store: &HashMap<ObjectKey, Row>) -> Vec<Row> {
     let mut entries: Vec<(&ObjectKey, &Row)> = store.iter().collect();
     entries.sort_by(|a, b| (&a.0.namespace, &a.0.name).cmp(&(&b.0.namespace, &b.0.name)));
