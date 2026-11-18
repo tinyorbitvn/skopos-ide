@@ -67,6 +67,13 @@ describe("screens", () => {
   it("catalog", async () => {
     await clickWhenShown("nav-catalog");
     await shown(`catalog-row-${KIND}`, 30000);
+    // The driver's click focuses the rail button with no pointer event, which reads as
+    // keyboard focus and opens its tooltip; the shot must not show it.
+    await browser.execute(() => (document.activeElement as HTMLElement | null)?.blur());
+    await browser.waitUntil(async () => (await $$('[role="tooltip"]').length) === 0, {
+      timeout: 5000,
+      timeoutMsg: "the rail tooltip stayed open",
+    });
     await shoot("catalog");
   });
 
