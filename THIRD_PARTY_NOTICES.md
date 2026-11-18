@@ -4,8 +4,8 @@ SkoposIDE is new code, written for this project. Parts of its logic are adapted 
 open-source projects below, whose license requires this notice to stay with the code.
 The app also bundles fonts, icons and npm packages. Their sections below, from
 [Fonts](#fonts) on, carry the copyright notices and license texts that their licenses ask
-every copy to keep. The Rust crates that the app links, pinned in `Cargo.lock`, are not
-listed here yet.
+every copy to keep. [Rust crates](#rust-crates) does the same for the crates that the app
+links, pinned in `Cargo.lock`.
 
 ## Freelens
 
@@ -430,6 +430,1513 @@ vscode-swift) belong to language services and languages that the app does not bu
 
 - **tslib** (0BSD): Copyright (c) Microsoft Corporation. Its license grants use with no
   conditions, so it asks for no notice; it is listed so the list is complete.
+
+## Rust crates
+
+The app's binary is built from `skopos-app`, `skopos-core` and the 543 crates below: the
+dependencies that `cargo tree -p skopos-app -e normal --target <triple>` lists for the four
+release targets (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin` and
+`x86_64-pc-windows-msvc`), at the versions pinned in `Cargo.lock`. The list includes the
+procedural macros, which run while the app is built and write part of its code. Build scripts,
+their dependencies, dev-dependencies and crates for other targets are left out. Run that command
+again when the dependencies change.
+
+Where a crate offers the MIT License, SkoposIDE takes MIT. Where it offers no MIT but a license
+that asks no notice of a binary (CC0-1.0 or BSL-1.0), SkoposIDE takes that one, and between
+Apache-2.0 and a BSD license it takes Apache-2.0. `brotli-decompressor` offers BSD-3-Clause or
+MIT but ships only the BSD-3-Clause text, so it is listed under BSD-3-Clause. No crate in the list
+ships an Apache-2.0 NOTICE file.
+
+### Crates under MIT
+
+These crates are under the MIT License, or offer it among other licenses. The copyright
+notices follow as each crate's license files state them. Where a crate's license files carry no
+copyright line, or one with a year but no name, the authors follow as the crate's `Cargo.toml`
+lists them. The crates in the last group state neither. The license text after the notices is
+the same for every crate.
+
+```text
+adler2
+  Authors: Jonas Schievink <jonasschievink@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>
+
+aes
+  Copyright (c) 2018-2024 The RustCrypto Project Developers
+  Copyright (c) 2018 Artyom Pavlov
+
+ahash
+  Copyright (c) 2018 Tom Kaitchuck
+
+aho-corasick, byteorder, byteorder-lite, encoding_rs_io, jiff, jiff-core, memchr, termcolor,
+ucd-trie, walkdir
+  Copyright (c) 2015 Andrew Gallant
+
+allocator-api2
+  Author: Zakarum <zaq.dev@icloud.com>
+
+annotate-snippets, anstyle, serde_spanned, toml, toml_datetime 1.1.2+spec-1.1.0, toml_edit,
+toml_parser, toml_writer
+  Copyright (c) Individual contributors
+
+anyhow, async-trait, dtoa, dyn-clone, erased-serde, itoa, quote, semver, serde-untagged,
+serde_repr, syn, thiserror, thiserror-impl, typeid, unicode-ident, unsafe-libyaml, zmij
+  Author: David Tolnay <dtolnay@gmail.com>
+
+apple-native-keyring-store, keyring, keyring-core, windows-native-keyring-store,
+zbus-secret-service-keyring-store
+  Copyright (c) 2016 keyring Developers
+
+arboard
+  Copyright (c) 2022 The Arboard contributors
+
+arraydeque
+  Copyright (c) 2018 Andy Lok <andylokandy@hotmail.com>
+
+async-broadcast
+  Copyright (c) 2020 Yoshua Wuyts
+
+async-channel, async-io, async-lock, async-process, async-task, fastrand
+  Author: Stjepan Glavina <stjepang@gmail.com>
+
+async-compression, compression-codecs, compression-core
+  Copyright (c) 2018 the rustasync developers
+
+async-executor, event-listener, piper, polling
+  Authors: Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>
+
+async-recursion
+  Author: Robert Usher <266585+dcchut@users.noreply.github.com>
+
+async-signal, event-listener-strategy
+  Author: John Nunley <dev@notgull.net>
+
+async-stream, async-stream-impl
+  Copyright (c) 2019 Carl Lerche
+  Copyright (c) 2018 David Tolnay
+
+atk, cairo-rs, gdk, gdk-pixbuf, gdkx11, gio, glib, glib-macros, gtk, gtk3-macros, pango
+  Copyrights in the gtk-rs Project project are retained by their contributors.
+
+atk-sys, cairo-sys-rs, gdk-pixbuf-sys, gdk-sys, gdkwayland-sys, gdkx11-sys, gio-sys,
+glib-sys, gobject-sys, gtk-sys, pango-sys
+  Author: The gtk-rs Project Developers
+
+atomic-waker, futures-lite
+  Copyright (c) 2016 Alex Crichton
+  Copyright (c) 2017 The Tokio Authors
+  Authors: Stjepan Glavina <stjepang@gmail.com>, Contributors to futures-rs
+
+base64 0.22.1
+  Copyright (c) 2015 Alice Maz
+
+base64 0.23.1
+  Copyright (c) 2025 Alice Maz, Marshall Pierce
+
+bit-set, bit-vec
+  Copyright (c) 2023 The Rust Project Developers
+
+bitflags, glob, log, num, num-bigint, num-complex, num-integer, num-iter, num-rational,
+num-traits, regex, regex-automata, regex-syntax
+  Copyright (c) 2014 The Rust Project Developers
+
+block-buffer 0.10.4
+  Copyright (c) 2018-2019 The RustCrypto Project Developers
+
+block-buffer 0.12.1, block-padding
+  Copyright (c) 2018-2025 The RustCrypto Project Developers
+
+block2, objc2, objc2-encode, objc2-exception-helper
+  Author: Mads Marquart <mads@marquart.dk>
+
+brotli
+  Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+bytemuck
+  Copyright (c) 2019 Daniel "Lokathor" Gee.
+
+bytes
+  Copyright (c) 2018 Carl Lerche
+
+camino
+  Authors: Without Boats <saoirse@without.boats>, Ashley Williams <ashley666ashley@gmail.com>, Steve Klabnik <steve@steveklabnik.com>, Rain <rain@sunshowers.io>
+
+cargo_metadata
+  Author: Oliver Schneider <git-spam-no-reply9815368754983@oli-obk.de>
+
+cbc
+  Copyright (c) 2018-2022 RustCrypto Developers
+  Copyright (c) 2018 Artyom Pavlov
+
+cfb
+  Copyright (c) 2017 Matthew D. Steele
+
+cfg-if, filetime, openssl-probe, socket2, stacker, toml_datetime 0.6.3
+  Copyright (c) 2014 Alex Crichton
+
+chacha20, zeroize_derive
+  Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+cipher
+  Copyright (c) 2016-2025 RustCrypto Developers
+
+cmov, hybrid-array
+  Copyright (c) 2022-2026 The RustCrypto Project Developers
+
+concurrent-queue
+  Authors: Stjepan Glavina <stjepang@gmail.com>, Taiki Endo <te316e89@gmail.com>, John Nunley <dev@notgull.net>
+
+const-oid, cpufeatures 0.3.1
+  Copyright (c) 2020-2026 The RustCrypto Project Developers
+
+cookie
+  Copyright (c) 2017 Sergio Benitez
+  Copyright (c) 2014 Alex Crichton
+
+core-foundation, core-foundation-sys, core-graphics, core-graphics-types, string_cache
+  Copyright (c) 2012-2013 Mozilla Foundation
+
+core_detect
+  Copyright (c) 2017-2020 The Rust Project Developers
+
+cpubits
+  Copyright (c) 2023-2026 The RustCrypto Project Developers
+
+cpufeatures 0.2.17
+  Copyright (c) 2020-2025 The RustCrypto Project Developers
+
+crc32fast
+  Copyright (c) 2018 Sam Rijs, Alex Crichton and contributors
+
+crossbeam-channel, crossbeam-utils
+  Copyright (c) 2019 The Crossbeam Project Developers
+
+crypto-common 0.1.7
+  Copyright (c) 2021 RustCrypto Developers
+
+crypto-common 0.2.2
+  Copyright (c) 2021-2026 RustCrypto Developers
+
+ctor
+  Author: Matt Mastracci <matthew@mastracci.com>
+
+ctutils
+  Copyright (c) 2025-2026 The RustCrypto Project Developers
+
+darling, darling_core, darling_macro
+  Copyright (c) 2017 Ted Driggs
+
+dashmap
+  Copyright (c) 2019 Acrimon
+
+data-encoding
+  Copyright (c) 2015-2020 Julien Cretin
+  Copyright (c) 2017-2020 Google Inc.
+
+dbus, libdbus-sys
+  Copyright (c) 2014-2018 David Henningsson <diwic@ubuntu.com> and other contributors
+
+deranged
+  Copyright (c) 2024 Jacob Pratt et al.
+
+derive_more, derive_more-impl
+  Copyright (c) 2016 Jelte Fennema
+
+digest 0.10.7, hmac
+  Copyright (c) 2017 Artyom Pavlov
+
+digest 0.11.3
+  Copyright (c) 2017-2025 RustCrypto Developers
+  Copyright (c) 2017 Artyom Pavlov
+
+directories
+  Copyright (c) 2018 directories-rs contributors
+
+dirs, dirs-sys
+  Copyright (c) 2018-2019 dirs-rs contributors
+
+dispatch2
+  Authors: Mads Marquart <mads@marquart.dk>, Mary <mary@mary.zone>
+
+displaydoc
+  Author: Jane Lusby <jlusby@yaah.dev>
+
+dlopen2
+  Authors: Szymon Wieloch <szymon.wieloch@gmail.com>, Ahmed Masud <ahmed.masud@saf.ai>, OpenByte <development.openbyte@gmail.com>
+
+dlopen2_derive
+  Authors: Szymon Wieloch <szymon.wieloch@gmail.com>, OpenByte <development.openbyte@gmail.com>
+
+dom_query
+  Copyright (c) 2023 Mykola Humanov
+
+downcast-rs
+  Copyright (c) 2020 Ashish Myles and contributors
+
+dpi (its copy of rust-lang/libm)
+  Copyright (c) 2018 Jorge Aparicio
+  Copyright © 2005-2020 Rich Felker, et al.
+  Copyright © 1993,2004 Sun Microsystems or
+  Copyright © 2003-2011 David Schultz or
+  Copyright © 2003-2009 Steven G. Kargl or
+  Copyright © 2003-2009 Bruce D. Evans or
+  Copyright © 2008 Stephen L. Moshier or
+  Copyright © 2017-2018 Arm Limited
+
+educe, enum-ordinalize, enum-ordinalize-derive
+  Copyright (c) 2023 magiclen.org (Ron Li)
+
+either
+  Copyright (c) 2015
+
+embed_plist
+  Copyright (c) 2020 Nikolai Vazquez
+
+encoding_rs, multiversion_no_op, utf8_iter, utf_types
+  Copyright Mozilla Foundation
+
+endi
+  Author: Zeeshan Ali Khan <zeenix@gmail.com>
+
+enumflags2
+  Copyright (c) 2017-2023 Maik Klein, Maja Kądziołka
+
+enumflags2_derive
+  Copyright (c) 2017 Maik Klein
+
+equivalent
+  Copyright (c) 2016--2023
+
+errno
+  Copyright (c) 2014 Chris Wong
+
+fax
+  Copyright © 2021 The pdf-rs contributers.
+
+fdeflate, image
+  Author: The image-rs Developers
+
+field-offset
+  Copyright (c) 2016-2021 Diggory Blake, and other contributors.
+
+file-id, notify-debouncer-full, notify-types
+  Copyright (c) 2023 Notify Contributors
+
+filedescriptor, portable-pty
+  Copyright (c) 2018 Wez Furlong
+
+fixedbitset
+  Copyright (c) 2015-2017
+  Author: bluss
+
+flate2
+  Copyright (c) 2014-2026 Alex Crichton
+
+fnv
+  Copyright (c) 2017 Contributors
+
+foreign-types, foreign-types-macros, foreign-types-shared
+  Copyright (c) 2017 The foreign-types Developers
+
+form_urlencoded
+  Copyright (c) 2013-2016 The rust-url developers
+
+futures, futures-channel, futures-core, futures-executor, futures-io, futures-macro,
+futures-sink, futures-task, futures-util
+  Copyright (c) 2016 Alex Crichton
+  Copyright (c) 2017 The Tokio Authors
+
+generic-array
+  Copyright (c) 2015 Bartłomiej Kamiński
+
+getrandom 0.2.17
+  Copyright (c) 2018-2024 The rust-random Project Developers
+  Copyright (c) 2014 The Rust Project Developers
+
+getrandom 0.3.4
+  Copyright (c) 2018-2025 The rust-random Project Developers
+  Copyright (c) 2014 The Rust Project Developers
+
+getrandom 0.4.3
+  Copyright (c) 2018-2026 The rust-random Project Developers
+  Copyright (c) 2014 The Rust Project Developers
+
+granit-parser
+  Copyright (c) 2015 Chen Yuheng
+  Copyright (c) 2023 Ethiraric
+  Modifications after commit `825edf857426d034954523fed19599635cbb5043` are Copyright (c) 2026 Bourumir Wyngs and licensed under MIT OR Apache-2.0.
+
+h2
+  Copyright (c) 2017 h2 authors
+
+half
+  Author: Kathryn Long <squeeself@gmail.com>
+
+hashbrown
+  Copyright (c) 2016 Amanieu d'Antras
+
+heck, unicode-segmentation, unicode-width
+  Copyright (c) 2015 The Rust Project Developers
+
+hex
+  Copyright (c) 2013-2014 The Rust Project Developers.
+  Copyright (c) 2015-2020 The rust-hex Developers
+
+hkdf
+  Copyright (c) 2015-2018 Vlad Filippov
+  Copyright (c) 2018-2021 RustCrypto Developers
+
+hostname
+  Copyright (c) 2016 fengcen
+  Copyright (c) 2019 svartalf
+
+html5ever, markup5ever, web_atoms
+  Copyright (c) 2014 The html5ever Project Developers
+
+http
+  Copyright (c) 2017 http-rs authors
+
+http-body, http-body-util
+  Copyright (c) 2019-2026 Sean McArthur & Hyper Contributors
+
+httparse
+  Copyright (c) 2015-2025 Sean McArthur
+
+hyper
+  Copyright (c) 2014-2026 Sean McArthur
+
+hyper-rustls, rustls, rustls-native-certs
+  Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
+
+hyper-timeout
+  Copyright (c) 2016 The weldr Project Developers
+
+hyper-util
+  Copyright (c) 2023-2025 Sean McArthur
+
+ico
+  Copyright (c) 2018 Matthew D. Steele
+
+ident_case
+  Author: Ted Driggs <ted.driggs@outlook.com>
+
+idna, percent-encoding, url
+  Copyright (c) 2013-2025 The rust-url developers
+
+idna_adapter
+  Copyright (c) The rust-url developers
+
+indexmap
+  Copyright (c) 2016--2017
+
+infer
+  Copyright (c) 2019 Bojan
+
+inout
+  Copyright (c) 2022-2025 The RustCrypto Project Developers
+  Copyright (c) 2022 Artyom Pavlov
+
+ipnet
+  Copyright 2017 Juniper Networks, Inc.
+
+is-docker, is-wsl
+  Copyright (c) 2023 Sean Larkin
+
+javascriptcore-rs
+  Copyright (c) 2013-2021, The Gtk-rs Project Developers.
+  Copyright (c) 2021, Tauri Programme within The Commons Conservancy.
+
+javascriptcore-rs-sys, soup3, soup3-sys
+  Copyright (c) 2013-2017, The Gtk-rs Project Developers.
+
+json-patch
+  Copyright (c) 2017 Ivan Dubrov
+
+jsonpath-rust
+  Copyright (c) [2021] [Boris Zhguchev]
+
+jsonptr
+  Copyright (c) 2022 Chance Dinkins
+
+keyboard-types
+  Copyright (c) 2017 Pyfisch
+
+lazy_static
+  Author: Marvin Löbel <loebel.marvin@gmail.com>
+
+libappindicator
+  Copyright (c) 2017-2021 qDot
+  Copyright (c) 2021 Tauri Apps Contributors
+
+libc
+  Copyright (c) The Rust Project Developers
+
+linux-raw-sys
+  Copyrights in the `linux-raw-sys` project are retained by their contributors.
+
+lock_api, parking_lot, parking_lot_core, thread_local
+  Copyright (c) 2016 The Rust Project Developers
+
+matchers, sharded-slab
+  Copyright (c) 2019 Eliza Weisman
+
+memoffset
+  Copyright (c) 2017 Gilad Naaman
+
+mime
+  Copyright (c) 2014 Sean McArthur
+
+miniz_oxide
+  Copyright 2013-2014 RAD Game Tools and Valve Software
+  Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+  Copyright (c) 2017 Frommi
+  Copyright (c) 2017-2024 oyvindln
+
+mio
+  Copyright (c) 2014 Carl Lerche and other MIO contributors
+
+muda, tray-icon
+  Copyright (c) 2022-2022 Tauri Programme within The Commons Conservancy
+
+new_debug_unreachable, ordered-float
+  Copyright (c) 2015 Jonathan Reem
+
+nix
+  Copyright (c) 2015 Carl Lerche + nix-rust Authors
+
+nohash-hasher
+  Copyright 2018 Parity Technologies (UK) Ltd.
+
+nom
+  Copyright (c) 2014-2019 Geoffroy Couprie
+
+nu-ansi-term
+  Copyright (c) 2014 Benjamin Sago
+  Copyright (c) 2021-2022 The Nushell Project Developers
+
+num-conv
+  Copyright (c) Jacob Pratt
+
+once_cell
+  Author: Aleksey Kladov <aleksey.kladov@gmail.com>
+
+open
+  Copyright © `2015` `Sebastian Thiel`
+
+ordered-stream
+  Authors: Daniel De Graaf <code@danieldg.net>, Zeeshan Ali Khan <zeeshanak@gnome.org>
+
+os_pipe
+  Author: Jack O'Connor
+
+parking
+  Copyright 2014-2020 The Rust Project Developers
+  Authors: Stjepan Glavina <stjepang@gmail.com>, The Rust Project Developers
+
+pem
+  Copyright (c) 2016 Jonathan Creekmore
+
+pest, pest_derive, pest_generator, pest_meta
+  Author: Dragoș Tiselice <dragostiselice@gmail.com>
+
+pest_stack_guard
+  Author: Tomas Tauber <me@tomtau.be>
+
+petgraph
+  Copyright (c) 2015
+  Authors: bluss, mitchmindtree
+
+phf, phf_generator, phf_macros, phf_shared
+  Copyright (c) 2014-2022 Steven Fackler, Yuki Okushi
+
+plist
+  Copyright (c) 2015 Edward Barnard
+
+png
+  Copyright (c) 2015 nwin
+
+powerfmt
+  Copyright (c) 2023 Jacob Pratt et al.
+
+precomputed-hash
+  Copyright (c) 2017 Emilio Cobos Álvarez
+
+proc-macro-crate
+  Author: Bastian Köcher <git@kchr.de>
+
+proc-macro-error, proc-macro-error-attr
+  Copyright (c) 2019-2020 CreepySkeleton
+
+proc-macro2
+  Authors: David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcrichton.com>
+
+psm
+  Copyright © 2018, Simonas Kazlauskas
+
+quick-error
+  Copyright (c) 2015 The quick-error Developers
+
+quick-xml
+  Copyright (c) 2016 Johann Tuffe
+
+rand
+  Copyrights in the Rand project are retained by their contributors.
+  Copyright 2018 Developers of the Rand project
+  Copyright (c) 2014 The Rust Project Developers
+
+rand_core
+  Copyrights in the Rand project are retained by their contributors.
+  Copyright (c) 2018-2026 The Rand Project Developers
+
+raw-window-handle
+  Copyright (c) 2019 Osspial
+
+reqwest
+  Copyright (c) 2016-2026 Sean McArthur
+
+rfd
+  Copyright (c) 2022 Bartłomiej Maryńczak
+
+rustc-hash
+  Author: The Rust Project Developers
+
+rustix
+  Copyrights in the `rustix` project are retained by their contributors.
+
+rustls-pki-types
+  Copyright (c) 2023 Dirkjan Ochtman <dirkjan@ochtman.nl>
+
+rustls-platform-verifier
+  Copyright (c) 2022 1Password
+
+same-file, winapi-util
+  Copyright (c) 2017 Andrew Gallant
+
+schannel
+  Copyright (c) 2015 steffengy
+
+schemars, schemars_derive
+  Copyright (c) 2019 Graham Esau
+
+scopeguard
+  Copyright (c) 2016-2019 Ulrik Sverdrup "bluss" and scopeguard developers
+
+secrecy
+  Copyright (c) 2019-2024 iqlusion
+
+secret-service
+  Copyright (c) 2025 secret-service Developers
+
+security-framework, security-framework-sys
+  Copyright (c) 2015 Steven Fackler
+
+serde, serde_core, serde_derive, serde_derive_internals
+  Authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+
+serde-value
+  Copyright (c) 2016 arcnmx
+
+serde_with
+  Copyright (c) 2015
+  Authors: Jonas Bushart, Marcin Kaźmierczak
+
+serde_with_macros
+  Copyright (c) 2015
+  Author: Jonas Bushart
+
+serde_yaml_ng
+  Copyright 2024 Antoine Catton
+  Copyright 2016-2024 David Tolnay
+
+serialize-to-javascript, serialize-to-javascript-impl
+  Copyright (c) 2021 Chip Reed
+
+servo_arc
+  Author: The Servo Project Developers
+
+sha1, sha2 0.11.1
+  Copyright (c) 2016-2026 The RustCrypto Project Developers
+  Copyright (c) 2016 Artyom Pavlov
+  Copyright (c) 2009-2013 Mozilla Foundation
+  Copyright (c) 2006-2009 Graydon Hoare
+
+sha2 0.10.9
+  Copyright (c) 2006-2009 Graydon Hoare
+  Copyright (c) 2009-2013 Mozilla Foundation
+  Copyright (c) 2016 Artyom Pavlov
+
+shared_library
+  Copyright (c) 2017 Pierre Krieger
+
+shell-words
+  Copyright (c) 2016 Tomasz Miąsko
+
+signal-hook-registry
+  Copyright (c) 2017 tokio-jsonrpc developers
+
+simd-adler32
+  Copyright (c) [2021] [Marvin Countryman]
+
+simdutf8
+  Author: Hans Kratz <hans@appfour.com>
+
+siphasher
+  Author: Frank Denis <github@pureftpd.org>
+
+slab
+  Copyright (c) 2019 Carl Lerche
+
+smallvec
+  Copyright (c) 2018 The Servo Project Developers
+
+softbuffer
+  Copyright 2022 Kirill Chibisov
+
+stable_deref_trait
+  Copyright (c) 2017 Robert Grosse
+
+strsim
+  Copyright (c) 2015 Danny Guo
+  Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>
+  Copyright (c) 2018 Akash Kurdekar
+
+symlink
+  Copyright (c) 2014 Chris Morgan and the Teepee project developers
+
+synstructure
+  Copyright 2016 Nika Layzell
+
+system-configuration, system-configuration-sys
+  Copyright (c) 2024 Mullvad VPN AB
+
+tar
+  Copyright (c) The tar-rs Project Contributors
+
+tauri, tauri-codegen, tauri-macros, tauri-plugin-clipboard-manager, tauri-plugin-dialog,
+tauri-plugin-fs, tauri-plugin-opener, tauri-plugin-window-state, tauri-runtime,
+tauri-runtime-wry, tauri-utils
+  Copyright (c) 2017 - Present Tauri Apps Contributors
+
+tempfile
+  Copyright (c) 2015 Steven Allen
+
+tendril
+  Copyright (c) 2015 Keegan McAllister
+
+tiff
+  Copyright (c) 2018 PistonDevelopers
+
+time, time-core, time-macros
+  Copyright (c) Jacob Pratt et al.
+
+tokio, tokio-util
+  Copyright (c) Tokio Contributors
+
+tokio-macros
+  Copyright (c) 2019 Yoshua Wuyts
+  Copyright (c) Tokio Contributors
+
+tokio-rustls
+  Copyright (c) 2017 quininer kel
+
+tokio-tungstenite
+  Copyright (c) 2017 Daniel Abramov
+  Copyright (c) 2017 Alexey Galakhov
+
+tower, tower-layer, tower-service
+  Copyright (c) 2019 Tower Contributors
+
+tower-http
+  Copyright (c) 2019-2021 Tower Contributors
+
+tracing, tracing-appender, tracing-attributes, tracing-core, tracing-log, tracing-subscriber
+  Copyright (c) 2019 Tokio Contributors
+
+tree_magic_mini
+  Copyright (c) 2017 Aaron Hancock
+
+try-lock
+  Copyright (c) 2018-2023 Sean McArthur
+  Copyright (c) 2016 Alex Crichton
+
+ts-rs, ts-rs-macros
+  Author: Moritz Bischof <moritz.bischof1@gmail.com>
+
+tungstenite
+  Copyright (c) 2017 Alexey Galakhov
+  Copyright (c) 2016 Jason Housley
+
+typed-path
+  Author: Chip Senkbeil <chip@senkbeil.org>
+
+typenum
+  Copyright (c) 2014 Paho Lurie-Gregg
+
+urlpattern
+  Copyright (c) 2021 the Deno authors
+
+uuid
+  Copyright (c) 2014 The Rust Project Developers
+  Copyright (c) 2018 Ashley Mannix, Christopher Armstrong, Dylan DPC, Hunar Roop Kahlon
+
+want
+  Copyright (c) 2018-2019 Sean McArthur
+
+wayland-backend, wayland-client, wayland-protocols, wayland-protocols-wlr, wayland-scanner,
+wayland-sys
+  Copyright (c) 2015 Elinor Berger
+
+web-time
+  Copyright (c) 2023 dAxpeDDa
+
+webkit2gtk
+  Copyright (c) 2016 Boucher, Antoni <bouanto@zoho.com>
+  Copyright (c) 2017-2021, The Gtk-rs Project Developers.
+  Copyright (c) 2021, Tauri Programme within The Commons Conservancy
+
+webkit2gtk-sys
+  Copyright (c) 2016 Boucher, Antoni <bouanto@zoho.com>
+
+weezl
+  Copyright (c) HeroicKatora 2020
+
+winapi
+  Copyright (c) 2015-2018 The winapi-rs Developers
+
+window-vibrancy
+  Copyright (c) 2020-2022 Tauri Programme within The Commons Conservancy
+
+windows, windows-collections, windows-core, windows-future, windows-implement,
+windows-interface, windows-link, windows-numerics, windows-registry, windows-result,
+windows-strings, windows-sys, windows-targets, windows-threading, windows-version,
+windows_x86_64_msvc
+  Copyright (c) Microsoft Corporation.
+
+winreg
+  Copyright (c) 2015 Igor Shaula
+
+wl-clipboard-rs
+  Copyright (c) 2019 Ivan Molodetskikh
+
+wry
+  Copyright (c) 2020-2023 Ngo Iok Ui & Tauri Programme within The Commons Conservancy
+
+x11, x11-dl
+  Authors: daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>
+
+x11rb, x11rb-protocol
+  Copyright 2019 x11rb Contributers
+
+zbus, zbus_macros, zbus_names, zvariant, zvariant_derive
+  Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors
+
+zcheapstr
+  Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors
+
+zerocopy, zerocopy-derive
+  Copyright 2023 The Fuchsia Authors
+
+zeroize
+  Copyright (c) 2018-2026 The RustCrypto Project Developers
+
+zip
+  Copyright (c) 2014 Mathijs van de Nes
+
+zune-core, zune-jpeg
+  Copyright (c) zune-image developers
+
+zvariant_utils
+  Authors: Zeeshan Ali Khan <zeeshanak@gnome.org>, turbocooler <turbocooler@cocaine.ninja>
+
+blocking, cargo-platform, libappindicator-sys, objc2-app-kit, objc2-core-foundation,
+objc2-core-graphics, objc2-core-services, objc2-foundation, objc2-quartz-core,
+objc2-web-kit, pin-project, pin-project-internal, pin-project-lite, serde-saphyr,
+serde_json, webview2-com, webview2-com-macros, webview2-com-sys, winnow
+  (the crate states no copyright line and no author)
+```
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Crates under Apache-2.0
+
+These crates are under the Apache License 2.0, or offer it beside a BSD license. Its text is in this
+file. The copyright notices follow as each crate's license
+files state them; `tao`'s comes from its SPDX file, and where a crate states none its authors
+follow from `Cargo.toml`. `dpi` puts its own code under Apache-2.0 and its copy of
+rust-lang/libm under MIT, listed above. For `ring`, see
+[Other notices inside crates](#other-notices-inside-crates).
+
+```text
+backon
+  Copyright 2021 Datafuse Labs
+
+gethostname
+  Author: Sebastian Wiesner <sebastian@swsnr.de>
+
+k8s-openapi
+  Author: Arnav Singh <me@arnavion.dev>
+
+kube, kube-client, kube-core, kube-runtime
+  Authors: clux <sszynrae@gmail.com>, Natalie Klestrup Röijezon <nat@nullable.se>, kazk <kazk.dev@gmail.com>
+
+moxcms, pxfm
+  Copyright 2024 Radzivon Bartoshyk
+
+serial2
+  Copyright 2021, Maarten de Vries <maarten@de-vri.es>
+
+sync_wrapper
+  Author: Actyx AG <developer@actyx.io>
+
+tao
+  Copyright 2021-2023, The Tauri Programme in the Commons Conservancy
+  Authors: Tauri Programme within The Commons Conservancy, The winit contributors
+
+dpi
+  (the crate states no copyright line and no author)
+```
+
+### Crates under BSD-3-Clause
+
+These crates are under the BSD 3-Clause License. `brotli` is under BSD-3-Clause and MIT
+together; its MIT notice is listed above. `encoding_rs` is under MIT, listed above, except for
+its data from the WHATWG Encoding Standard. `alloc-stdlib` ships no license file, so its author
+follows from `Cargo.toml`. The license text after the notices is the same for every crate.
+
+```text
+alloc-no-stdlib, brotli, brotli-decompressor
+  Copyright (c) 2016 Dropbox, Inc.
+
+alloc-stdlib
+  Author: Daniel Reiter Horn <danielrh@dropbox.com>
+
+encoding_rs (data from the WHATWG Encoding Standard)
+  Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+
+subtle
+  Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence. All rights reserved.
+  Copyright (c) 2016-2024 Isis Agora Lovecruft. All rights reserved.
+```
+
+```text
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### Crates under ISC
+
+These crates are under the ISC License. The license files of `untrusted` and `rustls-webpki`
+read "the authors disclaim" and "the authors be liable" where the text below reads "the author";
+the terms are the same. The `ring` entry gathers its `LICENSE-other-bits` and the ISC headers of
+its source files; for the rest of `ring`, see
+[Other notices inside crates](#other-notices-inside-crates).
+
+```text
+inotify, inotify-sys
+  Copyright (c) Hanno Braun and contributors
+
+libloading
+  Copyright © 2015, Simonas Kazlauskas
+
+ring
+  Copyright 2015-2025 Brian Smith.
+  Copyright 2016 David Judd.
+  Copyright 2016 Simon Sapin.
+  Copyright 2018 Trent Clarke.
+  Copyright (c) 2014, Google Inc.
+  Copyright (c) 2014, 2015, Google Inc.
+  Copyright (c) 2015, Google Inc.
+  Copyright (c) 2016, Google Inc.
+  Copyright (c) 2019, Google Inc.
+  Copyright (c) 2014, Intel Corporation.
+
+rustls-webpki
+  Copyright 2015 Brian Smith.
+
+untrusted
+  Copyright 2015-2016 Brian Smith.
+```
+
+```text
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+
+### Crates under Unicode-3.0
+
+These crates are under the Unicode License v3. `unicode-ident` is under MIT, listed above, for
+its code, and under Unicode-3.0 for the Unicode data in it.
+
+```text
+icu_collections, icu_locale_core, icu_normalizer, icu_normalizer_data, icu_properties,
+icu_properties_data, icu_provider, litemap, potential_utf, tinystr, writeable, yoke,
+yoke-derive, zerofrom, zerofrom-derive, zerotrie, zerovec, zerovec-derive
+  Copyright © 2020-2024 Unicode, Inc.
+  Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
+  ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
+
+unicode-ident
+  Copyright © 1991-2023 Unicode, Inc.
+```
+
+```text
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+```
+
+### Crates under Zlib
+
+`foldhash` (0.1.5 and 0.2.0) is under the zlib License:
+
+```text
+Copyright (c) 2024 Orson Peters
+
+This software is provided 'as-is', without any express or implied warranty. In
+no event will the authors be held liable for any damages arising from the use of
+this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject to
+the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim
+    that you wrote the original software. If you use this software in a product,
+    an acknowledgment in the product documentation would be appreciated but is
+    not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+    misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+```
+
+### Crates under MPL-2.0
+
+These crates are under the Mozilla Public License 2.0, which applies file by file to their
+source. SkoposIDE uses them unmodified. Their source code is available from crates.io at the
+addresses below. Their license files carry no copyright line, so their authors follow from
+`Cargo.toml`.
+
+```text
+cssparser
+  Author: Simon Sapin <simon.sapin@exyr.org>
+  Source: https://crates.io/crates/cssparser/0.37.0
+
+cssparser-macros
+  Author: Simon Sapin <simon.sapin@exyr.org>
+  Source: https://crates.io/crates/cssparser-macros/0.7.1
+
+dtoa-short
+  Author: Xidorn Quan <me@upsuper.org>
+  Source: https://crates.io/crates/dtoa-short/0.3.5
+
+option-ext
+  Author: Simon Ochsenreither <simon@ochsenreither.de>
+  Source: https://crates.io/crates/option-ext/0.2.0
+
+selectors
+  Author: The Servo Project Developers
+  Source: https://crates.io/crates/selectors/0.38.0
+```
+
+```text
+Mozilla Public License Version 2.0
+==================================
+
+1. Definitions
+--------------
+
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+    means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+    means Source Code Form to which the initial Contributor has attached
+    the notice in Exhibit A, the Executable Form of such Source Code
+    Form, and Modifications of such Source Code Form, in each case
+    including portions thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+    means
+
+    (a) that the initial Contributor has attached the notice described
+        in Exhibit B to the Covered Software; or
+
+    (b) that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the
+        terms of a Secondary License.
+
+1.6. "Executable Form"
+    means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+    means a work that combines Covered Software with other material, in 
+    a separate file or files, that is not Covered Software.
+
+1.8. "License"
+    means this document.
+
+1.9. "Licensable"
+    means having the right to grant, to the maximum extent possible,
+    whether at the time of the initial grant or subsequently, any and
+    all of the rights conveyed by this License.
+
+1.10. "Modifications"
+    means any of the following:
+
+    (a) any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered
+        Software; or
+
+    (b) any new file in Source Code Form that contains any Covered
+        Software.
+
+1.11. "Patent Claims" of a Contributor
+    means any patent claim(s), including without limitation, method,
+    process, and apparatus claims, in any patent Licensable by such
+    Contributor that would be infringed, but for the grant of the
+    License, by the making, using, selling, offering for sale, having
+    made, import, or transfer of either its Contributions or its
+    Contributor Version.
+
+1.12. "Secondary License"
+    means either the GNU General Public License, Version 2.0, the GNU
+    Lesser General Public License, Version 2.1, the GNU Affero General
+    Public License, Version 3.0, or any later versions of those
+    licenses.
+
+1.13. "Source Code Form"
+    means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+    means an individual or a legal entity exercising rights under this
+    License. For legal entities, "You" includes any entity that
+    controls, is controlled by, or is under common control with You. For
+    purposes of this definition, "control" means (a) the power, direct
+    or indirect, to cause the direction or management of such entity,
+    whether by contract or otherwise, or (b) ownership of more than
+    fifty percent (50%) of the outstanding shares or beneficial
+    ownership of such entity.
+
+2. License Grants and Conditions
+--------------------------------
+
+2.1. Grants
+
+Each Contributor hereby grants You a world-wide, royalty-free,
+non-exclusive license:
+
+(a) under intellectual property rights (other than patent or trademark)
+    Licensable by such Contributor to use, reproduce, make available,
+    modify, display, perform, distribute, and otherwise exploit its
+    Contributions, either on an unmodified basis, with Modifications, or
+    as part of a Larger Work; and
+
+(b) under Patent Claims of such Contributor to make, use, sell, offer
+    for sale, have made, import, and otherwise transfer either its
+    Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+The licenses granted in Section 2.1 with respect to any Contribution
+become effective for each Contribution on the date the Contributor first
+distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+The licenses granted in this Section 2 are the only rights granted under
+this License. No additional rights or licenses will be implied from the
+distribution or licensing of Covered Software under this License.
+Notwithstanding Section 2.1(b) above, no patent license is granted by a
+Contributor:
+
+(a) for any code that a Contributor has removed from Covered Software;
+    or
+
+(b) for infringements caused by: (i) Your and any other third party's
+    modifications of Covered Software, or (ii) the combination of its
+    Contributions with other software (except as part of its Contributor
+    Version); or
+
+(c) under Patent Claims infringed by Covered Software in the absence of
+    its Contributions.
+
+This License does not grant any rights in the trademarks, service marks,
+or logos of any Contributor (except as may be necessary to comply with
+the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+No Contributor makes additional grants as a result of Your choice to
+distribute the Covered Software under a subsequent version of this
+License (see Section 10.2) or under the terms of a Secondary License (if
+permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+Each Contributor represents that the Contributor believes its
+Contributions are its original creation(s) or it has sufficient rights
+to grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+This License is not intended to limit any rights You have under
+applicable copyright doctrines of fair use, fair dealing, or other
+equivalents.
+
+2.7. Conditions
+
+Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted
+in Section 2.1.
+
+3. Responsibilities
+-------------------
+
+3.1. Distribution of Source Form
+
+All distribution of Covered Software in Source Code Form, including any
+Modifications that You create or to which You contribute, must be under
+the terms of this License. You must inform recipients that the Source
+Code Form of the Covered Software is governed by the terms of this
+License, and how they can obtain a copy of this License. You may not
+attempt to alter or restrict the recipients' rights in the Source Code
+Form.
+
+3.2. Distribution of Executable Form
+
+If You distribute Covered Software in Executable Form then:
+
+(a) such Covered Software must also be made available in Source Code
+    Form, as described in Section 3.1, and You must inform recipients of
+    the Executable Form how they can obtain a copy of such Source Code
+    Form by reasonable means in a timely manner, at a charge no more
+    than the cost of distribution to the recipient; and
+
+(b) You may distribute such Executable Form under the terms of this
+    License, or sublicense it under different terms, provided that the
+    license for the Executable Form does not attempt to limit or alter
+    the recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+You may create and distribute a Larger Work under terms of Your choice,
+provided that You also comply with the requirements of this License for
+the Covered Software. If the Larger Work is a combination of Covered
+Software with a work governed by one or more Secondary Licenses, and the
+Covered Software is not Incompatible With Secondary Licenses, this
+License permits You to additionally distribute such Covered Software
+under the terms of such Secondary License(s), so that the recipient of
+the Larger Work may, at their option, further distribute the Covered
+Software under the terms of either this License or such Secondary
+License(s).
+
+3.4. Notices
+
+You may not remove or alter the substance of any license notices
+(including copyright notices, patent notices, disclaimers of warranty,
+or limitations of liability) contained within the Source Code Form of
+the Covered Software, except that You may alter any license notices to
+the extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+You may choose to offer, and to charge a fee for, warranty, support,
+indemnity or liability obligations to one or more recipients of Covered
+Software. However, You may do so only on Your own behalf, and not on
+behalf of any Contributor. You must make it absolutely clear that any
+such warranty, support, indemnity, or liability obligation is offered by
+You alone, and You hereby agree to indemnify every Contributor for any
+liability incurred by such Contributor as a result of warranty, support,
+indemnity or liability terms You offer. You may include additional
+disclaimers of warranty and limitations of liability specific to any
+jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+---------------------------------------------------
+
+If it is impossible for You to comply with any of the terms of this
+License with respect to some or all of the Covered Software due to
+statute, judicial order, or regulation then You must: (a) comply with
+the terms of this License to the maximum extent possible; and (b)
+describe the limitations and the code they affect. Such description must
+be placed in a text file included with all distributions of the Covered
+Software under this License. Except to the extent prohibited by statute
+or regulation, such description must be sufficiently detailed for a
+recipient of ordinary skill to be able to understand it.
+
+5. Termination
+--------------
+
+5.1. The rights granted under this License will terminate automatically
+if You fail to comply with any of its terms. However, if You become
+compliant, then the rights granted under this License from a particular
+Contributor are reinstated (a) provisionally, unless and until such
+Contributor explicitly and finally terminates Your grants, and (b) on an
+ongoing basis, if such Contributor fails to notify You of the
+non-compliance by some reasonable means prior to 60 days after You have
+come back into compliance. Moreover, Your grants from a particular
+Contributor are reinstated on an ongoing basis if such Contributor
+notifies You of the non-compliance by some reasonable means, this is the
+first time You have received notice of non-compliance with this License
+from such Contributor, and You become compliant prior to 30 days after
+Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+infringement claim (excluding declaratory judgment actions,
+counter-claims, and cross-claims) alleging that a Contributor Version
+directly or indirectly infringes any patent, then the rights granted to
+You by any and all Contributors for the Covered Software under Section
+2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all
+end user license agreements (excluding distributors and resellers) which
+have been validly granted by You or Your distributors under this License
+prior to termination shall survive termination.
+
+************************************************************************
+*                                                                      *
+*  6. Disclaimer of Warranty                                           *
+*  -------------------------                                           *
+*                                                                      *
+*  Covered Software is provided under this License on an "as is"       *
+*  basis, without warranty of any kind, either expressed, implied, or  *
+*  statutory, including, without limitation, warranties that the       *
+*  Covered Software is free of defects, merchantable, fit for a        *
+*  particular purpose or non-infringing. The entire risk as to the     *
+*  quality and performance of the Covered Software is with You.        *
+*  Should any Covered Software prove defective in any respect, You     *
+*  (not any Contributor) assume the cost of any necessary servicing,   *
+*  repair, or correction. This disclaimer of warranty constitutes an   *
+*  essential part of this License. No use of any Covered Software is   *
+*  authorized under this License except under this disclaimer.         *
+*                                                                      *
+************************************************************************
+
+************************************************************************
+*                                                                      *
+*  7. Limitation of Liability                                          *
+*  --------------------------                                          *
+*                                                                      *
+*  Under no circumstances and under no legal theory, whether tort      *
+*  (including negligence), contract, or otherwise, shall any           *
+*  Contributor, or anyone who distributes Covered Software as          *
+*  permitted above, be liable to You for any direct, indirect,         *
+*  special, incidental, or consequential damages of any character      *
+*  including, without limitation, damages for lost profits, loss of    *
+*  goodwill, work stoppage, computer failure or malfunction, or any    *
+*  and all other commercial damages or losses, even if such party      *
+*  shall have been informed of the possibility of such damages. This   *
+*  limitation of liability shall not apply to liability for death or   *
+*  personal injury resulting from such party's negligence to the       *
+*  extent applicable law prohibits such limitation. Some               *
+*  jurisdictions do not allow the exclusion or limitation of           *
+*  incidental or consequential damages, so this exclusion and          *
+*  limitation may not apply to You.                                    *
+*                                                                      *
+************************************************************************
+
+8. Litigation
+-------------
+
+Any litigation relating to this License may be brought only in the
+courts of a jurisdiction where the defendant maintains its principal
+place of business and such litigation shall be governed by laws of that
+jurisdiction, without reference to its conflict-of-law provisions.
+Nothing in this Section shall prevent a party's ability to bring
+cross-claims or counter-claims.
+
+9. Miscellaneous
+----------------
+
+This License represents the complete agreement concerning the subject
+matter hereof. If any provision of this License is held to be
+unenforceable, such provision shall be reformed only to the extent
+necessary to make it enforceable. Any law or regulation which provides
+that the language of a contract shall be construed against the drafter
+shall not be used to construe this License against a Contributor.
+
+10. Versions of the License
+---------------------------
+
+10.1. New Versions
+
+Mozilla Foundation is the license steward. Except as provided in Section
+10.3, no one other than the license steward has the right to modify or
+publish new versions of this License. Each version will be given a
+distinguishing version number.
+
+10.2. Effect of New Versions
+
+You may distribute the Covered Software under the terms of the version
+of the License under which You originally received the Covered Software,
+or under the terms of any subsequent version published by the license
+steward.
+
+10.3. Modified Versions
+
+If you create software not governed by this License, and you want to
+create a new license for such software, you may create and use a
+modified version of this License if you rename the license and remove
+any references to the name of the license steward (except to note that
+such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+Licenses
+
+If You choose to distribute Source Code Form that is Incompatible With
+Secondary Licenses under the terms of this version of the License, the
+notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+-------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular
+file, then You may include the notice in a location (such as a LICENSE
+file in a relevant directory) where a recipient would be likely to look
+for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+---------------------------------------------------------
+
+  This Source Code Form is "Incompatible With Secondary Licenses", as
+  defined by the Mozilla Public License, v. 2.0.
+```
+
+### Other notices inside crates
+
+- **ring** 0.17.14 (https://github.com/briansmith/ring) is under the ISC License for its own
+  code and the code it took from BoringSSL under ISC, and under Apache-2.0 for the code it took
+  from BoringSSL and fiat-crypto under Apache-2.0. Its ISC copyright notices are listed under
+  [Crates under ISC](#crates-under-isc), from its `LICENSE-other-bits` and from the ISC headers
+  of its source files. Its Apache-2.0 files carry the notices of The OpenSSL Project Authors,
+  The BoringSSL Authors, Intel Corporation, CloudFlare, Oracle and ARM, and its
+  `third_party/fiat/LICENSE` states "Copyright 2015-2020 the fiat-crypto authors (see the
+  AUTHORS file)". Its copy of once_cell is under MIT; once_cell is listed under
+  [Crates under MIT](#crates-under-mit). The Go and Chromium licenses in its
+  `LICENSE-BoringSSL` cover BoringSSL's test and build scripts, which `ring` does not compile.
+- **webview2-com-sys** 0.39.1 carries Microsoft's WebView2 loader (`WebView2LoaderStatic.lib`,
+  from the WebView2 SDK), which the Windows build links statically. The crate is under MIT and
+  ships no license text for the loader; the loader is under the license of Microsoft's WebView2
+  SDK.
+- **atomic-waker** and **futures-lite** carry code from futures-rs, and **parking** code from
+  the Rust standard library. Their `LICENSE-THIRD-PARTY` files offer that code under MIT or
+  Apache-2.0; SkoposIDE takes MIT, and the notices are listed under
+  [Crates under MIT](#crates-under-mit).
+- **crossbeam-channel**'s `LICENSE-THIRD-PARTY` covers tests ported from Go and from the Rust
+  standard library (CC-BY-3.0, BSD-3-Clause, MIT and Apache-2.0). The tests are not compiled
+  into the app.
+- **security-framework**'s `THIRD_PARTY` file covers documentation adapted from Apple's
+  Security framework under the Apple Public Source License 2.0. That documentation lives in
+  source comments and is not compiled into the app.
+- **libdbus-sys** links the system's libdbus. Its vendored copy of dbus is built only with its
+  `vendored` feature, which the app does not enable.
+
+### Crates that need no notice
+
+- **ryu** (Apache-2.0 or BSL-1.0, SkoposIDE takes BSL-1.0; author David Tolnay),
+  **clipboard-win** and **error-code** (BSL-1.0; author Douman): the Boost Software License
+  asks for its notice in copies of the source, not in machine-executable object code.
+- **constant_time_eq** (CC0-1.0, MIT-0 or Apache-2.0, SkoposIDE takes CC0-1.0; author Cesar
+  Eduardo Barros), **dunce** (the same choice; author Kornel) and **notify** (CC0-1.0; authors
+  Félix Saparelli, Daniel Faust and Aron Heinecke): CC0 waives copyright and asks for
+  no notice.
+
+They are listed so the list is complete.
 
 ## Apache License 2.0
 
