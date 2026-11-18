@@ -1,5 +1,5 @@
-import { Download } from "lucide-react";
 import { Button, ProgressBar } from "../../design";
+import { Download } from "../../design/icons";
 import type { ToolStatus } from "../../ipc/generated/ToolStatus";
 import { useHelm } from "../../stores/helm";
 import styles from "./Helm.module.css";

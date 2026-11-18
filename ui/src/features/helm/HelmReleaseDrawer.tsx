@@ -10,7 +10,7 @@ import {
   Tabs,
   useNow,
 } from "../../design";
-import { CircleArrowUp, History, Trash2 } from "../../design/glyphs";
+import { CircleArrowUp, History, Trash2 } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { HelmRelease } from "../../ipc/generated/HelmRelease";
 import type { HelmReleaseDetail } from "../../ipc/generated/HelmReleaseDetail";

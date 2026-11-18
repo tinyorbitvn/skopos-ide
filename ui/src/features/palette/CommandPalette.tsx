@@ -1,4 +1,3 @@
-import { Search } from "lucide-react";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -17,6 +16,7 @@ import {
   clickMode,
   openPath,
 } from "../../app/tabs/navigation";
+import { Search } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";

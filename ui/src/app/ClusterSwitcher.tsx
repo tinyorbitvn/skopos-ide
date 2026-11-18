@@ -1,12 +1,12 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { StatusDot } from "../design";
 import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
   Folder,
   Search,
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { StatusDot } from "../design";
+} from "../design/icons";
 import {
   type FolderTree,
   type TreeRow,

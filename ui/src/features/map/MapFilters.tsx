@@ -1,7 +1,7 @@
-import { FunnelX } from "lucide-react";
 import { type ReactElement, useState } from "react";
 import { Button } from "../../design/Button";
 import { FilterPopover } from "../../design/FilterPopover";
+import { FunnelX } from "../../design/icons";
 import type { GraphNamespaceCount } from "../../ipc/generated/GraphNamespaceCount";
 import {
   filtersActive,

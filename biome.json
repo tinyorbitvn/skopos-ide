@@ -11,43 +11,32 @@
         "noRestrictedImports": {
           "level": "error",
           "options": {
-            "paths": {
-              "lucide-react": {
-                "importNames": [
-                  "Trash2",
-                  "FileCode",
-                  "ScrollText",
-                  "Terminal",
-                  "Plug",
-                  "ArrowRightLeft",
-                  "MoveVertical",
-                  "RotateCw",
-                  "Play",
-                  "CirclePause",
-                  "CirclePlay",
-                  "ArrowDownToLine",
-                  "LogOut",
-                  "KeyRound",
-                  "Star",
-                  "ShieldOff",
-                  "Zap",
-                  "Pencil",
-                  "RefreshCw",
-                  "RotateCcw",
-                  "CircleStop",
-                  "History",
-                  "CircleArrowUp",
-                  "PackagePlus",
-                  "ExternalLink",
-                  "Square",
-                  "Ellipsis"
+            "patterns": [
+              {
+                "group": [
+                  "lucide-react",
+                  "lucide-react/**",
+                  "@animateicons/react",
+                  "@animateicons/react/**"
                 ],
-                "message": "Use the app's own icon from design/glyphs."
+                "message": "Import icons from design/icons, the one module that maps them."
               }
-            }
+            ]
           }
         }
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["ui/src/design/icons.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ]
 }

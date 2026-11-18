@@ -1,7 +1,7 @@
-import { X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
 import { ErrorNotice, IconButton, Tabs } from "../../design";
+import { X } from "../../design/icons";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { resourcePath } from "../../kinds/nav";
 import { DRAWER_PANE, usePaneSize } from "../../stores/paneSize";

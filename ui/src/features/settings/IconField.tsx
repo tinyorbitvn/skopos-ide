@@ -1,6 +1,6 @@
-import { ImageUp, X } from "lucide-react";
 import { type ChangeEvent, useRef, useState } from "react";
 import { Button } from "../../design";
+import { ImageUp, X } from "../../design/icons";
 import styles from "./ClusterSettingsScreen.module.css";
 import { checkIconFile, ICON_ERROR } from "./settingsForm";
 

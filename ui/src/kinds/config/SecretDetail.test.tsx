@@ -411,12 +411,12 @@ test("reveal and hide are an eye icon button named for the key", async () => {
   const button = screen.getByTestId("secret-reveal-a");
   expect(button.getAttribute("aria-label")).toBe("Reveal a");
   expect(button.textContent).toBe("");
-  expect(button.querySelector("svg.lucide-eye")).not.toBeNull();
+  expect(button.querySelector('[data-icon="eye"] svg')).not.toBeNull();
   fireEvent.click(button);
   await screen.findByDisplayValue("value-of-a");
   const hide = screen.getByTestId("secret-reveal-a");
   expect(hide.getAttribute("aria-label")).toBe("Hide a");
-  expect(hide.querySelector("svg.lucide-eye-off")).not.toBeNull();
+  expect(hide.querySelector('[data-icon="eye-off"] svg')).not.toBeNull();
 });
 
 test("base64 that differs only in whitespace is not a change", async () => {

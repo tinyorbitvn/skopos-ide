@@ -1,7 +1,7 @@
-import { Maximize2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Button } from "../../design/Button";
+import { Maximize2 } from "../../design/icons";
 import { StatusDot } from "../../design/StatusDot";
 import styles from "./DrawerMap.module.css";
 import { useFocusMap } from "./focusMap";

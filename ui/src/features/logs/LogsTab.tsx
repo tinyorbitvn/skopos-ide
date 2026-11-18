@@ -1,6 +1,6 @@
-import { Download } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../../design";
+import { Download } from "../../design/icons";
 import { isPodTab, type LogsDockTab, useDock } from "../../stores/dock";
 import { LogsSearch } from "./LogsSearch";
 import styles from "./LogsTab.module.css";

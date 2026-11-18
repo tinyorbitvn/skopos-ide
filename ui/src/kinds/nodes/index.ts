@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { toast } from "../../design";
-import { ArrowDownToLine, CirclePause, CirclePlay } from "../../design/glyphs";
+import { ArrowDownToLine, CirclePause, CirclePlay } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { baseColumns, textColumn } from "../columns";
 import type { KindAction } from "../registry";

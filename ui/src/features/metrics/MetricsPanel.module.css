@@ -64,8 +64,8 @@
   color: var(--status-critical-text);
 }
 
-.note > svg,
-.error > svg {
+.note > [data-icon],
+.error > [data-icon] {
   flex: none;
   margin-top: 2px;
 }

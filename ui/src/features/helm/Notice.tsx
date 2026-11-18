@@ -1,5 +1,5 @@
-import { CircleX, Info, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
+import { CircleX, Info, TriangleAlert } from "../../design/icons";
 import styles from "./Helm.module.css";
 
 const ICONS = { warn: TriangleAlert, danger: CircleX, neutral: Info };

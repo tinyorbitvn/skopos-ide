@@ -1,7 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
-import { ChevronDown, Download, FileText, ImageIcon } from "lucide-react";
 import { type RefObject, useCallback, useRef, useState } from "react";
 import { Button } from "../../design/Button";
+import { ChevronDown, Download, FileText, ImageIcon } from "../../design/icons";
 import { Menu } from "../../design/Menu";
 import { toast } from "../../design/Toast";
 import { api } from "../../ipc/api";

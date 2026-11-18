@@ -1,9 +1,9 @@
 import { getVersion } from "@tauri-apps/api/app";
-import { Copy, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ShellDialog } from "../../app/ShellDialog";
 import { Button, IconButton, toast } from "../../design";
 import { copyText } from "../../design/clipboard";
+import { Copy, X } from "../../design/icons";
 import { SkoposLogo } from "../../design/SkoposLogo";
 import { api } from "../../ipc/api";
 import type { AppInfo } from "../../ipc/generated/AppInfo";

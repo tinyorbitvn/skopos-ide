@@ -1,6 +1,6 @@
 import * as RC from "@radix-ui/react-context-menu";
-import { ChevronRight } from "lucide-react";
 import { Fragment, type ReactElement } from "react";
+import { ChevronRight } from "./icons";
 import styles from "./Menu.module.css";
 
 export interface ContextMenuItem {

@@ -6,7 +6,6 @@ import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   ASSET_SUFFIXES,
-  appGlyphs,
   assertSafeOut,
   build,
   cli,
@@ -242,7 +241,6 @@ describe("pngSize", () => {
     assert.throws(() => pngSize(Buffer.alloc(10)), /PNG/);
   });
 });
-const GLYPHS_TS = path.join(ROOT, "ui", "src", "design", "glyphPaths.ts");
 const LUCIDE_ICONS = path.join(ROOT, "ui", "node_modules", "lucide-react", "dist", "esm", "icons");
 const FONT_FILES = [
   "jetbrains-mono-latin-400-normal.woff2",
@@ -266,16 +264,6 @@ function readLucide(name) {
 }
 
 describe("icons", () => {
-  const ts = fs.readFileSync(GLYPHS_TS, "utf8");
-
-  test("appGlyphs reads every glyph the app draws", () => {
-    const glyphs = appGlyphs(ts);
-    const names = [...ts.matchAll(/^\s*\|\s*"([a-z0-9-]+)"/gm)].map((m) => m[1]);
-    assert.ok(names.length > 0);
-    assert.deepEqual([...glyphs.keys()].sort(), names.sort());
-    for (const d of glyphs.values()) assert.match(d, /^M[0-9.\sA-Za-z-]+$/);
-  });
-
   test("lucideNodes reads a Lucide icon's elements, without React keys", () => {
     const nodes = lucideNodes(fs.readFileSync(path.join(LUCIDE_ICONS, "network.mjs"), "utf8"));
     assert.deepEqual(
@@ -293,20 +281,20 @@ describe("icons", () => {
     assert.throws(() => lucideNodes("export default {};"), /no SVG elements/);
   });
 
-  test("sprite fills the app's glyphs, strokes Lucide icons and draws each name once", () => {
-    const svg = sprite(["download", "trash-2", "download"], { glyphs: appGlyphs(ts), readLucide });
+  test("sprite strokes each Lucide icon and draws each name once", () => {
+    const svg = sprite(["download", "terminal", "download"], { readLucide });
     assert.equal(svg.match(/<symbol /g).length, 2);
-    assert.match(
-      svg,
-      /<symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M[^"]+" fill="currentColor" stroke="none" fill-rule="evenodd"\/><\/symbol>/,
-    );
-    assert.match(
-      svg,
-      /<symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">(<path d="[^"]+"\/>)+<\/symbol>/,
-    );
+    for (const name of ["download", "terminal"]) {
+      assert.match(
+        svg,
+        new RegExp(
+          `<symbol id="i-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">(<path d="[^"]+"/>)+</symbol>`,
+        ),
+      );
+    }
     assert.match(svg, /^<!-- [^>]*Lucide[^>]*ISC[^>]*-->\n<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">/);
     assert.throws(
-      () => sprite(["no-such-icon"], { glyphs: appGlyphs(ts), readLucide }),
+      () => sprite(["no-such-icon"], { readLucide }),
       /no-such-icon/,
     );
   });

@@ -1,4 +1,3 @@
-import { Search, X } from "lucide-react";
 import { Fragment, useState } from "react";
 import { ShellDialog } from "../../app/ShellDialog";
 import {
@@ -12,6 +11,7 @@ import {
   type ShortcutRow,
 } from "../../app/shortcuts";
 import { IconButton, Input } from "../../design";
+import { Search, X } from "../../design/icons";
 import { useShell } from "../../stores/shell";
 import styles from "./ShortcutsDialog.module.css";
 

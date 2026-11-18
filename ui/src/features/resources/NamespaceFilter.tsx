@@ -1,5 +1,5 @@
-import { ChevronDown } from "lucide-react";
 import { Button, CheckMenu } from "../../design";
+import { ChevronDown } from "../../design/icons";
 
 /** The UI state key of a cluster's namespace filter: a list, empty for All. */
 export function namespaceFilterKey(clusterId: string): string {

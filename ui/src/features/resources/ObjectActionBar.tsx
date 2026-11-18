@@ -1,5 +1,5 @@
 import { IconButton, Menu } from "../../design";
-import { Ellipsis } from "../../design/glyphs";
+import { Ellipsis } from "../../design/icons";
 import styles from "./ObjectActionBar.module.css";
 import type { ObjectActionItem } from "./objectActions";
 import { menuItems } from "./ResourceActions";

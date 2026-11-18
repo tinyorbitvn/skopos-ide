@@ -1,6 +1,6 @@
-import { Eye, EyeOff } from "lucide-react";
 import { useRef, useState } from "react";
 import { ErrorNotice, IconButton } from "../../design";
+import { Eye, EyeOff } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { SecretValue } from "../../ipc/generated/SecretValue";

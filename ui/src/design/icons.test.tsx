@@ -1,5 +1,6 @@
 import { act, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import biomeConfig from "../../../biome.json?raw";
 import { Button } from "./Button";
 import * as iconModule from "./icons";
 import { type IconComponent, Pen, SVG_ART, Trash2 } from "./icons";
@@ -195,4 +196,34 @@ test("SVG_ART draws Lucide's svg itself, to sit inside another svg", () => {
     expect(container.querySelector("[data-icon]"), name).toBeNull();
     unmount();
   }
+});
+
+test("Biome lets only this module import lucide-react and @animateicons/react", () => {
+  const config = JSON.parse(biomeConfig) as {
+    linter: { rules: { style: Record<string, unknown> } };
+    overrides: { includes: string[]; linter: unknown }[];
+  };
+  expect(config.linter.rules.style.noRestrictedImports).toEqual({
+    level: "error",
+    options: {
+      patterns: [
+        {
+          group: [
+            "lucide-react",
+            "lucide-react/**",
+            "@animateicons/react",
+            "@animateicons/react/**",
+          ],
+          message:
+            "Import icons from design/icons, the one module that maps them.",
+        },
+      ],
+    },
+  });
+  expect(config.overrides).toEqual([
+    {
+      includes: ["ui/src/design/icons.tsx"],
+      linter: { rules: { style: { noRestrictedImports: "off" } } },
+    },
+  ]);
 });

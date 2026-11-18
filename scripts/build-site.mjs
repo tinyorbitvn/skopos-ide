@@ -157,17 +157,6 @@ export function render(template, { release, images, sprite }) {
   return html;
 }
 
-/** The app's own glyphs, name → path data, from ui/src/design/glyphPaths.ts. */
-export function appGlyphs(ts) {
-  const start = ts.indexOf("GLYPH_PATHS");
-  if (start === -1) throw new Error("glyphPaths.ts: GLYPH_PATHS not found");
-  const glyphs = new Map();
-  for (const m of ts.slice(start).matchAll(/(?:"([a-z0-9-]+)"|([a-z0-9]+)):\s*"([^"]+)"/g)) {
-    glyphs.set(m[1] ?? m[2], m[3]);
-  }
-  return glyphs;
-}
-
 /** The SVG elements of a lucide-react icon module, without React's keys. */
 export function lucideNodes(mjs) {
   const nodes = [];
@@ -185,17 +174,14 @@ export function lucideNodes(mjs) {
 }
 
 /**
- * A hidden SVG sprite with one <symbol id="i-<name>"> per name: the app's own glyph when
- * there is one, else the Lucide icon of that name.
+ * A hidden SVG sprite with one <symbol id="i-<name>"> per name: the Lucide icon of that
+ * name, the drawing the app shows too.
  */
-export function sprite(names, { glyphs, readLucide }) {
+export function sprite(names, { readLucide }) {
   const symbols = [...new Set(names)].sort().map((name) => {
-    if (glyphs.has(name)) {
-      return `<symbol id="i-${name}" viewBox="0 0 24 24"><path d="${escapeHtml(glyphs.get(name))}" fill="currentColor" stroke="none" fill-rule="evenodd"/></symbol>`;
-    }
     const mjs = readLucide(name);
     if (mjs == null) {
-      throw new Error(`icon "${name}": not one of the app's glyphs and not a Lucide icon`);
+      throw new Error(`icon "${name}": not a Lucide icon`);
     }
     const body = lucideNodes(mjs)
       .map(({ tag, attrs }) => `<${tag} ${attrs.map(([k, v]) => `${k}="${escapeHtml(v)}"`).join(" ")}/>`)
@@ -203,7 +189,7 @@ export function sprite(names, { glyphs, readLucide }) {
     return `<symbol id="i-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`;
   });
   return (
-    "<!-- Icons: SkoposIDE's own glyphs, and Lucide icons (ISC License, Copyright (c) Lucide Icons and Contributors). -->\n" +
+    "<!-- Icons: Lucide icons (ISC License, Copyright (c) Lucide Icons and Contributors). -->\n" +
     `<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">${symbols.join("")}</svg>`
   );
 }
@@ -285,15 +271,12 @@ export function build({ release, out, root }) {
     if (m) images[m[1]] = pngSize(data);
   }
   const names = [...template.matchAll(/href="#i-([a-z0-9-]+)"/g)].map((m) => m[1]);
-  const glyphs = appGlyphs(
-    fs.readFileSync(path.join(root, "ui", "src", "design", "glyphPaths.ts"), "utf8"),
-  );
   const icons = path.join(root, "ui", "node_modules", "lucide-react", "dist", "esm", "icons");
   const readLucide = (name) => {
     const file = path.join(icons, `${name}.mjs`);
     return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
   };
-  files.set("index.html", render(template, { release, images, sprite: sprite(names, { glyphs, readLucide }) }));
+  files.set("index.html", render(template, { release, images, sprite: sprite(names, { readLucide }) }));
   files.set("tokens.css", fs.readFileSync(path.join(root, "ui", "src", "design", "tinyorbit.css")));
   files.set("icon.svg", fs.readFileSync(path.join(root, "assets", "icon.svg")));
   for (const [pkg, file] of FONTS) {

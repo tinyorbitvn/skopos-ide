@@ -1,4 +1,3 @@
-import { Library } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
@@ -11,6 +10,7 @@ import {
   type TableColumn,
   VirtualTable,
 } from "../../design";
+import { Library } from "../../design/icons";
 import type { ChartSummary } from "../../ipc/generated/ChartSummary";
 import { isToolMissing, useHelm } from "../../stores/helm";
 import { useClusterContext } from "../cluster/ClusterLayout";

@@ -10,7 +10,7 @@ import {
   type TableColumn,
   VirtualTable,
 } from "../../design";
-import { Ellipsis } from "../../design/glyphs";
+import { Ellipsis } from "../../design/icons";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { resourcePath } from "../../kinds/nav";
 import { forwardsOf, usePortForwards } from "../../stores/portForwards";

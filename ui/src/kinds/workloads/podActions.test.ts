@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
-import { Zap } from "../../design/glyphs";
+import { Zap } from "../../design/icons";
 import { mockBackend } from "../../test/ipc";
 import { PODS } from "../refs";
 import { type ActionContext, kindSpec } from "../registry";

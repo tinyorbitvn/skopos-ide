@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { KeyRound } from "../../design/glyphs";
+import { KeyRound } from "../../design/icons";
 import type { KindAction } from "../registry";
 import { KubeconfigDialog } from "./KubeconfigDialog";
 

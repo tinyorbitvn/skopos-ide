@@ -1,5 +1,4 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowLeft } from "lucide-react";
 import {
   type FormEvent,
   type ReactNode,
@@ -19,6 +18,7 @@ import {
   Spinner,
   toast,
 } from "../../design";
+import { ArrowLeft } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
