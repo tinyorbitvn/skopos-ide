@@ -26,6 +26,19 @@ stringData:
 const until = (check: () => Promise<boolean>, timeoutMsg: string) =>
   browser.waitUntil(check, { timeout: 60000, interval: 500, timeoutMsg });
 
+/**
+ * Reveals a Secret key with a click on its masked value, again if a late update
+ * of the object masks it, until its field holds `value`.
+ */
+async function reveal(key: string, value: string) {
+  await until(async () => {
+    const masked = byTestId(`secret-value-${key}`);
+    if (await masked.isExisting()) await masked.click();
+    const input = byTestId(`secret-input-${key}`);
+    return (await input.isExisting()) && (await input.getValue()) === value;
+  }, `${key} never showed ${value}`);
+}
+
 async function openDrawer(nav: string, kind: string, name: string) {
   await openResource(nav, kind);
   await searchResources(name);
@@ -61,17 +74,18 @@ describe("editing config in the drawer", () => {
   it("keeps a Secret value out of the page until it is revealed", async () => {
     await openDrawer("nav-item-core-secrets", "Secret", "creds");
     expect(await browser.getPageSource()).not.toContain("e2e-hidden-value");
+    expect(await (await shown("secret-value-password")).getText()).toBe("••••••");
+    await reveal("password", "e2e-hidden-value");
     await clickWhenShown("secret-reveal-password");
-    await until(async () => (await browser.getPageSource()).includes("e2e-hidden-value"), "the value never showed");
-    await clickWhenShown("secret-reveal-password");
+    await shown("secret-value-password");
     await until(async () => !(await browser.getPageSource()).includes("e2e-hidden-value"), "the value stayed after hiding");
     await clickWhenShown("detail-close");
   });
 
-  it("edits a Secret value", async () => {
+  it("edits a revealed Secret value in place", async () => {
     await openDrawer("nav-item-core-secrets", "Secret", "creds");
-    await clickWhenShown("secret-reveal-password");
-    await clickWhenShown("secret-edit-password");
+    expect(await byTestId("secret-edit-password").isExisting()).toBe(false);
+    await reveal("password", "e2e-hidden-value");
     await (await shown("secret-input-password")).setValue("changed-value");
     await clickWhenShown("data-save");
     const expected = Buffer.from("changed-value").toString("base64");
@@ -79,6 +93,26 @@ describe("editing config in the drawer", () => {
       async () => (await kubectl(["-n", NS, "get", "secret", "creds", "-o", "jsonpath={.data.password}"])) === expected,
       "the Secret never changed",
     );
+    await clickWhenShown("detail-close");
+  });
+
+  it("saves a Secret value typed as base64, and reopens it as base64", async () => {
+    await openDrawer("nav-item-core-secrets", "Secret", "creds");
+    await reveal("password", "changed-value");
+    const input = await shown("secret-input-password");
+    await clickWhenShown("secret-form-password-base64");
+    const encoded = Buffer.from("changed-value").toString("base64");
+    await until(async () => (await input.getValue()) === encoded, "the value never turned to base64");
+    // 0xff 0x00 0x01 is not UTF-8, so it can only be typed as base64.
+    await input.setValue("/wAB");
+    await clickWhenShown("data-save");
+    await until(
+      async () => (await kubectl(["-n", NS, "get", "secret", "creds", "-o", "jsonpath={.data.password}"])) === "/wAB",
+      "the Secret never changed",
+    );
+    await reveal("password", "/wAB");
+    const raw = await shown("secret-form-password-raw");
+    expect(await raw.$("input").isEnabled()).toBe(false);
     await clickWhenShown("detail-close");
   });
 
