@@ -235,3 +235,32 @@ test("a layout sent while the core's answer is on its way wins over that answer 
   expect(useWindowLayout.getState().layout).toEqual(later);
   expect(backend.callsTo("window_layout_set")).toEqual([]);
 });
+
+test("before the app quits, a flush sends the pending save at once and then answers (P34)", async () => {
+  const backend = mockBackend({
+    window_layout_get: () => layoutOf("main", [tab("t1", "/catalog")]),
+    window_layout_set: () => null,
+    window_flushed: () => null,
+  });
+  await startWindowLayout(isRoute);
+  openTab("/a");
+
+  await emitEvent("window://flush");
+
+  expect(
+    backend.calls
+      .map((c) => c.cmd)
+      .filter((cmd) => cmd !== "plugin:event|listen"),
+  ).toEqual(["window_layout_get", "window_layout_set", "window_flushed"]);
+  expect(backend.callsTo("window_layout_set")).toEqual([
+    { layout: useWindowLayout.getState().layout },
+  ]);
+  // Nothing waits any more: the save timer was cancelled, and a flush with nothing
+  // pending only answers.
+  await emitEvent("window://flush");
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, LAYOUT_SAVE_DELAY_MS + 50));
+  });
+  expect(backend.callsTo("window_layout_set")).toHaveLength(1);
+  expect(backend.callsTo("window_flushed")).toHaveLength(2);
+});

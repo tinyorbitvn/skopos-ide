@@ -47,6 +47,13 @@ pub async fn window_layout_set(
     Ok(())
 }
 
+/// The calling window has sent its last layout before the app quits (P34).
+#[tauri::command]
+pub async fn window_flushed(window: WebviewWindow) -> Result<(), IpcError> {
+    windows::flushed(window.app_handle(), window.label());
+    Ok(())
+}
+
 /// The layouts of every open window, `main` first (the "Move to window" list).
 #[tauri::command]
 pub async fn windows_list(state: State<'_, AppState>) -> Result<Vec<WindowLayout>, IpcError> {

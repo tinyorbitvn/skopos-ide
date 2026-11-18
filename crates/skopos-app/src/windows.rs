@@ -3,7 +3,7 @@
 //! and the app quitting with `main`. The layouts and the choice of a window live in
 //! the core.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -16,15 +16,20 @@ use skopos_core::windows::{
 use tauri::utils::config::WindowConfig;
 use tauri::window::Monitor;
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow,
-    WebviewWindowBuilder, Window, WindowEvent,
+    AppHandle, Emitter, EventTarget, Manager, PhysicalPosition, PhysicalSize, Runtime,
+    WebviewWindow, WebviewWindowBuilder, Window, WindowEvent,
 };
+use tokio::sync::Notify;
 
 use crate::state::AppState;
 
 /// How long a window must stay still before its bounds are reported. Moves and resizes
 /// arrive many times a second while the user drags.
 const BOUNDS_SETTLE: Duration = Duration::from_millis(500);
+/// Asks a window's UI to save its layout now; it answers with `window_flushed` (P34).
+pub const WINDOW_FLUSH: &str = "window://flush";
+/// How long the app waits for the windows to save before it quits all the same.
+const FLUSH_LIMIT: Duration = Duration::from_millis(500);
 
 /// A point in a window's logical pixels, in physical pixels by that window's scale factor.
 pub fn to_physical(x: f64, y: f64, scale: f64) -> (i32, i32) {
@@ -83,6 +88,50 @@ pub fn on_destroyed(label: &str, quitting: bool) -> Destroyed {
     }
 }
 
+/// The windows asked to save their layout before the app quits, until each answers.
+#[derive(Default)]
+pub struct Flushes {
+    waiting: Mutex<BTreeSet<String>>,
+    answer: Notify,
+}
+
+impl Flushes {
+    fn waiting(&self) -> MutexGuard<'_, BTreeSet<String>> {
+        self.waiting.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits for these windows from now on.
+    pub fn expect(&self, labels: impl IntoIterator<Item = String>) {
+        self.waiting().extend(labels);
+    }
+
+    /// A window has saved; one not waited for changes nothing.
+    pub fn answered(&self, label: &str) {
+        if self.waiting().remove(label) {
+            self.answer.notify_waiters();
+        }
+    }
+
+    /// Returns once every window waited for has answered, or after `limit`, with the
+    /// labels of the windows that did not answer.
+    pub async fn wait(&self, limit: Duration) -> Vec<String> {
+        let all_answered = async {
+            loop {
+                let answer = self.answer.notified();
+                tokio::pin!(answer);
+                // Registered before the check, so an answer in between is not missed.
+                answer.as_mut().enable();
+                if self.waiting().is_empty() {
+                    return;
+                }
+                answer.await;
+            }
+        };
+        let _ = tokio::time::timeout(limit, all_answered).await;
+        std::mem::take(&mut *self.waiting()).into_iter().collect()
+    }
+}
+
 /// What the window events need between two events.
 #[derive(Default)]
 pub struct WindowTracker {
@@ -90,6 +139,12 @@ pub struct WindowTracker {
     quitting: AtomicBool,
     /// Per window, a count of its moves and resizes; a report goes once it stops changing.
     moves: Mutex<HashMap<String, u64>>,
+    /// The windows' answers to the flush before quitting.
+    flushes: Flushes,
+    /// Set when `main` first asks to close: the windows are saving.
+    flush_started: AtomicBool,
+    /// Set once they have saved, or the wait gave up: `main` may close.
+    flushed: AtomicBool,
 }
 
 impl WindowTracker {
@@ -107,6 +162,51 @@ pub fn quitting<R: Runtime>(app: &AppHandle<R>) {
     app.state::<WindowTracker>()
         .quitting
         .store(true, Ordering::SeqCst);
+}
+
+/// A window's UI has sent its last layout before the app quits.
+pub fn flushed<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    app.state::<WindowTracker>().flushes.answered(label);
+}
+
+/// Asks every window to save its layout now and waits until all have answered or
+/// `FLUSH_LIMIT` has passed, so the last changes before quitting are kept (P34, P38).
+async fn flush_windows<R: Runtime>(app: &AppHandle<R>) {
+    let tracker = app.state::<WindowTracker>();
+    let labels: Vec<String> = app.webview_windows().into_keys().collect();
+    tracker.flushes.expect(labels.iter().cloned());
+    for label in &labels {
+        let target = EventTarget::webview_window(label.clone());
+        if let Err(e) = app.emit_to(target, WINDOW_FLUSH, ()) {
+            tracing::warn!("cannot ask window {label} to save its layout: {e}");
+            tracker.flushes.answered(label);
+        }
+    }
+    let silent = tracker.flushes.wait(FLUSH_LIMIT).await;
+    if !silent.is_empty() {
+        tracing::warn!("windows that did not save their layout before quitting: {silent:?}");
+    }
+}
+
+/// `main` asked to close: unless the windows have saved, the close waits while they
+/// do, then `main` closes again and the app quits as before (P34).
+fn close_main_after_flush<R: Runtime>(app: &AppHandle<R>) {
+    let tracker = app.state::<WindowTracker>();
+    if tracker.flush_started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        flush_windows(&app).await;
+        app.state::<WindowTracker>()
+            .flushed
+            .store(true, Ordering::SeqCst);
+        let closed = app.get_webview_window(MAIN_WINDOW).map(|main| main.close());
+        if !matches!(closed, Some(Ok(()))) {
+            tracing::warn!("cannot close the main window after the windows saved; quitting");
+            app.exit(0);
+        }
+    });
 }
 
 fn work_area(monitor: &Monitor) -> ScreenRect {
@@ -312,8 +412,8 @@ fn report_bounds_later<R: Runtime>(window: &Window<R>) {
 
 /// Every window's events (P34 to P36): focus orders the windows for a drop, bounds go
 /// to the core once a window settles and when `main` closes, a window that closes on
-/// its own stops its sessions and drains and drops its layout, and `main` closing quits
-/// the app with every layout kept.
+/// its own stops its sessions and drains and drops its layout, and `main` closing
+/// first lets every window save its layout, then quits the app with every layout kept.
 pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     let app = window.app_handle();
     let label = window.label();
@@ -321,8 +421,13 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     match event {
         WindowEvent::Focused(true) => core.window_focused(label),
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => report_bounds_later(window),
-        WindowEvent::CloseRequested { .. } if label == MAIN_WINDOW => {
+        WindowEvent::CloseRequested { api, .. } if label == MAIN_WINDOW => {
             quitting(app);
+            if !app.state::<WindowTracker>().flushed.load(Ordering::SeqCst) {
+                api.prevent_close();
+                close_main_after_flush(app);
+                return;
+            }
             for other in app.webview_windows().values() {
                 report_bounds(core, other);
             }
@@ -407,6 +512,48 @@ mod tests {
         assert!(!closes_when_empty(&with_tab));
         // main shows its empty state instead (P21).
         assert!(!closes_when_empty(&empty(MAIN_WINDOW)));
+    }
+
+    fn labels(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| (*n).to_owned()).collect()
+    }
+
+    #[tokio::test]
+    async fn a_flush_wait_returns_once_every_window_answered() {
+        let flushes = std::sync::Arc::new(Flushes::default());
+        flushes.expect(labels(&[MAIN_WINDOW, "window-2"]));
+        let answering = flushes.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            answering.answered("window-2");
+            answering.answered("window-9");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            answering.answered(MAIN_WINDOW);
+        });
+        let started = std::time::Instant::now();
+
+        let missing = flushes.wait(Duration::from_secs(10)).await;
+
+        assert!(missing.is_empty(), "{missing:?}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn a_flush_wait_gives_up_after_its_limit_and_names_the_silent_windows() {
+        let flushes = Flushes::default();
+        flushes.expect(labels(&[MAIN_WINDOW, "window-2", "window-3"]));
+        flushes.answered(MAIN_WINDOW);
+        flushes.answered("window-3");
+        let started = std::time::Instant::now();
+
+        let missing = flushes.wait(Duration::from_millis(50)).await;
+
+        assert_eq!(missing, ["window-2"]);
+        assert!(started.elapsed() >= Duration::from_millis(50));
+        assert!(Flushes::default()
+            .wait(Duration::from_secs(10))
+            .await
+            .is_empty());
     }
 
     #[test]

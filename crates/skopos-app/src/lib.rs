@@ -208,6 +208,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::windows::window_layout_get,
             commands::windows::window_layout_set,
             commands::windows::windows_list,
+            commands::windows::window_flushed,
             commands::windows::window_tab_move,
             commands::windows::window_tab_drop,
         ])
