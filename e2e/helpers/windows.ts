@@ -20,6 +20,9 @@ export interface LayoutSummary {
   panes: { tabs: TabSummary[] }[];
 }
 
+/** How long `invokeAndForget` waits before it starts the command. */
+const FORGET_DELAY_MS = 200;
+
 /** Calls a backend command from the window the driver is on and gives its result. */
 export async function invoke<T>(
   cmd: string,
@@ -35,20 +38,25 @@ export async function invoke<T>(
 
 /**
  * Starts a backend command from the window the driver is on without waiting for it, for
- * a command that closes that window before it can answer.
+ * a command that closes that window before it can answer. The command starts a moment
+ * after the script returns: a window that closed while the driver waited for the script's
+ * answer failed the call ("no such window").
  */
 export async function invokeAndForget(
   cmd: string,
   args: Record<string, unknown> = {},
 ): Promise<void> {
   await browser.execute(
-    (c: string, a: Record<string, unknown>) => {
-      void (window as unknown as TauriGlobal).__TAURI__.core
-        .invoke(c, a)
-        .catch(() => {});
+    (c: string, a: Record<string, unknown>, delay: number) => {
+      setTimeout(() => {
+        void (window as unknown as TauriGlobal).__TAURI__.core
+          .invoke(c, a)
+          .catch(() => {});
+      }, delay);
     },
     cmd,
     args,
+    FORGET_DELAY_MS,
   );
 }
 

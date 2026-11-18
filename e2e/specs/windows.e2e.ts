@@ -7,7 +7,13 @@ import {
   tabTestId,
 } from "../helpers/tabs";
 import { clickWhenShown, gone, openCluster, shown } from "../helpers/ui";
-import { expectWindowCount, invoke, switchToLabel, windowLabels } from "../helpers/windows";
+import {
+  expectWindowCount,
+  invoke,
+  invokeAndForget,
+  switchToLabel,
+  windowLabels,
+} from "../helpers/windows";
 
 const KIND = "kind-skopos-e2e";
 
@@ -132,5 +138,37 @@ describe("windows", () => {
     await switchToLabel("main");
     expect(await windowList()).toEqual(["main: /r/core/nodes"]);
     await expectShape("*Nodes");
+  });
+
+  // The driver's pointer cannot leave the page, so a tab let go outside the window
+  // (P31) is sent as the page sends it: the drop command with the release's screen
+  // point. Under Xvfb the main window sits at the screen's top left, 1360 × 860.
+  it("drops a tab outside every window into a new window, and onto the main window back", async () => {
+    await ctrlClick(await shown("nav-item-core-pods"));
+    await expectShape("Nodes,*Pods");
+    const pods = (await tabTestId(0, "Pods")).replace(/^tab-/, "");
+    // The page saves its layout 300 ms after a change; the drop needs the tab saved.
+    await browser.waitUntil(
+      async () => (await windowList()).join() === "main: /r/core/nodes, /r/core/pods",
+      { timeout: 15000, timeoutMsg: "the new tab was never saved" },
+    );
+
+    expect(
+      await invoke("window_tab_drop", { tabId: pods, screenX: 1500, screenY: 950 }),
+    ).toEqual({ target: "window-2", created: true, sourceEmpty: false });
+
+    await expectWindowCount(2);
+    await expectShape("*Nodes");
+    expect(await windowList()).toEqual(["main: /r/core/nodes", "window-2: /r/core/pods"]);
+
+    await switchToLabel("window-2");
+    await shown("cluster-sidebar", 30000);
+    // Its only tab leaves, so the app closes the window before the command can answer.
+    await invokeAndForget("window_tab_drop", { tabId: pods, screenX: 100, screenY: 100 });
+
+    await expectWindowCount(1);
+    await switchToLabel("main");
+    expect(await windowList()).toEqual(["main: /r/core/nodes, /r/core/pods"]);
+    await expectShape("Nodes,*Pods");
   });
 });
