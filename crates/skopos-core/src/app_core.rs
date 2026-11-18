@@ -383,6 +383,10 @@ impl AppCore {
         self.inner.ui_state.set(key, value)
     }
 
+    pub(crate) fn ui_state_remove(&self, key: &str) -> CoreResult<()> {
+        self.inner.ui_state.remove(key)
+    }
+
     pub fn cluster_settings_get(&self, id: &ClusterId) -> ClusterSettings {
         self.inner
             .clusters

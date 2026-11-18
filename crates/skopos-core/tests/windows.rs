@@ -350,6 +350,35 @@ async fn closing_a_window_drops_its_layout_and_frees_its_label() {
 }
 
 #[tokio::test]
+async fn closing_a_window_clears_its_dock_layout() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    core.window_layout_set(two_panes()).unwrap();
+    core.window_tab_move(MAIN_WINDOW, "b", MoveTarget::NewWindow { x: 0, y: 0 })
+        .unwrap();
+    let dock = serde_json::json!({ "tabs": [{ "kind": "terminal" }] });
+    core.ui_state_set("dock:layout:window-2", dock.clone())
+        .unwrap();
+    core.ui_state_set("dock:layout:main", dock.clone()).unwrap();
+
+    core.window_closed("window-2").unwrap();
+    core.window_closed(MAIN_WINDOW).unwrap();
+
+    assert_eq!(core.ui_state_get("dock:layout:window-2"), None);
+    assert_eq!(core.ui_state_get("dock:layout:main"), Some(dock.clone()));
+    // The next window to take the label starts with an empty dock, after a restart too.
+    let outcome = core
+        .window_tab_move(MAIN_WINDOW, "c", MoveTarget::NewWindow { x: 0, y: 0 })
+        .unwrap();
+    assert_eq!(outcome.target, "window-2");
+    core.shutdown().await;
+    let restarted = fixture.start().await;
+    assert_eq!(restarted.ui_state_get("dock:layout:window-2"), None);
+    assert_eq!(restarted.ui_state_get("dock:layout:main"), Some(dock));
+    restarted.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_layout_save_keeps_the_bounds_and_drops_tabs_another_window_holds() {
     let fixture = Fixture::new();
     let core = fixture.start().await;
