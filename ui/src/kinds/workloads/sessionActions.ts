@@ -1,5 +1,5 @@
 import { toast } from "../../design";
-import { Plug, Terminal } from "../../design/glyphs";
+import { Plug, Terminal } from "../../design/icons";
 import {
   nodeShellImage,
   nodeShellPrompt,

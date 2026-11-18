@@ -12,17 +12,6 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import {
-  ChevronDown,
-  ChevronUp,
-  FilePlus,
-  type LucideIcon,
-  PanelBottom,
-  PanelRightOpen,
-  Plus,
-  SquareTerminal,
-  X,
-} from "lucide-react";
-import {
   type KeyboardEvent,
   type PointerEvent,
   useEffect,
@@ -31,7 +20,21 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { Button, ConfirmDialog, IconButton } from "../../design";
-import { FileCode, Plug, ScrollText, Terminal } from "../../design/glyphs";
+import {
+  ChevronDown,
+  ChevronUp,
+  FileCode,
+  FilePlus,
+  type IconComponent,
+  PanelBottom,
+  PanelRightOpen,
+  Plug,
+  Plus,
+  ScrollText,
+  SquareTerminal,
+  Terminal,
+  X,
+} from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import {
   type DetailsDockTab,
@@ -59,7 +62,7 @@ const KEYBOARD_RESIZE_STEP = 24;
 const DRAG_DISTANCE = 4;
 const NO_RESOURCES: ApiResourceInfo[] = [];
 
-const TAB_ICONS: Record<DockTab["kind"], LucideIcon> = {
+const TAB_ICONS: Record<DockTab["kind"], IconComponent> = {
   edit: FileCode,
   create: FilePlus,
   logs: ScrollText,

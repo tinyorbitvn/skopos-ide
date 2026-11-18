@@ -1,13 +1,16 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import {
-  FilePlus,
-  type LucideIcon,
-  PanelBottom,
-  SquareTerminal,
-} from "lucide-react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { FileCode, Plug, ScrollText, Terminal } from "../../design/glyphs";
+import {
+  FileCode,
+  FilePlus,
+  type IconComponent,
+  PanelBottom,
+  Plug,
+  ScrollText,
+  SquareTerminal,
+  Terminal,
+} from "../../design/icons";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { resetCatalogForTest } from "../../stores/catalog";
 import {
@@ -296,7 +299,7 @@ test("unsaved edits come back with their cluster", async () => {
 });
 
 /** What an icon draws, to compare a tab's icon with the one it should be. */
-function iconMarkup(Icon: LucideIcon): string {
+function iconMarkup(Icon: IconComponent): string {
   const { container, unmount } = render(<Icon size={14} aria-hidden="true" />);
   const markup = container.querySelector("svg")?.innerHTML ?? "";
   unmount();
@@ -342,7 +345,7 @@ test("each tab shows its kind's 14 px icon before its title", async () => {
     const svg = button.querySelector("svg");
     expect(svg?.getAttribute("width")).toBe("14");
     expect(svg?.innerHTML).toBe(iconMarkup(Icon));
-    expect(button.firstElementChild).toBe(svg);
+    expect(button.firstElementChild).toBe(svg?.closest("[data-icon]"));
     expect(button.textContent).toBe(tab.title);
   }
   expect(

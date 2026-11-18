@@ -1,7 +1,7 @@
-import { type LucideIcon, Server } from "lucide-react";
 import { clusterStatus } from "../../app/clusterStatus";
 import { COMMANDS, type CommandContext } from "../../app/commands";
 import { shortKeys } from "../../app/shortcuts";
+import { type IconComponent, Server } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import type { ObjectName } from "../../ipc/generated/ObjectName";
@@ -32,7 +32,7 @@ export interface PaletteEntry {
   testId: string;
   label: string;
   hint: string;
-  icon: LucideIcon;
+  icon: IconComponent;
   /**
    * The location the row opens, when it opens one: a Ctrl/Cmd, middle or double
    * click then opens it as the sidebar's items do (spec P11 to P13).
@@ -114,7 +114,7 @@ export function pageEntries(
   const page = (
     path: string,
     label: string,
-    icon: LucideIcon,
+    icon: IconComponent,
     to: string,
   ): PaletteEntry => ({
     key: path,

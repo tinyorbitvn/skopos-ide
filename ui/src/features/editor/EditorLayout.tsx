@@ -1,6 +1,6 @@
-import { BookOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button, PaneHandle } from "../../design";
+import { BookOpen } from "../../design/icons";
 import { API_DOCS_PANE, usePaneSize } from "../../stores/paneSize";
 import { ApiDocsPanel } from "./ApiDocsPanel";
 import type { ApiDocsTarget } from "./apiDocsKind";

@@ -1,4 +1,3 @@
-import { Columns3 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useParams, useSearchParams } from "react-router";
 import {
@@ -12,6 +11,7 @@ import {
   type TableSort,
   VirtualTable,
 } from "../../design";
+import { Columns3 } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { groupFromSegment } from "../../kinds/nav";
 import { type KubeObject, objectKey } from "../../kinds/objects";

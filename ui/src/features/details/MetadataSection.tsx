@@ -1,6 +1,6 @@
-import { Tags } from "lucide-react";
 import { useState } from "react";
 import { CopyButton } from "../../design";
+import { Tags } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import {
   ExpandRow,

@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { Circle } from "lucide-react";
 import { expect, test, vi } from "vitest";
-import { FileCode } from "../../design/glyphs";
+import { Box, FileCode } from "../../design/icons";
 import { ObjectActionBar } from "./ObjectActionBar";
 import type { ObjectActionItem } from "./objectActions";
 
@@ -11,7 +10,7 @@ const item = (
 ): ObjectActionItem => ({
   id,
   label: id,
-  icon: Circle,
+  icon: Box,
   danger: false,
   disabled: false,
   top: false,

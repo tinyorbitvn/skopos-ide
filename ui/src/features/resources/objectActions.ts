@@ -1,6 +1,10 @@
-import type { LucideIcon } from "lucide-react";
 import { toast } from "../../design";
-import { FileCode, ShieldOff, Trash2 } from "../../design/glyphs";
+import {
+  FileCode,
+  type IconComponent,
+  ShieldOff,
+  Trash2,
+} from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
@@ -11,7 +15,7 @@ import type { ActionContext, KindAction } from "../../kinds/registry";
 export interface ObjectActionItem {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: IconComponent;
   danger: boolean;
   disabled: boolean;
   top: boolean;

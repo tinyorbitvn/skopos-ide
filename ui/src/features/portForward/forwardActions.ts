@@ -1,12 +1,12 @@
-import type { LucideIcon } from "lucide-react";
 import { toast } from "../../design";
 import {
   ExternalLink,
+  type IconComponent,
   Play,
   RotateCw,
   Square,
   Trash2,
-} from "../../design/glyphs";
+} from "../../design/icons";
 import { failureMessage } from "../../ipc/client";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import {
@@ -23,7 +23,7 @@ export type ForwardActionId = "open" | "start" | "stop" | "restart" | "remove";
 export interface ForwardAction {
   id: ForwardActionId;
   label: string;
-  icon: LucideIcon;
+  icon: IconComponent;
   danger: boolean;
   /** Never rejects: a failure shows as a toast with the backend's message (spec §7). */
   run(): Promise<void>;

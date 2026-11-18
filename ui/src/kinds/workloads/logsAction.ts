@@ -1,4 +1,4 @@
-import { ScrollText } from "../../design/glyphs";
+import { ScrollText } from "../../design/icons";
 import { logsTab, useDock } from "../../stores/dock";
 import type { KindAction } from "../registry";
 

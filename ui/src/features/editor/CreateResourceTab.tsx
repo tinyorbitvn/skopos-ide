@@ -1,6 +1,6 @@
-import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, ConfirmDialog, ErrorNotice, Menu } from "../../design";
+import { ChevronDown } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage, IpcFailure } from "../../ipc/client";
 import type { ApplyResult } from "../../ipc/generated/ApplyResult";

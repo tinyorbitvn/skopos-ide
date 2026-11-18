@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp, Search } from "lucide-react";
 import { IconButton, Input } from "../../design";
+import { ChevronDown, ChevronUp, Search } from "../../design/icons";
 import styles from "./LogsTab.module.css";
 
 /** The search field, its count and the match arrows (spec §6.1, §6.8). */

@@ -1,8 +1,8 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect, useMemo } from "react";
 import { NavLink, type NavLinkProps, useLocation } from "react-router";
 import { useNavItem } from "../../app/tabs/navigation";
 import { ErrorNotice, Spinner } from "../../design";
+import { ChevronDown, ChevronRight } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import {
   type CrdDomainRow,

@@ -6,12 +6,12 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { type LucideIcon, Minimize2 } from "lucide-react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TableColumn } from "../../design";
 import { Menu } from "../../design";
 import { copyText } from "../../design/clipboard";
+import { type IconComponent, Minimize2 } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
@@ -775,7 +775,7 @@ const probe = (o: KubeObject) => (
 );
 
 /** What an icon draws, to compare a button's icon with the one it should be. */
-function iconMarkup(Icon: LucideIcon): string {
+function iconMarkup(Icon: IconComponent): string {
   const { container, unmount } = render(<Icon size={16} aria-hidden="true" />);
   const markup = container.querySelector("svg")?.innerHTML ?? "";
   unmount();

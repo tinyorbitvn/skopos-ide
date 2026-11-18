@@ -6,10 +6,10 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { Circle } from "lucide-react";
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "../../design";
+import { Box } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
@@ -866,18 +866,18 @@ test("a registered kind supplies its columns and row actions", async () => {
       },
     ],
     actions: [
-      { id: "poke", label: "Poke", icon: Circle, run },
+      { id: "poke", label: "Poke", icon: Box, run },
       {
         id: "never",
         label: "Never",
-        icon: Circle,
+        icon: Box,
         visible: () => false,
         run,
       },
       {
         id: "fail",
         label: "Explode",
-        icon: Circle,
+        icon: Box,
         run: () => Promise.reject(new Error("the gadget exploded")),
       },
     ],
@@ -912,7 +912,7 @@ test("an action can ask for confirmation", async () => {
       {
         id: "ask",
         label: "Ask",
-        icon: Circle,
+        icon: Box,
         run: async (ctx) => {
           answers.push(
             await ctx.confirm({
@@ -1041,7 +1041,7 @@ test("Edit YAML in a row's menu opens the object in the dock", async () => {
 
 test("a row's menu lists Edit YAML, the kind's actions, then Delete, each with an icon", async () => {
   registerKind("kinds.test", "sprockets", {
-    actions: [{ id: "spin", label: "Spin", icon: Circle, run: () => {} }],
+    actions: [{ id: "spin", label: "Spin", icon: Box, run: () => {} }],
   });
   const sprockets = info({
     group: "kinds.test",
@@ -1094,7 +1094,7 @@ test.each([
         {
           id: "go",
           label: "Go",
-          icon: Circle,
+          icon: Box,
           requires: "patch",
           run: () => {},
         },

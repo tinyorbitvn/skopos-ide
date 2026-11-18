@@ -128,11 +128,11 @@
   cursor: pointer;
 }
 
-.chevron svg {
+.chevron [data-icon] {
   transition: transform var(--dur-fast) var(--ease-out);
 }
 
-.open svg {
+.open [data-icon] {
   transform: rotate(90deg);
 }
 

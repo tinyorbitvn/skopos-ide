@@ -7,7 +7,7 @@ import {
 } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../../design/Button";
-import { RotateCcw } from "../../design/glyphs";
+import { RotateCcw } from "../../design/icons";
 import { Segmented } from "../../design/Segmented";
 import { api } from "../../ipc/api";
 import type { GraphNamespaceCount } from "../../ipc/generated/GraphNamespaceCount";
