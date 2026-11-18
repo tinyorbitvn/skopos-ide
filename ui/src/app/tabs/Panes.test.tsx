@@ -242,6 +242,20 @@ describe("a strip longer than its pane", () => {
     expect(document.activeElement).toBe(focusedBefore);
   });
 
+  test("closing the selected tab scrolls the tab that takes its place into sight (P19)", () => {
+    render(<Panes />);
+    const focusedBefore = document.activeElement;
+    scrolled.mockClear();
+
+    act(() =>
+      useWindowLayout.getState().dispatch({ type: "close", tabId: "t1" }),
+    );
+
+    expect(layout().panes[0].selected).toBe("t2");
+    expect(scrolledTo()).toEqual([tabElement("t2")]);
+    expect(document.activeElement).toBe(focusedBefore);
+  });
+
   test("a new tab opened at the end of the strip is scrolled into sight (P12)", () => {
     render(<Panes />);
     scrolled.mockClear();

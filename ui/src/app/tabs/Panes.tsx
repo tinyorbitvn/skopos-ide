@@ -355,13 +355,15 @@ function Pane(props: {
   const selectedAt = selected === null ? -1 : pane.tabs.indexOf(selected);
   const strip = useRef<HTMLDivElement>(null);
   // The selected tab stays in sight in a strip too long for the pane, wherever it
-  // came from (a click, a new tab at the end, a move, a restore); focus stays put.
+  // came from (a click, a new tab at the end, a move, a restore, a close that slides
+  // the next tab into its place); focus stays put.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `selectedId` scrolls a new tab at the same index.
   useEffect(() => {
     if (selectedAt < 0) return;
     strip.current
       ?.querySelector(':scope > [data-selected="true"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [selectedAt]);
+  }, [selectedAt, selectedId]);
   // Ctrl/Cmd and middle clicks on links inside the screen (P11, P12).
   const links = useMemo(
     () => (selectedId === null ? {} : screenLinkHandlers(selectedId)),
