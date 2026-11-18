@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetFoldersForTest, useFolders } from "../stores/folders";
@@ -180,6 +186,13 @@ test("while the sidebar shows another cluster, a line offers the focused tab's (
 });
 
 test("no line while the sidebar follows the focused tab, or on a tab without a cluster", () => {
+  renderSwitcher("id-prod-eu-1", "id-prod-eu-1");
+  expect(screen.getByTestId("switcher-trigger").textContent).toContain(
+    "prod-eu-1",
+  );
+  expect(screen.queryByTestId("switcher-follow")).toBeNull();
+  cleanup();
+
   renderSwitcher("id-demo", null);
   expect(screen.queryByTestId("switcher-follow")).toBeNull();
 });

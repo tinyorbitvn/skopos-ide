@@ -41,9 +41,9 @@ export interface SidebarCluster {
 
 /**
  * The cluster the sidebar shows (spec P23, P25): one picked in the switcher until focus
- * moves to another tab (or that tab moves to another cluster); else the focused tab's;
- * on a tab without a cluster, the one it showed before. A cluster gone from the
- * catalog is dropped.
+ * moves to another tab (or that tab moves to another pane or another cluster); else
+ * the focused tab's; on a tab without a cluster, the one it showed before. A cluster
+ * gone from the catalog is dropped.
  */
 export function useSidebarCluster(): SidebarCluster {
   const path = useFocusedPath();
