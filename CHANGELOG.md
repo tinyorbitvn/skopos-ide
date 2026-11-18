@@ -11,6 +11,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **Secrets edited in place:** a revealed value is an editable field, as raw text or as base64, so binary values can be edited too; the Edit button is gone.
 - **Animated icons:** the app's icons are now Lucide's, animated when you hover or focus their button or menu item, and still with Reduce Motion; Edit YAML shows a pen, and Delete sits in the object toolbar instead of the ⋯ menu.
 - **Lists keep their order as objects come and go:** a new or re-created object, such as a Pod that replaces a deleted one, shows in its place by namespace and name instead of at the bottom, and its Age counts up every second during its first minute.
+- **Project site:** the landing page is now dark: a ribbon in the app's orbit blues, drawn with WebGL, moves behind the headline and the closing call to action, and the features sit in a grid of cards. With reduced motion the ribbon stands still, and without WebGL a glow takes its place.
 
 ## [0.7.0] - 2026-11-18
 

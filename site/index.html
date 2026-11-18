@@ -1,18 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>SkoposIDE: a desktop IDE for Kubernetes</title>
 <meta name="description" content="A free, source-available desktop IDE for the Kubernetes clusters you already run: live resources, logs, shells, YAML and metrics for every context in your kubeconfig. For Linux, macOS and Windows.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="site.css">
+<script src="ribbon.js" defer></script>
 <script src="site.js" defer></script>
 </head>
 <body id="top">
 {{sprite}}
+<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false"><symbol id="frame-star" viewBox="0 0 13 13"><path d="M6.5 0C7.2 4.4 8.6 5.8 13 6.5C8.6 7.2 7.2 8.6 6.5 13C5.8 8.6 4.4 7.2 0 6.5C4.4 5.8 5.8 4.4 6.5 0Z"/></symbol></svg>
 <a class="skip" href="#main">Skip to content</a>
+<div class="frame" aria-hidden="true"></div>
 
 <header class="nav">
   <div class="wrap nav__bar">
@@ -27,29 +31,37 @@
       <a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a>
     </nav>
     <div class="nav__actions">
-      <a class="button button--ghost button--sm nav__source" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Source</a>
-      <a class="button button--secondary button--sm" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+      <a class="quiet nav__source" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Source</a>
+      <a class="button button--primary button--sm" href="#download"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download<svg class="icon icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
     </div>
   </div>
 </header>
 
 <main id="main">
-  <section class="wrap hero" aria-labelledby="hero-title">
-    <p class="overline">Free to use · Source available</p>
-    <h1 class="hero__title" id="hero-title">A desktop IDE for the Kubernetes clusters you already run.</h1>
-    <p class="hero__lead">Live resources, logs, shells, YAML and metrics for every context in your kubeconfig, in one window. For Linux, macOS and Windows.</p>
-    <div class="hero__actions">
-      <a class="button button--primary button--lg" id="hero-download" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-label>Download</span></a>
-      <a class="button button--secondary button--lg" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>View the source</a>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="glow" aria-hidden="true"></div>
+    <canvas class="ribbon" data-ribbon data-ribbon-angle="0.74" data-ribbon-offset="4" aria-hidden="true"></canvas>
+    <div class="wrap hero__copy">
+      <p class="overline">Free to use · Source available</p>
+      <h1 class="hero__title" id="hero-title">A desktop IDE for <span class="grad grad--move">the clusters you already run.</span></h1>
+      <p class="hero__lead">Live resources, logs, shells, YAML and metrics for every context in your kubeconfig, in one window. For Linux, macOS and Windows.</p>
+      <div class="actions">
+        <a class="button button--primary" id="hero-download" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-label>Download</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
+        <a class="button button--line" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>View the source</a>
+      </div>
+      <p class="hero__meta"><span class="mono">v{{release.version}}<span id="hero-file"></span></span><span>Released {{release.date}}</span><a href="#download">Other platforms →</a></p>
+      <p class="hero__alt" id="hero-alt" hidden></p>
     </div>
-    <p class="hero__meta"><span class="mono">v{{release.version}}<span id="hero-file"></span></span><span>Released {{release.date}}</span><a href="#download">Other platforms →</a></p>
-    <p class="hero__alt" id="hero-alt" hidden></p>
+    <div class="wrap hero__shot">
+      <figure class="shot shot--fade">
+        <img {{image:pods-drawer-dark.png}} alt="SkoposIDE with the Pods of the kind-skopos-e2e cluster and the details drawer of its etcd Pod">
+      </figure>
+    </div>
   </section>
 
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
+
   <div class="wrap">
-    <figure class="shot shot--hero">
-      <img {{image:pods-drawer-light.png}} alt="SkoposIDE with the Pods of the kind-skopos-e2e cluster and the details drawer of its etcd Pod">
-    </figure>
     <ul class="stats" aria-label="At a glance">
       <li><span class="stats__value">3</span><span class="stats__label">Platforms: Linux, macOS and Windows</span></li>
       <li><span class="stats__value">5</span><span class="stats__label">Installers in every release</span></li>
@@ -58,290 +70,310 @@
     </ul>
   </div>
 
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
+
   <section class="wrap section" id="features" aria-labelledby="features-title">
-    <p class="overline">What works today</p>
-    <h2 class="section__title" id="features-title">One window for the clusters you already run.</h2>
-    <p class="section__lead">Everything here is in release {{release.version}}, except where marked Next release. What is not built yet is on the roadmap, further down.</p>
+    <p class="overline overline--accent">What works today</p>
+    <h2 class="section__title" id="features-title"><span class="grad">One window</span> for the clusters you already run.</h2>
+    <p class="section__lead">Everything here is in release {{release.version}}. What is not built yet is on the roadmap, further down.</p>
+    <div class="bento">
+      <article class="card card--half">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-layers"/></svg></span>
+          <h3 class="card__title">Every kubeconfig, one catalog</h3>
+          <p>SkoposIDE reads your kubeconfig files and lists every context in a catalog. Pin the clusters you use to the hotbar and keep several connected at once.</p>
+          <ul class="ticks">
+            <li>Connection state for each cluster</li>
+            <li>Pinned clusters on the hotbar, one click away</li>
+            <li>Several clusters connected at the same time</li>
+          </ul>
+        </div>
+        <figure class="card__media">
+          <img {{image:catalog-dark.png}} alt="The catalog with the kind-skopos-e2e cluster" loading="lazy" decoding="async">
+        </figure>
+      </article>
 
-    <article class="feature">
-      <div class="feature__text">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-layers"/></svg>
-        <h3>Every kubeconfig, one catalog</h3>
-        <p>SkoposIDE reads your kubeconfig files and lists every context in a catalog. Pin the clusters you use to the hotbar and keep several connected at once.</p>
-        <ul>
-          <li>Connection state for each cluster</li>
-          <li>Pinned clusters on the hotbar, one click away</li>
-          <li>Several clusters connected at the same time</li>
-        </ul>
-      </div>
-      <figure class="feature__media shot">
-        <img {{image:catalog-light.png}} alt="The catalog with the kind-skopos-e2e cluster" loading="lazy" decoding="async">
-      </figure>
-    </article>
+      <article class="card card--half">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-file-code"/></svg></span>
+          <h3 class="card__title">YAML beside the API docs</h3>
+          <p>Edit or create any object in a YAML editor. The fields of its kind come from the cluster's own API docs, right next to the text.</p>
+          <ul class="ticks">
+            <li>Search and a field tree for the kind</li>
+            <li>Each field's type, default and description</li>
+            <li>The same panel in edit and create tabs</li>
+          </ul>
+        </div>
+        <figure class="card__media">
+          <img {{image:dock-yaml-dark.png}} alt="An edit tab with the YAML of the screens ConfigMap and the API docs of its kind beside it" loading="lazy" decoding="async">
+        </figure>
+      </article>
 
-    <article class="feature feature--flip">
-      <div class="feature__text">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-file-code"/></svg>
-        <h3>YAML beside the API docs</h3>
-        <p>Edit or create any object in a YAML editor. The fields of its kind come from the cluster's own API docs, right next to the text.</p>
-        <ul>
-          <li>Search and a field tree for the kind</li>
-          <li>Each field's type, default and description</li>
-          <li>The same panel in edit and create tabs</li>
-        </ul>
-      </div>
-      <figure class="feature__media shot">
-        <img {{image:dock-yaml-light.png}} alt="An edit tab with the YAML of the screens ConfigMap and the API docs of its kind beside it" loading="lazy" decoding="async">
-      </figure>
-    </article>
-
-    <article class="feature">
-      <div class="feature__text">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-scroll-text"/></svg>
-        <h3>Logs, shell and port forward</h3>
-        <p>Open a container's logs, a shell or a port forward from the details drawer. Each one opens as a tab in the dock below the list, so the list stays in view.</p>
-        <ul>
-          <li>Logs of each container</li>
-          <li>A shell in a running container</li>
-          <li>Port forwards from the details drawer</li>
-        </ul>
-      </div>
-      <figure class="feature__media shot mock" id="mock-dock" role="img" aria-label="The Pods list with the dock below it: tabs for a container's logs, a shell and a port forward, with the logs tab open">
-        <div class="mock__bar"><strong>Pods</strong><span>payments</span></div>
-        <div class="mock__row mock__row--selected"><span class="mock__name">api-7d9c6b5f8-x2kqp</span><span class="mock__muted">1/1</span><span class="badge badge--ok badge--dot">Running</span></div>
-        <div class="mock-dock">
-          <div class="mock-dock__tabs">
-            <span class="mock-dock__tab mock-dock__tab--active"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-scroll-text"/></svg>Logs · api-7d9c6b5f8-x2kqp</span>
-            <span class="mock-dock__tab"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-terminal"/></svg>Shell · ledger-0</span>
-            <span class="mock-dock__tab"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-arrow-right-left"/></svg>Port forward · 8080 → 80</span>
+      <article class="card card--third">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-scroll-text"/></svg></span>
+          <h3 class="card__title">Logs, shell and port forward</h3>
+          <p>Open a container's logs, a shell or a port forward from the details drawer. Each one opens as a tab in the dock below the list, so the list stays in view.</p>
+          <ul class="ticks">
+            <li>Logs of each container</li>
+            <li>A shell in a running container</li>
+            <li>Port forwards from the details drawer</li>
+          </ul>
+        </div>
+        <figure class="card__media mock" id="mock-dock" role="img" aria-label="The Pods list with the dock below it: tabs for a container's logs, a shell and a port forward, with the logs tab open">
+          <div class="mock__bar"><strong>Pods</strong><span>payments</span></div>
+          <div class="mock__row mock__row--selected"><span class="mock__name">api-7d9c6b5f8-x2kqp</span><span class="mock__muted">1/1</span><span class="badge badge--ok badge--dot">Running</span></div>
+          <div class="mock-dock">
+            <div class="mock-dock__tabs">
+              <span class="mock-dock__tab mock-dock__tab--active"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-scroll-text"/></svg>Logs · api-7d9c6b5f8-x2kqp</span>
+              <span class="mock-dock__tab"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-terminal"/></svg>Shell · ledger-0</span>
+              <span class="mock-dock__tab"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-arrow-right-left"/></svg>Port forward · 8080 → 80</span>
+            </div>
+            <div class="mock-dock__toolbar">
+              <span class="mock__select">Container api<svg class="icon icon--xs" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
+              <span class="mock__toggle"><span class="mock__switch"></span>Follow</span>
+              <span>Timestamps</span>
+              <span class="mock__search"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-search"/></svg>Search logs</span>
+            </div>
+            <div class="mock-dock__logs">
+              <p><span class="mock-dock__time">09:12:04.118</span><span class="mock-dock__level">INFO</span><span>listening on :8080</span></p>
+              <p><span class="mock-dock__time">09:12:04.352</span><span class="mock-dock__level">INFO</span><span>connected to ledger-0.ledger:5432</span></p>
+              <p><span class="mock-dock__time">09:12:05.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.9ms</span></p>
+              <p><span class="mock-dock__time">09:12:07.611</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 41ms</span></p>
+              <p><span class="mock-dock__time">09:12:07.902</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 38ms</span></p>
+              <p><span class="mock-dock__time">09:12:09.447</span><span class="mock-dock__level mock-dock__level--warn">WARN</span><span>ledger write slow, retrying (attempt 2)</span></p>
+              <p><span class="mock-dock__time">09:12:09.501</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 57ms</span></p>
+              <p><span class="mock-dock__time">09:12:10.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.8ms</span></p>
+              <p><span class="mock-dock__time">09:12:12.388</span><span class="mock-dock__level">INFO</span><span>GET /v1/payments/8c41 200 6ms</span></p>
+              <p><span class="mock-dock__time">09:12:13.115</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 44ms</span></p>
+              <p><span class="mock-dock__time">09:12:15.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.9ms</span></p>
+              <p><span class="mock-dock__time">09:12:15.734</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 39ms</span></p>
+            </div>
           </div>
-          <div class="mock-dock__toolbar">
-            <span class="mock__select">Container api<svg class="icon icon--xs" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
-            <span class="mock__toggle"><span class="mock__switch"></span>Follow</span>
-            <span>Timestamps</span>
-            <span class="mock__search"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-search"/></svg>Search logs</span>
-          </div>
-          <div class="mock-dock__logs">
-            <p><span class="mock-dock__time">09:12:04.118</span><span class="mock-dock__level">INFO</span><span>listening on :8080</span></p>
-            <p><span class="mock-dock__time">09:12:04.352</span><span class="mock-dock__level">INFO</span><span>connected to ledger-0.ledger:5432</span></p>
-            <p><span class="mock-dock__time">09:12:05.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.9ms</span></p>
-            <p><span class="mock-dock__time">09:12:07.611</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 41ms</span></p>
-            <p><span class="mock-dock__time">09:12:07.902</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 38ms</span></p>
-            <p><span class="mock-dock__time">09:12:09.447</span><span class="mock-dock__level mock-dock__level--warn">WARN</span><span>ledger write slow, retrying (attempt 2)</span></p>
-            <p><span class="mock-dock__time">09:12:09.501</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 57ms</span></p>
-            <p><span class="mock-dock__time">09:12:10.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.8ms</span></p>
-            <p><span class="mock-dock__time">09:12:12.388</span><span class="mock-dock__level">INFO</span><span>GET /v1/payments/8c41 200 6ms</span></p>
-            <p><span class="mock-dock__time">09:12:13.115</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 44ms</span></p>
-            <p><span class="mock-dock__time">09:12:15.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.9ms</span></p>
-            <p><span class="mock-dock__time">09:12:15.734</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 39ms</span></p>
-          </div>
-        </div>
-      </figure>
-    </article>
+        </figure>
+      </article>
 
-    <article class="feature feature--flip">
-      <div class="feature__text">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-network"/></svg>
-        <h3>Resource map</h3>
-        <p>See how an object connects to the rest of the cluster: what owns it and which Pods a Service selects.</p>
-        <ul>
-          <li>Owner chains from an Argo CD Application down to its Pods</li>
-          <li>RBAC access links</li>
-          <li>Export as PNG or PDF</li>
-        </ul>
-      </div>
-      <figure class="feature__media shot mock mock--page mock--fit" id="mock-map" role="img" aria-label="Resource map: an Argo CD Application owns Deployment api, its ReplicaSet and three Pods; Service api selects the Pods; ServiceAccount api is bound to Role pod-reader through RoleBinding api-read">
-        <div class="mock__bar mock__bar--tool">
-          <svg class="icon" aria-hidden="true"><use href="#i-network"/></svg>
-          <strong>Resource map</strong>
-          <span class="mock__mono">payments</span>
-          <span class="mock__actions"><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-image"/></svg>PNG</span><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-file-text"/></svg>PDF</span></span>
+      <article class="card card--third">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-network"/></svg></span>
+          <h3 class="card__title">Resource map</h3>
+          <p>See how an object connects to the rest of the cluster: what owns it and which Pods a Service selects.</p>
+          <ul class="ticks">
+            <li>Owner chains from an Argo CD Application down to its Pods</li>
+            <li>RBAC access links</li>
+            <li>Export as PNG or PDF</li>
+          </ul>
         </div>
-        <svg class="mock-map" viewBox="0 0 680 356" aria-hidden="true">
-          <g class="map-owns">
-            <path d="M144 70 H180"/>
-            <path d="M308 70 H344"/>
-            <path d="M472 70 C496 70 496 34 520 34"/>
-            <path d="M472 70 C496 70 496 92 520 92"/>
-            <path d="M472 70 C496 70 496 150 520 150"/>
-            <path d="M16 336 H40"/>
-          </g>
-          <g class="map-selects">
-            <path d="M472 170 C500 170 496 40 520 40"/>
-            <path d="M472 170 C500 170 496 98 520 98"/>
-            <path d="M472 170 C500 170 496 156 520 156"/>
-            <path d="M92 336 H116"/>
-          </g>
-          <g class="map-grants">
-            <path d="M144 262 H180"/>
-            <path d="M308 262 H344"/>
-            <path d="M472 262 H520"/>
-            <path d="M178 336 H202"/>
-          </g>
-          <g class="map-nodes">
-            <rect x="16" y="48" width="128" height="44" rx="8"/>
-            <rect class="map-focus" x="180" y="48" width="128" height="44" rx="8"/>
-            <rect x="344" y="48" width="128" height="44" rx="8"/>
-            <rect x="344" y="148" width="128" height="44" rx="8"/>
-            <rect x="520" y="16" width="144" height="40" rx="8"/>
-            <rect x="520" y="74" width="144" height="40" rx="8"/>
-            <rect x="520" y="132" width="144" height="40" rx="8"/>
-            <rect x="16" y="240" width="128" height="44" rx="8"/>
-            <rect x="180" y="240" width="128" height="44" rx="8"/>
-            <rect x="344" y="240" width="128" height="44" rx="8"/>
-          </g>
-          <rect class="map-rule" x="520" y="244" width="144" height="36" rx="18"/>
-          <g class="map-dots">
-            <circle cx="533" cy="36" r="3.5"/>
-            <circle cx="533" cy="94" r="3.5"/>
-            <circle cx="533" cy="152" r="3.5"/>
-          </g>
-          <g class="map-kind">
-            <text x="28" y="65">APPLICATION</text>
-            <text x="192" y="65">DEPLOYMENT</text>
-            <text x="356" y="65">REPLICASET</text>
-            <text x="356" y="165">SERVICE</text>
-            <text x="28" y="257">SERVICEACCOUNT</text>
-            <text x="192" y="257">ROLEBINDING</text>
-            <text x="356" y="257">ROLE</text>
-          </g>
-          <g class="map-name">
-            <text x="28" y="81">payments</text>
-            <text x="192" y="81">api</text>
-            <text x="356" y="81">api-7d9c6b5f8</text>
-            <text x="356" y="181">api</text>
-            <text class="map-pod" x="543" y="40">api-…-x2kqp</text>
-            <text class="map-pod" x="543" y="98">api-…-m8wzt</text>
-            <text class="map-pod" x="543" y="156">api-…-r5n2c</text>
-            <text x="28" y="273">api</text>
-            <text x="192" y="273">api-read</text>
-            <text x="356" y="273">pod-reader</text>
-          </g>
-          <text class="map-rule-text" x="536" y="266">get, list, watch pods</text>
-          <text class="map-note" x="16" y="306">Used by 3 Pods</text>
-          <g class="map-legend">
-            <text x="46" y="339">Owns</text>
-            <text x="122" y="339">Selects</text>
-            <text x="208" y="339">Grants access</text>
-          </g>
-        </svg>
-      </figure>
-    </article>
-
-    <article class="feature">
-      <div class="feature__text">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-activity"/></svg>
-        <h3>Metrics where you look</h3>
-        <p>CPU and memory for Pods, workloads and Nodes, from metrics-server or a Prometheus-compatible API in the cluster.</p>
-        <ul>
-          <li>Grafana Mimir and other multi-tenant APIs: scheme, path prefix and tenant</li>
-          <li>A cluster label for backends that hold several clusters</li>
-          <li>Errors and empty answers say which setting to check</li>
-        </ul>
-      </div>
-      <figure class="feature__media shot mock" id="mock-metrics" role="img" aria-label="The Metrics tab of Deployment api: CPU at 0.21 cores under its 0.25 core request and memory at 182 MiB under its 256 MiB limit over 6 hours, with the source line naming Prometheus, the tenant and the cluster label">
-        <div class="mock-metrics__head"><span class="overline">Deployment</span><span class="mock__title">api</span></div>
-        <div class="mock-metrics__tabs">
-          <span>Overview</span><span>Pods</span><span>YAML</span><span class="mock-metrics__tab--active">Metrics</span><span>Map</span>
-          <span class="mock__segmented"><span>1h</span><span class="mock__segmented-on">6h</span><span>24h</span></span>
-        </div>
-        <div class="mock-metrics__charts">
-          <div class="mock-chart">
-            <span class="mock-chart__title">CPU</span>
-            <span class="mock-chart__value"><strong>0.21</strong> cores · request 0.25</span>
-            <svg viewBox="0 0 280 150" preserveAspectRatio="none" aria-hidden="true">
-              <path class="chart-limit" d="M0 37 H280" vector-effect="non-scaling-stroke"/>
-              <path class="chart-area" d="M0 150 L0 96 L12 92 L24 98 L36 88 L48 84 L60 90 L72 76 L84 70 L96 78 L108 66 L120 72 L132 58 L144 62 L156 54 L168 66 L180 60 L192 70 L204 64 L216 52 L228 58 L240 50 L252 62 L264 56 L280 60 L280 150 Z"/>
-              <path class="chart-line" d="M0 96 L12 92 L24 98 L36 88 L48 84 L60 90 L72 76 L84 70 L96 78 L108 66 L120 72 L132 58 L144 62 L156 54 L168 66 L180 60 L192 70 L204 64 L216 52 L228 58 L240 50 L252 62 L264 56 L280 60" vector-effect="non-scaling-stroke"/>
-            </svg>
+        <figure class="card__media mock mock--page mock--fit" id="mock-map" role="img" aria-label="Resource map: an Argo CD Application owns Deployment api, its ReplicaSet and three Pods; Service api selects the Pods; ServiceAccount api is bound to Role pod-reader through RoleBinding api-read">
+          <div class="mock__bar mock__bar--tool">
+            <svg class="icon" aria-hidden="true"><use href="#i-network"/></svg>
+            <strong>Resource map</strong>
+            <span class="mock__mono">payments</span>
+            <span class="mock__actions"><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-image"/></svg>PNG</span><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-file-text"/></svg>PDF</span></span>
           </div>
-          <div class="mock-chart">
-            <span class="mock-chart__title">Memory</span>
-            <span class="mock-chart__value"><strong>182</strong> MiB · limit 256 MiB</span>
-            <svg viewBox="0 0 280 150" preserveAspectRatio="none" aria-hidden="true">
-              <path class="chart-limit" d="M0 22 H280" vector-effect="non-scaling-stroke"/>
-              <path class="chart-area" d="M0 150 L0 82 L20 80 L40 78 L60 79 L80 74 L100 72 L120 73 L140 68 L160 66 L180 67 L200 62 L220 60 L240 61 L260 57 L280 55 L280 150 Z"/>
-              <path class="chart-line" d="M0 82 L20 80 L40 78 L60 79 L80 74 L100 72 L120 73 L140 68 L160 66 L180 67 L200 62 L220 60 L240 61 L260 57 L280 55" vector-effect="non-scaling-stroke"/>
-            </svg>
+          <svg class="mock-map" viewBox="0 0 680 356" aria-hidden="true">
+            <g class="map-owns">
+              <path d="M144 70 H180"/>
+              <path d="M308 70 H344"/>
+              <path d="M472 70 C496 70 496 34 520 34"/>
+              <path d="M472 70 C496 70 496 92 520 92"/>
+              <path d="M472 70 C496 70 496 150 520 150"/>
+              <path d="M16 336 H40"/>
+            </g>
+            <g class="map-selects">
+              <path d="M472 170 C500 170 496 40 520 40"/>
+              <path d="M472 170 C500 170 496 98 520 98"/>
+              <path d="M472 170 C500 170 496 156 520 156"/>
+              <path d="M92 336 H116"/>
+            </g>
+            <g class="map-grants">
+              <path d="M144 262 H180"/>
+              <path d="M308 262 H344"/>
+              <path d="M472 262 H520"/>
+              <path d="M178 336 H202"/>
+            </g>
+            <g class="map-nodes">
+              <rect x="16" y="48" width="128" height="44" rx="8"/>
+              <rect class="map-focus" x="180" y="48" width="128" height="44" rx="8"/>
+              <rect x="344" y="48" width="128" height="44" rx="8"/>
+              <rect x="344" y="148" width="128" height="44" rx="8"/>
+              <rect x="520" y="16" width="144" height="40" rx="8"/>
+              <rect x="520" y="74" width="144" height="40" rx="8"/>
+              <rect x="520" y="132" width="144" height="40" rx="8"/>
+              <rect x="16" y="240" width="128" height="44" rx="8"/>
+              <rect x="180" y="240" width="128" height="44" rx="8"/>
+              <rect x="344" y="240" width="128" height="44" rx="8"/>
+            </g>
+            <rect class="map-rule" x="520" y="244" width="144" height="36" rx="18"/>
+            <g class="map-dots">
+              <circle cx="533" cy="36" r="3.5"/>
+              <circle cx="533" cy="94" r="3.5"/>
+              <circle cx="533" cy="152" r="3.5"/>
+            </g>
+            <g class="map-kind">
+              <text x="28" y="65">APPLICATION</text>
+              <text x="192" y="65">DEPLOYMENT</text>
+              <text x="356" y="65">REPLICASET</text>
+              <text x="356" y="165">SERVICE</text>
+              <text x="28" y="257">SERVICEACCOUNT</text>
+              <text x="192" y="257">ROLEBINDING</text>
+              <text x="356" y="257">ROLE</text>
+            </g>
+            <g class="map-name">
+              <text x="28" y="81">payments</text>
+              <text x="192" y="81">api</text>
+              <text x="356" y="81">api-7d9c6b5f8</text>
+              <text x="356" y="181">api</text>
+              <text class="map-pod" x="543" y="40">api-…-x2kqp</text>
+              <text class="map-pod" x="543" y="98">api-…-m8wzt</text>
+              <text class="map-pod" x="543" y="156">api-…-r5n2c</text>
+              <text x="28" y="273">api</text>
+              <text x="192" y="273">api-read</text>
+              <text x="356" y="273">pod-reader</text>
+            </g>
+            <text class="map-rule-text" x="536" y="266">get, list, watch pods</text>
+            <text class="map-note" x="16" y="306">Used by 3 Pods</text>
+            <g class="map-legend">
+              <text x="46" y="339">Owns</text>
+              <text x="122" y="339">Selects</text>
+              <text x="208" y="339">Grants access</text>
+            </g>
+          </svg>
+        </figure>
+      </article>
+
+      <article class="card card--third">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-activity"/></svg></span>
+          <h3 class="card__title">Metrics where you look</h3>
+          <p>CPU and memory for Pods, workloads and Nodes, from metrics-server or a Prometheus-compatible API in the cluster.</p>
+          <ul class="ticks">
+            <li>Grafana Mimir and other multi-tenant APIs: scheme, path prefix and tenant</li>
+            <li>A cluster label for backends that hold several clusters</li>
+            <li>Errors and empty answers say which setting to check</li>
+          </ul>
+        </div>
+        <figure class="card__media mock" id="mock-metrics" role="img" aria-label="The Metrics tab of Deployment api: CPU at 0.21 cores under its 0.25 core request and memory at 182 MiB under its 256 MiB limit over 6 hours, with the source line naming Prometheus, the tenant and the cluster label">
+          <div class="mock-metrics__head"><span class="overline">Deployment</span><span class="mock__title">api</span></div>
+          <div class="mock-metrics__tabs">
+            <span>Overview</span><span>Pods</span><span>YAML</span><span class="mock-metrics__tab--active">Metrics</span><span>Map</span>
+            <span class="mock__segmented"><span>1h</span><span class="mock__segmented-on">6h</span><span>24h</span></span>
           </div>
-        </div>
-        <p class="mock-metrics__source">source: prometheus in the cluster · monitoring/prometheus:9090 · tenant team-payments · cluster=prod-eu</p>
-      </figure>
-    </article>
+          <div class="mock-metrics__charts">
+            <div class="mock-chart">
+              <span class="mock-chart__title">CPU</span>
+              <span class="mock-chart__value"><strong>0.21</strong> cores · request 0.25</span>
+              <svg viewBox="0 0 280 150" preserveAspectRatio="none" aria-hidden="true">
+                <path class="chart-limit" d="M0 37 H280" vector-effect="non-scaling-stroke"/>
+                <path class="chart-area" d="M0 150 L0 96 L12 92 L24 98 L36 88 L48 84 L60 90 L72 76 L84 70 L96 78 L108 66 L120 72 L132 58 L144 62 L156 54 L168 66 L180 60 L192 70 L204 64 L216 52 L228 58 L240 50 L252 62 L264 56 L280 60 L280 150 Z"/>
+                <path class="chart-line" d="M0 96 L12 92 L24 98 L36 88 L48 84 L60 90 L72 76 L84 70 L96 78 L108 66 L120 72 L132 58 L144 62 L156 54 L168 66 L180 60 L192 70 L204 64 L216 52 L228 58 L240 50 L252 62 L264 56 L280 60" vector-effect="non-scaling-stroke"/>
+              </svg>
+            </div>
+            <div class="mock-chart">
+              <span class="mock-chart__title">Memory</span>
+              <span class="mock-chart__value"><strong>182</strong> MiB · limit 256 MiB</span>
+              <svg viewBox="0 0 280 150" preserveAspectRatio="none" aria-hidden="true">
+                <path class="chart-limit" d="M0 22 H280" vector-effect="non-scaling-stroke"/>
+                <path class="chart-area" d="M0 150 L0 82 L20 80 L40 78 L60 79 L80 74 L100 72 L120 73 L140 68 L160 66 L180 67 L200 62 L220 60 L240 61 L260 57 L280 55 L280 150 Z"/>
+                <path class="chart-line" d="M0 82 L20 80 L40 78 L60 79 L80 74 L100 72 L120 73 L140 68 L160 66 L180 67 L200 62 L220 60 L240 61 L260 57 L280 55" vector-effect="non-scaling-stroke"/>
+              </svg>
+            </div>
+          </div>
+          <p class="mock-metrics__source">source: prometheus in the cluster · monitoring/prometheus:9090 · tenant team-payments · cluster=prod-eu</p>
+        </figure>
+      </article>
 
-    <article class="feature feature--flip">
-      <div class="feature__text">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-package"/></svg>
-        <h3>Helm and Argo CD</h3>
-        <p>Helm releases and Argo CD Applications have their own lists in the sidebar.</p>
-        <ul>
-          <li>Each release's chart, revision and status</li>
-          <li>Each Application's sync state and health</li>
-          <li>Sync an Application from the app</li>
-        </ul>
-      </div>
-      <figure class="feature__media shot mock mock--page mock--padded mock--fit" id="mock-apps" role="img" aria-label="Three Helm releases with their charts and revisions, all deployed, and three Argo CD Applications with their sync state and health, beside a Sync button">
-        <div class="mock-table">
-          <div class="mock-table__head"><svg class="icon" aria-hidden="true"><use href="#i-package"/></svg><strong>Helm releases</strong><span class="mock__count">3</span></div>
-          <div class="mock-table__row"><span class="mock__name">ingress-nginx</span><span class="mock-table__ns">ingress</span><span class="mock-table__chart">ingress-nginx-4.11.3</span><span class="mock-table__rev">7</span><span class="badge badge--ok badge--dot">Deployed</span></div>
-          <div class="mock-table__row"><span class="mock__name">cert-manager</span><span class="mock-table__ns">cert-manager</span><span class="mock-table__chart">cert-manager-v1.16.1</span><span class="mock-table__rev">4</span><span class="badge badge--ok badge--dot">Deployed</span></div>
-          <div class="mock-table__row"><span class="mock__name">prometheus</span><span class="mock-table__ns">monitoring</span><span class="mock-table__chart">kube-prometheus-stack-65.1.0</span><span class="mock-table__rev">12</span><span class="badge badge--ok badge--dot">Deployed</span></div>
+      <article class="card card--wide">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-package"/></svg></span>
+          <h3 class="card__title">Helm and Argo CD</h3>
+          <p>Helm releases and Argo CD Applications have their own lists in the sidebar.</p>
+          <ul class="ticks">
+            <li>Each release's chart, revision and status</li>
+            <li>Each Application's sync state and health</li>
+            <li>Sync an Application from the app</li>
+          </ul>
         </div>
-        <div class="mock-table">
-          <div class="mock-table__head"><svg class="icon" aria-hidden="true"><use href="#i-git-branch"/></svg><strong>Argo CD Applications</strong><span class="mock__count">3</span><span class="mock__actions"><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Sync</span></span></div>
-          <div class="mock-table__row"><span class="mock__name">payments</span><span class="mock-table__path">apps/payments</span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Synced</span></span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Healthy</span></span></div>
-          <div class="mock-table__row"><span class="mock__name">shop</span><span class="mock-table__path">apps/shop</span><span class="mock-table__badge"><span class="badge badge--warn badge--dot">OutOfSync</span></span><span class="mock-table__badge"><span class="badge badge--danger badge--dot">Degraded</span></span></div>
-          <div class="mock-table__row"><span class="mock__name">platform</span><span class="mock-table__path">platform/base</span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Synced</span></span><span class="mock-table__badge"><span class="badge badge--dot">Progressing</span></span></div>
-        </div>
-      </figure>
-    </article>
+        <figure class="card__media mock mock--page mock--padded mock--fit" id="mock-apps" role="img" aria-label="Three Helm releases with their charts and revisions, all deployed, and three Argo CD Applications with their sync state and health, beside a Sync button">
+          <div class="mock-table">
+            <div class="mock-table__head"><svg class="icon" aria-hidden="true"><use href="#i-package"/></svg><strong>Helm releases</strong><span class="mock__count">3</span></div>
+            <div class="mock-table__row"><span class="mock__name">ingress-nginx</span><span class="mock-table__ns">ingress</span><span class="mock-table__chart">ingress-nginx-4.11.3</span><span class="mock-table__rev">7</span><span class="badge badge--ok badge--dot">Deployed</span></div>
+            <div class="mock-table__row"><span class="mock__name">cert-manager</span><span class="mock-table__ns">cert-manager</span><span class="mock-table__chart">cert-manager-v1.16.1</span><span class="mock-table__rev">4</span><span class="badge badge--ok badge--dot">Deployed</span></div>
+            <div class="mock-table__row"><span class="mock__name">prometheus</span><span class="mock-table__ns">monitoring</span><span class="mock-table__chart">kube-prometheus-stack-65.1.0</span><span class="mock-table__rev">12</span><span class="badge badge--ok badge--dot">Deployed</span></div>
+          </div>
+          <div class="mock-table">
+            <div class="mock-table__head"><svg class="icon" aria-hidden="true"><use href="#i-git-branch"/></svg><strong>Argo CD Applications</strong><span class="mock__count">3</span><span class="mock__actions"><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Sync</span></span></div>
+            <div class="mock-table__row"><span class="mock__name">payments</span><span class="mock-table__path">apps/payments</span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Synced</span></span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Healthy</span></span></div>
+            <div class="mock-table__row"><span class="mock__name">shop</span><span class="mock-table__path">apps/shop</span><span class="mock-table__badge"><span class="badge badge--warn badge--dot">OutOfSync</span></span><span class="mock-table__badge"><span class="badge badge--danger badge--dot">Degraded</span></span></div>
+            <div class="mock-table__row"><span class="mock__name">platform</span><span class="mock-table__path">platform/base</span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Synced</span></span><span class="mock-table__badge"><span class="badge badge--dot">Progressing</span></span></div>
+          </div>
+        </figure>
+      </article>
 
-    <ul class="cards">
-      <li class="card">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-table"/></svg>
-        <h3 class="card__title">Live resource tables</h3>
-        <p>Each kind has its own columns, status and actions, such as scale, restart and node drain. Lists follow the cluster as it changes.</p>
-      </li>
-      <li class="card">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-cpu"/></svg>
-        <h3 class="card__title">Tauri 2 and a Rust core</h3>
-        <p>A Rust core and a React UI in a native shell. The Windows installer is {{asset:x64-setup.exe:size}}.</p>
-      </li>
-      <li class="card">
-        <svg class="icon icon--lg" aria-hidden="true"><use href="#i-command"/></svg>
-        <h3 class="card__title">Keyboard first</h3>
-        <p>A command palette and shortcuts for every view, from switching clusters to opening a shell.</p>
-      </li>
-    </ul>
+      <article class="card card--third card--small">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-table"/></svg></span>
+          <h3 class="card__title">Live resource tables</h3>
+          <p>Each kind has its own columns, status and actions, such as scale, restart and node drain. Lists follow the cluster as it changes.</p>
+        </div>
+      </article>
+
+      <article class="card card--third card--small">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-cpu"/></svg></span>
+          <h3 class="card__title">Tauri 2 and a Rust core</h3>
+          <p>A Rust core and a React UI in a native shell. The Windows installer is {{asset:x64-setup.exe:size}}.</p>
+        </div>
+      </article>
+
+      <article class="card card--third card--small">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-command"/></svg></span>
+          <h3 class="card__title">Keyboard first</h3>
+          <p>A command palette and shortcuts for every view, from switching clusters to opening a shell.</p>
+        </div>
+      </article>
+    </div>
   </section>
 
-  <section class="band" aria-labelledby="band-title">
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
+
+  <section class="themes" aria-labelledby="themes-title">
+    <div class="themes__glow" aria-hidden="true"></div>
     <div class="wrap">
-      <div class="band__head">
-        <h2 class="section__title" id="band-title">Light or dark, like the rest of your desktop.</h2>
-        <p>SkoposIDE follows your system theme, or keeps the one you pick in Preferences. The same Pods list, in the dark theme.</p>
+      <div class="themes__head">
+        <div>
+          <p class="overline overline--accent">Themes</p>
+          <h2 class="section__title" id="themes-title">Light or dark, like the rest of your desktop.</h2>
+        </div>
+        <p class="themes__text">SkoposIDE follows your system theme, or keeps the one you pick in Preferences. The same Pods list, in the light theme.</p>
       </div>
-      <figure class="shot band__shot">
-        <img {{image:pods-drawer-dark.png}} alt="The same Pods list and details drawer in the dark theme" loading="lazy" decoding="async">
+      <figure class="shot themes__shot" data-theme="light">
+        <img {{image:pods-drawer-light.png}} alt="The same Pods list and details drawer in the light theme" loading="lazy" decoding="async">
       </figure>
     </div>
   </section>
 
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
+
   <section class="wrap section" id="download" aria-labelledby="download-title">
-    <p class="overline">Download</p>
-    <h2 class="section__title" id="download-title">SkoposIDE {{release.version}}</h2>
+    <p class="overline overline--accent">Download</p>
+    <h2 class="section__title" id="download-title">SkoposIDE <span class="grad">{{release.version}}</span></h2>
     <p class="section__lead">Released {{release.date}}. Every file comes from <a href="{{release.url}}">GitHub Releases</a>. Builds are not signed yet, so each platform has one first-run step.</p>
     <div class="downloads">
-      <article class="platform">
-        <h3 class="platform__name">macOS</h3>
+      <article class="platform" data-os="mac">
+        <div class="platform__head">
+          <h3 class="platform__name">macOS</h3>
+          <span class="tag platform__tag" hidden>Your system</span>
+        </div>
         <ul class="files">
           <li class="file">
             <span class="file__text"><span class="file__label">Apple silicon</span><span class="file__meta">{{asset:aarch64.dmg:name}} · {{asset:aarch64.dmg:size}}</span></span>
-            <a class="button button--secondary button--sm" href="{{asset:aarch64.dmg:url}}" data-asset="aarch64.dmg" data-name="{{asset:aarch64.dmg:name}}" data-size="{{asset:aarch64.dmg:size}}" aria-label="Download {{asset:aarch64.dmg:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            <a class="button button--line button--sm" href="{{asset:aarch64.dmg:url}}" data-asset="aarch64.dmg" data-name="{{asset:aarch64.dmg:name}}" data-size="{{asset:aarch64.dmg:size}}" aria-label="Download {{asset:aarch64.dmg:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
           <li class="file">
             <span class="file__text"><span class="file__label">Intel</span><span class="file__meta">{{asset:x64.dmg:name}} · {{asset:x64.dmg:size}}</span></span>
-            <a class="button button--secondary button--sm" href="{{asset:x64.dmg:url}}" data-asset="x64.dmg" data-name="{{asset:x64.dmg:name}}" data-size="{{asset:x64.dmg:size}}" aria-label="Download {{asset:x64.dmg:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            <a class="button button--line button--sm" href="{{asset:x64.dmg:url}}" data-asset="x64.dmg" data-name="{{asset:x64.dmg:name}}" data-size="{{asset:x64.dmg:size}}" aria-label="Download {{asset:x64.dmg:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
         </ul>
         <div class="first-run">
@@ -349,28 +381,34 @@
           <code>xattr -cr /Applications/SkoposIDE.app</code>
         </div>
       </article>
-      <article class="platform">
-        <h3 class="platform__name">Windows</h3>
+      <article class="platform" data-os="windows">
+        <div class="platform__head">
+          <h3 class="platform__name">Windows</h3>
+          <span class="tag platform__tag" hidden>Your system</span>
+        </div>
         <ul class="files">
           <li class="file">
             <span class="file__text"><span class="file__label">64-bit installer</span><span class="file__meta">{{asset:x64-setup.exe:name}} · {{asset:x64-setup.exe:size}}</span></span>
-            <a class="button button--secondary button--sm" href="{{asset:x64-setup.exe:url}}" data-asset="x64-setup.exe" data-name="{{asset:x64-setup.exe:name}}" data-size="{{asset:x64-setup.exe:size}}" aria-label="Download {{asset:x64-setup.exe:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            <a class="button button--line button--sm" href="{{asset:x64-setup.exe:url}}" data-asset="x64-setup.exe" data-name="{{asset:x64-setup.exe:name}}" data-size="{{asset:x64-setup.exe:size}}" aria-label="Download {{asset:x64-setup.exe:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
         </ul>
         <div class="first-run">
           <p><strong>First run.</strong> In SmartScreen, choose More info, then Run anyway.</p>
         </div>
       </article>
-      <article class="platform">
-        <h3 class="platform__name">Linux</h3>
+      <article class="platform" data-os="linux">
+        <div class="platform__head">
+          <h3 class="platform__name">Linux</h3>
+          <span class="tag platform__tag" hidden>Your system</span>
+        </div>
         <ul class="files">
           <li class="file">
             <span class="file__text"><span class="file__label">AppImage</span><span class="file__meta">{{asset:amd64.AppImage:name}} · {{asset:amd64.AppImage:size}}</span></span>
-            <a class="button button--secondary button--sm" href="{{asset:amd64.AppImage:url}}" data-asset="amd64.AppImage" data-name="{{asset:amd64.AppImage:name}}" data-size="{{asset:amd64.AppImage:size}}" aria-label="Download {{asset:amd64.AppImage:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            <a class="button button--line button--sm" href="{{asset:amd64.AppImage:url}}" data-asset="amd64.AppImage" data-name="{{asset:amd64.AppImage:name}}" data-size="{{asset:amd64.AppImage:size}}" aria-label="Download {{asset:amd64.AppImage:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
           <li class="file">
             <span class="file__text"><span class="file__label">Debian and Ubuntu package</span><span class="file__meta">{{asset:amd64.deb:name}} · {{asset:amd64.deb:size}}</span></span>
-            <a class="button button--secondary button--sm" href="{{asset:amd64.deb:url}}" data-asset="amd64.deb" data-name="{{asset:amd64.deb:name}}" data-size="{{asset:amd64.deb:size}}" aria-label="Download {{asset:amd64.deb:name}}"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+            <a class="button button--line button--sm" href="{{asset:amd64.deb:url}}" data-asset="amd64.deb" data-name="{{asset:amd64.deb:name}}" data-size="{{asset:amd64.deb:size}}" aria-label="Download {{asset:amd64.deb:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
         </ul>
         <div class="first-run">
@@ -385,13 +423,15 @@
     </p>
   </section>
 
-  <section class="wrap section section--last" id="roadmap" aria-labelledby="roadmap-title">
-    <p class="overline">Roadmap</p>
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
+
+  <section class="wrap section" id="roadmap" aria-labelledby="roadmap-title">
+    <p class="overline overline--accent">Roadmap</p>
     <h2 class="section__title" id="roadmap-title">What comes next</h2>
     <p class="section__lead">The plan lives in <a href="https://github.com/vanlongme/skopos-ide/blob/main/docs/roadmap.md">docs/roadmap.md</a> and changes as work lands.</p>
     <div class="milestones">
       <article class="milestone">
-        <p class="overline">Milestone B</p>
+        <p class="overline overline--accent">Milestone B</p>
         <h3 class="milestone__title">Ecosystem integrations</h3>
         <dl class="milestone__items">
           <div><dt>GitOps</dt><dd>Flux objects, sync status and reconcile</dd></div>
@@ -404,7 +444,7 @@
         </dl>
       </article>
       <article class="milestone">
-        <p class="overline">Milestone C</p>
+        <p class="overline overline--accent">Milestone C</p>
         <h3 class="milestone__title">AI and extensions</h3>
         <dl class="milestone__items">
           <div><dt>AI chat</dt><dd>A cluster-aware assistant on your own model API key, asking before any change</dd></div>
@@ -413,6 +453,23 @@
       </article>
     </div>
   </section>
+
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
+
+  <section class="cta" aria-labelledby="cta-title">
+    <div class="glow" aria-hidden="true"></div>
+    <canvas class="ribbon" data-ribbon data-ribbon-angle="0.32" data-ribbon-offset="11" aria-hidden="true"></canvas>
+    <div class="wrap cta__copy">
+      <h2 class="section__title" id="cta-title">Download <span class="grad">SkoposIDE {{release.version}}</span></h2>
+      <p class="cta__lead">Free to use, with the source on GitHub, for Linux, macOS and Windows.</p>
+      <div class="actions">
+        <a class="button button--primary" id="cta-download" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span data-label>Download</span><svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
+        <a class="button button--line" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>View the source</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
 </main>
 
 <footer class="footer">
@@ -450,6 +507,7 @@
   <div class="wrap">
     <p class="footer__bottom"><span>Copyright Nguyen Van Long · PolyForm Shield 1.0.0</span><span class="mono">latest: {{release.tag}} · {{release.isoDate}}</span></p>
   </div>
+  <div class="wordmark" aria-hidden="true">SkoposIDE</div>
 </footer>
 </body>
 </html>
