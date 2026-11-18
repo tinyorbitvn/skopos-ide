@@ -1,7 +1,7 @@
 {
   "name": "skopos",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "LicenseRef-PolyForm-Shield-1.0.0",
   "packageManager": "pnpm@10.30.3",
   "devDependencies": {
