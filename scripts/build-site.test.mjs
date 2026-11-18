@@ -470,6 +470,36 @@ describe("cli", () => {
     assert.throws(() => cli(["--out", "tmp/site", "--publish"], { root: ROOT }), /unknown argument/);
   });
 });
+// TinyOrbit colors as sRGB channels from 0 to 1, following var() references. A dark token falls
+// back to the palette in the first block.
+const TOKENS_CSS = fs.readFileSync(path.join(ROOT, "ui", "src", "design", "tinyorbit.css"), "utf8");
+function tokenRgb(name, theme = "light") {
+  const blocks = [...TOKENS_CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const light = blocks.filter((m) => /:root\b|\[data-theme="light"\]/.test(m[1]));
+  const dark = blocks.filter((m) => /\[data-theme="dark"\]/.test(m[1]));
+  for (const [, , body] of theme === "dark" ? [...dark, ...light] : light) {
+    const found = new RegExp(`(?:^|[\\s;])${name}:\\s*([^;]+);`).exec(body);
+    if (!found) continue;
+    const value = found[1].trim();
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    if (ref) return tokenRgb(ref[1], theme);
+    assert.match(value, /^#[0-9a-f]{6}$/i, name);
+    return [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16) / 255);
+  }
+  throw new Error(`no token ${name}`);
+}
+
+function over(top, alpha, bottom) {
+  return top.map((channel, i) => alpha * channel + (1 - alpha) * bottom[i]);
+}
+
+function contrast(a, b) {
+  const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = ([r, g, bl]) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(bl);
+  const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (high + 0.05) / (low + 0.05);
+}
+
 describe("page", () => {
   const release = parseRelease(releaseJson());
   const template = fs.readFileSync(path.join(ROOT, "site", "index.html"), "utf8");
@@ -667,6 +697,36 @@ describe("page", () => {
   test("keeps the gradient text readable in forced colors", () => {
     const block = /@media \(forced-colors: active\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
     assert.match(block, /\.grad \{\s*background: none;\s*color: CanvasText;\s*\}/);
+  });
+
+  test("drops the ribbons in forced colors, so the text sits on the system background", () => {
+    // Forced colors repaint text in CanvasText but leave a canvas as drawn: dark under a light theme.
+    const block = /@media \(forced-colors: active\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    assert.match(block, /\.ribbon \{\s*display: none;\s*\}/);
+  });
+
+  test("backs the copy over each ribbon with a scrim that grows with it", () => {
+    // A fixed-size scrim left the copy's last lines on the bare ribbon once the copy grew taller.
+    assert.ok(!/class="scrim/.test(html), "no fixed-size scrim in the page");
+    for (const copy of ["hero__copy", "cta__copy"]) {
+      assert.match(css, new RegExp(`\\n\\.${copy} \\{[^}]*width: fit-content;`), copy);
+    }
+    const plate = /\n\.hero__copy::before,\n\.cta__copy::before \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    assert.match(plate, /position: absolute;/);
+    assert.match(plate, /z-index: -1;/);
+    const [, top, side] = /inset: -(\d+)px -(\d+)px;/.exec(plate) ?? [];
+    const [, blur] = /filter: blur\((\d+)px\);/.exec(plate) ?? [];
+    assert.ok(blur, "the plate has soft edges");
+    // Two blur radii in from both edges the plate keeps 97.7% of its color on each axis.
+    assert.ok(Number(top) >= 2 * blur && Number(side) >= 2 * blur, "the plate reaches past the copy");
+    const [, share] = /background: color-mix\(in srgb, var\(--gray-950\) (\d+)%, transparent\);/.exec(plate) ?? [];
+    assert.ok(share, "the plate is gray-950");
+    // The ribbon's brightest pixels reach white.
+    const behind = over(tokenRgb("--gray-950"), (Number(share) / 100) * 0.977 ** 2, [1, 1, 1]);
+    for (const name of ["--text-secondary", "--text-link"]) {
+      const ratio = contrast(tokenRgb(name, "dark"), behind);
+      assert.ok(ratio >= 4.5, `${name} at ${ratio.toFixed(2)}:1`);
+    }
   });
 
   test("hides the orbit frame and its stars on narrow screens", () => {
