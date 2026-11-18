@@ -8,7 +8,8 @@ import {
   useRef,
   type WheelEvent,
 } from "react";
-import { Button, IconButton, Tooltip } from "../../design";
+import { Button, ContextMenu, IconButton, Tooltip } from "../../design";
+import type { ContextMenuItem } from "../../design/ContextMenu";
 import type { PaneState } from "../../ipc/generated/PaneState";
 import type { TabState } from "../../ipc/generated/TabState";
 import { MAIN_WINDOW } from "../../ipc/window";
@@ -25,6 +26,8 @@ import { openPath, screenLinkHandlers } from "./navigation";
 import styles from "./Panes.module.css";
 import { tabInfo } from "./routes";
 import { TabView } from "./TabView";
+import { focusTabElement, tabElementId } from "./tabKeys";
+import { type TabMenuId, type TabMenuItem, tabMenu } from "./tabMenu";
 
 /** One Left or Right press moves a splitter by 2% of the width. */
 const KEY_STEP = 0.02;
@@ -35,60 +38,149 @@ function dispatch(action: LayoutAction): void {
   useWindowLayout.getState().dispatch(action);
 }
 
-/** A tab in a pane's strip: its icon, screen and cluster chip; pinned tabs show a pin and no Close (P9, P14). */
-function TabItem(props: { tab: TabState; selected: boolean }) {
-  const { tab, selected } = props;
+/** The items that start a group in the tab menu: the moves, then the closes. */
+const MENU_GROUPS: ReadonlySet<TabMenuId> = new Set(["left", "close"]);
+
+function menuItems(items: TabMenuItem[]): ContextMenuItem[] {
+  return items.map((it) => ({
+    id: it.id,
+    label: it.label,
+    // An item that cannot apply says why, beside it and as its tooltip (P15).
+    hint: it.reason ?? it.hint,
+    tooltip: it.reason ?? undefined,
+    disabled: it.reason !== null,
+    separated: MENU_GROUPS.has(it.id),
+    testId: `tab-menu-${it.id}`,
+    onSelect: () => {
+      if (it.action !== null) dispatch(it.action);
+    },
+  }));
+}
+
+/** Shift+F10 and the context-menu key open the menu under the tab, as a right-click does. */
+function openMenuAt(button: HTMLElement): void {
+  const box = button.getBoundingClientRect();
+  button.dispatchEvent(
+    new window.MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: box.left + box.width / 2,
+      clientY: box.bottom,
+    }),
+  );
+}
+
+/**
+ * The strip's keys on a tab: Left and Right move the focus along the strip, wrapping,
+ * Home and End to its ends; Enter or Space then select. Shift+F10 and the
+ * context-menu key open the tab menu (P15).
+ */
+function onTabKey(
+  event: KeyboardEvent<HTMLButtonElement>,
+  tabs: TabState[],
+  index: number,
+): void {
+  if ((event.key === "F10" && event.shiftKey) || event.key === "ContextMenu") {
+    event.preventDefault();
+    openMenuAt(event.currentTarget);
+    return;
+  }
+  // Alt+Left and Alt+Right are Back and Forward.
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const last = tabs.length - 1;
+  const moves: Record<string, number> = {
+    ArrowLeft: index === 0 ? last : index - 1,
+    ArrowRight: index === last ? 0 : index + 1,
+    Home: 0,
+    End: last,
+  };
+  const to = moves[event.key];
+  if (to === undefined) return;
+  event.preventDefault();
+  focusTabElement(tabs[to]?.id);
+}
+
+/**
+ * A tab in a pane's strip: its icon, screen and cluster chip; pinned tabs show a pin
+ * and no Close (P9, P14). A double-click pins or unpins it, a middle-click closes it,
+ * and a right-click opens its menu (P13 to P15).
+ */
+function TabItem(props: {
+  tabs: TabState[];
+  index: number;
+  selected: boolean;
+}) {
+  const { tabs, index, selected } = props;
+  const tab = tabs[index];
   const clusters = useCatalog((s) => s.clusters);
+  const layout = useWindowLayout((s) => s.layout);
   const path = tabPath(tab);
   const info = useMemo(() => tabInfo(path, clusters), [path, clusters]);
+  const items = menuItems(tabMenu(layout, tab.id, crypto.randomUUID()));
   const Icon = info.icon;
   return (
-    <div
-      className={styles.tab}
-      role="presentation"
-      data-selected={selected}
-      data-pinned={tab.pinned}
-    >
-      <button
-        type="button"
-        role="tab"
-        className={styles.tabButton}
-        aria-selected={selected}
-        aria-label={info.title}
-        title={info.title}
-        tabIndex={selected ? 0 : -1}
-        data-testid={`tab-${tab.id}`}
-        onClick={() => dispatch({ type: "select", tabId: tab.id })}
+    <ContextMenu label={`Actions for ${info.title}`} items={items}>
+      <div
+        className={styles.tab}
+        role="presentation"
+        data-selected={selected}
+        data-pinned={tab.pinned}
       >
-        {tab.pinned ? (
-          <Pin size={12} aria-hidden="true" className={styles.pin} />
-        ) : null}
-        <Icon size={14} aria-hidden="true" className={styles.icon} />
-        <span className={styles.label}>{info.screen}</span>
-        {info.clusterId !== null ? (
-          <span className={styles.chip}>
-            <span
-              className={styles.chipDot}
-              style={{ backgroundColor: clusterColor(info.clusterId) }}
-            />
-            <span className={styles.label}>{info.clusterName}</span>
-          </span>
-        ) : null}
-      </button>
-      {tab.pinned ? null : (
         <button
           type="button"
-          className={styles.close}
-          aria-label={`Close ${info.title}`}
-          title="Close tab"
-          tabIndex={-1}
-          data-testid={`tab-close-${tab.id}`}
-          onClick={() => dispatch({ type: "close", tabId: tab.id })}
+          role="tab"
+          id={tabElementId(tab.id)}
+          className={styles.tabButton}
+          aria-selected={selected}
+          aria-label={info.title}
+          title={info.title}
+          tabIndex={selected ? 0 : -1}
+          data-testid={`tab-${tab.id}`}
+          onClick={() => dispatch({ type: "select", tabId: tab.id })}
+          onDoubleClick={() =>
+            dispatch({ type: tab.pinned ? "unpin" : "pin", tabId: tab.id })
+          }
+          onMouseDown={(event) => {
+            // A middle press would start the browser's autoscroll.
+            if (event.button === 1) event.preventDefault();
+          }}
+          onAuxClick={(event) => {
+            if (event.button !== 1) return;
+            event.preventDefault();
+            dispatch({ type: "close", tabId: tab.id });
+          }}
+          onKeyDown={(event) => onTabKey(event, tabs, index)}
         >
-          <X size={12} aria-hidden="true" />
+          {tab.pinned ? (
+            <Pin size={12} aria-hidden="true" className={styles.pin} />
+          ) : null}
+          <Icon size={14} aria-hidden="true" className={styles.icon} />
+          <span className={styles.label}>{info.screen}</span>
+          {info.clusterId !== null ? (
+            <span className={styles.chip}>
+              <span
+                className={styles.chipDot}
+                style={{ backgroundColor: clusterColor(info.clusterId) }}
+              />
+              <span className={styles.label}>{info.clusterName}</span>
+            </span>
+          ) : null}
         </button>
-      )}
-    </div>
+        {tab.pinned ? null : (
+          <button
+            type="button"
+            className={styles.close}
+            aria-label={`Close ${info.title}`}
+            title="Close tab"
+            tabIndex={-1}
+            data-testid={`tab-close-${tab.id}`}
+            onClick={() => dispatch({ type: "close", tabId: tab.id })}
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    </ContextMenu>
   );
 }
 
@@ -168,10 +260,11 @@ function Pane(props: {
           aria-label={`Tabs of pane ${index + 1}`}
           onWheel={scrollStrip}
         >
-          {pane.tabs.map((tab) => (
+          {pane.tabs.map((tab, at) => (
             <TabItem
               key={tab.id}
-              tab={tab}
+              tabs={pane.tabs}
+              index={at}
               selected={tab.id === pane.selected}
             />
           ))}

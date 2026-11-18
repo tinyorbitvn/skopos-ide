@@ -1,5 +1,11 @@
 import { mockWindows } from "@tauri-apps/api/mocks";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
@@ -11,6 +17,7 @@ import {
 import { clusterEntry } from "../../test/ipc";
 import { focusedTab, tabPath } from "./layout";
 import { Panes } from "./Panes";
+import { tabElementId } from "./tabKeys";
 
 // A tab's screen is a stand-in here: the tab router has its own tests.
 vi.mock("./TabView", () => ({
@@ -263,4 +270,155 @@ describe("a strip longer than its pane", () => {
 
     expect(strip.scrollLeft).toBe(120 + 3 * 16);
   });
+});
+
+// Per pane: `p1:*/catalog^,/x`, each tab's shown path, `*` selected, `^` pinned.
+function shape(): string {
+  return layout()
+    .panes.map(
+      (p) =>
+        `${p.id}:${p.tabs
+          .map(
+            (t) =>
+              `${p.selected === t.id ? "*" : ""}${tabPath(t)}${t.pinned ? "^" : ""}`,
+          )
+          .join(",")}`,
+    )
+    .join(" | ");
+}
+
+test("a double-click on a tab pins it, and on a pinned tab unpins it (P13, P14)", () => {
+  render(<Panes />);
+  fireEvent.doubleClick(screen.getByTestId("tab-t2"));
+  expect(shape()).toBe(
+    "p1:/catalog^,*/preferences^ | p2:*/cluster/c1/map,/cluster/c1",
+  );
+  expect(screen.queryByTestId("tab-close-t2")).toBeNull();
+  fireEvent.doubleClick(screen.getByTestId("tab-t1"));
+  expect(shape()).toBe(
+    "p1:/preferences^,*/catalog | p2:*/cluster/c1/map,/cluster/c1",
+  );
+});
+
+test("a middle-click closes a tab, but not a pinned one (P14)", () => {
+  render(<Panes />);
+  const press = fireEvent.mouseDown(screen.getByTestId("tab-t4"), {
+    button: 1,
+  });
+  expect(press).toBe(false);
+  fireEvent(
+    screen.getByTestId("tab-t4"),
+    new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }),
+  );
+  expect(shape()).toBe("p1:*/catalog^,/preferences | p2:*/cluster/c1/map");
+  fireEvent(
+    screen.getByTestId("tab-t1"),
+    new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }),
+  );
+  expect(shape()).toBe("p1:*/catalog^,/preferences | p2:*/cluster/c1/map");
+});
+
+test("the tab menu shows why an item does not apply, and runs the others (P15)", async () => {
+  render(<Panes />);
+  fireEvent.contextMenu(screen.getByTestId("tab-t2"));
+  const menu = await screen.findByRole("menu", {
+    name: "Actions for Preferences",
+  });
+  expect(
+    [...menu.querySelectorAll('[role="menuitem"]')].map((i) => [
+      i.getAttribute("data-testid"),
+      i.textContent,
+      i.hasAttribute("data-disabled"),
+      i.getAttribute("title"),
+    ]),
+  ).toEqual([
+    ["tab-menu-pin", "Pin tabDouble-click", false, null],
+    [
+      "tab-menu-left",
+      "Move to the left paneNo pane on the left",
+      true,
+      "No pane on the left",
+    ],
+    ["tab-menu-right", "Move to the right pane", false, null],
+    ["tab-menu-new-pane", "Move to a new pane on the right", false, null],
+    ["tab-menu-close", "CloseCtrl+W", false, null],
+    // The other tab of its pane is pinned.
+    [
+      "tab-menu-close-others",
+      "Close other tabsNo other tabs to close",
+      true,
+      "No other tabs to close",
+    ],
+  ]);
+  fireEvent.click(screen.getByTestId("tab-menu-right"));
+  expect(shape()).toBe(
+    "p1:*/catalog^ | p2:/cluster/c1/map,/cluster/c1,*/preferences",
+  );
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+});
+
+test("a pinned tab's menu cannot close it, and Close other tabs keeps it (P14)", async () => {
+  render(<Panes />);
+  fireEvent.contextMenu(screen.getByTestId("tab-t1"));
+  const close = await screen.findByTestId("tab-menu-close");
+  expect(close.hasAttribute("data-disabled")).toBe(true);
+  expect(close.getAttribute("title")).toBe("Pinned tabs cannot be closed");
+  fireEvent.click(screen.getByTestId("tab-menu-close-others"));
+  expect(shape()).toBe("p1:*/catalog^ | p2:*/cluster/c1/map,/cluster/c1");
+});
+
+test("Shift+F10 and the context-menu key open the menu of the focused tab (P15)", async () => {
+  render(<Panes />);
+  const button = screen.getByTestId("tab-t3");
+  button.focus();
+  fireEvent.keyDown(button, { key: "F10", shiftKey: true });
+  expect(
+    await screen.findByRole("menu", {
+      name: "Actions for Resource map · prod",
+    }),
+  ).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  fireEvent.keyDown(screen.getByTestId("tab-t4"), { key: "ContextMenu" });
+  expect(
+    await screen.findByRole("menu", { name: "Actions for Overview · prod" }),
+  ).toBeTruthy();
+});
+
+test("Left, Right, Home and End move the focus along the strip, wrapping; Enter selects", () => {
+  resetWindowLayoutForTest({
+    ...twoPanes(),
+    panes: [
+      {
+        ...twoPanes().panes[0],
+        tabs: [...twoPanes().panes[0].tabs, tab("t5", "/cluster/c1/nodes")],
+      },
+      twoPanes().panes[1],
+    ],
+  });
+  render(<Panes />);
+  const focused = () => document.activeElement?.id;
+  screen.getByTestId("tab-t1").focus();
+  fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
+  expect(focused()).toBe(tabElementId("t2"));
+  fireEvent.keyDown(document.activeElement as Element, { key: "End" });
+  expect(focused()).toBe(tabElementId("t5"));
+  fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
+  expect(focused()).toBe(tabElementId("t1"));
+  fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
+  expect(focused()).toBe(tabElementId("t5"));
+  fireEvent.keyDown(document.activeElement as Element, { key: "Home" });
+  expect(focused()).toBe(tabElementId("t1"));
+  // Moving the focus does not select: the screen of the tab stays mounted.
+  expect(layout().panes[0].selected).toBe("t1");
+  fireEvent.keyDown(document.activeElement as Element, { key: "ArrowRight" });
+  fireEvent.click(document.activeElement as Element);
+  expect(layout().panes[0].selected).toBe("t2");
+  // Alt+Left is Back, not a move along the strip.
+  const back = fireEvent.keyDown(document.activeElement as Element, {
+    key: "ArrowLeft",
+    altKey: true,
+  });
+  expect(back).toBe(true);
+  expect(focused()).toBe(tabElementId("t2"));
 });
