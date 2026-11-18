@@ -433,7 +433,7 @@ vscode-swift) belong to language services and languages that the app does not bu
 
 ## Rust crates
 
-The app's binary is built from `skopos-app`, `skopos-core` and the 543 crates below: the
+The app's binary is built from `skopos-app`, `skopos-core` and the 542 crates below: the
 dependencies that `cargo tree -p skopos-app -e normal --target <triple>` lists for the four
 release targets (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin` and
 `x86_64-pc-windows-msvc`), at the versions pinned in `Cargo.lock`. The list includes the
@@ -1111,7 +1111,7 @@ tar
   Copyright (c) The tar-rs Project Contributors
 
 tauri, tauri-codegen, tauri-macros, tauri-plugin-clipboard-manager, tauri-plugin-dialog,
-tauri-plugin-fs, tauri-plugin-opener, tauri-plugin-window-state, tauri-runtime,
+tauri-plugin-fs, tauri-plugin-opener, tauri-runtime,
 tauri-runtime-wry, tauri-utils
   Copyright (c) 2017 - Present Tauri Apps Contributors
 
