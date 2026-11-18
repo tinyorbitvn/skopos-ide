@@ -809,7 +809,7 @@ async fn an_install_streams_helms_output_and_exits_zero() {
     helm.configure(&core);
     let (tx, rx) = mpsc::channel(32);
     let session = core
-        .helm_install_start(&id, &install_request(), tx)
+        .helm_install_start(&id, &install_request(), tx, "main")
         .await
         .unwrap();
     assert!(session.starts_with("session-"), "{session}");
@@ -853,7 +853,7 @@ exit 1"#,
     let (core, _fake, id, root) = connected_fake(FakeKubeConfig::default()).await;
     helm.configure(&core);
     let (tx, rx) = mpsc::channel(32);
-    core.helm_install_start(&id, &install_request(), tx)
+    core.helm_install_start(&id, &install_request(), tx, "main")
         .await
         .unwrap();
     let (data, events) = session_output(rx).await;
@@ -880,7 +880,10 @@ async fn stopping_an_action_ends_it_as_cancelled_and_deletes_the_values_file() {
     let mut request = install_request();
     request.wait = true;
     let (tx, mut rx) = mpsc::channel(32);
-    let session = core.helm_install_start(&id, &request, tx).await.unwrap();
+    let session = core
+        .helm_install_start(&id, &request, tx, "main")
+        .await
+        .unwrap();
     loop {
         let item = tokio::time::timeout(Duration::from_secs(30), rx.recv())
             .await
@@ -922,20 +925,23 @@ async fn bad_requests_are_refused_before_helm_runs() {
     no_version.chart.version = String::new();
     for request in [&bad_values, &bad_name, &no_version] {
         let (tx, _rx) = mpsc::channel(32);
-        let error = core.helm_install_start(&id, request, tx).await.unwrap_err();
+        let error = core
+            .helm_install_start(&id, request, tx, "main")
+            .await
+            .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidInput, "{request:?}");
         let error = core.helm_install_preview(&id, request).await.unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidInput, "{request:?}");
     }
     let (tx, _rx) = mpsc::channel(32);
     let error = core
-        .helm_rollback_start(&id, "skopos-test-helm", "rel", 0, false, tx)
+        .helm_rollback_start(&id, "skopos-test-helm", "rel", 0, false, tx, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);
     let (tx, _rx) = mpsc::channel(32);
     let error = core
-        .helm_uninstall_start(&id, "skopos-test-helm", "-rel", false, false, tx)
+        .helm_uninstall_start(&id, "skopos-test-helm", "-rel", false, false, tx, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);
@@ -988,7 +994,9 @@ async fn an_upgrade_sends_the_whole_values_set() {
         wait: true,
     };
     let (tx, rx) = mpsc::channel(32);
-    core.helm_upgrade_start(&id, &request, tx).await.unwrap();
+    core.helm_upgrade_start(&id, &request, tx, "main")
+        .await
+        .unwrap();
     let (_, events) = session_output(rx).await;
     assert!(
         matches!(events.last(), Some(SessionEvent::Exited { code: Some(0) })),
@@ -1011,7 +1019,7 @@ async fn rollback_and_uninstall_run_as_sessions() {
     let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
     helm.configure(&core);
     let (tx, rx) = mpsc::channel(32);
-    core.helm_rollback_start(&id, "skopos-test-helm", "rel", 1, true, tx)
+    core.helm_rollback_start(&id, "skopos-test-helm", "rel", 1, true, tx, "main")
         .await
         .unwrap();
     let (data, events) = session_output(rx).await;
@@ -1021,7 +1029,7 @@ async fn rollback_and_uninstall_run_as_sessions() {
         "{events:?}"
     );
     let (tx, rx) = mpsc::channel(32);
-    core.helm_uninstall_start(&id, "skopos-test-helm", "rel", false, true, tx)
+    core.helm_uninstall_start(&id, "skopos-test-helm", "rel", false, true, tx, "main")
         .await
         .unwrap();
     let (_, events) = session_output(rx).await;

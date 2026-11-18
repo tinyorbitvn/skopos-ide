@@ -181,7 +181,7 @@ async fn drain_worker(core: &AppCore, id: &ClusterId) -> Vec<DrainEvent> {
         delete_empty_dir: true,
         timeout_seconds: Some(DRAIN_SECONDS),
     };
-    core.node_drain_start(id, WORKER, options, tx)
+    core.node_drain_start(id, WORKER, options, tx, "main")
         .await
         .unwrap();
     let mut events = Vec::new();
@@ -291,7 +291,7 @@ async fn a_retry_does_not_evict_a_pod_recreated_under_the_same_name() {
             delete_empty_dir: true,
             timeout_seconds: Some(DRAIN_SECONDS),
         };
-        core.node_drain_start(&id, WORKER, options, tx)
+        core.node_drain_start(&id, WORKER, options, tx, "main")
             .await
             .unwrap();
         let mut replacement_uid = None;
@@ -389,7 +389,7 @@ async fn a_drain_waits_for_a_pod_whose_namespace_is_terminating() {
             delete_empty_dir: true,
             timeout_seconds: Some(DRAIN_SECONDS),
         };
-        core.node_drain_start(&id, WORKER, options, tx)
+        core.node_drain_start(&id, WORKER, options, tx, "main")
             .await
             .unwrap();
         let mut failures = Vec::new();

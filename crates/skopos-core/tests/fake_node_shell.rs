@@ -34,7 +34,10 @@ fn add_node(fake: &FakeKube, os: &str) {
 
 async fn start(core: &AppCore, id: &ClusterId) -> (String, mpsc::Receiver<SessionOutput>) {
     let (tx, rx) = mpsc::channel(32);
-    let session = core.node_shell_start(id, "worker", SIZE, tx).await.unwrap();
+    let session = core
+        .node_shell_start(id, "worker", SIZE, tx, "main")
+        .await
+        .unwrap();
     (session, rx)
 }
 
@@ -90,7 +93,7 @@ async fn a_windows_node_is_refused_before_any_pod_is_created() {
     add_node(&fake, "windows");
     let (tx, _rx) = mpsc::channel(4);
     let error = core
-        .node_shell_start(&id, "worker", SIZE, tx)
+        .node_shell_start(&id, "worker", SIZE, tx, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);
@@ -103,7 +106,7 @@ async fn a_missing_node_is_refused_with_the_api_server_message() {
     let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
     let (tx, _rx) = mpsc::channel(4);
     let error = core
-        .node_shell_start(&id, "worker", SIZE, tx)
+        .node_shell_start(&id, "worker", SIZE, tx, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::NotFound);

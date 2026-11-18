@@ -69,7 +69,10 @@ fn start(
     options: LogOptions,
 ) -> (String, mpsc::Receiver<LogEvent>) {
     let (tx, rx) = mpsc::channel(32);
-    (core.logs_start(id, target, options, tx).unwrap(), rx)
+    (
+        core.logs_start(id, target, options, tx, "main").unwrap(),
+        rx,
+    )
 }
 
 /// Receives until an event matches, and returns everything received so far.
@@ -639,12 +642,14 @@ async fn bad_arguments_and_a_disconnected_cluster_are_refused_at_once() {
         pod: "a/b".into(),
         container: None,
     };
-    let error = core.logs_start(&id, bad, once(), tx.clone()).unwrap_err();
+    let error = core
+        .logs_start(&id, bad, once(), tx.clone(), "main")
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);
 
     core.cluster_disconnect(&id).await.unwrap();
     let error = core
-        .logs_start(&id, pod_target(None), once(), tx)
+        .logs_start(&id, pod_target(None), once(), tx, "main")
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::Unreachable);
     assert_eq!(core.session_count(), 0);
@@ -817,7 +822,9 @@ async fn a_kind_without_pods_of_its_own_is_refused() {
         name: "c".into(),
         container: None,
     };
-    let error = core.logs_start(&id, target, once(), tx).unwrap_err();
+    let error = core
+        .logs_start(&id, target, once(), tx, "main")
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);
 }
 
@@ -848,7 +855,7 @@ async fn a_download_writes_every_line_past_the_tail_limit() {
         ..once()
     };
     let saved = core
-        .logs_download(&id, pod_target(Some("main")), options, &dest)
+        .logs_download(&id, pod_target(Some("main")), options, &dest, "main")
         .await
         .unwrap();
     let text = std::fs::read_to_string(&dest).unwrap();
@@ -865,7 +872,7 @@ async fn a_download_of_several_streams_labels_lines_and_notes_a_failure() {
     fake.fail_logs_with("default", "p", "setup", Some(403));
     add_line(&fake, "main", ONE, "one");
     let dest = root.path().join("saved.log");
-    core.logs_download(&id, pod_target(None), once(), &dest)
+    core.logs_download(&id, pod_target(None), once(), &dest, "main")
         .await
         .unwrap();
     let text = std::fs::read_to_string(&dest).unwrap();
@@ -880,7 +887,7 @@ async fn a_failed_download_rejects_and_leaves_no_file() {
     fake.fail_logs_with("default", "p", "main", Some(403));
     let dest = root.path().join("saved.log");
     let error = core
-        .logs_download(&id, pod_target(Some("main")), once(), &dest)
+        .logs_download(&id, pod_target(Some("main")), once(), &dest, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::Forbidden);
@@ -905,6 +912,7 @@ async fn a_download_refuses_a_relative_path() {
             pod_target(Some("main")),
             once(),
             std::path::Path::new("saved.log"),
+            "main",
         )
         .await
         .unwrap_err();
@@ -917,7 +925,7 @@ async fn an_unwritable_download_folder_is_refused_without_quoting_it() {
     pod_with_containers(&fake, json!({}));
     let dest = root.path().join("missing-folder").join("saved.log");
     let error = core
-        .logs_download(&id, pod_target(Some("main")), once(), &dest)
+        .logs_download(&id, pod_target(Some("main")), once(), &dest, "main")
         .await
         .unwrap_err();
     let shown = format!("{} {:?}", error.message, error.details);

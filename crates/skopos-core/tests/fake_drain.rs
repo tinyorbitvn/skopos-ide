@@ -149,7 +149,10 @@ async fn start(
     options: DrainOptions,
 ) -> (String, mpsc::Receiver<DrainEvent>) {
     let (tx, rx) = mpsc::channel(32);
-    let drain = core.node_drain_start(id, "n1", options, tx).await.unwrap();
+    let drain = core
+        .node_drain_start(id, "n1", options, tx, "main")
+        .await
+        .unwrap();
     (drain, rx)
 }
 
@@ -429,7 +432,7 @@ async fn a_second_drain_of_a_node_is_refused() {
     let (drain, mut rx) = start(&core, &id, NO_OPTIONS).await;
     let (tx, _second) = mpsc::channel(32);
     let error = core
-        .node_drain_start(&id, "n1", NO_OPTIONS, tx)
+        .node_drain_start(&id, "n1", NO_OPTIONS, tx, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::Conflict);
@@ -470,7 +473,10 @@ async fn closing_the_event_channel_cancels_the_drain() {
     let started = Instant::now();
     let (_again, _rx) = loop {
         let (tx, rx) = mpsc::channel(32);
-        match core.node_drain_start(&id, "n1", NO_OPTIONS, tx).await {
+        match core
+            .node_drain_start(&id, "n1", NO_OPTIONS, tx, "main")
+            .await
+        {
             Ok(drain) => break (drain, rx),
             Err(error) => assert_eq!(error.code, ErrorCode::Conflict),
         }
@@ -490,7 +496,7 @@ async fn cancelling_all_stops_every_drain_and_frees_their_nodes() {
     fake.fail_evictions_with("default", "b", 429, None);
     let (_first, mut first_rx) = start(&core, &id, NO_OPTIONS).await;
     let (tx, mut second_rx) = mpsc::channel(32);
-    core.node_drain_start(&id, "n2", NO_OPTIONS, tx)
+    core.node_drain_start(&id, "n2", NO_OPTIONS, tx, "main")
         .await
         .unwrap();
     wait_until(&mut first_rx, |e| {
@@ -526,7 +532,7 @@ async fn an_invalid_node_name_is_refused() {
     let (core, _fake, id, _root) = fake_with_node(FakeKubeConfig::default()).await;
     let (tx, _rx) = mpsc::channel(32);
     let error = core
-        .node_drain_start(&id, "../n1", NO_OPTIONS, tx)
+        .node_drain_start(&id, "../n1", NO_OPTIONS, tx, "main")
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);

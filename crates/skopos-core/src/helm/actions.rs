@@ -378,9 +378,10 @@ impl AppCore {
         call: Vec<OsString>,
         values: Option<ValuesFile>,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         let token = self.cluster_cancel_token(id)?;
-        let guard = self.sessions().register(token.clone(), None);
+        let guard = self.sessions().register(token.clone(), None, owner);
         let session = guard.id().to_owned();
         let mut spec = ProcessSpec::new(&helm.path, call, ACTION_LIMIT);
         spec.env = self.helm_env();
@@ -468,6 +469,7 @@ impl AppCore {
         id: &ClusterId,
         request: &HelmInstallRequest,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         let chart = check_install(request)?;
         let helm = self.helm_binary().await?;
@@ -481,7 +483,7 @@ impl AppCore {
             helm.major,
             Run::Action,
         );
-        self.start_action(id, helm, call, Some(values), output)
+        self.start_action(id, helm, call, Some(values), output, owner)
     }
 
     pub async fn helm_upgrade_start(
@@ -489,6 +491,7 @@ impl AppCore {
         id: &ClusterId,
         request: &HelmUpgradeRequest,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         let chart = check_upgrade(request)?;
         let helm = self.helm_binary().await?;
@@ -502,9 +505,11 @@ impl AppCore {
             helm.major,
             Run::Action,
         );
-        self.start_action(id, helm, call, Some(values), output)
+        self.start_action(id, helm, call, Some(values), output, owner)
     }
 
+    // The arguments mirror the command's, plus the window that owns the session.
+    #[allow(clippy::too_many_arguments)]
     pub async fn helm_rollback_start(
         &self,
         id: &ClusterId,
@@ -513,6 +518,7 @@ impl AppCore {
         revision: u32,
         wait: bool,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         check_namespace(namespace)?;
         check_name("release", release)?;
@@ -522,9 +528,11 @@ impl AppCore {
         let helm = self.helm_binary().await?;
         let kubeconfig = self.cluster_kubeconfig_path(id)?;
         let call = rollback_args(release, revision, &kubeconfig, namespace, helm.major, wait);
-        self.start_action(id, helm, call, None, output)
+        self.start_action(id, helm, call, None, output, owner)
     }
 
+    // The arguments mirror the command's, plus the window that owns the session.
+    #[allow(clippy::too_many_arguments)]
     pub async fn helm_uninstall_start(
         &self,
         id: &ClusterId,
@@ -533,6 +541,7 @@ impl AppCore {
         wait: bool,
         keep_history: bool,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         check_namespace(namespace)?;
         check_name("release", release)?;
@@ -546,7 +555,7 @@ impl AppCore {
             wait,
             keep_history,
         );
-        self.start_action(id, helm, call, None, output)
+        self.start_action(id, helm, call, None, output, owner)
     }
 }
 
