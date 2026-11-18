@@ -20,7 +20,7 @@ import { useWindowLayout } from "../stores/windowLayout";
 import styles from "./ClusterSwitcher.module.css";
 import { clusterStatus } from "./clusterStatus";
 import { clusterColor, clusterInitials } from "./clusterVisual";
-import { focusedTab } from "./tabs/layout";
+import { focusedPane, focusedTab } from "./tabs/layout";
 import { tabCluster } from "./tabs/routes";
 import { useFocusedPath } from "./tabs/ShellRouter";
 
@@ -49,7 +49,8 @@ export function useSidebarCluster(): SidebarCluster {
   const path = useFocusedPath();
   const focused = path === null ? null : tabCluster(path);
   const tabId = useWindowLayout((s) => focusedTab(s.layout)?.id ?? null);
-  const focus = `${tabId ?? ""}\n${focused ?? ""}`;
+  const paneId = useWindowLayout((s) => focusedPane(s.layout)?.id ?? null);
+  const focus = `${tabId ?? ""}\n${paneId ?? ""}\n${focused ?? ""}`;
   const [picked, setPicked] = useState<{ id: string; focus: string } | null>(
     null,
   );

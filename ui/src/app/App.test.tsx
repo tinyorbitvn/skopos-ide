@@ -280,6 +280,51 @@ test("a cluster picked in the switcher shows in the sidebar until focus moves to
   expect(screen.queryByTestId("switcher-follow")).toBeNull();
 });
 
+test("a pick is dropped when the focused tab moves to another pane (P25)", async () => {
+  mockBackend({
+    catalog_list: () => [
+      clusterEntry({
+        contextName: "alpha",
+        state: { status: "connected", info: INFO },
+      }),
+      clusterEntry({ contextName: "beta" }),
+    ],
+    catalog_warnings: () => [],
+    catalog_folders: () => ({ folders: [], placements: {} }),
+    cluster_connect: () => null,
+    hotbar_get: () => [],
+    resources_discover: () => [],
+    ui_state_get: () => null,
+    ui_state_set: () => null,
+    window_layout_get: () =>
+      windowOf([
+        [tab("t1", ["/cluster/id-alpha"])],
+        [tab("t2", ["/cluster/id-alpha/map"])],
+      ]),
+    window_layout_set: () => null,
+  });
+
+  render(<App />);
+  expect(await screen.findByTestId("cluster-sidebar")).toBeTruthy();
+
+  fireEvent.click(screen.getByTestId("switcher-trigger"));
+  fireEvent.click(await screen.findByTestId("switcher-cluster-beta"));
+  expect(await screen.findByTestId("sidebar-waiting")).toBeTruthy();
+
+  // The focused tab keeps its id and cluster but moves to the other pane.
+  act(() =>
+    useWindowLayout.getState().dispatch({
+      type: "move",
+      tabId: "t1",
+      paneId: "p2",
+      index: 0,
+    }),
+  );
+  expect(focusedTab(useWindowLayout.getState().layout)?.id).toBe("t1");
+  expect(await screen.findByTestId("cluster-sidebar")).toBeTruthy();
+  expect(screen.queryByTestId("switcher-follow")).toBeNull();
+});
+
 test("a sidebar item navigates the focused tab, and Ctrl+click opens a new tab (P11, P12)", async () => {
   mockBackend({
     catalog_list: () => [
