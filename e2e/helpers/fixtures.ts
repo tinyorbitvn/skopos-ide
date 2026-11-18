@@ -236,6 +236,9 @@ const FIXTURES: Record<string, SpecFixture> = {
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
   tabs: { kubeconfigs: {}, start: startKindFixture },
+  "catalog-folders": {
+    kubeconfigs: { config: kubeconfig(["alpha", "beta", "gamma"]) },
+  },
 };
 
 /** Specs with no entry start with an empty `~/.kube`. */
