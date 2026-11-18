@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
 import { openTerminal } from "../features/dock/openTerminal";
@@ -5,11 +6,15 @@ import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetPrefsForTest } from "../stores/prefs";
 import { resetShellForTest, useShell } from "../stores/shell";
-import { resetWorkspaceForTest, useWorkspace } from "../stores/workspace";
+import {
+  resetWindowLayoutForTest,
+  useWindowLayout,
+} from "../stores/windowLayout";
 import { mockBackend } from "../test/ipc";
 import {
   COMMANDS,
   type CommandContext,
+  commandById,
   runCommand,
   runMenuCommand,
 } from "./commands";
@@ -40,6 +45,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   resetShellForTest();
   resetPrefsForTest();
+  resetWindowLayoutForTest();
 });
 
 test("the registry lists the spec's commands in order", () => {
@@ -61,13 +67,15 @@ test("the registry lists the spec's commands in order", () => {
       ["theme-system", "Theme: System", null],
       ["back", "Go back", "back"],
       ["forward", "Go forward", "forward"],
-      ["workspace", "Workspace", null],
-      ["workspace-open", "Open prod in the Workspace", null],
+      ["split-right", "Split right", "splitRight"],
+      ["close-tab", "Close tab", "closeTab"],
+      ["pin-tab", "Pin tab", null],
+      ["new-window", "Open in new window", null],
     ],
   );
 });
 
-test("terminal, disconnect, install-chart and resource-map need the current cluster connected; cluster-settings and workspace-open any cluster", () => {
+test("terminal, disconnect, install-chart and resource-map need the current cluster connected; cluster-settings any cluster", () => {
   const available = (ctx: CommandContext) =>
     COMMANDS.filter((c) => c.available(ctx)).map((c) => c.id);
   const all = COMMANDS.map((c) => c.id);
@@ -78,9 +86,7 @@ test("terminal, disconnect, install-chart and resource-map need the current clus
       id !== "install-chart" &&
       id !== "resource-map",
   );
-  const always = onCluster.filter(
-    (id) => id !== "cluster-settings" && id !== "workspace-open",
-  );
+  const always = onCluster.filter((id) => id !== "cluster-settings");
   expect(available(context())).toEqual(always);
   expect(
     available(context({ cluster: on({ status: "disconnected" }) })),
@@ -129,35 +135,6 @@ test("catalog, back and forward navigate", () => {
   runCommand("back", ctx);
   runCommand("forward", ctx);
   expect(ctx.navigate.mock.calls).toEqual([["/catalog"], [-1], [1]]);
-});
-
-test("workspace goes to the Workspace, once", () => {
-  const ctx = context({ cluster: on(CONNECTED) });
-  runCommand("workspace", ctx);
-  expect(ctx.navigate.mock.calls).toEqual([["/workspace"]]);
-
-  const there = context({ pathname: "/workspace" });
-  runCommand("workspace", there);
-  expect(there.navigate).not.toHaveBeenCalled();
-});
-
-test("workspace-open opens the current cluster in the Workspace and goes there", async () => {
-  resetWorkspaceForTest();
-  mockBackend({ ui_state_get: () => null, ui_state_set: () => null });
-  const ctx = context({ pathname: "/cluster/c1", cluster: on(CONNECTED) });
-
-  runCommand("workspace-open", ctx);
-
-  expect(ctx.navigate.mock.calls).toEqual([["/workspace"]]);
-  await vi.waitFor(() =>
-    expect(useWorkspace.getState().layout.panes[0].tabs).toEqual([
-      { id: "t2", clusterId: "c1", view: "pods", pinned: false },
-    ]),
-  );
-
-  const nowhere = context();
-  runCommand("workspace-open", nowhere);
-  expect(nowhere.navigate).not.toHaveBeenCalled();
 });
 
 test("preferences closes a shell dialog and does not navigate where it is", () => {
@@ -263,4 +240,102 @@ test("an open shell dialog does not stop menu ids", () => {
   } finally {
     palette.remove();
   }
+});
+
+function windowLayout() {
+  return useWindowLayout.getState().layout;
+}
+
+test("the tab commands act on the focused tab, and show only when they apply (P17)", () => {
+  const ctx = context();
+  const pin = COMMANDS.find((c) => c.id === "pin-tab");
+  const shown = () =>
+    COMMANDS.filter((c) => c.available(ctx))
+      .map((c) => c.id)
+      .filter((id) => ["split-right", "close-tab", "pin-tab"].includes(id));
+  expect(shown()).toEqual(["split-right", "close-tab", "pin-tab"]);
+
+  runCommand("pin-tab", ctx);
+  expect(windowLayout().panes[0].tabs[0].pinned).toBe(true);
+  expect(pin?.label(ctx)).toBe("Unpin tab");
+  // A pinned tab is not closed (P14).
+  expect(shown()).toEqual(["split-right", "pin-tab"]);
+  runCommand("pin-tab", ctx);
+  expect(pin?.label(ctx)).toBe("Pin tab");
+
+  runCommand("split-right", ctx);
+  runCommand("split-right", ctx);
+  expect(windowLayout().panes).toHaveLength(3);
+  expect(shown()).toEqual(["close-tab", "pin-tab"]);
+  runCommand("split-right", ctx);
+  expect(windowLayout().panes).toHaveLength(3);
+
+  runCommand("close-tab", ctx);
+  expect(windowLayout().panes).toHaveLength(2);
+});
+
+test("in a window without tabs the tab commands do not show", () => {
+  resetWindowLayoutForTest({
+    label: "main",
+    bounds: null,
+    panes: [{ id: "p1", width: 1, selected: "", tabs: [] }],
+    focusedPane: 0,
+  });
+  const ids = COMMANDS.filter((c) => c.available(context())).map((c) => c.id);
+  expect(ids).not.toContain("split-right");
+  expect(ids).not.toContain("close-tab");
+  expect(ids).not.toContain("pin-tab");
+  expect(ids).not.toContain("new-window");
+});
+
+test("Open in new window sends the focused tab to a new window through the core (P17)", async () => {
+  const backend = mockBackend({
+    windows_list: () => [windowLayout()],
+    window_tab_move: () => ({
+      target: "window-2",
+      created: true,
+      sourceEmpty: false,
+    }),
+  });
+  const ctx = context();
+  const before = windowLayout();
+  const tabId = before.panes[0].tabs[0].id;
+  expect(commandById("new-window").available(ctx)).toBe(true);
+
+  runCommand("new-window", ctx);
+
+  // The window's bounds are not known yet: a step from its screen position.
+  const scale = window.devicePixelRatio;
+  const step = Math.round(32 * scale);
+  await waitFor(() =>
+    expect(backend.callsTo("window_tab_move")).toEqual([
+      {
+        tabId,
+        target: {
+          kind: "newWindow",
+          x: Math.round(window.screenX * scale) + step,
+          y: Math.round(window.screenY * scale) + step,
+        },
+      },
+    ]),
+  );
+  // The core's layout event takes the tab out of this window.
+  expect(windowLayout()).toBe(before);
+});
+
+test("the commands that open a location name it, so the click modes can open it (P11 to P13)", () => {
+  const ctx = context({ cluster: on(CONNECTED) });
+  expect(
+    COMMANDS.filter((c) => c.path !== undefined).map((c) => [
+      c.id,
+      c.path?.(ctx),
+    ]),
+  ).toEqual([
+    ["catalog", "/catalog"],
+    ["preferences", "/preferences"],
+    ["install-chart", "/cluster/c1/helm/charts"],
+    ["cluster-settings", "/cluster/c1/settings"],
+    ["resource-map", "/cluster/c1/map"],
+  ]);
+  expect(commandById("resource-map").path?.(context())).toBeNull();
 });

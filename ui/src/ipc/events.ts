@@ -4,6 +4,8 @@ import type { PortForward } from "./generated/PortForward";
 import type { StoreWarning } from "./generated/StoreWarning";
 import type { SyncWarning } from "./generated/SyncWarning";
 import type { ToolProgress } from "./generated/ToolProgress";
+import type { WindowLayout } from "./generated/WindowLayout";
+import { windowLabel } from "./window";
 
 function on<T>(
   name: string,
@@ -12,9 +14,25 @@ function on<T>(
   return listen<T>(name, (event) => handler(event.payload));
 }
 
+/**
+ * Listens to an event the backend sends to one window. Tauri hands a targeted event to
+ * every listener that names no target, in every window, so this one names its own.
+ */
+function onOwn<T>(
+  name: string,
+  handler: (payload: T) => void,
+): Promise<UnlistenFn> {
+  return listen<T>(name, (event) => handler(event.payload), {
+    target: { kind: "WebviewWindow", label: windowLabel() },
+  });
+}
+
 export const events = {
   onCatalogChanged: (handler: () => void) =>
     on<unknown>("catalog://changed", () => handler()),
+  /** The folder tree or a placement changed; read `api.catalogFolders` again. */
+  onCatalogFoldersChanged: (handler: () => void) =>
+    on<unknown>("catalog://folders-changed", () => handler()),
   onClusterState: (
     handler: (change: { id: string; state: ConnectionState }) => void,
   ) => on("cluster://state", handler),
@@ -28,7 +46,23 @@ export const events = {
   /** A tool download's progress: at most every 200 ms, and at once on each phase change. */
   onToolsProgress: (handler: (progress: ToolProgress) => void) =>
     on("tools://progress", handler),
-  /** The macOS menu's app items: `about`, `preferences`, `palette`, `shortcuts`. */
+  /** The macOS menu's app items: `about`, `preferences`, `palette`, `shortcuts`. Only the focused window gets them. */
   onMenuCommand: (handler: (command: { id: string }) => void) =>
-    on("menu://command", handler),
+    onOwn("menu://command", handler),
+  /**
+   * This window's layout as the core now holds it: after a tab moved in or out, or
+   * when the core changed a layout this window saved. It replaces the window's layout.
+   */
+  /**
+   * The app is about to quit: save this window's layout now, then answer with
+   * `api.windowFlushed` (P34). The app quits without an answer after 500 ms.
+   */
+  onWindowFlush: (handler: () => void) =>
+    onOwn<unknown>("window://flush", () => handler()),
+  onWindowLayout: (handler: (layout: WindowLayout) => void) => {
+    const label = windowLabel();
+    return onOwn<WindowLayout>("window://layout", (layout) => {
+      if (layout.label === label) handler(layout);
+    });
+  },
 };

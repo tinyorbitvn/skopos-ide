@@ -370,6 +370,7 @@ impl AppCore {
         id: &ClusterId,
         request: RemoteRequest,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         let client = self.cluster_client(id)?;
         let token = self.cluster_cancel_token(id)?;
@@ -379,7 +380,9 @@ impl AppCore {
             output.clone(),
             token.clone(),
         );
-        let guard = self.sessions().register(token.clone(), Some(control));
+        let guard = self
+            .sessions()
+            .register(token.clone(), Some(control), owner);
         let session = guard.id().to_owned();
         tokio::spawn(async move {
             let pods: Api<Pod> = Api::namespaced(client, &request.namespace);
@@ -409,6 +412,8 @@ impl AppCore {
     }
 
     /// Starts a shell in a container. `container: None` picks the default one (F12).
+    // The arguments mirror the command's, plus the window that owns the session.
+    #[allow(clippy::too_many_arguments)]
     pub async fn pod_exec_start(
         &self,
         id: &ClusterId,
@@ -417,6 +422,7 @@ impl AppCore {
         container: Option<String>,
         size: TerminalSize,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         check_names(namespace, pod, container.as_deref())?;
         let client = self.cluster_client(id)?;
@@ -431,11 +437,13 @@ impl AppCore {
             interactive: true,
             size,
         };
-        self.spawn_remote(id, request, output)
+        self.spawn_remote(id, request, output, owner)
     }
 
     /// Attaches to a container's main process. With no TTY in its spec the session is output
     /// only, which `Started { tty: false }` tells the interface.
+    // The arguments mirror the command's, plus the window that owns the session.
+    #[allow(clippy::too_many_arguments)]
     pub async fn pod_attach_start(
         &self,
         id: &ClusterId,
@@ -444,6 +452,7 @@ impl AppCore {
         container: Option<String>,
         size: TerminalSize,
         output: mpsc::Sender<SessionOutput>,
+        owner: &str,
     ) -> CoreResult<String> {
         check_names(namespace, pod, container.as_deref())?;
         let client = self.cluster_client(id)?;
@@ -465,7 +474,7 @@ impl AppCore {
             interactive: mode.interactive,
             size,
         };
-        self.spawn_remote(id, request, output)
+        self.spawn_remote(id, request, output, owner)
     }
 }
 

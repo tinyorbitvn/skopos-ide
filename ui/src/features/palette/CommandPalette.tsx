@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import {
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   useEffect,
   useId,
@@ -10,12 +11,20 @@ import {
 import { useCommandContext } from "../../app/commands";
 import { ShellDialog } from "../../app/ShellDialog";
 import { IS_MAC } from "../../app/shortcuts";
+import { focusedTab } from "../../app/tabs/layout";
+import {
+  catchSecondClick,
+  clickMode,
+  openPath,
+} from "../../app/tabs/navigation";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ObjectNames } from "../../ipc/generated/ObjectNames";
 import { useCatalog } from "../../stores/catalog";
+import { useFolders } from "../../stores/folders";
 import { useShell } from "../../stores/shell";
+import { useWindowLayout } from "../../stores/windowLayout";
 import styles from "./CommandPalette.module.css";
 import { isBlank } from "./fuzzy";
 import {
@@ -150,7 +159,12 @@ function PaletteBody({ onDone }: { onDone(): void }) {
   const listId = useId();
 
   const commands = useMemo(() => commandEntries(ctx, IS_MAC), [ctx]);
-  const clusters = useMemo(() => clusterEntries(catalog), [catalog]);
+  const folders = useFolders((s) => s.folders);
+  const placements = useFolders((s) => s.placements);
+  const clusters = useMemo(
+    () => clusterEntries(catalog, { folders, placements }),
+    [catalog, folders, placements],
+  );
   const pages = useMemo(
     () => (connectedId === null ? null : pageEntries(connectedId, resources)),
     [connectedId, resources],
@@ -191,6 +205,34 @@ function PaletteBody({ onDone }: { onDone(): void }) {
   function run(row: PaletteRow): void {
     onDone();
     row.run(ctx);
+  }
+
+  /**
+   * A row that opens a location is a navigation item (spec P11 to P13): Ctrl/Cmd+click
+   * opens it in a new tab; a plain click runs it in the focused tab, and the second
+   * click of a double-click then pins that tab. Other rows run on any left click.
+   */
+  function click(row: PaletteRow, event: MouseEvent): void {
+    const mode = row.path === undefined ? "current" : clickMode(event);
+    if (mode === null) return;
+    if (mode !== "current" && row.path !== undefined) {
+      onDone();
+      openPath(row.path, mode);
+      return;
+    }
+    run(row);
+    const shown = focusedTab(useWindowLayout.getState().layout);
+    if (row.path !== undefined && shown !== null) {
+      catchSecondClick(shown.id, event.clientX, event.clientY);
+    }
+  }
+
+  /** A middle-click opens a row's location beside (P12). */
+  function auxClick(row: PaletteRow, event: MouseEvent): void {
+    if (event.button !== 1 || row.path === undefined) return;
+    event.preventDefault();
+    onDone();
+    openPath(row.path, "beside");
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
@@ -269,6 +311,8 @@ function PaletteBody({ onDone }: { onDone(): void }) {
                     selected={at === active}
                     onSelect={() => setSelected(at)}
                     onRun={() => run(row)}
+                    onClick={(event) => click(row, event)}
+                    onAuxClick={(event) => auxClick(row, event)}
                   />
                 );
               })}
@@ -310,6 +354,8 @@ function Row(props: {
   selected: boolean;
   onSelect(): void;
   onRun(): void;
+  onClick(event: MouseEvent): void;
+  onAuxClick(event: MouseEvent): void;
 }) {
   const { row } = props;
   const Icon = row.icon;
@@ -322,9 +368,10 @@ function Row(props: {
       className={styles.row}
       data-testid={row.testId}
       onMouseMove={props.selected ? undefined : props.onSelect}
-      // Keeps the focus in the input.
+      // Keeps the focus in the input, and a middle press from autoscrolling.
       onMouseDown={(event) => event.preventDefault()}
-      onClick={props.onRun}
+      onClick={props.onClick}
+      onAuxClick={props.onAuxClick}
       onKeyDown={(event) => {
         if (event.key === "Enter") props.onRun();
       }}

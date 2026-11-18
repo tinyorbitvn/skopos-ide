@@ -56,7 +56,7 @@ test("the groups and rows follow the table, with words off macOS", () => {
     "Dialogs and lists",
     "Charts",
     "Resource map",
-    "Workspace",
+    "Tabs and windows",
   ]);
   expect(rows()).toEqual([
     "shortcut-palette",
@@ -81,9 +81,10 @@ test("the groups and rows follow the table, with words off macOS", () => {
     "shortcut-mapZoom",
     "shortcut-mapFit",
     "shortcut-mapClear",
-    "shortcut-workspaceSplit",
-    "shortcut-workspaceTabs",
-    "shortcut-workspaceClose",
+    "shortcut-splitRight",
+    "shortcut-closeTab",
+    "shortcut-cycleTabs",
+    "shortcut-focusPane",
   ]);
   expect(chips("palette")).toEqual(["Ctrl+Shift+P"]);
   expect(chips("shortcuts")).toEqual(["Ctrl+/"]);
@@ -143,7 +144,7 @@ test("the filter matches the action, the group or the keys, ignoring case", () =
   ]);
 
   filter("shift+tab");
-  expect(rows()).toEqual(["shortcut-focus"]);
+  expect(rows()).toEqual(["shortcut-focus", "shortcut-cycleTabs"]);
 });
 
 test("the filter finds the Charts group by its name", () => {
@@ -171,6 +172,32 @@ test("the filter finds the Resource map group by its name", () => {
     "shortcut-mapFit",
     "shortcut-mapClear",
   ]);
+});
+
+test("the Tabs and windows group lists the tab keys (spec P16)", () => {
+  body("linux");
+  filter("tabs and windows");
+
+  expect(groups()).toEqual(["Tabs and windows"]);
+  expect(rows()).toEqual([
+    "shortcut-splitRight",
+    "shortcut-closeTab",
+    "shortcut-cycleTabs",
+    "shortcut-focusPane",
+  ]);
+  expect(chips("splitRight")).toEqual(["Ctrl+\\"]);
+  expect(chips("closeTab")).toEqual(["Ctrl+W"]);
+  expect(chips("cycleTabs")).toEqual(["Ctrl+Tab", "Ctrl+Shift+Tab"]);
+  expect(chips("focusPane")).toEqual(["Ctrl+1", "Ctrl+2", "Ctrl+3"]);
+});
+
+test("on macOS the tab keys read ⌘, and Ctrl+Tab reads ⌃", () => {
+  body("macos");
+
+  expect(chips("splitRight")).toEqual(["⌘\\"]);
+  expect(chips("closeTab")).toEqual(["⌘W"]);
+  expect(chips("cycleTabs")).toEqual(["⌃Tab", "⌃⇧Tab"]);
+  expect(chips("focusPane")).toEqual(["⌘1", "⌘2", "⌘3"]);
 });
 
 test("on macOS the filter reads the symbols", () => {
@@ -242,28 +269,4 @@ test("the dialog opens with the focus in the filter, and Close gives it back", a
   await waitFor(() =>
     expect(document.activeElement).toBe(screen.getByTestId("opener")),
   );
-});
-
-test("the Workspace group lists its keys", () => {
-  body("linux");
-  filter("workspace");
-
-  expect(groups()).toEqual(["Workspace"]);
-  expect(rows()).toEqual([
-    "shortcut-workspaceSplit",
-    "shortcut-workspaceTabs",
-    "shortcut-workspaceClose",
-  ]);
-  expect(chips("workspaceSplit")).toEqual(["Ctrl+\\"]);
-  expect(chips("workspaceTabs")).toEqual(["Left", "Right"]);
-  expect(screen.getByTestId("shortcut-workspaceClose").textContent).toBe(
-    "Close the tabDelete",
-  );
-});
-
-test("on macOS the Workspace split reads ⌘\\", () => {
-  body("macos");
-
-  expect(chips("workspaceSplit")).toEqual(["⌘\\"]);
-  expect(chips("workspaceTabs")).toEqual(["←", "→"]);
 });

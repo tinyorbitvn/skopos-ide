@@ -954,10 +954,7 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
     table.until("the pod", |c| c.has("default", "full")).await;
     let row = &table.rows[&(Some("default".to_owned()), "full".to_owned())];
     assert_eq!(row["metadata"]["labels"], json!({ "app": "web" }));
-    assert_eq!(
-        row["spec"]["containers"],
-        json!([{ "name": "main", "image": "registry.k8s.io/pause:3.10" }])
-    );
+    assert_eq!(row["spec"]["containers"], json!([{ "name": "main" }]));
     assert_eq!(row["status"]["phase"], "Running");
     assert_eq!(
         row["metadata"]["annotations"],
@@ -975,5 +972,9 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
     assert_eq!(
         whole["spec"]["containers"][0]["env"],
         json!([{ "name": "A", "value": "1" }])
+    );
+    assert_eq!(
+        whole["spec"]["containers"][0]["image"],
+        "registry.k8s.io/pause:3.10"
     );
 }

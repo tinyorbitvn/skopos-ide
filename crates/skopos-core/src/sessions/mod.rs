@@ -76,6 +76,8 @@ pub(crate) struct TerminalControl {
 #[derive(Debug)]
 struct RunningSession {
     token: CancellationToken,
+    /// The label of the window that started the session (P36).
+    owner: String,
     /// `None` for a log stream.
     control: Option<TerminalControl>,
     /// Set for a log stream, which has flow control and nothing else to drive.
@@ -92,14 +94,17 @@ pub(crate) struct SessionRegistry {
 }
 
 impl SessionRegistry {
-    /// Adds a session. It stays listed until the guard is dropped.
+    /// Adds a session that the window `owner` started. It stays listed until the guard
+    /// is dropped.
     pub(crate) fn register(
         self: &Arc<Self>,
         token: CancellationToken,
         control: Option<TerminalControl>,
+        owner: &str,
     ) -> SessionGuard {
         self.insert(RunningSession {
             token,
+            owner: owner.to_owned(),
             control,
             log_flow: None,
         })
@@ -110,9 +115,11 @@ impl SessionRegistry {
         self: &Arc<Self>,
         token: CancellationToken,
         flow: Arc<FlowControl>,
+        owner: &str,
     ) -> SessionGuard {
         self.insert(RunningSession {
             token,
+            owner: owner.to_owned(),
             control: None,
             log_flow: Some(flow),
         })
@@ -148,6 +155,12 @@ impl SessionRegistry {
 
     fn stop_all(&self) {
         for session in self.sessions.iter() {
+            session.token.cancel();
+        }
+    }
+
+    fn stop_owned(&self, owner: &str) {
+        for session in self.sessions.iter().filter(|s| s.owner == owner) {
             session.token.cancel();
         }
     }
@@ -228,12 +241,17 @@ impl AppCore {
         self.sessions().stop(id);
     }
 
-    /// Stops every session on every cluster, for when the page that started them goes
-    /// away. It took their ids with it, and a Tauri channel can still be written after a
-    /// reload, so nothing else would stop them. Port-forwards are not sessions: the new
-    /// page finds them with `portforward_list`.
+    /// Stops every session on every cluster, as `shutdown` does.
     pub fn sessions_stop_all(&self) {
         self.sessions().stop_all();
+    }
+
+    /// Stops the sessions the window `owner` started, on every cluster, for when its page
+    /// loads again or it closes (P36). The page took their ids with it, and a Tauri
+    /// channel can still be written after a reload, so nothing else would stop them.
+    /// Port-forwards are not sessions: the new page finds them with `portforward_list`.
+    pub fn sessions_stop_owned(&self, owner: &str) {
+        self.sessions().stop_owned(owner);
     }
 
     /// How many sessions are running, node shell cleanup included.
@@ -308,8 +326,8 @@ mod tests {
     #[test]
     fn ids_are_unique() {
         let registry = Arc::new(SessionRegistry::default());
-        let first = registry.register(CancellationToken::new(), None);
-        let second = registry.register(CancellationToken::new(), None);
+        let first = registry.register(CancellationToken::new(), None, "main");
+        let second = registry.register(CancellationToken::new(), None, "main");
         assert_ne!(first.id(), second.id());
         assert_eq!(registry.len(), 2);
     }
@@ -317,7 +335,7 @@ mod tests {
     #[test]
     fn dropping_the_guard_removes_the_session() {
         let registry = Arc::new(SessionRegistry::default());
-        let guard = registry.register(CancellationToken::new(), None);
+        let guard = registry.register(CancellationToken::new(), None, "main");
         drop(guard);
         assert_eq!(registry.len(), 0);
     }
@@ -326,8 +344,8 @@ mod tests {
     fn stop_cancels_that_session_only_and_can_be_repeated() {
         let registry = Arc::new(SessionRegistry::default());
         let (a, b) = (CancellationToken::new(), CancellationToken::new());
-        let guard_a = registry.register(a.clone(), None);
-        let _guard_b = registry.register(b.clone(), None);
+        let guard_a = registry.register(a.clone(), None, "main");
+        let _guard_b = registry.register(b.clone(), None, "main");
         registry.stop(guard_a.id());
         registry.stop(guard_a.id());
         registry.stop("session-unknown");
@@ -336,11 +354,31 @@ mod tests {
     }
 
     #[test]
+    fn stop_owned_cancels_only_the_sessions_of_that_window() {
+        let registry = Arc::new(SessionRegistry::default());
+        let (main, other, log) = (
+            CancellationToken::new(),
+            CancellationToken::new(),
+            CancellationToken::new(),
+        );
+        let _guard_main = registry.register(main.clone(), None, "main");
+        let _guard_other = registry.register(other.clone(), None, "window-2");
+        let _guard_log =
+            registry.register_log(log.clone(), Arc::new(FlowControl::new()), "window-2");
+
+        registry.stop_owned("window-2");
+        registry.stop_owned("window-9");
+
+        assert!(!main.is_cancelled());
+        assert!(other.is_cancelled() && log.is_cancelled());
+    }
+
+    #[test]
     fn stop_all_cancels_every_session() {
         let registry = Arc::new(SessionRegistry::default());
         let (a, b) = (CancellationToken::new(), CancellationToken::new());
-        let _guard_a = registry.register(a.clone(), None);
-        let _guard_b = registry.register(b.clone(), None);
+        let _guard_a = registry.register(a.clone(), None, "main");
+        let _guard_b = registry.register(b.clone(), None, "main");
         registry.stop_all();
         assert!(a.is_cancelled() && b.is_cancelled());
     }
@@ -348,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn wait_idle_ends_when_the_last_session_ends() {
         let registry = Arc::new(SessionRegistry::default());
-        let guard = registry.register(CancellationToken::new(), None);
+        let guard = registry.register(CancellationToken::new(), None, "main");
         let waiter = {
             let registry = registry.clone();
             tokio::spawn(async move { registry.wait_idle(Duration::from_secs(30)).await })
@@ -361,7 +399,7 @@ mod tests {
     #[tokio::test]
     async fn wait_idle_gives_up_at_its_limit() {
         let registry = Arc::new(SessionRegistry::default());
-        let _guard = registry.register(CancellationToken::new(), None);
+        let _guard = registry.register(CancellationToken::new(), None, "main");
         assert!(!registry.wait_idle(Duration::from_millis(20)).await);
     }
 
@@ -380,7 +418,7 @@ mod tests {
         // `on_page_load` in `skopos-app` has no automated coverage. This is the method it calls.
         let (core, _root) = started_core().await;
         let token = CancellationToken::new();
-        let guard = core.sessions().register(token.clone(), None);
+        let guard = core.sessions().register(token.clone(), None, "main");
         assert_eq!(core.session_count(), 1);
         core.sessions_stop_all();
         assert!(token.is_cancelled());
@@ -391,10 +429,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_window_stops_only_its_own_sessions_through_the_core() {
+        // `on_page_load` and the window close in `skopos-app` call this for one window.
+        let (core, _root) = started_core().await;
+        let (main, other) = (CancellationToken::new(), CancellationToken::new());
+        let _guard_main = core.sessions().register(main.clone(), None, "main");
+        let guard_other = core.sessions().register(other.clone(), None, "window-2");
+
+        core.sessions_stop_owned("window-2");
+
+        assert!(other.is_cancelled());
+        assert!(!main.is_cancelled());
+        drop(guard_other);
+        assert_eq!(core.session_count(), 1);
+    }
+
+    #[tokio::test]
     async fn shutdown_waits_for_a_session_to_clean_up() {
         let (core, _root) = started_core().await;
         let token = CancellationToken::new();
-        let guard = core.sessions().register(token.clone(), None);
+        let guard = core.sessions().register(token.clone(), None, "main");
         let cleaned = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = cleaned.clone();
         tokio::spawn(async move {
@@ -413,14 +467,16 @@ mod tests {
         let missing = core.session_write("session-unknown", vec![1]).unwrap_err();
         assert_eq!(missing.code, ErrorCode::NotFound);
 
-        let log_stream = core.sessions().register(CancellationToken::new(), None);
+        let log_stream = core
+            .sessions()
+            .register(CancellationToken::new(), None, "main");
         let no_input = core.session_write(log_stream.id(), vec![1]).unwrap_err();
         assert_eq!(no_input.code, ErrorCode::InvalidInput);
 
         let (control, input) = control();
         let terminal = core
             .sessions()
-            .register(CancellationToken::new(), Some(control));
+            .register(CancellationToken::new(), Some(control), "main");
         core.session_write(terminal.id(), vec![1]).unwrap();
         core.session_write(terminal.id(), vec![2]).unwrap();
         let full = core.session_write(terminal.id(), vec![3]).unwrap_err();
@@ -436,7 +492,7 @@ mod tests {
         let flow = Arc::new(FlowControl::new());
         let guard = core
             .sessions()
-            .register_log(CancellationToken::new(), flow.clone());
+            .register_log(CancellationToken::new(), flow.clone(), "main");
         flow.sent(100);
         core.session_ack(guard.id(), 100);
         assert_eq!(flow.unacked(), 0);
@@ -474,7 +530,7 @@ mod tests {
         let registry = Arc::new(SessionRegistry::default());
         let (control, _input) = control();
         let flow = control.flow.clone();
-        let guard = registry.register(CancellationToken::new(), Some(control));
+        let guard = registry.register(CancellationToken::new(), Some(control), "main");
         flow.sent(100);
         let session = registry.sessions.get(guard.id()).unwrap();
         session.control.as_ref().unwrap().flow.acked(100);

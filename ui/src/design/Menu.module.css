@@ -37,6 +37,12 @@
   cursor: not-allowed;
 }
 
+.separator {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--border-subtle);
+}
+
 .danger {
   color: var(--text-danger);
 }
@@ -55,6 +61,16 @@
   display: inline-flex;
   width: 14px;
   color: var(--text-accent);
+}
+
+/* The arrow of an item that opens a submenu. */
+.more {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.item[data-state="open"] {
+  background: var(--surface-hover);
 }
 
 .hint {

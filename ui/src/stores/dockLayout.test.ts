@@ -1,3 +1,4 @@
+import { mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { JsonValue } from "../ipc/generated/serde_json/JsonValue";
@@ -17,7 +18,7 @@ import {
   writeDraft,
 } from "./dock";
 import {
-  DOCK_LAYOUT_KEY,
+  dockLayoutKey,
   LAYOUT_SAVE_DELAY_MS,
   parseLayout,
   resetDockLayoutForTest,
@@ -214,13 +215,90 @@ test("restore reads the key once and applies it", async () => {
     ui_state_set: () => null,
   });
   await Promise.all([restoreDockLayout(), restoreDockLayout()]);
-  expect(b.callsTo("ui_state_get")).toEqual([{ key: DOCK_LAYOUT_KEY }]);
+  expect(b.callsTo("ui_state_get")).toEqual([{ key: dockLayoutKey("main") }]);
   expect(useDock.getState()).toMatchObject({
     restored: true,
     height: 400,
     activeId: EDIT.id,
     tabs: [EDIT],
   });
+});
+
+test("each window keeps its dock under its own key (P37)", async () => {
+  expect(dockLayoutKey("main")).toBe("dock:layout:main");
+  mockWindows("window-2");
+  const b = mockBackend({
+    ui_state_get: () => saved([SAVED_EDIT], { activeId: EDIT.id }),
+    ui_state_set: () => null,
+  });
+  await restoreDockLayout();
+  expect(b.callsTo("ui_state_get")).toEqual([{ key: "dock:layout:window-2" }]);
+  vi.useFakeTimers();
+  useDock.getState().setHeight(450);
+  vi.advanceTimersByTime(LAYOUT_SAVE_DELAY_MS);
+  expect(
+    b.callsTo("ui_state_set").map((c) => (c as { key: string }).key),
+  ).toEqual(["dock:layout:window-2"]);
+});
+
+test("the main window's first run takes over the old dock key (P40)", async () => {
+  const old = saved([SAVED_EDIT], { activeId: EDIT.id });
+  const b = mockBackend({
+    ui_state_get: ({ key }: { key: string }) =>
+      key === "dock:layout" ? old : null,
+    ui_state_set: () => null,
+  });
+  await restoreDockLayout();
+  expect(b.callsTo("ui_state_get")).toEqual([
+    { key: "dock:layout:main" },
+    { key: "dock:layout" },
+  ]);
+  expect(useDock.getState()).toMatchObject({ activeId: EDIT.id, tabs: [EDIT] });
+  // Copied to the main window's key, then the old key is cleared.
+  expect(b.callsTo("ui_state_set")).toEqual([
+    { key: "dock:layout:main", value: old },
+    { key: "dock:layout", value: null },
+  ]);
+});
+
+test("the old dock key is read only by the main window, and only when its own key is empty (P40)", async () => {
+  const b = mockBackend({
+    ui_state_get: ({ key }: { key: string }) =>
+      key === "dock:layout:main" ? saved([]) : saved([SAVED_EDIT]),
+    ui_state_set: () => null,
+  });
+  await restoreDockLayout();
+  expect(b.callsTo("ui_state_get")).toEqual([{ key: "dock:layout:main" }]);
+  expect(useDock.getState().tabs).toEqual([]);
+  resetDockLayoutForTest();
+
+  mockWindows("window-2");
+  const other = mockBackend({
+    ui_state_get: ({ key }: { key: string }) =>
+      key === "dock:layout" ? saved([SAVED_EDIT]) : null,
+    ui_state_set: () => null,
+  });
+  await restoreDockLayout();
+  expect(other.callsTo("ui_state_get")).toEqual([
+    { key: "dock:layout:window-2" },
+  ]);
+  expect(other.callsTo("ui_state_set")).toEqual([]);
+});
+
+test("a main window key that cannot be read does not bring the old one back", async () => {
+  const b = mockBackend({
+    ui_state_get: ({ key }: { key: string }) => {
+      if (key === "dock:layout:main") {
+        throw { code: "Internal", message: "broken", details: null };
+      }
+      return saved([SAVED_EDIT]);
+    },
+    ui_state_set: () => null,
+  });
+  await restoreDockLayout();
+  expect(b.callsTo("ui_state_get")).toEqual([{ key: "dock:layout:main" }]);
+  expect(b.callsTo("ui_state_set")).toEqual([]);
+  expect(useDock.getState().tabs).toEqual([]);
 });
 
 test("a layout that cannot be read gives the defaults", async () => {
@@ -251,7 +329,7 @@ test("changes are written 300 ms after the last one", async () => {
   vi.advanceTimersByTime(1);
   expect(b.callsTo("ui_state_set")).toEqual([
     {
-      key: DOCK_LAYOUT_KEY,
+      key: dockLayoutKey("main"),
       value: {
         version: 1,
         height: 400,

@@ -8,7 +8,7 @@ use skopos_core::helm::{
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::sessions::SessionEvent;
 use tauri::ipc::{Channel, InvokeResponseBody};
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::commands::sessions::{forward_output, OUTPUT_BACKLOG};
@@ -150,6 +150,7 @@ pub async fn helm_upgrade_preview(
 #[tauri::command]
 pub async fn helm_install_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     request: HelmInstallRequest,
     on_data: Channel<InvokeResponseBody>,
@@ -158,7 +159,7 @@ pub async fn helm_install_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .helm_install_start(&cluster_id, &request, tx)
+        .helm_install_start(&cluster_id, &request, tx, window.label())
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)
@@ -167,6 +168,7 @@ pub async fn helm_install_start(
 #[tauri::command]
 pub async fn helm_upgrade_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     request: HelmUpgradeRequest,
     on_data: Channel<InvokeResponseBody>,
@@ -175,7 +177,7 @@ pub async fn helm_upgrade_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .helm_upgrade_start(&cluster_id, &request, tx)
+        .helm_upgrade_start(&cluster_id, &request, tx, window.label())
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)
@@ -186,6 +188,7 @@ pub async fn helm_upgrade_start(
 #[tauri::command]
 pub async fn helm_rollback_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     namespace: String,
     release: String,
@@ -197,7 +200,15 @@ pub async fn helm_rollback_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .helm_rollback_start(&cluster_id, &namespace, &release, revision, wait, tx)
+        .helm_rollback_start(
+            &cluster_id,
+            &namespace,
+            &release,
+            revision,
+            wait,
+            tx,
+            window.label(),
+        )
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)
@@ -208,6 +219,7 @@ pub async fn helm_rollback_start(
 #[tauri::command]
 pub async fn helm_uninstall_start(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     namespace: String,
     release: String,
@@ -219,7 +231,15 @@ pub async fn helm_uninstall_start(
     let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
     let id = state
         .core
-        .helm_uninstall_start(&cluster_id, &namespace, &release, wait, keep_history, tx)
+        .helm_uninstall_start(
+            &cluster_id,
+            &namespace,
+            &release,
+            wait,
+            keep_history,
+            tx,
+            window.label(),
+        )
         .await?;
     forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
     Ok(id)

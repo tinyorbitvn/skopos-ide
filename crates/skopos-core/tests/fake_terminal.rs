@@ -43,7 +43,7 @@ async fn start_shell(
     })
     .unwrap();
     let (tx, rx) = mpsc::channel(32);
-    (core.terminal_start(id, size, tx).await.unwrap(), rx)
+    (core.terminal_start(id, size, tx, "main").await.unwrap(), rx)
 }
 
 /// Runs a command in the shell. `\r` is Enter on every OS.
@@ -187,7 +187,10 @@ async fn a_cluster_that_is_not_connected_is_refused() {
     let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
     core.cluster_disconnect(&id).await.unwrap();
     let (tx, _rx) = mpsc::channel(4);
-    let error = core.terminal_start(&id, WIDE, tx).await.unwrap_err();
+    let error = core
+        .terminal_start(&id, WIDE, tx, "main")
+        .await
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::Unreachable);
     assert_eq!(core.session_count(), 0);
 }

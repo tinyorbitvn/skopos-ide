@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
+use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState};
 use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -33,6 +34,7 @@ use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
 use crate::tools::{ToolProgress, Tools};
 use crate::ui_state::UiState;
+use crate::windows::{WindowLayout, Windows};
 
 const STORE_VERSION: u32 = 1;
 const PREFS_FILE: &str = "prefs.json";
@@ -40,6 +42,8 @@ const CLUSTERS_FILE: &str = "clusters.json";
 const HOTBAR_FILE: &str = "hotbar.json";
 const PORTFORWARDS_FILE: &str = "portforwards.json";
 const UI_STATE_FILE: &str = "ui-state.json";
+const CATALOG_FOLDERS_FILE: &str = "catalog-folders.json";
+const WINDOWS_FILE: &str = "windows.json";
 /// The safety net under file events, which some filesystems never deliver.
 const SYNC_POLL: Duration = Duration::from_secs(10);
 const EVENT_BACKLOG: usize = 64;
@@ -67,6 +71,13 @@ pub enum CoreEvent {
     ToolProgress {
         progress: ToolProgress,
     },
+    /// The catalog folder tree or a placement changed; read `catalog_folders` again.
+    CatalogFoldersChanged,
+    /// The core changed a window's layout, as a move between windows does; only that
+    /// window (`layout.label`) needs it.
+    WindowLayoutChanged {
+        layout: WindowLayout,
+    },
 }
 
 /// A cheap handle to the running core; clones share everything.
@@ -79,6 +90,8 @@ struct Inner {
     prefs: JsonStore<Prefs>,
     clusters: JsonStore<HashMap<ClusterId, ClusterSettings>>,
     hotbar: JsonStore<Vec<ClusterId>>,
+    folders: JsonStore<CatalogFolders>,
+    windows: Windows,
     ui_state: UiState,
     pasted: PastedConfigs,
     connections: Arc<ClusterManager>,
@@ -139,6 +152,24 @@ fn open_prefs(
         });
     }
     (prefs, sources)
+}
+
+/// The folder tree, repaired if someone edited the file into a shape the UI cannot show.
+fn open_folders(paths: &AppPaths, warnings: &mut Vec<StoreWarning>) -> JsonStore<CatalogFolders> {
+    let store: JsonStore<CatalogFolders> = open_store(paths, CATALOG_FOLDERS_FILE, warnings);
+    let loaded = store.get();
+    let repaired = loaded.clone().repaired();
+    if repaired != loaded {
+        tracing::warn!("{CATALOG_FOLDERS_FILE}: repaired folders with a missing parent or a cycle");
+        // A failed save keeps the repaired tree in memory (P44).
+        if let Ok(((), Some(failed))) = store.try_update_kept(|all| {
+            *all = repaired;
+            Ok(())
+        }) {
+            warnings.push(failed);
+        }
+    }
+    store
 }
 
 fn open_store<T>(paths: &AppPaths, file: &str, warnings: &mut Vec<StoreWarning>) -> JsonStore<T>
@@ -218,6 +249,13 @@ impl AppCore {
         let (prefs, sources) = open_prefs(&paths, kubeconfig_env.as_deref(), &mut warnings);
         let clusters = open_store(&paths, CLUSTERS_FILE, &mut warnings);
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
+        let folders = open_folders(&paths, &mut warnings);
+        let (windows, windows_warning) = Windows::open(
+            paths.config.join(WINDOWS_FILE),
+            STORE_VERSION,
+            events.clone(),
+        );
+        warnings.extend(windows_warning);
         let portforward_definitions = open_store(&paths, PORTFORWARDS_FILE, &mut warnings);
         let (ui_state, ui_warning) = UiState::open(paths.config.join(UI_STATE_FILE), STORE_VERSION);
         warnings.extend(ui_warning);
@@ -235,6 +273,8 @@ impl AppCore {
                 prefs,
                 clusters,
                 hotbar,
+                folders,
+                windows,
                 ui_state,
                 pasted,
                 connections,
@@ -296,6 +336,7 @@ impl AppCore {
     pub fn catalog_remove_pasted(&self, id: &ClusterId) -> CoreResult<()> {
         if self.inner.pasted.remove(id)? {
             self.inner.secrets.delete(id);
+            self.catalog_folders_forget(id);
             return Ok(());
         }
         // A pasted entry can still be listed here until the sync catches up.
@@ -316,12 +357,34 @@ impl AppCore {
         })
     }
 
+    /// Whether the catalog lists `id` right now.
+    pub(crate) fn catalog_lists(&self, id: &ClusterId) -> bool {
+        self.inner
+            .snapshots
+            .borrow()
+            .entries
+            .iter()
+            .any(|entry| entry.id == *id)
+    }
+
+    pub(crate) fn folders(&self) -> &JsonStore<CatalogFolders> {
+        &self.inner.folders
+    }
+
+    pub(crate) fn windows(&self) -> &Windows {
+        &self.inner.windows
+    }
+
     pub fn ui_state_get(&self, key: &str) -> Option<serde_json::Value> {
         self.inner.ui_state.get(key)
     }
 
     pub fn ui_state_set(&self, key: &str, value: serde_json::Value) -> CoreResult<()> {
         self.inner.ui_state.set(key, value)
+    }
+
+    pub(crate) fn ui_state_remove(&self, key: &str) -> CoreResult<()> {
+        self.inner.ui_state.remove(key)
     }
 
     pub fn cluster_settings_get(&self, id: &ClusterId) -> ClusterSettings {

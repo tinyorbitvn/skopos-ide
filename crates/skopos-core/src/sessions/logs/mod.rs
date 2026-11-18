@@ -368,12 +368,15 @@ impl AppCore {
         target: LogTarget,
         options: LogOptions,
         events: mpsc::Sender<LogEvent>,
+        owner: &str,
     ) -> CoreResult<String> {
         check_target(&target)?;
         let client = self.cluster_client(id)?;
         let token = self.cluster_cancel_token(id)?;
         let flow = Arc::new(FlowControl::new());
-        let guard = self.sessions().register_log(token.clone(), flow.clone());
+        let guard = self
+            .sessions()
+            .register_log(token.clone(), flow.clone(), owner);
         let session = guard.id().to_owned();
         tokio::spawn(async move {
             let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);

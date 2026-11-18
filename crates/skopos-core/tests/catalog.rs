@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use skopos_core::app_core::{AppCore, CoreEvent};
+use skopos_core::catalog::folders::{CatalogFolder, CatalogFolders};
 use skopos_core::catalog::{ClusterEntry, ClusterSource};
 use skopos_core::error::ErrorCode;
 use skopos_core::kubeconfig::{parse_contexts, SyncSource};
@@ -802,4 +803,212 @@ async fn app_core_is_cloneable_and_shutdown_is_repeatable() {
         1,
         "the last snapshot stays readable"
     );
+}
+
+/// How many `CatalogFoldersChanged` events wait in `events`.
+fn folder_events(events: &mut tokio::sync::broadcast::Receiver<CoreEvent>) -> usize {
+    let mut count = 0;
+    while let Ok(event) = events.try_recv() {
+        if matches!(event, CoreEvent::CatalogFoldersChanged) {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[tokio::test]
+async fn catalog_folders_persist_and_each_change_sends_one_event() {
+    let fixture = Fixture::with_kube_config(&["alpha"]);
+    let core = fixture.start().await;
+    wait_for_names(&core, &["alpha"]).await;
+    let id = id_of(&core, "alpha");
+    let mut events = core.subscribe();
+
+    let prod = core.catalog_folder_create(None, "prod").unwrap();
+    let eu = core.catalog_folder_create(Some(&prod.id), "eu").unwrap();
+    core.catalog_folder_rename(&eu.id, "EU").unwrap();
+    core.catalog_cluster_place(&id, Some(&eu.id)).unwrap();
+    core.catalog_folder_move(&eu.id, None).unwrap();
+    core.catalog_folder_delete(&prod.id).unwrap();
+
+    assert_eq!(folder_events(&mut events), 6);
+    let saved = core.catalog_folders();
+    assert_eq!(
+        saved.folders,
+        [CatalogFolder {
+            id: eu.id.clone(),
+            name: "EU".to_owned(),
+            parent: None,
+        }]
+    );
+    assert_eq!(saved.placements.get(&id), Some(&eu.id));
+    core.shutdown().await;
+
+    let restarted = fixture.start().await;
+    assert_eq!(restarted.catalog_folders(), saved);
+    restarted.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_refused_folder_change_sends_nothing_and_writes_nothing() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    let mut events = core.subscribe();
+
+    let err = core.catalog_folder_create(None, "  ").unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+    assert_eq!(err.message, "A folder needs a name.");
+    assert_eq!(folder_events(&mut events), 0);
+    assert!(!fixture.paths.config.join("catalog-folders.json").exists());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn only_a_listed_cluster_goes_into_a_folder() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    let folder = core.catalog_folder_create(None, "prod").unwrap();
+
+    let err = core
+        .catalog_cluster_place(&"gone".to_owned(), Some(&folder.id))
+        .unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert!(core.catalog_folders().placements.is_empty());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn removing_a_pasted_cluster_drops_its_placement() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    core.catalog_add_pasted(&config_with(&["one"])).unwrap();
+    let (id, _) = pasted_entry(&core, "one").await;
+    let folder = core.catalog_folder_create(None, "pasted").unwrap();
+    core.catalog_cluster_place(&id, Some(&folder.id)).unwrap();
+    let mut events = core.subscribe();
+
+    core.catalog_remove_pasted(&id).unwrap();
+
+    let after = core.catalog_folders();
+    assert!(after.placements.is_empty());
+    assert_eq!(after.folders.len(), 1, "the folder stays");
+    assert_eq!(folder_events(&mut events), 1);
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_corrupt_folders_file_is_a_startup_warning_and_is_replaced() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(&fixture.paths.config).unwrap();
+    let file = fixture.paths.config.join("catalog-folders.json");
+    std::fs::write(&file, "{ nope").unwrap();
+
+    let core = fixture.start().await;
+
+    let warnings = core.take_startup_warnings();
+    let files: Vec<&str> = warnings.iter().map(|w| w.file.as_str()).collect();
+    assert_eq!(files, ["catalog-folders.json"]);
+    assert_eq!(core.catalog_folders(), CatalogFolders::default());
+    core.catalog_folder_create(None, "prod").unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("\"prod\""), "{text}");
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_folders_file_with_a_missing_parent_is_repaired_at_start() {
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(&fixture.paths.config).unwrap();
+    let file = fixture.paths.config.join("catalog-folders.json");
+    let edited = r#"{"version":1,"data":{"folders":[{"id":"folder-1","name":"a","parent":"folder-9"}],"placements":{"x":"folder-9"}}}"#;
+    std::fs::write(&file, edited).unwrap();
+
+    let core = fixture.start().await;
+
+    let folders = core.catalog_folders();
+    assert_eq!(folders.folders[0].parent, None);
+    assert!(folders.placements.is_empty());
+    assert!(core.take_startup_warnings().is_empty());
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("folder-9"));
+    core.shutdown().await;
+}
+
+/// Makes a dir read-only until dropped (Unix only).
+#[cfg(unix)]
+struct ReadOnly<'a> {
+    dir: &'a Path,
+    mode: u32,
+}
+
+#[cfg(unix)]
+impl<'a> ReadOnly<'a> {
+    /// `None` when this user can write the dir anyway, as root can.
+    fn new(dir: &'a Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir).unwrap().permissions().mode();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let guard = Self { dir, mode };
+        let probe = dir.join(".probe");
+        if std::fs::write(&probe, "").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            return None;
+        }
+        Some(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnly<'_> {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(self.dir, std::fs::Permissions::from_mode(self.mode));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_folders_save_keeps_the_change_and_warns_once() {
+    let fixture = Fixture::new();
+    let core = fixture.start().await;
+    core.catalog_folder_create(None, "prod").unwrap();
+    let file = fixture.paths.config.join("catalog-folders.json");
+    let mut events = core.subscribe();
+    let Some(read_only) = ReadOnly::new(&fixture.paths.config) else {
+        core.shutdown().await;
+        return;
+    };
+
+    let eu = core.catalog_folder_create(None, "eu").unwrap();
+    core.catalog_folder_rename(&eu.id, "EU").unwrap();
+
+    let mut names: Vec<String> = core
+        .catalog_folders()
+        .folders
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    names.sort();
+    assert_eq!(names, ["EU", "prod"]);
+    let (mut changed, mut warned) = (0, Vec::new());
+    while let Ok(event) = events.try_recv() {
+        match event {
+            CoreEvent::CatalogFoldersChanged => changed += 1,
+            CoreEvent::StoreWarning { warning } => warned.push(warning.file),
+            _ => {}
+        }
+    }
+    assert_eq!(changed, 2);
+    assert_eq!(warned, ["catalog-folders.json"]);
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("EU"));
+
+    drop(read_only);
+    core.catalog_folder_create(None, "dev").unwrap();
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        on_disk.contains("\"EU\"") && on_disk.contains("\"dev\""),
+        "{on_disk}"
+    );
+    core.shutdown().await;
 }

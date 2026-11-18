@@ -8,6 +8,7 @@ import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
 import { ResourceRoute } from "../resources/ResourceScreen";
 import { ClusterLayout } from "./ClusterLayout";
+import { ClusterNav } from "./ClusterNav";
 
 const CRD: ApiResourceInfo = {
   resource: {
@@ -49,7 +50,7 @@ const WIDGET_CRD = {
   status: { conditions: [{ type: "Established", status: "True" }] },
 };
 
-/** Renders the layout with a discovery that gives `answers` in turn, then the last. */
+/** Renders the cluster's sidebar with a discovery that gives `answers` in turn, then the last. */
 async function renderWithDiscovery(answers: ApiResourceInfo[][]) {
   let send: (e: WatchEvent) => void = () => {};
   let call = 0;
@@ -71,7 +72,7 @@ async function renderWithDiscovery(answers: ApiResourceInfo[][]) {
   render(
     <MemoryRouter initialEntries={["/cluster/c1"]}>
       <Routes>
-        <Route path="/cluster/:id" element={<ClusterLayout clusterId="c1" />} />
+        <Route path="/cluster/:id" element={<ClusterNav clusterId="c1" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -215,5 +216,6 @@ test("a change in the set of CRDs re-discovers the resources", async () => {
     clusterId: "c1",
     refresh: true,
   });
-  expect(screen.getByTestId("cluster-sidebar")).toBeTruthy();
+  // A cluster tab has no sidebar of its own: the window's shell has it (P1).
+  expect(screen.queryByTestId("cluster-sidebar")).toBeNull();
 });

@@ -2,7 +2,8 @@
 //! builds and tests; only `install` turns it into a Tauri menu, on macOS.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
-/// The ids of the app items. Selecting one emits `menu://command` with `{ id }`.
+/// The ids of the app items. Selecting one sends `menu://command` with `{ id }` to the
+/// focused window.
 pub const APP_COMMANDS: [&str; 4] = ["about", "preferences", "palette", "shortcuts"];
 pub const MENU_EVENT: &str = "menu://command";
 
@@ -110,13 +111,25 @@ pub fn menu_layout() -> Vec<MenuSpec> {
     ]
 }
 
-/// Builds the layout into the app's menu bar and forwards the app items to the UI.
-/// Quit is the predefined item, so it takes the normal exit path and
+/// The window an app item's command goes to (P36): the focused one, or `main` when
+/// none has the focus.
+pub fn menu_target(windows: &[(String, bool)]) -> String {
+    windows
+        .iter()
+        .find(|(_, focused)| *focused)
+        .map_or(skopos_core::windows::MAIN_WINDOW, |(label, _)| {
+            label.as_str()
+        })
+        .to_owned()
+}
+
+/// Builds the layout into the app's menu bar and forwards the app items to the
+/// focused window. Quit is the predefined item, so it takes the normal exit path and
 /// `core.shutdown()` runs.
 #[cfg(target_os = "macos")]
 pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-    use tauri::Emitter;
+    use tauri::{Emitter, EventTarget, Manager};
 
     let menu = Menu::new(app)?;
     for spec in menu_layout() {
@@ -140,7 +153,14 @@ pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         let id = event.id().as_ref();
         if APP_COMMANDS.contains(&id) {
-            if let Err(error) = app.emit(MENU_EVENT, serde_json::json!({ "id": id })) {
+            let windows: Vec<(String, bool)> = app
+                .webview_windows()
+                .into_iter()
+                .map(|(label, window)| (label, window.is_focused().unwrap_or(false)))
+                .collect();
+            let target = EventTarget::webview_window(menu_target(&windows));
+            let payload = serde_json::json!({ "id": id });
+            if let Err(error) = app.emit_to(target, MENU_EVENT, payload) {
                 tracing::warn!("menu command {id} not sent: {error}");
             }
         }
@@ -246,6 +266,15 @@ mod tests {
         for (id, _) in apps {
             assert!(APP_COMMANDS.contains(&id), "{id} is not sent to the UI");
         }
+    }
+
+    #[test]
+    fn a_menu_command_goes_to_the_focused_window_else_to_main() {
+        let focused = [("main".to_owned(), false), ("window-2".to_owned(), true)];
+        assert_eq!(menu_target(&focused), "window-2");
+
+        let none = [("window-2".to_owned(), false), ("main".to_owned(), false)];
+        assert_eq!(menu_target(&none), "main");
     }
 
     #[test]
