@@ -55,7 +55,8 @@ pub struct PaneState {
     pub tabs: Vec<TabState>,
 }
 
-/// Outer position and size in physical pixels.
+/// Physical pixels: the outer position (title bar included) and the inner size, as the
+/// app reads and sets them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -598,8 +599,18 @@ impl AppCore {
     }
 
     /// The app reports a window's bounds when it moves, resizes, maximizes or closes.
+    /// A maximized window keeps the position and size it had before, which it returns
+    /// to when it is restored.
     pub fn window_bounds_set(&self, label: &str, bounds: WindowBounds) -> CoreResult<()> {
-        if find(&self.windows().get(), label)?.bounds == Some(bounds) {
+        let stored = find(&self.windows().get(), label)?.bounds;
+        let bounds = match stored {
+            Some(before) if bounds.maximized => WindowBounds {
+                maximized: true,
+                ..before
+            },
+            _ => bounds,
+        };
+        if stored == Some(bounds) {
             return Ok(());
         }
         self.windows().change(|file| {
