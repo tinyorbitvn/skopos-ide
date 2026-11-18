@@ -202,3 +202,36 @@ test("main keeps its empty layout and saves it after the delay", async () => {
   vi.advanceTimersByTime(LAYOUT_SAVE_DELAY_MS);
   expect(backend.callsTo("window_layout_set")).toHaveLength(1);
 });
+
+test("a layout sent while the core's answer is on its way wins over that answer (P33, P38)", async () => {
+  let answer: (layout: WindowLayout) => void = () => {};
+  const backend = mockBackend({
+    window_layout_get: () =>
+      new Promise<WindowLayout>((resolve) => {
+        answer = resolve;
+      }),
+    window_layout_set: () => null,
+  });
+  const starting = startWindowLayout(isRoute);
+  await vi.waitFor(() =>
+    expect(backend.callsTo("window_layout_get")).toHaveLength(1),
+  );
+  const moved = layoutOf("main", [
+    tab("t1", "/catalog"),
+    tab("t9", "/preferences"),
+  ]);
+
+  await emitEvent("window://layout", moved);
+  answer(layoutOf("main", [tab("t1", "/catalog")]));
+  await starting;
+
+  expect(useWindowLayout.getState()).toMatchObject({
+    layout: moved,
+    ready: true,
+  });
+  // Later layouts from the core still replace it, and none is saved back.
+  const later = layoutOf("main", [tab("t9", "/preferences")]);
+  await emitEvent("window://layout", later);
+  expect(useWindowLayout.getState().layout).toEqual(later);
+  expect(backend.callsTo("window_layout_set")).toEqual([]);
+});

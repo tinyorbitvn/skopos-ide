@@ -93,20 +93,43 @@ function queueSave(layout: WindowLayout): void {
 /**
  * Loads this window's layout from the core, drops the tabs no route knows and sends
  * the result back (P39), then keeps it in sync: each change is saved after 300 ms and
- * at once on `pagehide`, and a layout the core sends replaces this one (P38). Runs
- * once per page; later calls return the first one's promise.
+ * at once on `pagehide`, and a layout the core sends replaces this one (P38). The
+ * listener is in place before the layout is asked for, so a layout the core sends
+ * meanwhile (a tab moved in while the window loads) is kept, and the newest one wins
+ * over the answer. Runs once per page; later calls return the first one's promise.
  */
 export function startWindowLayout(
   isRoute: (path: string) => boolean,
 ): Promise<void> {
   started ??= (async () => {
     const label = windowLabel();
-    let loaded: WindowLayout;
+    let loading = true;
+    let sentMeanwhile: WindowLayout | null = null;
+    const unlisten = await events.onWindowLayout((incoming) => {
+      if (loading) {
+        sentMeanwhile = incoming;
+        return;
+      }
+      cancelSave();
+      const kept = prune(incoming, isRoute);
+      applying = true;
+      try {
+        useWindowLayout.setState({ layout: kept });
+      } finally {
+        applying = false;
+      }
+      if (kept !== incoming) queueSave(kept);
+    });
+    stops.push(unlisten);
+
+    let answer: WindowLayout;
     try {
-      loaded = await api.windowLayoutGet();
+      answer = await api.windowLayoutGet();
     } catch {
-      loaded = startLayout(label);
+      answer = startLayout(label);
     }
+    loading = false;
+    const loaded = sentMeanwhile ?? answer;
     const layout = prune(loaded, isRoute);
     useWindowLayout.setState({ label, layout, ready: true });
     if (layout !== loaded) void api.windowLayoutSet(layout).catch(() => {});
@@ -121,19 +144,6 @@ export function startWindowLayout(
     const onPageHide = () => void flushWindowLayout();
     window.addEventListener("pagehide", onPageHide);
     stops.push(() => window.removeEventListener("pagehide", onPageHide));
-
-    const unlisten = await events.onWindowLayout((incoming) => {
-      cancelSave();
-      const kept = prune(incoming, isRoute);
-      applying = true;
-      try {
-        useWindowLayout.setState({ layout: kept });
-      } finally {
-        applying = false;
-      }
-      if (kept !== incoming) queueSave(kept);
-    });
-    stops.push(unlisten);
   })();
   return started;
 }
