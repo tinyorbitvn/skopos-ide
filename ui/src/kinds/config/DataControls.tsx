@@ -1,29 +1,82 @@
-import { type ReactNode, useState } from "react";
-import { Button, ErrorNotice, Input } from "../../design";
+import { type ReactNode, useId, useState } from "react";
+import { Button, ErrorNotice, Input, Segmented } from "../../design";
 import styles from "./config.module.css";
-import { type DataEditState, isValidDataKey } from "./dataEdits";
+import {
+  convertText,
+  type DataEditState,
+  isValidDataKey,
+  rawHint,
+  type ValueForm,
+  valueError,
+} from "./dataEdits";
 
 const INVALID_KEY = "A key may hold only letters, digits, `.`, `-` and `_`.";
 const MAX_ROWS = 12;
 
-/** A key's text box, as tall as its text up to a limit. */
+/** A key's text box, as tall as its text up to a limit, with any error under it. */
 export function ValueInput(props: {
   label: string;
   testId: string;
   value: string;
   readOnly?: boolean;
+  error?: string;
   onChange(value: string): void;
 }) {
+  const errorId = useId();
   return (
-    <textarea
-      className={styles.input}
-      aria-label={props.label}
-      data-testid={props.testId}
-      rows={Math.min(props.value.split("\n").length + 1, MAX_ROWS)}
-      spellCheck={false}
-      readOnly={props.readOnly}
-      value={props.value}
-      onChange={(e) => props.onChange(e.target.value)}
+    <>
+      <textarea
+        className={
+          props.error ? `${styles.input} ${styles.invalid}` : styles.input
+        }
+        aria-label={props.label}
+        aria-invalid={props.error ? true : undefined}
+        aria-describedby={props.error ? errorId : undefined}
+        data-testid={props.testId}
+        rows={Math.min(props.value.split("\n").length + 1, MAX_ROWS)}
+        spellCheck={false}
+        readOnly={props.readOnly}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+      {props.error ? (
+        <span id={errorId} role="alert" className={styles.error}>
+          {props.error}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Raw | Base64 for one value's text. Choosing the other form hands over the
+ * text converted to it; Raw is offered only for base64 of UTF-8 text.
+ */
+export function FormSwitch(props: {
+  label: string;
+  testId: string;
+  form: ValueForm;
+  text: string;
+  disabled?: boolean;
+  onChange(form: ValueForm, text: string): void;
+}) {
+  const hint = rawHint(props.form, props.text);
+  return (
+    <Segmented
+      label={props.label}
+      size="sm"
+      value={props.form}
+      testId={props.testId}
+      options={[
+        {
+          value: "raw",
+          label: "Raw",
+          disabled: props.disabled || hint !== undefined,
+          hint,
+        },
+        { value: "base64", label: "Base64", disabled: props.disabled },
+      ]}
+      onChange={(form) => props.onChange(form, convertText(props.text, form))}
     />
   );
 }
@@ -103,13 +156,25 @@ export function DataControls(props: {
   edits: DataEditState;
   /** Names a new key may not take, beyond those being edited. */
   reservedKeys?: string[];
+  /**
+   * Offers a new value as raw text or as base64, and learns the form each key
+   * is added in. Without it, a new value is text.
+   */
+  onAddInForm?(key: string, form: ValueForm): void;
+  /** Some text cannot be saved as it is. */
+  invalid?: boolean;
 }) {
-  const { edits, reservedKeys = [] } = props;
+  const { edits, reservedKeys = [], onAddInForm, invalid = false } = props;
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [newForm, setNewForm] = useState<ValueForm>("raw");
   const valid = isValidDataKey(newKey);
+  const valueProblem = valueError(newForm, newValue);
   const canAdd =
-    valid && edits.isNewKey(newKey) && !reservedKeys.includes(newKey);
+    valid &&
+    edits.isNewKey(newKey) &&
+    !reservedKeys.includes(newKey) &&
+    !valueProblem;
   return (
     <div className={styles.controls}>
       <div className={styles.addRow}>
@@ -122,11 +187,25 @@ export function DataControls(props: {
           data-testid="data-new-key"
           onChange={(e) => setNewKey(e.target.value)}
         />
+        {onAddInForm ? (
+          <FormSwitch
+            label="Encoding of new value"
+            testId="data-new-form"
+            form={newForm}
+            text={newValue}
+            disabled={edits.saving}
+            onChange={(form, text) => {
+              setNewForm(form);
+              setNewValue(text);
+            }}
+          />
+        ) : null}
         <ValueInput
           label="New value"
           testId="data-new-value"
           value={newValue}
           readOnly={edits.saving}
+          error={valueProblem}
           onChange={setNewValue}
         />
         <Button
@@ -134,9 +213,11 @@ export function DataControls(props: {
           disabled={!canAdd || edits.saving}
           data-testid="data-add"
           onClick={() => {
+            onAddInForm?.(newKey, newForm);
             edits.setText(newKey, newValue);
             setNewKey("");
             setNewValue("");
+            setNewForm("raw");
           }}
         >
           Add
@@ -150,7 +231,7 @@ export function DataControls(props: {
         <Button
           variant="primary"
           loading={edits.saving}
-          disabled={!edits.dirty}
+          disabled={!edits.dirty || invalid}
           data-testid="data-save"
           onClick={() => void edits.save()}
         >
