@@ -1,9 +1,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type CSSProperties,
+  createContext,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -36,6 +39,9 @@ const OVERSCAN = 10;
 /** 12 px cell padding on each side of the 18 px checkbox, plus 2 px to spare. */
 const SELECT_TRACK_PX = 44;
 const CLOCK_TICK_MS = 30_000;
+/** A row younger than this has its age count every second. */
+const FRESH_MS = 60_000;
+const FRESH_TICK_MS = 1000;
 
 let clockNow = Date.now();
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,12 +65,33 @@ function subscribeClock(listener: () => void): () => void {
   };
 }
 
+/** The time of the table a cell is in, which counts every second while it must. */
+const TableNow = createContext(0);
+
 /**
  * The current time, for cells that show an age. Every cell reads the same timer, so
- * 10,000 rows do not mean 10,000 timers, and ages move together.
+ * 10,000 rows do not mean 10,000 timers, and ages move together. In a table that shows
+ * a row less than a minute old, the table's own timer also counts every second.
  */
 export function useNow(): number {
-  return useSyncExternalStore(subscribeClock, () => clockNow);
+  const shared = useSyncExternalStore(subscribeClock, () => clockNow);
+  return Math.max(shared, useContext(TableNow));
+}
+
+/**
+ * Counts every second until `until`, so the age of a row just created does not stay at
+ * `0s` for up to 30 s. One timer for the table; only the cells that read `useNow`
+ * redraw. Its last time stays, so an age never counts backwards to the shared clock.
+ */
+function FreshClock(props: { until: number; children: ReactNode }) {
+  const [now, setNow] = useState(Date.now);
+  const counting = now < props.until;
+  useEffect(() => {
+    if (!counting) return;
+    const timer = setInterval(() => setNow(Date.now()), FRESH_TICK_MS);
+    return () => clearInterval(timer);
+  }, [counting]);
+  return <TableNow.Provider value={now}>{props.children}</TableNow.Provider>;
 }
 
 function track(width: number | string): string {
@@ -101,6 +128,11 @@ export function VirtualTable<T>(props: {
   onSelectedChange?(s: Set<string>): void;
   onRowClick?(row: T): void;
   rowTestId?(row: T): string;
+  /**
+   * When a row's object was created, as RFC 3339 text. While a row shown is less than
+   * a minute old, the ages in the table count every second rather than every 30 s.
+   */
+  rowCreated?(row: T): string | undefined;
   /** What a row's checkbox is named after: `Select <label>`. Defaults to the row key. */
   rowLabel?(row: T): string;
   /** The test id of a row's checkbox. */
@@ -194,6 +226,16 @@ export function VirtualTable<T>(props: {
     onSelectedChange?.(next);
   }
 
+  const items = virtualizer.getVirtualItems();
+  // Only the rows shown matter: a row out of view has no age cell to redraw.
+  let freshUntil = 0;
+  if (props.rowCreated) {
+    for (const item of items) {
+      const created = Date.parse(props.rowCreated(rows[item.index]) ?? "");
+      if (created + FRESH_MS > freshUntil) freshUntil = created + FRESH_MS;
+    }
+  }
+
   const selectable = onSelectedChange !== undefined;
   const tracks = columns.map((c) => track(c.width));
   const minWidth = columns.reduce(
@@ -276,81 +318,86 @@ export function VirtualTable<T>(props: {
           className={styles.body}
           style={{ height: virtualizer.getTotalSize() }}
         >
-          {virtualizer.getVirtualItems().map((item) => {
-            const row = rows[item.index];
-            const key = rowKey(row);
-            const isSelected = selected?.has(key) ?? false;
-            return (
-              <tr
-                key={key}
-                className={[
-                  styles.row,
-                  styles.bodyRow,
-                  onRowClick ? styles.clickable : "",
-                  isSelected ? styles.selected : "",
-                  key === props.activeKey ? styles.active : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                style={{
-                  height: rowHeight,
-                  transform: `translateY(${item.start}px)`,
-                }}
-                aria-rowindex={item.index + 2}
-                aria-selected={isSelected}
-                aria-current={key === props.activeKey ? "true" : undefined}
-                data-testid={props.rowTestId?.(row)}
-                tabIndex={onRowClick ? 0 : undefined}
-                onClick={
-                  onRowClick
-                    ? (e) => {
-                        if (!belongsToControl(e)) onRowClick(row);
-                      }
-                    : undefined
-                }
-                onKeyDown={
-                  onRowClick
-                    ? (e) => {
-                        if (e.key === "Enter" && e.target === e.currentTarget) {
-                          onRowClick(row);
+          <FreshClock until={freshUntil}>
+            {items.map((item) => {
+              const row = rows[item.index];
+              const key = rowKey(row);
+              const isSelected = selected?.has(key) ?? false;
+              return (
+                <tr
+                  key={key}
+                  className={[
+                    styles.row,
+                    styles.bodyRow,
+                    onRowClick ? styles.clickable : "",
+                    isSelected ? styles.selected : "",
+                    key === props.activeKey ? styles.active : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  style={{
+                    height: rowHeight,
+                    transform: `translateY(${item.start}px)`,
+                  }}
+                  aria-rowindex={item.index + 2}
+                  aria-selected={isSelected}
+                  aria-current={key === props.activeKey ? "true" : undefined}
+                  data-testid={props.rowTestId?.(row)}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  onClick={
+                    onRowClick
+                      ? (e) => {
+                          if (!belongsToControl(e)) onRowClick(row);
                         }
+                      : undefined
+                  }
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (
+                            e.key === "Enter" &&
+                            e.target === e.currentTarget
+                          ) {
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                  {selectable ? (
+                    <td className={styles.cell}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${props.rowLabel?.(row) ?? key}`}
+                        data-testid={props.selectTestId?.(row)}
+                        checked={isSelected}
+                        onChange={(e) =>
+                          toggleRow(
+                            row,
+                            item.index,
+                            (e.nativeEvent as globalThis.MouseEvent).shiftKey,
+                          )
+                        }
+                      />
+                    </td>
+                  ) : null}
+                  {columns.map((c) => (
+                    <td
+                      key={c.id}
+                      className={
+                        c.stickyEnd
+                          ? `${styles.cell} ${styles.stickyEnd}`
+                          : styles.cell
                       }
-                    : undefined
-                }
-              >
-                {selectable ? (
-                  <td className={styles.cell}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${props.rowLabel?.(row) ?? key}`}
-                      data-testid={props.selectTestId?.(row)}
-                      checked={isSelected}
-                      onChange={(e) =>
-                        toggleRow(
-                          row,
-                          item.index,
-                          (e.nativeEvent as globalThis.MouseEvent).shiftKey,
-                        )
-                      }
-                    />
-                  </td>
-                ) : null}
-                {columns.map((c) => (
-                  <td
-                    key={c.id}
-                    className={
-                      c.stickyEnd
-                        ? `${styles.cell} ${styles.stickyEnd}`
-                        : styles.cell
-                    }
-                    inert={props.endInert && c.stickyEnd ? true : undefined}
-                  >
-                    {c.render(row)}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
+                      inert={props.endInert && c.stickyEnd ? true : undefined}
+                    >
+                      {c.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </FreshClock>
         </tbody>
       </table>
     </div>

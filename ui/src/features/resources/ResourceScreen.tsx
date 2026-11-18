@@ -371,6 +371,7 @@ export function ResourceScreen(props: {
               columns={tableColumns}
               rowKey={objectKey}
               rowTestId={rowTestId}
+              rowCreated={(o) => o.metadata.creationTimestamp}
               rowLabel={(o) =>
                 o.metadata.namespace
                   ? `${o.metadata.namespace}/${o.metadata.name}`
