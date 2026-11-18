@@ -172,3 +172,55 @@ export function screenLinkHandlers(
     },
   };
 }
+
+/** How long after a click on a palette row its second click makes a double-click. */
+export const DOUBLE_CLICK_MS = 500;
+/** How far from the first click, in pixels, the second one may land. */
+const DOUBLE_CLICK_SLOP = 4;
+const SECOND_CLICK = [
+  "pointerdown",
+  "mousedown",
+  "pointerup",
+  "mouseup",
+  "click",
+  "dblclick",
+] as const;
+
+/**
+ * A palette row is a navigation item (P11 to P13), but the palette closes on the
+ * first click, so the second click of a double-click lands on whatever was under it.
+ * For `DOUBLE_CLICK_MS` after the first click at `x`, `y`, the second one is caught
+ * here, so it reaches nothing below, and its `dblclick` pins `tabId`, the tab that the
+ * first click showed the location in. A press farther away, or a new click (a mouse
+ * event whose `detail` is under 2), ends the wait.
+ */
+export function catchSecondClick(tabId: string, x: number, y: number): void {
+  const timer = setTimeout(stop, DOUBLE_CLICK_MS);
+  function stop(): void {
+    clearTimeout(timer);
+    for (const type of SECOND_CLICK) {
+      window.removeEventListener(type, onEvent, true);
+    }
+  }
+  function onEvent(event: Event): void {
+    const { clientX, clientY, detail } = event as globalThis.MouseEvent;
+    const near =
+      Math.abs(clientX - x) <= DOUBLE_CLICK_SLOP &&
+      Math.abs(clientY - y) <= DOUBLE_CLICK_SLOP;
+    // The mouse events of a new click count from 1; pointer events do not count.
+    const fresh = !event.type.startsWith("pointer") && detail < 2;
+    if (!near || fresh) {
+      stop();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type === "dblclick") {
+      stop();
+      useWindowLayout.getState().dispatch({ type: "pin", tabId });
+    }
+  }
+  for (const type of SECOND_CLICK) {
+    window.addEventListener(type, onEvent, true);
+  }
+}

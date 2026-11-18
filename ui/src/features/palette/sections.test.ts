@@ -349,3 +349,28 @@ test("object rows carry the namespace in their id and hint, and open with ?objec
     ["/cluster/c1/r/networking.k8s.io/ingresses?object=web%2Fsite"],
   ]);
 });
+
+test("rows that open a location carry it, for the click modes (P11 to P13)", () => {
+  const [cluster] = clusterEntries([
+    clusterEntry({ id: "a/b", contextName: "prod" }),
+  ]);
+  expect(cluster.path).toBe("/cluster/a%2Fb");
+  const pages = pageEntries("c1", []);
+  expect(pages.map((p) => p.path).slice(0, 2)).toEqual([
+    "/cluster/c1",
+    "/cluster/c1/helm/charts",
+  ]);
+  const [object] = objectEntries("c1", [
+    {
+      kind: "Pod",
+      group: "",
+      plural: "pods",
+      namespace: "default",
+      name: "web-1",
+    },
+  ]);
+  expect(object.path).toBe("/cluster/c1/r/core/pods?object=default%2Fweb-1");
+  const commands = commandEntries(context(), false);
+  expect(commands.find((c) => c.key === "catalog")?.path).toBe("/catalog");
+  expect(commands.find((c) => c.key === "about")?.path).toBeUndefined();
+});

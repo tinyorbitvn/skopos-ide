@@ -5,10 +5,15 @@ import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetPrefsForTest } from "../stores/prefs";
 import { resetShellForTest, useShell } from "../stores/shell";
+import {
+  resetWindowLayoutForTest,
+  useWindowLayout,
+} from "../stores/windowLayout";
 import { mockBackend } from "../test/ipc";
 import {
   COMMANDS,
   type CommandContext,
+  commandById,
   runCommand,
   runMenuCommand,
 } from "./commands";
@@ -39,6 +44,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   resetShellForTest();
   resetPrefsForTest();
+  resetWindowLayoutForTest();
 });
 
 test("the registry lists the spec's commands in order", () => {
@@ -60,6 +66,9 @@ test("the registry lists the spec's commands in order", () => {
       ["theme-system", "Theme: System", null],
       ["back", "Go back", "back"],
       ["forward", "Go forward", "forward"],
+      ["split-right", "Split right", "splitRight"],
+      ["close-tab", "Close tab", "closeTab"],
+      ["pin-tab", "Pin tab", null],
     ],
   );
 });
@@ -229,4 +238,66 @@ test("an open shell dialog does not stop menu ids", () => {
   } finally {
     palette.remove();
   }
+});
+
+function windowLayout() {
+  return useWindowLayout.getState().layout;
+}
+
+test("the tab commands act on the focused tab, and show only when they apply (P17)", () => {
+  const ctx = context();
+  const pin = COMMANDS.find((c) => c.id === "pin-tab");
+  const shown = () =>
+    COMMANDS.filter((c) => c.available(ctx))
+      .map((c) => c.id)
+      .filter((id) => ["split-right", "close-tab", "pin-tab"].includes(id));
+  expect(shown()).toEqual(["split-right", "close-tab", "pin-tab"]);
+
+  runCommand("pin-tab", ctx);
+  expect(windowLayout().panes[0].tabs[0].pinned).toBe(true);
+  expect(pin?.label(ctx)).toBe("Unpin tab");
+  // A pinned tab is not closed (P14).
+  expect(shown()).toEqual(["split-right", "pin-tab"]);
+  runCommand("pin-tab", ctx);
+  expect(pin?.label(ctx)).toBe("Pin tab");
+
+  runCommand("split-right", ctx);
+  runCommand("split-right", ctx);
+  expect(windowLayout().panes).toHaveLength(3);
+  expect(shown()).toEqual(["close-tab", "pin-tab"]);
+  runCommand("split-right", ctx);
+  expect(windowLayout().panes).toHaveLength(3);
+
+  runCommand("close-tab", ctx);
+  expect(windowLayout().panes).toHaveLength(2);
+});
+
+test("in a window without tabs the tab commands do not show", () => {
+  resetWindowLayoutForTest({
+    label: "main",
+    bounds: null,
+    panes: [{ id: "p1", width: 1, selected: "", tabs: [] }],
+    focusedPane: 0,
+  });
+  const ids = COMMANDS.filter((c) => c.available(context())).map((c) => c.id);
+  expect(ids).not.toContain("split-right");
+  expect(ids).not.toContain("close-tab");
+  expect(ids).not.toContain("pin-tab");
+});
+
+test("the commands that open a location name it, so the click modes can open it (P11 to P13)", () => {
+  const ctx = context({ cluster: on(CONNECTED) });
+  expect(
+    COMMANDS.filter((c) => c.path !== undefined).map((c) => [
+      c.id,
+      c.path?.(ctx),
+    ]),
+  ).toEqual([
+    ["catalog", "/catalog"],
+    ["preferences", "/preferences"],
+    ["install-chart", "/cluster/c1/helm/charts"],
+    ["cluster-settings", "/cluster/c1/settings"],
+    ["resource-map", "/cluster/c1/map"],
+  ]);
+  expect(commandById("resource-map").path?.(context())).toBeNull();
 });

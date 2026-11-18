@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
 import {
@@ -8,7 +8,9 @@ import {
 } from "../../stores/windowLayout";
 import { tabPath } from "./layout";
 import {
+  catchSecondClick,
   clickMode,
+  DOUBLE_CLICK_MS,
   linkPath,
   navItemHandlers,
   openPath,
@@ -201,4 +203,68 @@ test("in a screen, Shift+click stays in the tab instead of leaving the app", () 
   });
   expect(shifted).toBe(false);
   expect(shape()).toBe("p1:*/cluster/a");
+});
+
+describe("the second click of a double-click on a palette row (P13)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** Fires the second click's events at `x`, `y` on the body; how many got through. */
+  function secondClick(x: number, y: number): number {
+    let through = 0;
+    const count = () => {
+      through += 1;
+    };
+    const types = ["pointerdown", "mousedown", "mouseup", "click", "dblclick"];
+    for (const type of types) document.body.addEventListener(type, count);
+    for (const type of types) {
+      document.body.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          detail: 2,
+        }),
+      );
+    }
+    for (const type of types) document.body.removeEventListener(type, count);
+    return through;
+  }
+
+  test("is caught where the first one was, reaches nothing below, and pins the tab", () => {
+    catchSecondClick("t1", 100, 40);
+    expect(secondClick(102, 41)).toBe(0);
+    expect(shape()).toBe("p1:*/catalog^");
+    // Caught once only.
+    expect(secondClick(102, 41)).toBe(5);
+  });
+
+  test("a press elsewhere ends the wait and goes through", () => {
+    catchSecondClick("t1", 100, 40);
+    expect(secondClick(300, 40)).toBe(5);
+    expect(secondClick(100, 40)).toBe(5);
+    expect(shape()).toBe("p1:*/catalog");
+  });
+
+  test("a new click at the same place goes through", () => {
+    catchSecondClick("t1", 100, 40);
+    let clicked = 0;
+    const count = () => {
+      clicked += 1;
+    };
+    document.body.addEventListener("click", count);
+    fireEvent.click(document.body, { clientX: 100, clientY: 40, detail: 1 });
+    document.body.removeEventListener("click", count);
+    expect(clicked).toBe(1);
+    expect(secondClick(100, 40)).toBe(5);
+    expect(shape()).toBe("p1:*/catalog");
+  });
+
+  test("after the double-click time nothing is caught", () => {
+    vi.useFakeTimers();
+    catchSecondClick("t1", 100, 40);
+    vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+    expect(secondClick(100, 40)).toBe(5);
+    expect(shape()).toBe("p1:*/catalog");
+  });
 });

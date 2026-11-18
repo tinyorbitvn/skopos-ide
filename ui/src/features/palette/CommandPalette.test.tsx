@@ -8,12 +8,17 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, expect, test } from "vitest";
+import { focusedTab, tabPath } from "../../app/tabs/layout";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import type { ObjectNames } from "../../ipc/generated/ObjectNames";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { resetShellForTest, useShell } from "../../stores/shell";
+import {
+  resetWindowLayoutForTest,
+  useWindowLayout,
+} from "../../stores/windowLayout";
 import { clusterEntry, emitEvent, mockBackend } from "../../test/ipc";
 import { CommandPalette } from "./CommandPalette";
 
@@ -166,7 +171,22 @@ function where(): string {
 beforeEach(() => {
   resetCatalogForTest();
   resetShellForTest();
+  resetWindowLayoutForTest();
 });
+
+/** Per pane, the locations of its tabs; `*` marks the selected one, `^` a pinned one. */
+function panes(): string[] {
+  return useWindowLayout
+    .getState()
+    .layout.panes.map((p) =>
+      p.tabs
+        .map(
+          (t) =>
+            `${p.selected === t.id ? "*" : ""}${tabPath(t)}${t.pinned ? "^" : ""}`,
+        )
+        .join(","),
+    );
+}
 
 test("without a query: Commands and Clusters at their caps", async () => {
   const nine = Array.from({ length: 9 }, (_, i) =>
@@ -476,4 +496,69 @@ test("labels show their matched letters; a cluster matched by its state has none
   expect(
     screen.getByTestId("palette-cluster-c2").querySelector("mark"),
   ).toBeNull();
+});
+
+test("Ctrl+click on a row opens its location in a new tab, and a middle-click beside (P12)", async () => {
+  await show("/cluster/c1");
+
+  type("pods");
+  fireEvent.click(await screen.findByTestId("palette-page-r/core/pods"), {
+    ctrlKey: true,
+  });
+  await waitFor(() => expect(screen.queryByTestId("palette")).toBeNull());
+  expect(panes()).toEqual(["/catalog,*/cluster/c1/r/core/pods"]);
+  // The focused tab did not move.
+  expect(where()).toBe("/cluster/c1");
+
+  await openPalette();
+  type("staging");
+  const row = await screen.findByTestId("palette-cluster-c2");
+  expect(fireEvent.mouseDown(row, { button: 1 })).toBe(false);
+  fireEvent(
+    row,
+    new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }),
+  );
+  await waitFor(() => expect(screen.queryByTestId("palette")).toBeNull());
+  expect(panes()).toEqual([
+    "/catalog,*/cluster/c1/r/core/pods",
+    "*/cluster/c2",
+  ]);
+});
+
+test("a row without a location runs as a plain click whatever the modifiers", async () => {
+  await show("/catalog");
+
+  type("about");
+  fireEvent.click(await screen.findByTestId("palette-command-about"), {
+    ctrlKey: true,
+  });
+  await waitFor(() => expect(useShell.getState().dialog).toBe("about"));
+  expect(panes()).toEqual(["*/catalog"]);
+});
+
+test("a double-click on a row shows its location, then pins the tab that shows it (P13)", async () => {
+  await show("/cluster/c1");
+
+  type("nodes");
+  fireEvent.click(await screen.findByTestId("palette-page-r/core/nodes"), {
+    clientX: 200,
+    clientY: 120,
+    detail: 1,
+  });
+  await waitFor(() => expect(where()).toBe("/cluster/c1/r/core/nodes"));
+  // The second click lands where the palette was.
+  for (const type of ["mousedown", "mouseup", "click", "dblclick"]) {
+    fireEvent(
+      document.body,
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: 200,
+        clientY: 120,
+        detail: 2,
+      }),
+    );
+  }
+  const tab = focusedTab(useWindowLayout.getState().layout);
+  expect(tab?.pinned).toBe(true);
 });
