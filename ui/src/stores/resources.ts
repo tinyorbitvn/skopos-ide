@@ -70,6 +70,21 @@ function keyOf(key: ObjectKey): string {
   return `${key.namespace ?? ""}/${key.name}`;
 }
 
+/**
+ * The order of a snapshot: by namespace, cluster-scoped first, then name, comparing
+ * code units as the core compares bytes. Keep it the same as `sorted_items` in
+ * `crates/skopos-core/src/resources/hub.rs`, so an object a batch adds shows where a
+ * snapshot would put it.
+ */
+function compareListed(a: KubeObject, b: KubeObject): number {
+  const an = a.metadata.namespace ?? "";
+  const bn = b.metadata.namespace ?? "";
+  if (an !== bn) return an < bn ? -1 : 1;
+  const { name: x } = a.metadata;
+  const { name: y } = b.metadata;
+  return x === y ? 0 : x < y ? -1 : 1;
+}
+
 /** Applies one event and publishes a single new state for it. */
 function apply(entry: Entry, event: WatchEvent): void {
   const { state } = entry;
@@ -87,8 +102,18 @@ function apply(entry: Entry, event: WatchEvent): void {
     }
     case "batch": {
       for (const key of event.deletes) entry.rows.delete(keyOf(key));
+      // An update keeps its place. A Map adds a new key at the end, and the core sends
+      // a batch in no order, so new objects are put in the snapshot's order.
+      let added = false;
       for (const o of event.upserts as unknown as KubeObject[]) {
-        entry.rows.set(objectKey(o), o);
+        const key = objectKey(o);
+        added ||= !entry.rows.has(key);
+        entry.rows.set(key, o);
+      }
+      if (added) {
+        entry.rows = new Map(
+          [...entry.rows].sort(([, a], [, b]) => compareListed(a, b)),
+        );
       }
       entry.state = { ...state, items: [...entry.rows.values()] };
       break;
