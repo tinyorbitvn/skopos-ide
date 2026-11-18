@@ -3,8 +3,8 @@
  * on every canvas[data-ribbon], in the page's own tokens. The page works without this
  * script: the canvas stays transparent and the CSS glow behind it shows. When the tokens or
  * WebGL fail, the canvas hides, with the same result. Under reduced motion it draws one
- * still frame. It animates only while its canvas is on screen and the tab is visible.
- * Nothing is fetched.
+ * still frame, and it follows that setting when it changes. It animates, at about 30 frames
+ * a second, only while its canvas is on screen and the tab is visible. Nothing is fetched.
  */
 (function (global) {
   "use strict";
@@ -74,6 +74,9 @@ void main() {
   const DEFAULT_ANGLE = 0.74;
   // The still frame shows the clock this many seconds after the canvas's offset.
   const STILL_AT = 4;
+  // The ribbon moves slowly, so about 30 frames a second look like 60 or 120 and cost the
+  // GPU half or a quarter as much. The margin under 33.3 ms absorbs the display's jitter.
+  const MIN_FRAME_MS = 28;
 
   // [r, g, b] in 0..1 for a "#rrggbb" token, spaces around it allowed; null for any other shape.
   function tokenColor(style, name) {
@@ -126,7 +129,12 @@ void main() {
 
     let gl = null;
     try {
-      gl = canvas.getContext("webgl", { alpha: false, antialias: false, depth: false });
+      gl = canvas.getContext("webgl", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        powerPreference: "low-power",
+      });
     } catch {
       gl = null;
     }
@@ -182,21 +190,24 @@ void main() {
       canvas.hidden = true;
     });
 
-    const still =
-      typeof win.matchMedia === "function" && win.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (still) {
-      draw(offset + STILL_AT);
-      listen(win, "resize", () => draw(offset + STILL_AT));
-      return stop;
-    }
+    // The browser keeps this list's matches current, and says so with a change event.
+    const motion =
+      typeof win.matchMedia === "function" ? win.matchMedia("(prefers-reduced-motion: reduce)") : null;
+    const still = () => Boolean(motion?.matches);
+    const drawStill = () => draw(offset + STILL_AT);
 
     // Without IntersectionObserver the canvas counts as always in view.
     let inView = typeof win.IntersectionObserver !== "function";
-    const running = () => !stopped && inView && !doc.hidden;
+    let watching = false;
+    let last = -Infinity;
+    const running = () => !stopped && !still() && inView && !doc.hidden;
     function tick(ms) {
       frame = 0;
       if (!running()) return;
-      draw(offset + ms / 1000);
+      if (ms - last >= MIN_FRAME_MS) {
+        last = ms;
+        draw(offset + ms / 1000);
+      }
       frame = win.requestAnimationFrame(tick);
     }
     function update() {
@@ -206,15 +217,31 @@ void main() {
         frame = 0;
       }
     }
-    if (!inView) {
-      observer = new win.IntersectionObserver((entries) => {
-        for (const entry of entries) inView = entry.isIntersecting;
-        update();
-      });
-      observer.observe(canvas);
+    // Watches the view and the tab from the first moving frame on, so a page that stays
+    // under reduced motion never needs the observer.
+    function watch() {
+      if (watching) return;
+      watching = true;
+      if (!inView) {
+        observer = new win.IntersectionObserver((entries) => {
+          for (const entry of entries) inView = entry.isIntersecting;
+          update();
+        });
+        observer.observe(canvas);
+      }
+      listen(doc, "visibilitychange", update);
     }
-    listen(doc, "visibilitychange", update);
-    update();
+    function follow() {
+      if (still()) drawStill();
+      else watch();
+      update();
+    }
+    // A moving ribbon redraws at its size on its next frame; a still one needs this.
+    listen(win, "resize", () => {
+      if (still()) drawStill();
+    });
+    if (motion && typeof motion.addEventListener === "function") listen(motion, "change", follow);
+    follow();
     return stop;
   }
 

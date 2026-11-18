@@ -109,11 +109,13 @@ function fakeCanvas({
     width: 300,
     height: 150,
     contextRequests: 0,
+    contextAttributes: null,
     getAttribute(name) {
       return Object.hasOwn(this.attrs, name) ? this.attrs[name] : null;
     },
-    getContext(type) {
+    getContext(type, attributes) {
       this.contextRequests += 1;
+      this.contextAttributes = attributes ?? null;
       if (throws) throw new Error("WebGL is blocked");
       return type === "webgl" ? this.gl : null;
     },
@@ -130,6 +132,12 @@ function fakeCanvas({
 function fakeWindow({ reduced = false, hidden = false, dpr = 2, observer = true, tokens = {} } = {}) {
   const windowEvents = listenerBag();
   const documentEvents = listenerBag();
+  const motionEvents = listenerBag();
+  const motion = {
+    matches: reduced,
+    addEventListener: motionEvents.addEventListener,
+    removeEventListener: motionEvents.removeEventListener,
+  };
   const values = { ...TOKENS, ...tokens };
   const frames = new Map();
   const observers = [];
@@ -159,7 +167,7 @@ function fakeWindow({ reduced = false, hidden = false, dpr = 2, observer = true,
     addEventListener: windowEvents.addEventListener,
     removeEventListener: windowEvents.removeEventListener,
     getComputedStyle: () => ({ getPropertyValue: (name) => values[name] ?? "" }),
-    matchMedia: (query) => ({ matches: reduced && query === "(prefers-reduced-motion: reduce)" }),
+    matchMedia: (query) => (query === "(prefers-reduced-motion: reduce)" ? motion : { matches: false }),
     requestAnimationFrame(callback) {
       const id = nextFrame++;
       frames.set(id, callback);
@@ -191,7 +199,11 @@ function fakeWindow({ reduced = false, hidden = false, dpr = 2, observer = true,
     resize() {
       windowEvents.emit("resize");
     },
-    listening: () => windowEvents.count() + documentEvents.count(),
+    setReduced(value) {
+      motion.matches = value;
+      motionEvents.emit("change");
+    },
+    listening: () => windowEvents.count() + documentEvents.count() + motionEvents.count(),
   };
 }
 
@@ -244,6 +256,59 @@ describe("ribbon.js", () => {
     assert.equal(canvas.gl.draws, 2);
     assert.deepEqual([canvas.width, canvas.height], [1200, 900]);
     assert.equal(env.frames.size, 0);
+  });
+
+  test("turning reduced motion on stops on a still frame, and turning it off resumes", () => {
+    const env = fakeWindow();
+    const canvas = fakeCanvas({ attrs: { "data-ribbon": "", "data-ribbon-offset": "11" } });
+    loadRibbon().start(canvas, env.win);
+    env.intersect(true);
+    env.runFrames(1000);
+    assert.equal(canvas.gl.draws, 1);
+    env.setReduced(true);
+    assert.equal(env.frames.size, 0, "the loop stops");
+    assert.equal(canvas.gl.draws, 2);
+    assert.equal(canvas.gl.uniforms.uTime, 15, "the still frame");
+    env.resize();
+    assert.equal(canvas.gl.draws, 3, "a resize redraws the still frame");
+    env.setReduced(false);
+    assert.equal(env.frames.size, 1, "the loop resumes");
+    env.runFrames(5000);
+    assert.equal(canvas.gl.uniforms.uTime, 16);
+    env.resize();
+    assert.equal(canvas.gl.draws, 4, "a moving ribbon waits for its next frame");
+  });
+
+  test("a page loaded under reduced motion starts moving once the setting is turned off", () => {
+    const env = fakeWindow({ reduced: true });
+    const canvas = fakeCanvas();
+    loadRibbon().start(canvas, env.win);
+    assert.equal(env.observers.length, 0);
+    env.setReduced(false);
+    assert.equal(env.observers[0].targets[0], canvas);
+    env.intersect(true);
+    assert.equal(env.frames.size, 1);
+  });
+
+  test("draws at most about 30 frames a second, whatever the display's rate", () => {
+    const env = fakeWindow({ observer: false });
+    const canvas = fakeCanvas();
+    loadRibbon().start(canvas, env.win);
+    // A 120 Hz display: a frame every 8.33 ms for half a second.
+    for (let i = 0; i <= 60; i++) env.runFrames(1000 + (i * 1000) / 120);
+    assert.equal(canvas.gl.draws, 16);
+    assert.equal(env.frames.size, 1, "keeps asking for frames");
+  });
+
+  test("asks for a low-power context without alpha, antialiasing or depth", () => {
+    const canvas = fakeCanvas();
+    loadRibbon().start(canvas, fakeWindow().win);
+    assert.deepEqual(plain(canvas.contextAttributes), {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      powerPreference: "low-power",
+    });
   });
 
   test("draws at the CSS size times the pixel ratio, at most 1.5 and 2400 px wide", () => {
@@ -387,8 +452,29 @@ describe("ribbon.js", () => {
     assert.equal(other.contextRequests, 0);
   });
 
-  test("makes no network request and starts only where there is a document", () => {
+  test("makes no network request", () => {
     assert.doesNotMatch(CODE, /fetch\(|XMLHttpRequest|sendBeacon|WebSocket|import\(/);
-    assert.equal(typeof loadRibbon().start, "function");
+  });
+
+  test("starts by itself only where there is a document and a window", () => {
+    for (const [globals, starts] of [
+      [["document", "window"], true],
+      [["window"], false],
+      [["document"], false],
+    ]) {
+      const env = fakeWindow();
+      const asked = [];
+      const doc = Object.assign(env.doc, {
+        querySelectorAll(selector) {
+          asked.push(selector);
+          return [];
+        },
+      });
+      const context = vm.createContext({});
+      if (globals.includes("document")) context.document = doc;
+      if (globals.includes("window")) context.window = env.win;
+      vm.runInContext(CODE, context, { filename: "ribbon.js" });
+      assert.deepEqual(asked, starts ? ["canvas[data-ribbon]"] : [], globals.join(" and "));
+    }
   });
 });
