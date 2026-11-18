@@ -63,6 +63,16 @@
   color: var(--text-accent);
 }
 
+/* The arrow of an item that opens a submenu. */
+.more {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.item[data-state="open"] {
+  background: var(--surface-hover);
+}
+
 .hint {
   margin-left: auto;
   padding-left: var(--space-8);
