@@ -160,7 +160,7 @@ fn open_folders(paths: &AppPaths, warnings: &mut Vec<StoreWarning>) -> JsonStore
     let loaded = store.get();
     let repaired = loaded.clone().repaired();
     if repaired != loaded {
-        tracing::warn!("{CATALOG_FOLDERS_FILE}: repaired folders with a missing parent or a cycle");
+        tracing::warn!("{CATALOG_FOLDERS_FILE}: repaired a folder tree the UI cannot show");
         // A failed save keeps the repaired tree in memory (P44).
         if let Ok(((), Some(failed))) = store.try_update_kept(|all| {
             *all = repaired;
