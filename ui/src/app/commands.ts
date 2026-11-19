@@ -4,6 +4,8 @@ import {
   AppWindow,
   ArrowLeft,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   Columns2,
   type IconComponent,
   Info,
@@ -30,6 +32,7 @@ import type { Theme } from "../ipc/generated/Theme";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
 import { useShell } from "../stores/shell";
+import { toggleSidebar, useSidebarToggle } from "../stores/sidebarCollapse";
 import { useWindowLayout } from "../stores/windowLayout";
 import { type CurrentCluster, useCurrentCluster } from "./currentCluster";
 import { otherModalOpen } from "./shellKeys";
@@ -59,6 +62,7 @@ export type CommandId =
   | "theme-dark"
   | "theme-light"
   | "theme-system"
+  | "toggle-sidebar"
   | "back"
   | "forward"
   | "split-right"
@@ -71,6 +75,8 @@ export interface AppCommand {
   /** A function, because some labels name the cluster. */
   label(ctx: CommandContext): string;
   icon: IconComponent;
+  /** The icon for the state now, when it changes with it; the palette uses it over `icon`. */
+  iconFor?(): IconComponent;
   shortcut?: ShortcutId;
   /**
    * The location the command opens, if it only opens one: a click on its palette row
@@ -234,6 +240,21 @@ export const COMMANDS: readonly AppCommand[] = [
   theme("theme-dark", "Theme: Dark", Moon, "dark"),
   theme("theme-light", "Theme: Light", Sun, "light"),
   theme("theme-system", "Theme: System", Monitor, "system"),
+  {
+    id: "toggle-sidebar",
+    label: () =>
+      useSidebarToggle.getState().collapsed
+        ? "Expand the sidebar"
+        : "Collapse the sidebar",
+    icon: ChevronLeft,
+    iconFor: () =>
+      useSidebarToggle.getState().collapsed ? ChevronRight : ChevronLeft,
+    shortcut: "toggleSidebar",
+    available: () => useSidebarToggle.getState().toggle !== null,
+    run: () => {
+      toggleSidebar();
+    },
+  },
   {
     id: "back",
     label: () => "Go back",

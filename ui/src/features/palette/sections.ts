@@ -71,7 +71,7 @@ export function commandEntries(
     testId: `palette-command-${c.id}`,
     label: c.label(ctx),
     hint: c.shortcut ? shortKeys(c.shortcut, mac) : "Command",
-    icon: c.icon,
+    icon: c.iconFor?.() ?? c.icon,
     path: c.path?.(ctx) ?? undefined,
     run: (context) => c.run(context),
   }));

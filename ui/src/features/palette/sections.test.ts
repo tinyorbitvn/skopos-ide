@@ -1,9 +1,13 @@
 import { expect, test, vi } from "vitest";
 import type { CommandContext } from "../../app/commands";
 import { toast } from "../../design";
-import { Server } from "../../design/icons";
+import { ChevronRight, Server } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
+import {
+  resetSidebarToggleForTest,
+  useSidebarToggle,
+} from "../../stores/sidebarCollapse";
 import { clusterEntry, mockBackend } from "../../test/ipc";
 import {
   buildSections,
@@ -396,4 +400,27 @@ test("rows that open a location carry it, for the click modes (P11 to P13)", () 
   const commands = commandEntries(context(), false);
   expect(commands.find((c) => c.key === "catalog")?.path).toBe("/catalog");
   expect(commands.find((c) => c.key === "about")?.path).toBeUndefined();
+});
+
+test("the sidebar command shows the label and icon of the sidebar's state, hinted Ctrl+B", () => {
+  useSidebarToggle.setState({ toggle: vi.fn(), collapsed: true });
+  try {
+    const row = commandEntries(context(), false).find(
+      (r) => r.key === "toggle-sidebar",
+    );
+    expect([row?.label, row?.icon, row?.hint]).toEqual([
+      "Expand the sidebar",
+      ChevronRight,
+      "Ctrl+B",
+    ]);
+    expect(
+      commandEntries(context(), true).find((r) => r.key === "toggle-sidebar")
+        ?.hint,
+    ).toBe("⌘B");
+  } finally {
+    resetSidebarToggleForTest();
+  }
+  expect(
+    commandEntries(context(), false).some((r) => r.key === "toggle-sidebar"),
+  ).toBe(false);
 });

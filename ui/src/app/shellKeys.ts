@@ -4,11 +4,16 @@ export interface ShellKeyActions {
   palette(): void;
   shortcuts(): void;
   preferences(): void;
+  sidebar(): void;
 }
 
 /** A modal dialog other than the three shell dialogs, which carry `data-shell-dialog`. */
 const OTHER_MODAL =
   '[role="dialog"]:not([data-shell-dialog]), [role="alertdialog"]';
+
+/** Where Mod+B belongs to what has focus: bold in a field, the editor's keys, a shell's Ctrl+B. */
+const TEXT_ENTRY =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"]), .monaco-editor, .xterm';
 
 /** True while such a dialog is open; shell keys and macOS menu items then do nothing. */
 export function otherModalOpen(): boolean {
@@ -20,7 +25,7 @@ function inside(target: EventTarget | null, selector: string): boolean {
 }
 
 /**
- * Mod+Shift+P, Mod+/ and Mod+, (spec C §4.3). The listener sits on `window` in the
+ * Mod+Shift+P, Mod+/, Mod+, and Mod+B (spec C §4.3, Q §3). The listener sits on `window` in the
  * capture phase, so it runs before Monaco, xterm and text fields see the key.
  * Returns a function that removes it.
  */
@@ -41,6 +46,9 @@ export function installShellKeys(
       if (inside(event.target, ".monaco-editor")) return;
       if (!mac && inside(event.target, ".xterm")) return;
       action = actions.shortcuts;
+    } else if (matchesShortcut("toggleSidebar", event, mac)) {
+      if (inside(event.target, TEXT_ENTRY)) return;
+      action = actions.sidebar;
     }
     if (action === null) return;
     event.preventDefault();
