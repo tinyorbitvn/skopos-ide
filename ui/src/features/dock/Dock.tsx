@@ -337,9 +337,10 @@ export function Dock(props: {
             </div>
           </SortableContext>
         </DndContext>
+        {/* Right-aligned: the button ends the bar and the menu does not shift to fit. */}
         <Menu
           side="top"
-          align="start"
+          align="end"
           sideOffset={6}
           avoidCollisions={false}
           className={styles.createMenu}

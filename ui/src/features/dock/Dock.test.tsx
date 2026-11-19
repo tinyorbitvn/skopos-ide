@@ -459,11 +459,13 @@ test("the Create button opens an upward menu: Create resource, then Terminal ses
   ]).toEqual(["dock-new", "Create", "plus", true]);
   fireEvent.keyDown(create, { key: "Enter" });
   const menu = screen.getByRole("menu");
+  // Its right edge meets the button's: the button ends the bar, and the menu does not
+  // shift to fit, so a start-aligned menu would run past the window.
   expect([
     menu.getAttribute("data-side"),
     menu.getAttribute("data-align"),
     menu.classList.contains("createMenu"),
-  ]).toEqual(["top", "start", true]);
+  ]).toEqual(["top", "end", true]);
   expect(
     screen
       .getAllByRole("menuitem")
