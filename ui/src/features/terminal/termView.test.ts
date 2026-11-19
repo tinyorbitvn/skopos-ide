@@ -66,3 +66,21 @@ test("fit gives null while the host is outside the document or has no size, and 
   view.dispose();
   expect(view.host.isConnected).toBe(false);
 });
+
+test("a paste on a child of the host is stopped before it can bubble to xterm's listeners", () => {
+  const view = createTermView();
+  document.body.append(view.host);
+  const child = document.createElement("textarea");
+  view.host.append(child);
+  const bubbled = vi.fn();
+  child.addEventListener("paste", bubbled);
+  view.host.addEventListener("paste", bubbled);
+  const event = new Event("paste", { cancelable: true, bubbles: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: { getData: () => "x" },
+  });
+  child.dispatchEvent(event);
+  expect(bubbled).not.toHaveBeenCalled();
+  expect(event.defaultPrevented).toBe(true);
+  view.dispose();
+});

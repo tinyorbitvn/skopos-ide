@@ -3,7 +3,13 @@ import { type ITheme, Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { PALETTE, type TerminalColors } from "../../design/palette";
 import type { TerminalSize } from "../../ipc/generated/TerminalSize";
-import { handleTerminalKey, IS_MAC } from "./terminalKeys";
+import {
+  handleNativePaste,
+  handleTerminalKey,
+  IS_MAC,
+  type KeyTarget,
+  openTerminalLink,
+} from "./terminalKeys";
 import { type NoteTone, noteLine } from "./terminalText";
 import "./termView.css";
 
@@ -61,6 +67,15 @@ class XtermView implements TermView {
   /** Whether the cursor is at the start of a line, so a note needs no line break first. */
   private atLineStart = true;
   private listener: ((data: string) => void) | null = null;
+  private readonly keyTarget: KeyTarget = {
+    hasSelection: () => this.term.hasSelection(),
+    getSelection: () => this.term.getSelection(),
+    paste: (text) => this.term.paste(text),
+    inputEnabled: () => this.inputOn,
+  };
+  /** Capture phase on the host, so it runs before xterm's own paste listeners below it. */
+  private readonly onNativePaste = (event: Event): void =>
+    handleNativePaste(event as ClipboardEvent, this.keyTarget);
 
   constructor() {
     this.host.dataset.terminalHost = "";
@@ -70,19 +85,13 @@ class XtermView implements TermView {
       scrollback: TERMINAL_SCROLLBACK,
       disableStdin: true,
       theme: xtermTheme(PALETTE.dark.terminal),
+      // Without a handler xterm opens an OSC 8 link with window.open, past the app's opener.
+      linkHandler: { activate: (_event, uri) => openTerminalLink(uri) },
     });
+    this.host.addEventListener("paste", this.onNativePaste, true);
     this.term.loadAddon(this.fitAddon);
     this.term.attachCustomKeyEventHandler((event) =>
-      handleTerminalKey(
-        event,
-        {
-          hasSelection: () => this.term.hasSelection(),
-          getSelection: () => this.term.getSelection(),
-          paste: (text) => this.term.paste(text),
-          inputEnabled: () => this.inputOn,
-        },
-        IS_MAC,
-      ),
+      handleTerminalKey(event, this.keyTarget, IS_MAC),
     );
     this.term.onData((data) => this.listener?.(data));
   }
@@ -146,6 +155,7 @@ class XtermView implements TermView {
   }
 
   dispose(): void {
+    this.host.removeEventListener("paste", this.onNativePaste, true);
     this.term.dispose();
     this.host.remove();
   }
