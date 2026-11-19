@@ -6,7 +6,11 @@ export default defineConfig({
   clearScreen: false,
   server: { port: 5173, strictPort: true },
   // Monaco's lazy chunk is far over the default warning, and is meant to be.
-  build: { chunkSizeWarningLimit: 5000 },
+  build: {
+    chunkSizeWarningLimit: 5000,
+    // The logo files are never inlined as data URIs, whatever their size.
+    assetsInlineLimit: (file) => (file.endsWith(".svg") ? false : undefined),
+  },
   worker: { format: "es" },
   test: {
     environment: "jsdom",

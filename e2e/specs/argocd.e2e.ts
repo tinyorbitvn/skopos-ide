@@ -70,7 +70,7 @@ describe("Argo CD on the kind cluster", () => {
   });
 
   it("lists Applications in their own section with the Argo CD columns", async () => {
-    await shown("nav-section-argocd");
+    await shown("nav-section-argo");
     for (const plural of ["applications", "applicationsets", "appprojects"]) {
       await shown(`nav-item-argoproj.io-${plural}`);
     }

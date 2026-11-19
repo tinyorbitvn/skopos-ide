@@ -52,6 +52,20 @@ icon; see [npm packages](#npm-packages).
 The Kubernetes logo is a registered trademark of The Linux Foundation; its use here does not
 imply endorsement by The Linux Foundation or the CNCF.
 
+## Helm and Argo logos
+
+- Source: https://github.com/cncf/artwork, `projects/helm/icon/color/helm-icon-color.svg`,
+  `projects/helm/icon/white/helm-icon-white.svg`, `projects/argo/icon/black/argo-icon-black.svg`
+  and `projects/argo/icon/white/argo-icon-white.svg`
+- Reference commit: `099d60e33670b00b3f6a82843c9acd69d791b698`
+- License: the repository makes all its artwork available under the Linux Foundation trademark
+  usage guidelines (https://www.linuxfoundation.org/trademark-usage); it states no copyright license.
+
+The cluster sidebar shows these icons, in `ui/src/design/logos/`, beside the Helm and Argo sections
+only to identify those projects. Their shapes and colours are unchanged; the Helm files lose only
+their editor's layer name. Helm and Argo are trademarks of The Linux Foundation; their use here does
+not imply that The Linux Foundation or its projects sponsor or endorse SkoposIDE.
+
 ## Reading the reference locally
 
 Reference code is not part of this repository. Clone it into `tmp/reference/`, which git

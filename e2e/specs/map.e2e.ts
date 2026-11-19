@@ -692,7 +692,7 @@ describe("resource map", () => {
     );
   });
 
-  it("puts Helm and Argo CD under Nodes, and every Gateway API kind under Network", async () => {
+  it("puts Helm and Argo first, then Nodes and Namespaces, and every Gateway API kind under Network", async () => {
     const sections = () =>
       browser.execute(() =>
         Array.from(document.querySelectorAll('[data-testid^="nav-section-"]')).map(
@@ -702,8 +702,8 @@ describe("resource map", () => {
     await until(
       async () =>
         (await sections()).slice(0, 4).join(" ") ===
-        "nav-section-nodes nav-section-helm nav-section-argocd nav-section-workloads",
-      "the sidebar never started with Nodes, Helm, Argo CD and Workloads",
+        "nav-section-helm nav-section-argo nav-section-nodes nav-section-namespaces",
+      "the sidebar never started with Helm, Argo, Nodes and Namespaces",
     );
     for (const plural of NETWORK_GATEWAY_KINDS) {
       await byTestId(`nav-item-${GATEWAY_GROUP}-${plural}`).waitForExist({
