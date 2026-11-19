@@ -111,23 +111,51 @@ test("badges read a state on a soft pill, and toasts and tooltips enter without 
   }
 });
 
-test("dialogs sit on a blurred scrim with the deepest shadow and no exit animation", () => {
+test("dialogs sit on a scrim without blur, at 28 % from the top, with the third shadow and no exit animation (spec Q §5)", () => {
   const dialog = cssRules(CSS_FILES["/src/design/Dialog.module.css"]);
   const decls = (s: string) =>
     Object.fromEntries(dialog.find((r) => r.selector === s)?.decls ?? []);
   expect(decls(".overlay").background).toBe("var(--scrim)");
-  expect(decls(".overlay")["backdrop-filter"]).toBe("var(--blur-thin)");
-  expect(decls(".content")["box-shadow"]).toBe("var(--shadow-4)");
-  expect(decls(".content")["border-radius"]).toBe("var(--radius-xl)");
+  expect(decls(".overlay")["backdrop-filter"]).toBeUndefined();
+  expect(CSS_FILES["/src/design/Dialog.module.css"]).not.toContain(
+    "backdrop-filter",
+  );
+  const content = decls(".content");
+  expect([
+    content.top,
+    content.transform,
+    content.width,
+    content["max-height"],
+    content.display,
+    content.gap,
+    content.padding,
+    content["border-radius"],
+    content["box-shadow"],
+  ]).toEqual([
+    "28%",
+    "translateX(-50%)",
+    "min(440px, calc(100vw - 32px))",
+    "calc(72vh - 16px)",
+    "flex",
+    "var(--space-7)",
+    "var(--space-9)",
+    "var(--radius-lg)",
+    "var(--shadow-3)",
+  ]);
+  expect([decls(".title").margin, decls(".title").font]).toEqual([
+    "0",
+    "var(--type-heading)",
+  ]);
+  expect(decls(".footer")["margin-top"]).toBeUndefined();
   expect(CSS_FILES["/src/design/Dialog.module.css"]).not.toMatch(
     /data-state="closed"[^{]*\{[^}]*animation/,
   );
   const menu = cssRules(CSS_FILES["/src/design/Menu.module.css"]);
-  const content = Object.fromEntries(
+  const menuContent = Object.fromEntries(
     menu.find((r) => r.selector === ".content")?.decls ?? [],
   );
-  expect(content["box-shadow"]).toBe("var(--shadow-3)");
-  expect(content["border-radius"]).toBe("var(--radius-md)");
+  expect(menuContent["box-shadow"]).toBe("var(--shadow-3)");
+  expect(menuContent["border-radius"]).toBe("var(--radius-md)");
 });
 
 test("tables have hairline rows, no outer border and an inset focus ring", () => {

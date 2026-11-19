@@ -1,9 +1,15 @@
+/* The search field, inset in the palette (spec Q §5). */
 .inputRow {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-5);
-  padding: var(--space-5) var(--space-8);
-  border-bottom: 1px solid var(--border-subtle);
+  height: 44px;
+  margin: var(--space-5);
+  padding: 0 var(--space-5) 0 var(--space-6);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
 }
 
 .searchIcon {
@@ -59,7 +65,7 @@
   gap: var(--space-6);
   min-height: 34px;
   padding: 0 var(--space-6);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   color: var(--text-primary);
   cursor: pointer;
 }
