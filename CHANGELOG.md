@@ -14,6 +14,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **Helm releases subscription (backend):** new `helm_releases_subscribe` and `helm_releases_unsubscribe` commands watch the Secrets Helm labels `owner=helm` (metadata only, no payload) and send one `changed` per burst of changes, so the releases screen can list again without polling. `forbidden` or `failed` end the subscription once; the screen then polls every 60 s. Releases kept in ConfigMaps or SQL are not seen. A cluster that refuses the cluster-wide `helm list` is also remembered for 60 s, so each refresh skips the call that cannot succeed.
 - **One Pod watch for the table and the Map (backend):** with a Pods table and the Map open, the core now watches Pods once instead of twice; each view still gets its own, differently trimmed rows.
 - **No idle wake-ups in watches (backend):** a watch subscriber's flush timer no longer ticks every 150 ms while nothing changes; it sleeps until a change, a status or a snapshot is queued. A change still reaches the interface within the same 150 ms batch.
+- **Workload logs open fewer streams (backend):** a log session reads at most 20 containers at a time and queues the rest; a new `limited` marker (`{ type: "limited", streaming, total }`) tells how many run and how many exist, and a last one with `streaming == total` says nothing waits any more. Following a workload no longer reads each Pod again before its first stream.
 
 ## [0.8.0] - 2026-11-18
 
