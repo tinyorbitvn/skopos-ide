@@ -46,27 +46,36 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// One watcher's scope: a namespace, or `None` for the whole cluster.
 type Partition = Option<String>;
 
-/// What a watcher's rows keep: what the tables read, or what the relationship graph reads.
-/// The two differ only for core Pods, so every other resource shares one watcher.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// What a subscriber's rows keep: what the tables read, or what the relationship graph reads.
+/// The two differ only for core Pods, so a group stores both rows of each Pod, and every other
+/// resource has one row for both shapes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) enum RowShape {
+    #[default]
     Table,
     Graph,
 }
 
-impl RowShape {
-    /// The shape `resource`'s rows are kept in when this one is asked for.
-    fn of(self, resource: &ResourceRef) -> Self {
-        if is_core_pods(resource) {
-            self
-        } else {
-            Self::Table
+/// What a group keeps of one object.
+#[derive(Clone)]
+struct StoredRow {
+    table: Row,
+    /// Only core Pods have a graph row of their own.
+    graph: Option<Row>,
+}
+
+impl StoredRow {
+    /// The row a subscriber of `shape` receives.
+    fn pick(&self, shape: RowShape) -> &Row {
+        match shape {
+            RowShape::Table => &self.table,
+            RowShape::Graph => self.graph.as_ref().unwrap_or(&self.table),
         }
     }
 }
 
-/// A group's key: cluster, group, plural and row shape.
-type GroupKey = (ClusterId, String, String, RowShape);
+/// A group's key: cluster, group and plural.
+type GroupKey = (ClusterId, String, String);
 
 enum Phase {
     Syncing,
@@ -93,6 +102,8 @@ type StatusUpdate = (WatchStatus, Option<String>);
 /// What one subscriber has not received yet.
 #[derive(Default)]
 struct Subscriber {
+    /// Which of an object's rows this subscriber receives.
+    shape: RowShape,
     /// Latest wins, so this holds at most one entry per object.
     changes: HashMap<ObjectKey, Option<Row>>,
     status: Option<StatusUpdate>,
@@ -102,7 +113,7 @@ struct Subscriber {
 }
 
 struct GroupState {
-    store: HashMap<ObjectKey, Row>,
+    store: HashMap<ObjectKey, StoredRow>,
     partitions: HashMap<Partition, PartitionState>,
     subscribers: HashMap<String, Subscriber>,
     status: StatusUpdate,
@@ -156,7 +167,7 @@ impl GroupState {
         }
     }
 
-    fn record_change(&mut self, key: &ObjectKey, value: Option<&Row>) {
+    fn record_change(&mut self, key: &ObjectKey, value: Option<&StoredRow>) {
         // Whoever is waiting for a snapshot gets this change in it.
         if !self.synced() {
             return;
@@ -166,7 +177,8 @@ impl GroupState {
             if subscriber.snapshot_due {
                 continue;
             }
-            subscriber.changes.insert(key.clone(), value.cloned());
+            let row = value.map(|stored| stored.pick(subscriber.shape).clone());
+            subscriber.changes.insert(key.clone(), row);
             if subscriber.changes.len() > limit {
                 subscriber.changes.clear();
                 subscriber.snapshot_due = true;
@@ -177,17 +189,15 @@ impl GroupState {
 
 struct Group {
     resource: ResourceRef,
-    shape: RowShape,
     /// A child of the cluster's token. Lingering out cancels it too.
     token: CancellationToken,
     state: Mutex<GroupState>,
 }
 
 impl Group {
-    fn new(resource: ResourceRef, shape: RowShape, token: CancellationToken) -> Self {
+    fn new(resource: ResourceRef, token: CancellationToken) -> Self {
         Self {
             resource,
-            shape,
             token,
             state: Mutex::new(GroupState {
                 store: HashMap::new(),
@@ -209,12 +219,13 @@ impl Group {
     }
 
     /// False when the group stopped, and the caller needs a new one.
-    fn attach(&self, subscription: &str) -> bool {
+    fn attach(&self, subscription: &str, shape: RowShape) -> bool {
         let mut state = self.lock();
         if state.terminal || self.token.is_cancelled() {
             return false;
         }
         let subscriber = Subscriber {
+            shape,
             status: Some(state.status.clone()),
             snapshot_due: state.synced(),
             ..Default::default()
@@ -262,7 +273,7 @@ impl Group {
             .take()
             .map(|(status, message)| WatchEvent::Status { status, message });
         let snapshot = std::mem::take(&mut subscriber.snapshot_due).then(|| WatchEvent::Snapshot {
-            items: sorted_items(&state.store),
+            items: sorted_items(&state.store, subscriber.shape),
         });
         let batch = (!subscriber.changes.is_empty()).then(|| {
             let mut upserts = Vec::new();
@@ -293,7 +304,7 @@ impl Group {
     }
 
     /// Replaces what the partition holds with a completed listing.
-    fn finish_init(&self, partition: &Partition, listed: HashMap<ObjectKey, Row>) {
+    fn finish_init(&self, partition: &Partition, listed: HashMap<ObjectKey, StoredRow>) {
         let mut state = self.lock();
         match partition {
             None => state.store = listed,
@@ -312,7 +323,7 @@ impl Group {
         state.queue_snapshot();
     }
 
-    fn apply(&self, key: ObjectKey, value: Row) {
+    fn apply(&self, key: ObjectKey, value: StoredRow) {
         let mut state = self.lock();
         state.record_change(&key, Some(&value));
         state.store.insert(key, value);
@@ -443,7 +454,6 @@ impl WatchHub {
         tx: mpsc::Sender<WatchEvent>,
         connection: &Connection,
     ) -> CoreResult<String> {
-        let shape = shape.of(&resource);
         let subscription = self.new_subscription();
         let group = loop {
             // A disconnect that just happened would leave every new group closed.
@@ -453,8 +463,8 @@ impl WatchHub {
                     format!("cluster {id} is not connected"),
                 ));
             }
-            let group = self.group_for(id, &resource, shape, connection);
-            if group.attach(&subscription) {
+            let group = self.group_for(id, &resource, connection);
+            if group.attach(&subscription, shape) {
                 break group;
             }
         };
@@ -476,23 +486,13 @@ impl WatchHub {
         self: &Arc<Self>,
         id: &ClusterId,
         resource: &ResourceRef,
-        shape: RowShape,
         connection: &Connection,
     ) -> Arc<Group> {
-        let key = (
-            id.clone(),
-            resource.group.clone(),
-            resource.plural.clone(),
-            shape,
-        );
+        let key = (id.clone(), resource.group.clone(), resource.plural.clone());
         match self.groups.entry(key.clone()) {
             Entry::Occupied(entry) if !entry.get().is_closed() => entry.get().clone(),
             entry => {
-                let group = Arc::new(Group::new(
-                    resource.clone(),
-                    shape,
-                    connection.token.child_token(),
-                ));
+                let group = Arc::new(Group::new(resource.clone(), connection.token.child_token()));
                 entry.insert(group.clone());
                 tokio::spawn(run_group(
                     self.clone(),
@@ -692,18 +692,20 @@ pub(super) fn stripped_object(
     Some((key, value))
 }
 
-/// The row for a subscriber.
-fn to_row(
-    object: &DynamicObject,
-    resource: &ResourceRef,
-    shape: RowShape,
-) -> Option<(ObjectKey, Row)> {
+/// The rows for the subscribers. A core Pod gets its graph row too, cut from a copy of the
+/// same parsed value, so the object is parsed once however many shapes read it.
+fn to_row(object: &DynamicObject, resource: &ResourceRef) -> Option<(ObjectKey, StoredRow)> {
     let (key, mut value) = stripped_object(object, resource)?;
-    match shape {
-        RowShape::Table => trim_for_watch(resource, &mut value),
-        RowShape::Graph => trim_for_graph(resource, &mut value),
-    }
-    Some((key, Row::new(&value).ok()?))
+    let graph = if is_core_pods(resource) {
+        let mut graph = value.clone();
+        trim_for_graph(resource, &mut graph);
+        Some(Row::new(&graph).ok()?)
+    } else {
+        None
+    };
+    trim_for_watch(resource, &mut value);
+    let table = Row::new(&value).ok()?;
+    Some((key, StoredRow { table, graph }))
 }
 
 /// Sleeps unless cancelled first, and lengthens the next pause.
@@ -749,7 +751,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                     continue;
                 }
                 Some(Ok(watcher::Event::InitApply(object))) => {
-                    listing.extend(to_row(&object, resource, group.shape));
+                    listing.extend(to_row(&object, resource));
                     continue;
                 }
                 Some(Ok(watcher::Event::InitDone)) => {
@@ -758,7 +760,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                     continue;
                 }
                 Some(Ok(watcher::Event::Apply(object))) => {
-                    if let Some((key, value)) = to_row(&object, resource, group.shape) {
+                    if let Some((key, value)) = to_row(&object, resource) {
                         group.apply(key, value);
                     }
                     continue;
@@ -892,15 +894,15 @@ impl AppCore {
     }
 }
 
-/// The store's objects in a stable order: by namespace (cluster-scoped first), then name.
-/// The UI puts objects a batch adds in this same order (`compareListed` in
+/// The store's rows of `shape` in a stable order: by namespace (cluster-scoped first), then
+/// name. The UI puts objects a batch adds in this same order (`compareListed` in
 /// `ui/src/stores/resources.ts`); keep the two the same.
-fn sorted_items(store: &HashMap<ObjectKey, Row>) -> Vec<Row> {
-    let mut entries: Vec<(&ObjectKey, &Row)> = store.iter().collect();
+fn sorted_items(store: &HashMap<ObjectKey, StoredRow>, shape: RowShape) -> Vec<Row> {
+    let mut entries: Vec<(&ObjectKey, &StoredRow)> = store.iter().collect();
     entries.sort_by(|a, b| (&a.0.namespace, &a.0.name).cmp(&(&b.0.namespace, &b.0.name)));
     entries
         .into_iter()
-        .map(|(_, value)| value.clone())
+        .map(|(_, stored)| stored.pick(shape).clone())
         .collect()
 }
 
@@ -922,9 +924,15 @@ mod tests {
                 name: name.to_owned(),
             };
             let row = Row::new(&serde_json::json!({ "n": namespace, "name": name })).unwrap();
-            store.insert(key, row);
+            store.insert(
+                key,
+                StoredRow {
+                    table: row,
+                    graph: None,
+                },
+            );
         }
-        let names: Vec<_> = sorted_items(&store)
+        let names: Vec<_> = sorted_items(&store, RowShape::Table)
             .iter()
             .map(|row| row.to_value()["name"].as_str().unwrap().to_owned())
             .collect();
@@ -991,8 +999,9 @@ mod tests {
         .unwrap();
         let pods = resource("", "pods");
 
-        let (_, table) = to_row(&object, &pods, RowShape::Table).unwrap();
-        let (_, graph) = to_row(&object, &pods, RowShape::Graph).unwrap();
+        let (_, stored) = to_row(&object, &pods).unwrap();
+        let table = stored.pick(RowShape::Table);
+        let graph = stored.pick(RowShape::Graph);
 
         assert!(table.to_value()["spec"].get("serviceAccountName").is_none());
         assert_eq!(graph.to_value()["spec"]["serviceAccountName"], "web");
@@ -1000,17 +1009,84 @@ mod tests {
     }
 
     #[test]
-    fn only_core_pods_have_a_graph_shape_of_their_own() {
-        assert_eq!(RowShape::Graph.of(&resource("", "pods")), RowShape::Graph);
-        assert_eq!(
-            RowShape::Graph.of(&resource("", "secrets")),
-            RowShape::Table
-        );
-        assert_eq!(
-            RowShape::Graph.of(&resource("example.com", "pods")),
-            RowShape::Table
-        );
-        assert_eq!(RowShape::Table.of(&resource("", "pods")), RowShape::Table);
+    fn only_core_pods_store_a_graph_row_of_their_own() {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": { "name": "x", "namespace": "a" },
+            "spec": { "serviceAccountName": "x" },
+        }))
+        .unwrap();
+        for (group, plural, own_graph_row) in [
+            ("", "pods", true),
+            ("", "secrets", false),
+            ("", "configmaps", false),
+            ("example.com", "pods", false),
+        ] {
+            let (_, stored) = to_row(&object, &resource(group, plural)).unwrap();
+            assert_eq!(stored.graph.is_some(), own_graph_row, "{group}/{plural}");
+            if !own_graph_row {
+                assert_eq!(
+                    stored.pick(RowShape::Graph).json(),
+                    stored.pick(RowShape::Table).json(),
+                    "{group}/{plural}"
+                );
+            }
+        }
+    }
+
+    /// The rows a batch of events carries, as values.
+    fn rows_of(events: &[WatchEvent]) -> Vec<Value> {
+        events
+            .iter()
+            .flat_map(|event| match event {
+                WatchEvent::Snapshot { items } => items.clone(),
+                WatchEvent::Batch { upserts, .. } => upserts.clone(),
+                WatchEvent::Status { .. } => Vec::new(),
+            })
+            .map(|row| row.to_value())
+            .collect()
+    }
+
+    #[test]
+    fn each_subscriber_of_a_group_gets_the_rows_of_its_shape_in_snapshots_and_changes() {
+        let pods = resource("", "pods");
+        let object = |version: &str| -> DynamicObject {
+            serde_json::from_value(serde_json::json!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": "web",
+                    "namespace": "a",
+                    "resourceVersion": version,
+                    "labels": { "version": version },
+                },
+                "spec": { "serviceAccountName": "web", "containers": [{ "name": "app" }] },
+            }))
+            .unwrap()
+        };
+        let group = Group::new(pods.clone(), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table));
+        assert!(group.attach("graph", RowShape::Graph));
+
+        let (key, first) = to_row(&object("1"), &pods).unwrap();
+        group.finish_init(&None, HashMap::from([(key.clone(), first)]));
+        let table = rows_of(&group.take_events("table").0);
+        let graph = rows_of(&group.take_events("graph").0);
+        assert_eq!(table.len(), 1);
+        assert_eq!(graph.len(), 1);
+        assert!(table[0]["spec"].get("serviceAccountName").is_none());
+        assert_eq!(graph[0]["spec"]["serviceAccountName"], "web");
+
+        let (_, second) = to_row(&object("2"), &pods).unwrap();
+        group.apply(key, second);
+        let table = rows_of(&group.take_events("table").0);
+        let graph = rows_of(&group.take_events("graph").0);
+        assert_eq!(table[0]["metadata"]["resourceVersion"], "2");
+        assert!(table[0]["spec"].get("serviceAccountName").is_none());
+        // A graph row keeps no resourceVersion, so a label shows it is the new row.
+        assert_eq!(graph[0]["metadata"]["labels"]["version"], "2");
+        assert_eq!(graph[0]["spec"]["serviceAccountName"], "web");
     }
 
     #[test]
