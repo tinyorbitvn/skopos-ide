@@ -563,6 +563,49 @@ async fn a_forbidden_list_of_every_namespace_lists_each_namespace() {
     core.shutdown().await;
 }
 
+/// How many calls asked helm for every namespace at once.
+fn cluster_wide_lists(helm: &FakeHelm) -> usize {
+    helm.calls()
+        .iter()
+        .filter(|call| call.iter().any(|arg| arg == "--all-namespaces"))
+        .count()
+}
+
+#[tokio::test]
+async fn a_refused_cluster_wide_list_is_not_asked_again_until_the_connection_changes() {
+    let body = format!(
+        "case \"$*\" in *--all-namespaces*|*--namespace=kube-system*) {FORBIDDEN};; esac\n\
+         printf '%s' '[{{\"name\":\"web\",\"namespace\":\"default\",\"revision\":\"2\",\"status\":\"deployed\",\"chart\":\"skopos-fixture-0.2.0\"}}]'"
+    );
+    let helm = FakeHelm::new("v4.3.1", &body);
+    let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    helm.configure(&core);
+
+    let first = core.helm_release_list(&id, None).await.unwrap();
+    assert!(first.partial);
+    assert_eq!(cluster_wide_lists(&helm), 1);
+    let calls_after_first = helm.calls().len();
+
+    let second = core.helm_release_list(&id, None).await.unwrap();
+    assert!(second.partial);
+    assert_eq!(second.releases, first.releases);
+    assert_eq!(second.failed_namespaces, ["kube-system"]);
+    assert_eq!(
+        cluster_wide_lists(&helm),
+        1,
+        "the second list must go straight to the namespaces"
+    );
+    // Only the two per-namespace calls were added.
+    assert_eq!(helm.calls().len(), calls_after_first + 2);
+
+    // A new connection starts without the memo.
+    core.cluster_disconnect(&id).await.unwrap();
+    core.cluster_connect(&id).await.unwrap();
+    core.helm_release_list(&id, None).await.unwrap();
+    assert_eq!(cluster_wide_lists(&helm), 2);
+    core.shutdown().await;
+}
+
 #[tokio::test]
 async fn a_list_is_refused_when_every_namespace_fails() {
     let helm = FakeHelm::new("v4.3.1", FORBIDDEN);

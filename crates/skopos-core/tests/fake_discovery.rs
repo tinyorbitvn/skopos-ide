@@ -16,6 +16,7 @@ use tempfile::TempDir;
 const CONTEXT: &str = "fake";
 const REVIEWS: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
 const RULES: &str = "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews";
+const APIS: &str = "/apis";
 
 async fn core_with_fake(cfg: FakeKubeConfig) -> (AppCore, FakeKube, ClusterId, TempDir) {
     let fake = FakeKube::start(cfg).await.unwrap();
@@ -72,6 +73,19 @@ fn deny(verb: &str, plural: &str, namespace: Option<&str>) -> DenyRule {
 
 fn widgets() -> FakeResource {
     FakeResource::new("example.com", "v1", "Widget", "widgets", true)
+}
+
+/// Waits until the fake has seen `count` requests to `path`.
+async fn until_requests(fake: &FakeKube, path: &str, count: usize) {
+    let started = Instant::now();
+    while fake.request_count(path) < count {
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "only {} requests to {path}",
+            fake.request_count(path)
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
 }
 
 #[tokio::test]
@@ -447,6 +461,109 @@ async fn reconnect_clears_the_cache() {
     core.cluster_disconnect(&id).await.unwrap();
     core.cluster_connect(&id).await.unwrap();
     let all = core.resources_discover(&id, false).await.unwrap();
+
+    assert!(find(&all, "example.com", "widgets").can_list);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_refreshes_share_one_discovery_run() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let before = fake.request_count(APIS);
+
+    let results =
+        futures::future::join_all((0..5).map(|_| core.resources_discover(&id, true))).await;
+
+    assert_eq!(fake.request_count(APIS), before + 1);
+    let first = results[0].as_ref().unwrap();
+    for result in &results {
+        assert_eq!(result.as_ref().unwrap(), first);
+    }
+}
+
+#[tokio::test]
+async fn a_refresh_that_arrives_during_a_run_starts_exactly_one_more() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.delay_discovery(Duration::from_millis(400));
+    let before = fake.request_count(APIS);
+
+    let first = tokio::spawn({
+        let (core, id) = (core.clone(), id.clone());
+        async move { core.resources_discover(&id, true).await }
+    });
+    until_requests(&fake, APIS, before + 1).await;
+    // A CRD appears while the first run is going. Its answer was built without it.
+    fake.serve_resource(widgets());
+    let later: Vec<_> = (0..3)
+        .map(|_| {
+            let (core, id) = (core.clone(), id.clone());
+            tokio::spawn(async move { core.resources_discover(&id, true).await })
+        })
+        .collect();
+
+    first.await.unwrap().unwrap();
+    for call in later {
+        let all = call.await.unwrap().unwrap();
+        assert!(find(&all, "example.com", "widgets").can_list);
+    }
+    assert_eq!(
+        fake.request_count(APIS),
+        before + 2,
+        "the three later calls share one run"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_failed_run_fails_every_waiter() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.fail_discovery_with(Some(500));
+    let before = fake.request_count(APIS);
+    let alone = core.resources_discover(&id, true).await.unwrap_err();
+    let one_run = fake.request_count(APIS) - before;
+    assert!(one_run > 0);
+
+    let before = fake.request_count(APIS);
+    let results =
+        futures::future::join_all((0..3).map(|_| core.resources_discover(&id, true))).await;
+
+    for result in results {
+        assert_eq!(result.unwrap_err(), alone);
+    }
+    assert_eq!(fake.request_count(APIS) - before, one_run);
+    // The failure is not kept: the next refresh runs again and succeeds.
+    fake.fail_discovery_with(None);
+    assert!(core.resources_discover(&id, true).await.is_ok());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_caller_that_drops_its_refresh_does_not_cancel_the_others() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.delay_discovery(Duration::from_millis(300));
+    let before = fake.request_count(APIS);
+    let quitter = tokio::spawn({
+        let (core, id) = (core.clone(), id.clone());
+        async move { core.resources_discover(&id, true).await }
+    });
+    let stayer = tokio::spawn({
+        let (core, id) = (core.clone(), id.clone());
+        async move { core.resources_discover(&id, true).await }
+    });
+    until_requests(&fake, APIS, before + 1).await;
+
+    quitter.abort();
+
+    assert!(stayer.await.unwrap().is_ok());
+    assert_eq!(fake.request_count(APIS), before + 1);
+}
+
+#[tokio::test]
+async fn a_reconnect_starts_discovery_fresh() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.resources_discover(&id, true).await.unwrap();
+    fake.serve_resource(widgets());
+
+    core.cluster_disconnect(&id).await.unwrap();
+    core.cluster_connect(&id).await.unwrap();
+    let all = core.resources_discover(&id, true).await.unwrap();
 
     assert!(find(&all, "example.com", "widgets").can_list);
 }

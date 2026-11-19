@@ -1,6 +1,7 @@
 //! The resource graph against the fake API server (spec E §4.8).
 //! Every kubeconfig lives in a temp `<home>/.kube`; `KUBECONFIG` is never read.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -144,10 +145,11 @@ impl Snapshot {
     }
 }
 
-fn into_snapshot(event: Option<GraphEvent>) -> Snapshot {
+fn into_snapshot(event: Option<Arc<GraphEvent>>) -> Snapshot {
     let Some(event) = event else {
         panic!("the subscription ended");
     };
+    let event = Arc::unwrap_or_clone(event);
     let json = serde_json::to_string(&event).unwrap();
     match event {
         GraphEvent::Snapshot {
@@ -170,7 +172,7 @@ fn into_snapshot(event: Option<GraphEvent>) -> Snapshot {
 
 struct Subscription {
     id: String,
-    rx: mpsc::Receiver<GraphEvent>,
+    rx: mpsc::Receiver<Arc<GraphEvent>>,
 }
 
 impl Subscription {
@@ -183,7 +185,7 @@ impl Subscription {
         Self { id, rx }
     }
 
-    async fn next(&mut self) -> Option<GraphEvent> {
+    async fn next(&mut self) -> Option<Arc<GraphEvent>> {
         tokio::time::timeout(WAIT, self.rx.recv())
             .await
             .expect("timed out waiting for an event")
@@ -423,6 +425,24 @@ async fn the_first_snapshot_holds_the_graph_and_nothing_follows_without_a_change
 }
 
 #[tokio::test]
+async fn unfiltered_subscriptions_share_one_event_and_a_namespace_view_does_not() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default(), true).await;
+    seed_web(&fake, "default");
+    let mut first = Subscription::start(&core, &id, None);
+    let shared = first.next().await.expect("the first snapshot");
+    // No further build, so the next subscriber joins the same generation.
+    first.quiet(INTERVAL + Duration::from_millis(200)).await;
+
+    let mut second = Subscription::start(&core, &id, None);
+    let again = second.next().await.expect("the current snapshot");
+    assert!(Arc::ptr_eq(&shared, &again), "one event for both");
+
+    let mut namespaced = Subscription::start(&core, &id, Some(&["default"]));
+    let own = namespaced.next().await.expect("the namespace view");
+    assert!(!Arc::ptr_eq(&shared, &own), "a namespace view is its own");
+}
+
+#[tokio::test]
 async fn a_change_comes_no_sooner_than_the_interval() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default(), true).await;
     seed_web(&fake, "default");
@@ -622,4 +642,86 @@ async fn a_disconnect_ends_the_subscription_and_a_reconnect_starts_a_new_graph()
     let mut again = Subscription::start(&core, &id, None);
     assert_eq!(again.snapshot().await.ids(), WEB_IDS);
     assert_eq!(core.running_graphs_for_test(), 1);
+}
+
+#[tokio::test]
+async fn trimmed_replica_set_and_config_map_rows_give_the_graph_the_same_facts() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default(), false).await;
+    fake.upsert(
+        "deployments",
+        json!({ "metadata": { "name": "web", "namespace": "default" }, "spec": { "replicas": 3 } }),
+    );
+    fake.upsert(
+        "replicasets",
+        json!({
+            "metadata": {
+                "name": "web-1",
+                "namespace": "default",
+                "annotations": { "deployment.kubernetes.io/revision": "7", "note": "n".repeat(400) },
+                "ownerReferences": controller("Deployment", "web"),
+            },
+            "spec": {
+                "replicas": 3,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": { "spec": { "containers": [{
+                    "name": "app",
+                    "image": "registry.example.com/web:1",
+                    "env": [{ "name": "PLAIN", "value": PLAIN_VALUE }],
+                }] } },
+            },
+            "status": { "replicas": 3, "readyReplicas": 2, "availableReplicas": 2, "observedGeneration": 4 },
+        }),
+    );
+    fake.upsert(
+        "configmaps",
+        json!({
+            "metadata": { "name": "web-config", "namespace": "default" },
+            "immutable": true,
+            "data": { "a": PLAIN_VALUE, "b": "2" },
+            "binaryData": { "c": "AAE=" },
+        }),
+    );
+    // A ConfigMap no edge points at is not shown, and a trimmed ReplicaSet row keeps no
+    // references, so a Pod that reads the ConfigMap is what brings it into the graph.
+    fake.upsert(
+        "pods",
+        json!({
+            "metadata": {
+                "name": "web-1-a",
+                "namespace": "default",
+                "ownerReferences": controller("ReplicaSet", "web-1"),
+            },
+            "spec": { "containers": [{
+                "name": "app",
+                "image": "registry.example.com/web:1",
+                "envFrom": [{ "configMapRef": { "name": "web-config" } }],
+            }] },
+        }),
+    );
+    let mut map = Subscription::start(&core, &id, None);
+
+    let first = map.snapshot().await;
+
+    let replica_set = first.node("ReplicaSet/default/web-1");
+    assert_eq!(
+        replica_set.facts,
+        [
+            ("Pods".to_owned(), "3".to_owned()),
+            ("Ready".to_owned(), "2".to_owned()),
+            ("Revision".to_owned(), "7".to_owned()),
+        ]
+    );
+    assert_eq!(
+        first.node("ConfigMap/default/web-config").facts,
+        [("Keys".to_owned(), "3".to_owned())]
+    );
+    assert!(first.edges().contains(&(
+        "Deployment/default/web",
+        "ReplicaSet/default/web-1",
+        GraphRel::Owns
+    )));
+    assert!(
+        !first.json.contains(PLAIN_VALUE),
+        "no ConfigMap value leaves the core"
+    );
 }

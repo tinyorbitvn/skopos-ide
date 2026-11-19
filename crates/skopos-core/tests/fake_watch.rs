@@ -2,11 +2,14 @@
 //! Every kubeconfig lives in a temp `<home>/.kube`; `KUBECONFIG` is never read.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use skopos_core::app_core::AppCore;
 use skopos_core::cluster::ConnectionState;
+use skopos_core::error::ErrorCode;
+use skopos_core::graph::{GraphEvent, GraphRel};
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
 use skopos_core::resources::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
@@ -248,6 +251,34 @@ impl Consumer {
     }
 }
 
+impl Consumer {
+    async fn subscribe_object(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        namespace: Option<&str>,
+        name: &str,
+    ) -> Consumer {
+        let (tx, rx) = mpsc::channel(64);
+        let id = core
+            .resources_subscribe_object(
+                id,
+                resource,
+                namespace.map(str::to_owned),
+                name.to_owned(),
+                tx,
+            )
+            .await
+            .unwrap();
+        Consumer {
+            id,
+            rx,
+            rows: BTreeMap::new(),
+            seen: Vec::new(),
+        }
+    }
+}
+
 async fn eventually(what: &str, done: impl Fn() -> bool) {
     let started = Instant::now();
     while !done() {
@@ -402,7 +433,7 @@ fn object_with_server_fields(name: &str) -> Value {
 #[tokio::test]
 async fn managed_fields_are_stripped() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
-    // Not Pods: their rows cut annotation values, and this checks that others keep them whole.
+    // A ConfigMap row cuts annotation values to 256 characters, which "keep" and "me" are under.
     fake.upsert("configmaps", object_with_server_fields("listed"));
 
     let configmaps = resource("", "ConfigMap", "configmaps", true);
@@ -976,5 +1007,570 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
     assert_eq!(
         whole["spec"]["containers"][0]["image"],
         "registry.k8s.io/pause:3.10"
+    );
+}
+
+#[tokio::test]
+async fn a_watched_config_map_row_blanks_its_values_and_a_get_returns_them() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let config_map = |name: &str| {
+        json!({
+            "metadata": { "name": name, "namespace": "default", "annotations": { "note": "n".repeat(300) } },
+            "immutable": true,
+            "data": { "mode": "fast", "empty": "" },
+            "binaryData": { "blob": "AAEC" },
+        })
+    };
+    fake.upsert("configmaps", config_map("listed"));
+    let configmaps = resource("", "ConfigMap", "configmaps", true);
+    let mut table = Consumer::subscribe(&core, &id, configmaps.clone()).await;
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    fake.upsert("configmaps", config_map("watched"));
+    table
+        .until("the watched object", |c| c.has("default", "watched"))
+        .await;
+
+    for row in table.rows.values() {
+        assert_eq!(row["data"], json!({ "mode": "", "empty": "" }));
+        assert_eq!(row["binaryData"], json!({ "blob": "" }));
+        assert!(row.get("immutable").is_none());
+        assert_eq!(row["kind"], "ConfigMap");
+        assert_eq!(row["metadata"]["annotations"]["note"], "n".repeat(256));
+    }
+    let whole = core
+        .resource_get(&id, &configmaps, Some("default"), "listed")
+        .await
+        .unwrap();
+    assert_eq!(whole["data"], json!({ "mode": "fast", "empty": "" }));
+    assert_eq!(whole["binaryData"], json!({ "blob": "AAEC" }));
+    assert_eq!(whole["immutable"], true);
+}
+
+#[tokio::test]
+async fn watched_node_crd_and_replica_set_rows_are_trimmed_and_a_get_returns_them_whole() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.serve_resource(FakeResource::new(
+        "apps",
+        "v1",
+        "ReplicaSet",
+        "replicasets",
+        true,
+    ));
+    fake.upsert(
+        "nodes",
+        json!({
+            "metadata": { "name": "worker-1" },
+            "spec": { "unschedulable": true, "podCIDR": "10.0.0.0/24" },
+            "status": {
+                "allocatable": { "cpu": "4" },
+                "capacity": { "cpu": "8" },
+                "images": [{ "names": ["registry.example.com/app:1"], "sizeBytes": 1 }],
+                "nodeInfo": { "kubeletVersion": "v1.31.2", "machineID": "abc" },
+            },
+        }),
+    );
+    fake.upsert(
+        "customresourcedefinitions",
+        json!({
+            "metadata": { "name": "widgets.example.com" },
+            "spec": {
+                "group": "example.com",
+                "scope": "Namespaced",
+                "names": { "plural": "widgets", "kind": "Widget" },
+                "versions": [{
+                    "name": "v1", "served": true, "storage": true,
+                    "schema": { "openAPIV3Schema": { "type": "object" } },
+                    "additionalPrinterColumns": [{ "name": "Size", "type": "integer", "jsonPath": ".spec.size" }],
+                }],
+            },
+            "status": { "conditions": [{ "type": "Established", "status": "True", "message": "ok" }] },
+        }),
+    );
+    fake.upsert(
+        "replicasets",
+        json!({
+            "metadata": { "name": "web-1", "namespace": "default" },
+            "spec": {
+                "replicas": 2,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": { "spec": { "containers": [{ "name": "app", "image": "registry.example.com/app:1" }] } },
+            },
+            "status": { "replicas": 2, "availableReplicas": 2, "observedGeneration": 3 },
+        }),
+    );
+    let nodes = resource("", "Node", "nodes", false);
+    let crds = resource(
+        "apiextensions.k8s.io",
+        "CustomResourceDefinition",
+        "customresourcedefinitions",
+        false,
+    );
+    let replica_sets = resource("apps", "ReplicaSet", "replicasets", true);
+
+    let mut node_table = Consumer::subscribe(&core, &id, nodes.clone()).await;
+    let mut crd_table = Consumer::subscribe(&core, &id, crds.clone()).await;
+    let mut rs_table = Consumer::subscribe(&core, &id, replica_sets.clone()).await;
+    node_table.until("the node", |c| c.snapshots() == 1).await;
+    crd_table.until("the crd", |c| c.snapshots() == 1).await;
+    rs_table
+        .until("the replica set", |c| c.snapshots() == 1)
+        .await;
+
+    let node = node_table.rows.values().next().unwrap();
+    assert_eq!(node["spec"], json!({ "unschedulable": true }));
+    assert_eq!(node["status"]["allocatable"], json!({ "cpu": "4" }));
+    assert_eq!(
+        node["status"]["nodeInfo"],
+        json!({ "kubeletVersion": "v1.31.2" })
+    );
+    assert!(node["status"].get("images").is_none());
+    assert!(node["status"].get("capacity").is_none());
+
+    let crd = crd_table.rows.values().next().unwrap();
+    assert!(crd["spec"]["versions"][0].get("schema").is_none());
+    assert_eq!(
+        crd["spec"]["versions"][0]["additionalPrinterColumns"][0]["jsonPath"],
+        ".spec.size"
+    );
+    assert_eq!(
+        crd["status"]["conditions"],
+        json!([{ "type": "Established", "status": "True" }])
+    );
+
+    let rs = rs_table.rows.values().next().unwrap();
+    assert_eq!(
+        rs["spec"]["selector"],
+        json!({ "matchLabels": { "app": "web" } })
+    );
+    assert_eq!(
+        rs["spec"]["template"]["spec"]["containers"],
+        json!([{ "name": "app" }])
+    );
+    assert!(rs["status"].get("observedGeneration").is_none());
+
+    let whole = core
+        .resource_get(&id, &nodes, None, "worker-1")
+        .await
+        .unwrap();
+    assert_eq!(whole["status"]["images"][0]["sizeBytes"], 1);
+    let whole = core
+        .resource_get(&id, &crds, None, "widgets.example.com")
+        .await
+        .unwrap();
+    assert_eq!(
+        whole["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["type"],
+        "object"
+    );
+    let whole = core
+        .resource_get(&id, &replica_sets, Some("default"), "web-1")
+        .await
+        .unwrap();
+    assert_eq!(whole["status"]["observedGeneration"], 3);
+}
+
+fn rich_pod(name: &str, rev: usize) -> Value {
+    json!({
+        "metadata": {
+            "name": name,
+            "namespace": "default",
+            "labels": { "rev": rev.to_string() },
+            "annotations": {
+                "kubectl.kubernetes.io/last-applied-configuration": "{\"marker\":\"applied\"}",
+                "long": "x".repeat(300),
+            },
+            "managedFields": [{ "manager": "marker-manager", "operation": "Apply" }],
+        },
+        "spec": { "containers": [{
+            "name": "main",
+            "image": "registry.k8s.io/pause:3.10",
+            "env": [{ "name": "A", "value": "1" }],
+        }] },
+        "status": { "phase": "Running", "hostIP": "10.0.0.9" },
+    })
+}
+
+#[tokio::test]
+async fn an_object_watch_sends_one_whole_object_then_its_changes_and_no_other() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", rich_pod("web", 1));
+    fake.upsert("pods", rich_pod("other", 1));
+
+    let mut watch = Consumer::subscribe_object(&core, &id, pods(), Some("default"), "web").await;
+    watch.until("the snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(watch.rows.len(), 1, "{}", watch.summary());
+    let row = &watch.rows[&(Some("default".to_owned()), "web".to_owned())];
+    // Whole: no Pod trim.
+    assert_eq!(
+        row["spec"]["containers"][0]["env"],
+        json!([{ "name": "A", "value": "1" }])
+    );
+    assert_eq!(
+        row["spec"]["containers"][0]["image"],
+        "registry.k8s.io/pause:3.10"
+    );
+    assert_eq!(row["status"]["hostIP"], "10.0.0.9");
+    assert_eq!(row["metadata"]["annotations"]["long"], "x".repeat(300));
+    // Stamped and stripped, as every row.
+    assert_eq!(
+        (row["kind"].as_str(), row["apiVersion"].as_str()),
+        (Some("Pod"), Some("v1"))
+    );
+    let text = serde_json::to_string(&watch.seen).unwrap();
+    assert!(
+        !text.contains("marker-manager") && !text.contains("last-applied"),
+        "{text}"
+    );
+
+    fake.upsert("pods", rich_pod("other", 2));
+    fake.upsert("pods", rich_pod("web", 2));
+    watch
+        .until("the update", |c| rev_of(c, "web").as_deref() == Some("2"))
+        .await;
+    assert!(!watch.has("default", "other"), "{}", watch.summary());
+
+    fake.delete("pods", Some("default"), "web");
+    watch
+        .until("the delete", |c| !c.has("default", "web"))
+        .await;
+    fake.upsert("pods", rich_pod("web", 3));
+    watch
+        .until("the object back", |c| {
+            rev_of(c, "web").as_deref() == Some("3")
+        })
+        .await;
+    assert!(!watch.has("default", "other"), "{}", watch.summary());
+    assert_eq!(watch.snapshots(), 1, "{}", watch.summary());
+
+    // One request for the namespace, none for a cluster-wide Pod watch.
+    assert_eq!(fake.watch_request_count(PODS), 0);
+    assert_eq!(
+        fake.watch_request_count("/api/v1/namespaces/default/pods"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn an_object_watch_of_a_missing_object_sends_an_empty_snapshot_then_the_object() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let mut watch = Consumer::subscribe_object(&core, &id, pods(), Some("default"), "late").await;
+    watch
+        .until("status live", |c| c.saw_status(WatchStatus::Live))
+        .await;
+    assert_eq!(watch.snapshots(), 1);
+    assert!(watch.rows.is_empty());
+
+    fake.upsert("pods", rich_pod("late", 1));
+    watch
+        .until("the object", |c| c.has("default", "late"))
+        .await;
+    assert_eq!(watch.snapshots(), 1);
+}
+
+#[tokio::test]
+async fn an_object_watch_of_a_cluster_scoped_object_uses_the_cluster_wide_path() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("nodes", json!({ "metadata": { "name": "worker-1" } }));
+    fake.upsert("nodes", json!({ "metadata": { "name": "worker-2" } }));
+    let nodes = resource("", "Node", "nodes", false);
+
+    let mut watch = Consumer::subscribe_object(&core, &id, nodes, None, "worker-1").await;
+    watch.until("the snapshot", |c| c.snapshots() == 1).await;
+
+    assert_eq!(watch.rows.len(), 1);
+    assert!(watch.rows.contains_key(&(None, "worker-1".to_owned())));
+    // The snapshot ends the list; the watch request follows it.
+    eventually("the watch request", || {
+        fake.watch_request_count("/api/v1/nodes") == 1
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_object_watch_blanks_secret_values_in_the_snapshot_and_in_an_update() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("secrets", secret_object("db"));
+
+    let mut watch = Consumer::subscribe_object(&core, &id, secrets(), Some("default"), "db").await;
+    watch.until("the snapshot", |c| c.snapshots() == 1).await;
+    fake.upsert("secrets", secret_object("db"));
+    watch.until("the update", |c| c.batches() >= 1).await;
+
+    let text = serde_json::to_string(&watch.seen).unwrap();
+    assert!(!text.contains("czNjcjN0"), "{text}");
+    let row = watch.rows.values().next().unwrap();
+    assert_eq!(row["data"]["password"], "");
+    assert_eq!(row["stringData"]["token"], "");
+    assert_eq!(row["kind"], "Secret");
+}
+
+#[tokio::test]
+async fn an_object_watch_without_the_right_to_list_reports_forbidden_and_ends() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        deny: vec![deny_list("pods")],
+        ..Default::default()
+    })
+    .await;
+
+    let mut watch = Consumer::subscribe_object(&core, &id, pods(), Some("default"), "web").await;
+    watch
+        .until("status forbidden", |c| c.saw_status(WatchStatus::Forbidden))
+        .await;
+    watch.until_closed("the subscription", QUIET).await;
+
+    let path = "/api/v1/namespaces/default/pods";
+    let settled = fake.request_count(path);
+    tokio::time::sleep(QUIET).await;
+    assert_eq!(fake.request_count(path), settled, "no retries");
+}
+
+#[tokio::test]
+async fn an_object_watch_of_a_resource_that_is_gone_reports_not_served_and_ends() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.serve_resource(fake_widgets());
+    fake.upsert("widgets", widget("one"));
+
+    let mut watch = Consumer::subscribe_object(&core, &id, widgets(), Some("default"), "one").await;
+    watch
+        .until("status live", |c| c.saw_status(WatchStatus::Live))
+        .await;
+    eventually("the watch", || fake.open_watch_count() == 1).await;
+
+    fake.remove_resource("widgets");
+
+    watch
+        .until("status not served", |c| {
+            c.saw_status(WatchStatus::NotServed)
+        })
+        .await;
+    watch.until_closed("the subscription", QUIET).await;
+}
+
+#[tokio::test]
+async fn an_object_watch_shares_the_id_counter_and_resources_unsubscribe_ends_it() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", rich_pod("web", 1));
+    let number = |c: &Consumer| c.id.trim_start_matches("watch-").parse::<u64>().unwrap();
+
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    let mut watch = Consumer::subscribe_object(&core, &id, pods(), Some("default"), "web").await;
+    assert!(number(&watch) > number(&table), "{} {}", table.id, watch.id);
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    watch.until("the snapshot", |c| c.snapshots() == 1).await;
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    core.resources_unsubscribe(&watch.id);
+
+    watch.until_closed("the object watch", QUIET).await;
+    eventually("the object watch to close", || fake.open_watch_count() == 1).await;
+    fake.upsert("pods", rich_pod("web", 2));
+    table
+        .until("the table still live", |c| {
+            rev_of(c, "web").as_deref() == Some("2")
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn an_object_watch_ends_when_the_cluster_disconnects() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", rich_pod("web", 1));
+    let mut watch = Consumer::subscribe_object(&core, &id, pods(), Some("default"), "web").await;
+    watch.until("the snapshot", |c| c.snapshots() == 1).await;
+
+    core.cluster_disconnect(&id).await.unwrap();
+
+    watch.until_closed("the subscription", QUIET).await;
+    eventually("the watch to close", || fake.open_watch_count() == 0).await;
+}
+
+#[tokio::test]
+async fn an_object_watch_refuses_a_name_or_scope_that_does_not_fit_before_any_request() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let nodes = resource("", "Node", "nodes", false);
+    let cases = [
+        (pods(), Some("default"), "a/b"),
+        (pods(), Some("default"), ".."),
+        (pods(), Some("default"), ""),
+        (pods(), Some("default"), "a%2Fb"),
+        (pods(), Some("a/b"), "web"),
+        (pods(), None, "web"),
+        (nodes, Some("default"), "worker-1"),
+        (resource("", "Pod", "../pods", true), Some("default"), "web"),
+    ];
+    for (resource, namespace, name) in cases {
+        let (tx, _rx) = mpsc::channel(1);
+        let refused = core
+            .resources_subscribe_object(
+                &id,
+                resource.clone(),
+                namespace.map(str::to_owned),
+                name.to_owned(),
+                tx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused.code,
+            ErrorCode::InvalidInput,
+            "{resource:?} {namespace:?} {name:?}"
+        );
+    }
+    assert_eq!(fake.open_watch_count(), 0);
+
+    core.cluster_disconnect(&id).await.unwrap();
+    let (tx, _rx) = mpsc::channel(1);
+    assert!(core
+        .resources_subscribe_object(&id, pods(), Some("default".into()), "web".into(), tx)
+        .await
+        .is_err());
+}
+
+/// A Pod the graph follows to a ConfigMap, with what only the Pods table reads (the ports)
+/// and what only the graph reads (the volumes and the service account).
+fn mounting_pod(name: &str) -> Value {
+    json!({
+        "metadata": { "name": name, "namespace": "default" },
+        "spec": {
+            "serviceAccountName": "web",
+            "volumes": [{ "name": "config", "configMap": { "name": "web-config" } }],
+            "containers": [{
+                "name": "main",
+                "image": "registry.k8s.io/pause:3.10",
+                "ports": [{ "containerPort": 8080 }],
+                "env": [{ "name": "A", "value": "hidden-value" }],
+            }],
+        },
+        "status": { "phase": "Running" },
+    })
+}
+
+fn seed_mounting_pods(fake: &FakeKube) {
+    fake.upsert(
+        "configmaps",
+        json!({ "metadata": { "name": "web-config", "namespace": "default" }, "data": { "a": "1" } }),
+    );
+    fake.upsert("pods", mounting_pod("web"));
+}
+
+/// Reads graph events until a snapshot holds the edge from Pod `pod` to the ConfigMap, and
+/// gives it as the text that crosses to the interface.
+async fn graph_mounting(graph: &mut mpsc::Receiver<Arc<GraphEvent>>, pod: &str) -> String {
+    let from = format!("Pod/default/{pod}");
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, graph.recv())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for the Mounts edge of {pod}"))
+            .expect("the graph subscription ended");
+        if let GraphEvent::Snapshot { edges, .. } = event.as_ref() {
+            let mounted = edges.iter().any(|edge| {
+                edge.from == from
+                    && edge.to == "ConfigMap/default/web-config"
+                    && edge.rel == GraphRel::Mounts
+            });
+            if mounted {
+                return serde_json::to_string(event.as_ref()).unwrap();
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_table_and_the_graph_share_one_pod_watcher_and_each_gets_its_own_rows() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_graph_interval_for_test(Duration::from_millis(100));
+    seed_mounting_pods(&fake);
+
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    let (tx, mut graph) = mpsc::channel(16);
+    core.resource_graph_subscribe(&id, None, tx).unwrap();
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    let snapshot = graph_mounting(&mut graph, "web").await;
+
+    // The table's row keeps the ports and not what only the graph reads.
+    let row = &table.rows[&(Some("default".to_owned()), "web".to_owned())];
+    assert_eq!(
+        row["spec"]["containers"][0]["ports"][0]["containerPort"],
+        8080
+    );
+    assert!(row["spec"].get("volumes").is_none());
+    assert!(row["spec"].get("serviceAccountName").is_none());
+    // The graph read the volumes from its own row, and no env value reached it.
+    assert!(!snapshot.contains("hidden-value"), "{snapshot}");
+
+    // A change reaches both shapes.
+    fake.upsert("pods", mounting_pod("web-2"));
+    table
+        .until("the second pod", |c| c.has("default", "web-2"))
+        .await;
+    graph_mounting(&mut graph, "web-2").await;
+    let row = &table.rows[&(Some("default".to_owned()), "web-2".to_owned())];
+    assert!(row["spec"].get("volumes").is_none());
+
+    assert_eq!(
+        fake.watch_request_count(PODS),
+        1,
+        "the table and the graph share one Pod watch"
+    );
+}
+
+#[tokio::test]
+async fn the_pod_watcher_outlives_a_table_while_the_graph_still_reads_it() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let linger = Duration::from_millis(200);
+    core.set_watch_timing_for_test(FAST_BATCH, linger);
+    core.set_graph_interval_for_test(Duration::from_millis(100));
+    seed_mounting_pods(&fake);
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    let (tx, mut graph) = mpsc::channel(16);
+    let graph_id = core.resource_graph_subscribe(&id, None, tx).unwrap();
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    graph_mounting(&mut graph, "web").await;
+    assert_eq!(fake.watch_request_count(PODS), 1);
+
+    core.resources_unsubscribe(&table.id);
+    table.until_closed("the table", QUIET).await;
+    tokio::time::sleep(linger * 3).await;
+
+    // The graph is the group's last subscriber, so the table's leaving closed nothing.
+    let mut again = Consumer::subscribe(&core, &id, pods()).await;
+    again.until("the snapshot", |c| c.snapshots() == 1).await;
+    assert!(again.has("default", "web"));
+    assert_eq!(
+        fake.watch_request_count(PODS),
+        1,
+        "a table that comes back finds the Pod watch open"
+    );
+
+    core.resources_unsubscribe(&again.id);
+    core.resource_graph_unsubscribe(&graph_id);
+    eventually("every watch to close", || fake.open_watch_count() == 0).await;
+}
+
+#[tokio::test]
+async fn a_quiet_subscription_sends_nothing_and_a_late_change_still_arrives_within_a_batch() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.serve_resource(fake_widgets());
+    fake.upsert("widgets", widget("one"));
+    let mut table = Consumer::subscribe(&core, &id, widgets()).await;
+    table
+        .until("the snapshot and Live", |c| {
+            c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+        })
+        .await;
+    let seen = table.seen.len();
+
+    table.drain_for(Duration::from_millis(600)).await;
+    assert_eq!(table.seen.len(), seen, "{}", table.summary());
+
+    let started = Instant::now();
+    fake.upsert("widgets", widget("two"));
+    table
+        .until("the late change", |c| c.has("default", "two"))
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "took {:?}",
+        started.elapsed()
     );
 }

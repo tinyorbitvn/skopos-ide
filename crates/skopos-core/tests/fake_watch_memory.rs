@@ -214,10 +214,11 @@ async fn the_hub_keeps_a_watched_object_in_about_the_size_of_its_json() {
 
     let per_object = kept / PODS;
     let json_per_object = text / PODS;
-    // A Pod row is trimmed to about 1 KB, so the key, the map entry and the watch's own
-    // share weigh as much as the text. A parsed tree would cost about ten times the text.
+    // A Pod row is trimmed to about 1 KB, and the group keeps the graph's row beside it, so
+    // the two rows, the key, the map entry and the watch's own share weigh about twice the
+    // text. A parsed tree would cost about ten times the text.
     assert!(
-        per_object < json_per_object * 3 / 2 + 1024,
+        per_object < json_per_object * 3 / 2 + 2048,
         "the hub keeps {per_object} bytes for each object of {json_per_object} bytes of JSON"
     );
     drop(rx);

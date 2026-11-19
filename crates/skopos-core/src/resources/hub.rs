@@ -12,11 +12,13 @@ use std::time::Duration;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
+use futures::FutureExt;
 use kube::api::{ApiResource, DynamicObject};
 use kube::runtime::watcher;
 use kube::{Api, Client};
-use tokio::sync::mpsc;
-use tokio::time::{Instant, MissedTickBehavior};
+use serde_json::Value;
+use tokio::sync::{mpsc, Notify};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::discovery::state_name;
@@ -31,8 +33,8 @@ use crate::kubeconfig::ClusterId;
 const DEFAULT_BATCH: Duration = Duration::from_millis(150);
 const DEFAULT_LINGER: Duration = Duration::from_secs(30);
 const PAGE_SIZE: u32 = 500;
-const MIN_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
+pub(super) const MIN_BACKOFF: Duration = Duration::from_secs(1);
+pub(super) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Pending changes may reach this many, or the number of objects if larger,
 /// before a fresh snapshot replaces them. Otherwise names that come and go while
 /// a subscriber is stalled would pile up as deletes.
@@ -45,27 +47,36 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// One watcher's scope: a namespace, or `None` for the whole cluster.
 type Partition = Option<String>;
 
-/// What a watcher's rows keep: what the tables read, or what the relationship graph reads.
-/// The two differ only for core Pods, so every other resource shares one watcher.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// What a subscriber's rows keep: what the tables read, or what the relationship graph reads.
+/// The two differ only for core Pods, so a group stores both rows of each Pod, and every other
+/// resource has one row for both shapes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) enum RowShape {
+    #[default]
     Table,
     Graph,
 }
 
-impl RowShape {
-    /// The shape `resource`'s rows are kept in when this one is asked for.
-    fn of(self, resource: &ResourceRef) -> Self {
-        if is_core_pods(resource) {
-            self
-        } else {
-            Self::Table
+/// What a group keeps of one object.
+#[derive(Clone)]
+struct StoredRow {
+    table: Row,
+    /// Only core Pods have a graph row of their own.
+    graph: Option<Row>,
+}
+
+impl StoredRow {
+    /// The row a subscriber of `shape` receives.
+    fn pick(&self, shape: RowShape) -> &Row {
+        match shape {
+            RowShape::Table => &self.table,
+            RowShape::Graph => self.graph.as_ref().unwrap_or(&self.table),
         }
     }
 }
 
-/// A group's key: cluster, group, plural and row shape.
-type GroupKey = (ClusterId, String, String, RowShape);
+/// A group's key: cluster, group and plural.
+type GroupKey = (ClusterId, String, String);
 
 enum Phase {
     Syncing,
@@ -92,16 +103,21 @@ type StatusUpdate = (WatchStatus, Option<String>);
 /// What one subscriber has not received yet.
 #[derive(Default)]
 struct Subscriber {
+    /// Which of an object's rows this subscriber receives.
+    shape: RowShape,
     /// Latest wins, so this holds at most one entry per object.
     changes: HashMap<ObjectKey, Option<Row>>,
     status: Option<StatusUpdate>,
     /// Built from the store when flushed, so a stalled subscriber holds no copy.
     snapshot_due: bool,
     got_snapshot: bool,
+    /// Signalled whenever something is queued for this subscriber, so its flusher sleeps
+    /// until then. `notify_one` keeps a permit, so a signal during a flush is not lost.
+    wake: Arc<Notify>,
 }
 
 struct GroupState {
-    store: HashMap<ObjectKey, Row>,
+    store: HashMap<ObjectKey, StoredRow>,
     partitions: HashMap<Partition, PartitionState>,
     subscribers: HashMap<String, Subscriber>,
     status: StatusUpdate,
@@ -130,6 +146,13 @@ impl GroupState {
         status
     }
 
+    /// Tells every subscriber's flusher to look at what is queued.
+    fn wake_all(&self) {
+        for subscriber in self.subscribers.values() {
+            subscriber.wake.notify_one();
+        }
+    }
+
     fn set_status(&mut self, status: StatusUpdate) {
         if self.status == status {
             return;
@@ -137,6 +160,7 @@ impl GroupState {
         self.status = status;
         for subscriber in self.subscribers.values_mut() {
             subscriber.status = Some(self.status.clone());
+            subscriber.wake.notify_one();
         }
     }
 
@@ -152,10 +176,11 @@ impl GroupState {
         for subscriber in self.subscribers.values_mut() {
             subscriber.snapshot_due = true;
             subscriber.changes.clear();
+            subscriber.wake.notify_one();
         }
     }
 
-    fn record_change(&mut self, key: &ObjectKey, value: Option<&Row>) {
+    fn record_change(&mut self, key: &ObjectKey, value: Option<&StoredRow>) {
         // Whoever is waiting for a snapshot gets this change in it.
         if !self.synced() {
             return;
@@ -165,28 +190,28 @@ impl GroupState {
             if subscriber.snapshot_due {
                 continue;
             }
-            subscriber.changes.insert(key.clone(), value.cloned());
+            let row = value.map(|stored| stored.pick(subscriber.shape).clone());
+            subscriber.changes.insert(key.clone(), row);
             if subscriber.changes.len() > limit {
                 subscriber.changes.clear();
                 subscriber.snapshot_due = true;
             }
+            subscriber.wake.notify_one();
         }
     }
 }
 
 struct Group {
     resource: ResourceRef,
-    shape: RowShape,
     /// A child of the cluster's token. Lingering out cancels it too.
     token: CancellationToken,
     state: Mutex<GroupState>,
 }
 
 impl Group {
-    fn new(resource: ResourceRef, shape: RowShape, token: CancellationToken) -> Self {
+    fn new(resource: ResourceRef, token: CancellationToken) -> Self {
         Self {
             resource,
-            shape,
             token,
             state: Mutex::new(GroupState {
                 store: HashMap::new(),
@@ -207,17 +232,21 @@ impl Group {
         self.token.is_cancelled() || self.lock().terminal
     }
 
-    /// False when the group stopped, and the caller needs a new one.
-    fn attach(&self, subscription: &str) -> bool {
+    /// False when the group stopped, and the caller needs a new one. `wake` is signalled
+    /// whenever something is queued for the new subscriber, which starts with a status.
+    fn attach(&self, subscription: &str, shape: RowShape, wake: Arc<Notify>) -> bool {
         let mut state = self.lock();
         if state.terminal || self.token.is_cancelled() {
             return false;
         }
         let subscriber = Subscriber {
+            shape,
             status: Some(state.status.clone()),
             snapshot_due: state.synced(),
+            wake,
             ..Default::default()
         };
+        subscriber.wake.notify_one();
         state
             .subscribers
             .insert(subscription.to_owned(), subscriber);
@@ -261,7 +290,7 @@ impl Group {
             .take()
             .map(|(status, message)| WatchEvent::Status { status, message });
         let snapshot = std::mem::take(&mut subscriber.snapshot_due).then(|| WatchEvent::Snapshot {
-            items: sorted_items(&state.store),
+            items: sorted_items(&state.store, subscriber.shape),
         });
         let batch = (!subscriber.changes.is_empty()).then(|| {
             let mut upserts = Vec::new();
@@ -292,7 +321,7 @@ impl Group {
     }
 
     /// Replaces what the partition holds with a completed listing.
-    fn finish_init(&self, partition: &Partition, listed: HashMap<ObjectKey, Row>) {
+    fn finish_init(&self, partition: &Partition, listed: HashMap<ObjectKey, StoredRow>) {
         let mut state = self.lock();
         match partition {
             None => state.store = listed,
@@ -311,7 +340,7 @@ impl Group {
         state.queue_snapshot();
     }
 
-    fn apply(&self, key: ObjectKey, value: Row) {
+    fn apply(&self, key: ObjectKey, value: StoredRow) {
         let mut state = self.lock();
         state.record_change(&key, Some(&value));
         state.store.insert(key, value);
@@ -366,6 +395,8 @@ impl Group {
         let mut state = self.lock();
         state.terminal = true;
         state.set_status((status, message));
+        // A subscriber must learn it is over even when the status did not change.
+        state.wake_all();
     }
 }
 
@@ -383,6 +414,9 @@ pub(crate) struct WatchHub {
     subscriptions: DashMap<String, CancellationToken>,
     next_subscription: AtomicU64,
     timing: Mutex<Timing>,
+    /// How many times a flusher reached `take_events`.
+    #[cfg(test)]
+    flusher_wakes: AtomicU64,
 }
 
 impl Default for WatchHub {
@@ -395,15 +429,17 @@ impl Default for WatchHub {
                 batch: DEFAULT_BATCH,
                 linger: DEFAULT_LINGER,
             }),
+            #[cfg(test)]
+            flusher_wakes: AtomicU64::new(0),
         }
     }
 }
 
 /// What a new watcher needs from the connection.
-struct Connection {
-    client: Client,
-    token: CancellationToken,
-    namespaces: Vec<String>,
+pub(super) struct Connection {
+    pub(super) client: Client,
+    pub(super) token: CancellationToken,
+    pub(super) namespaces: Vec<String>,
 }
 
 impl WatchHub {
@@ -411,9 +447,32 @@ impl WatchHub {
         *lock(&self.timing)
     }
 
+    #[cfg(test)]
+    fn flusher_wakes(&self) -> u64 {
+        self.flusher_wakes.load(Ordering::Relaxed)
+    }
+
     /// How long a watcher outlives its last subscriber. The graph lingers as long.
     pub(crate) fn linger(&self) -> Duration {
         self.timing().linger
+    }
+
+    /// The next id, `watch-N`. Hub subscribers and object watches draw from one counter.
+    fn new_subscription(&self) -> String {
+        let number = self.next_subscription.fetch_add(1, Ordering::Relaxed);
+        format!("watch-{number}")
+    }
+
+    /// Makes `stop` what `unsubscribe` cancels for a new id, for a watch that has no group.
+    pub(super) fn register(&self, stop: CancellationToken) -> String {
+        let subscription = self.new_subscription();
+        self.subscriptions.insert(subscription.clone(), stop);
+        subscription
+    }
+
+    /// Forgets an id whose watch has ended.
+    pub(super) fn deregister(&self, subscription: &str) {
+        self.subscriptions.remove(subscription);
     }
 
     fn subscribe(
@@ -424,9 +483,8 @@ impl WatchHub {
         tx: mpsc::Sender<WatchEvent>,
         connection: &Connection,
     ) -> CoreResult<String> {
-        let shape = shape.of(&resource);
-        let number = self.next_subscription.fetch_add(1, Ordering::Relaxed);
-        let subscription = format!("watch-{number}");
+        let subscription = self.new_subscription();
+        let wake = Arc::new(Notify::new());
         let group = loop {
             // A disconnect that just happened would leave every new group closed.
             if connection.token.is_cancelled() {
@@ -435,8 +493,8 @@ impl WatchHub {
                     format!("cluster {id} is not connected"),
                 ));
             }
-            let group = self.group_for(id, &resource, shape, connection);
-            if group.attach(&subscription) {
+            let group = self.group_for(id, &resource, connection);
+            if group.attach(&subscription, shape, wake.clone()) {
                 break group;
             }
         };
@@ -447,6 +505,7 @@ impl WatchHub {
             self.clone(),
             group,
             subscription.clone(),
+            wake,
             tx,
             stop,
         ));
@@ -458,23 +517,13 @@ impl WatchHub {
         self: &Arc<Self>,
         id: &ClusterId,
         resource: &ResourceRef,
-        shape: RowShape,
         connection: &Connection,
     ) -> Arc<Group> {
-        let key = (
-            id.clone(),
-            resource.group.clone(),
-            resource.plural.clone(),
-            shape,
-        );
+        let key = (id.clone(), resource.group.clone(), resource.plural.clone());
         match self.groups.entry(key.clone()) {
             Entry::Occupied(entry) if !entry.get().is_closed() => entry.get().clone(),
             entry => {
-                let group = Arc::new(Group::new(
-                    resource.clone(),
-                    shape,
-                    connection.token.child_token(),
-                ));
+                let group = Arc::new(Group::new(resource.clone(), connection.token.child_token()));
                 entry.insert(group.clone());
                 tokio::spawn(run_group(
                     self.clone(),
@@ -495,24 +544,43 @@ impl WatchHub {
     }
 }
 
-/// Sends a subscriber what has piled up, once per batch interval, until it leaves,
-/// its group ends or the receiver closes.
+/// Sends a subscriber what has piled up, until it leaves, its group ends or the receiver
+/// closes. It sleeps until the group queues something for the subscriber, and then until a
+/// batch interval has passed since its last flush. So an idle subscriber never wakes, a busy
+/// one is sent at most once per interval, and a change waits no longer than one interval.
 async fn flush_subscriber(
     hub: Arc<WatchHub>,
     group: Arc<Group>,
     subscription: String,
+    wake: Arc<Notify>,
     tx: mpsc::Sender<WatchEvent>,
     stop: CancellationToken,
 ) {
-    let mut ticks = tokio::time::interval(hub.timing().batch);
-    ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let batch = hub.timing().batch;
+    let mut last_flush: Option<Instant> = None;
     'flushing: loop {
         tokio::select! {
             () = stop.cancelled() => break,
             () = tx.closed() => break,
-            _ = ticks.tick() => {}
+            () = wake.notified() => {}
         }
+        if let Some(last) = last_flush {
+            tokio::select! {
+                () = stop.cancelled() => break,
+                () = tx.closed() => break,
+                () = tokio::time::sleep_until(last + batch) => {}
+            }
+        }
+        // This flush takes everything queued so far, so a signal stored since the wake
+        // (several queueings, or one during the sleep) would only wake it for nothing.
+        // A queueing after this point stores a new one, so nothing is missed.
+        let _ = wake.notified().now_or_never();
+        #[cfg(test)]
+        hub.flusher_wakes.fetch_add(1, Ordering::Relaxed);
         let (events, last) = group.take_events(&subscription);
+        // A wake whose changes an earlier flush already took sends nothing, and must not
+        // push the next flush back.
+        let sent_any = !events.is_empty();
         for event in events {
             tokio::select! {
                 () = stop.cancelled() => break 'flushing,
@@ -522,6 +590,9 @@ async fn flush_subscriber(
                     }
                 }
             }
+        }
+        if sent_any {
+            last_flush = Some(Instant::now());
         }
         if last {
             break;
@@ -587,13 +658,13 @@ async fn run_partitions(group: &Group, client: &Client, namespaces: &[String]) -
     PartitionEnd::Forbidden(denied)
 }
 
-struct Failure {
-    code: Option<u16>,
+pub(super) struct Failure {
+    pub(super) code: Option<u16>,
     /// Sanitized, since the status reaches the webview.
-    message: String,
+    pub(super) message: String,
 }
 
-fn describe(err: watcher::Error) -> Failure {
+pub(super) fn describe(err: watcher::Error) -> Failure {
     let source = match err {
         watcher::Error::InitialListFailed(source)
         | watcher::Error::WatchStartFailed(source)
@@ -618,7 +689,7 @@ fn describe(err: watcher::Error) -> Failure {
 
 /// Asks the API server, not the discovery result kept since connecting. When it
 /// cannot tell, the resource counts as served, so that the watcher keeps trying.
-async fn still_served(client: &Client, resource: &ResourceRef) -> bool {
+pub(super) async fn still_served(client: &Client, resource: &ResourceRef) -> bool {
     let list = if resource.group.is_empty() {
         client.list_core_api_resources(&resource.version).await
     } else {
@@ -651,35 +722,47 @@ pub(super) fn api_version(resource: &ResourceRef) -> String {
     }
 }
 
-fn object_key(object: &DynamicObject) -> Option<ObjectKey> {
+pub(super) fn object_key(object: &DynamicObject) -> Option<ObjectKey> {
     Some(ObjectKey {
         namespace: object.metadata.namespace.clone(),
         name: object.metadata.name.clone()?,
     })
 }
 
-/// The row for a subscriber. List items come without `kind` and `apiVersion`, so
-/// these are set from the resource before stripping, which depends on them.
-fn to_row(
+/// The object as the JSON value a row is built from, before any trim. List items come
+/// without `kind` and `apiVersion`, so these are set from the resource before stripping,
+/// which depends on them.
+pub(super) fn stripped_object(
     object: &DynamicObject,
     resource: &ResourceRef,
-    shape: RowShape,
-) -> Option<(ObjectKey, Row)> {
+) -> Option<(ObjectKey, Value)> {
     let key = object_key(object)?;
     let mut value = serde_json::to_value(object).ok()?;
     let fields = value.as_object_mut()?;
     fields.insert("apiVersion".to_owned(), api_version(resource).into());
     fields.insert("kind".to_owned(), stamped_kind(resource).into());
     strip_for_list(&mut value);
-    match shape {
-        RowShape::Table => trim_for_watch(resource, &mut value),
-        RowShape::Graph => trim_for_graph(resource, &mut value),
-    }
-    Some((key, Row::new(&value).ok()?))
+    Some((key, value))
+}
+
+/// The rows for the subscribers. A core Pod gets its graph row too, cut from a copy of the
+/// same parsed value, so the object is parsed once however many shapes read it.
+fn to_row(object: &DynamicObject, resource: &ResourceRef) -> Option<(ObjectKey, StoredRow)> {
+    let (key, mut value) = stripped_object(object, resource)?;
+    let graph = if is_core_pods(resource) {
+        let mut graph = value.clone();
+        trim_for_graph(resource, &mut graph);
+        Some(Row::new(&graph).ok()?)
+    } else {
+        None
+    };
+    trim_for_watch(resource, &mut value);
+    let table = Row::new(&value).ok()?;
+    Some((key, StoredRow { table, graph }))
 }
 
 /// Sleeps unless cancelled first, and lengthens the next pause.
-async fn pause(backoff: &mut Duration, token: &CancellationToken) -> bool {
+pub(super) async fn pause(backoff: &mut Duration, token: &CancellationToken) -> bool {
     let delay = *backoff;
     *backoff = (delay * 2).min(MAX_BACKOFF);
     tokio::select! {
@@ -721,7 +804,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                     continue;
                 }
                 Some(Ok(watcher::Event::InitApply(object))) => {
-                    listing.extend(to_row(&object, resource, group.shape));
+                    listing.extend(to_row(&object, resource));
                     continue;
                 }
                 Some(Ok(watcher::Event::InitDone)) => {
@@ -730,7 +813,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                     continue;
                 }
                 Some(Ok(watcher::Event::Apply(object))) => {
-                    if let Some((key, value)) = to_row(&object, resource, group.shape) {
+                    if let Some((key, value)) = to_row(&object, resource) {
                         group.apply(key, value);
                     }
                     continue;
@@ -826,6 +909,13 @@ impl AppCore {
         shape: RowShape,
         tx: mpsc::Sender<WatchEvent>,
     ) -> CoreResult<String> {
+        let connection = self.connection_of(id)?;
+        self.watches()
+            .subscribe(id, resource, shape, tx, &connection)
+    }
+
+    /// The client, token and namespaces of a connected cluster.
+    pub(super) fn connection_of(&self, id: &ClusterId) -> CoreResult<Connection> {
         let info = match self.cluster_state(id) {
             ConnectionState::Connected { info } => info,
             other => {
@@ -835,13 +925,11 @@ impl AppCore {
                 ))
             }
         };
-        let connection = Connection {
+        Ok(Connection {
             client: self.cluster_client(id)?,
             token: self.cluster_cancel_token(id)?,
             namespaces: info.namespaces,
-        };
-        self.watches()
-            .subscribe(id, resource, shape, tx, &connection)
+        })
     }
 
     /// An id that is unknown or already ended is ignored.
@@ -859,15 +947,15 @@ impl AppCore {
     }
 }
 
-/// The store's objects in a stable order: by namespace (cluster-scoped first), then name.
-/// The UI puts objects a batch adds in this same order (`compareListed` in
+/// The store's rows of `shape` in a stable order: by namespace (cluster-scoped first), then
+/// name. The UI puts objects a batch adds in this same order (`compareListed` in
 /// `ui/src/stores/resources.ts`); keep the two the same.
-fn sorted_items(store: &HashMap<ObjectKey, Row>) -> Vec<Row> {
-    let mut entries: Vec<(&ObjectKey, &Row)> = store.iter().collect();
+fn sorted_items(store: &HashMap<ObjectKey, StoredRow>, shape: RowShape) -> Vec<Row> {
+    let mut entries: Vec<(&ObjectKey, &StoredRow)> = store.iter().collect();
     entries.sort_by(|a, b| (&a.0.namespace, &a.0.name).cmp(&(&b.0.namespace, &b.0.name)));
     entries
         .into_iter()
-        .map(|(_, value)| value.clone())
+        .map(|(_, stored)| stored.pick(shape).clone())
         .collect()
 }
 
@@ -889,9 +977,15 @@ mod tests {
                 name: name.to_owned(),
             };
             let row = Row::new(&serde_json::json!({ "n": namespace, "name": name })).unwrap();
-            store.insert(key, row);
+            store.insert(
+                key,
+                StoredRow {
+                    table: row,
+                    graph: None,
+                },
+            );
         }
-        let names: Vec<_> = sorted_items(&store)
+        let names: Vec<_> = sorted_items(&store, RowShape::Table)
             .iter()
             .map(|row| row.to_value()["name"].as_str().unwrap().to_owned())
             .collect();
@@ -958,8 +1052,9 @@ mod tests {
         .unwrap();
         let pods = resource("", "pods");
 
-        let (_, table) = to_row(&object, &pods, RowShape::Table).unwrap();
-        let (_, graph) = to_row(&object, &pods, RowShape::Graph).unwrap();
+        let (_, stored) = to_row(&object, &pods).unwrap();
+        let table = stored.pick(RowShape::Table);
+        let graph = stored.pick(RowShape::Graph);
 
         assert!(table.to_value()["spec"].get("serviceAccountName").is_none());
         assert_eq!(graph.to_value()["spec"]["serviceAccountName"], "web");
@@ -967,16 +1062,310 @@ mod tests {
     }
 
     #[test]
-    fn only_core_pods_have_a_graph_shape_of_their_own() {
-        assert_eq!(RowShape::Graph.of(&resource("", "pods")), RowShape::Graph);
-        assert_eq!(
-            RowShape::Graph.of(&resource("", "secrets")),
-            RowShape::Table
+    fn only_core_pods_store_a_graph_row_of_their_own() {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": { "name": "x", "namespace": "a" },
+            "spec": { "serviceAccountName": "x" },
+        }))
+        .unwrap();
+        for (group, plural, own_graph_row) in [
+            ("", "pods", true),
+            ("", "secrets", false),
+            ("", "configmaps", false),
+            ("example.com", "pods", false),
+        ] {
+            let (_, stored) = to_row(&object, &resource(group, plural)).unwrap();
+            assert_eq!(stored.graph.is_some(), own_graph_row, "{group}/{plural}");
+            if !own_graph_row {
+                assert_eq!(
+                    stored.pick(RowShape::Graph).json(),
+                    stored.pick(RowShape::Table).json(),
+                    "{group}/{plural}"
+                );
+            }
+        }
+    }
+
+    /// The rows a batch of events carries, as values.
+    fn rows_of(events: &[WatchEvent]) -> Vec<Value> {
+        events
+            .iter()
+            .flat_map(|event| match event {
+                WatchEvent::Snapshot { items } => items.clone(),
+                WatchEvent::Batch { upserts, .. } => upserts.clone(),
+                WatchEvent::Status { .. } => Vec::new(),
+            })
+            .map(|row| row.to_value())
+            .collect()
+    }
+
+    #[test]
+    fn each_subscriber_of_a_group_gets_the_rows_of_its_shape_in_snapshots_and_changes() {
+        let pods = resource("", "pods");
+        let object = |version: &str| -> DynamicObject {
+            serde_json::from_value(serde_json::json!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": "web",
+                    "namespace": "a",
+                    "resourceVersion": version,
+                    "labels": { "version": version },
+                },
+                "spec": { "serviceAccountName": "web", "containers": [{ "name": "app" }] },
+            }))
+            .unwrap()
+        };
+        let group = Group::new(pods.clone(), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        assert!(group.attach("graph", RowShape::Graph, Arc::default()));
+
+        let (key, first) = to_row(&object("1"), &pods).unwrap();
+        group.finish_init(&None, HashMap::from([(key.clone(), first)]));
+        let table = rows_of(&group.take_events("table").0);
+        let graph = rows_of(&group.take_events("graph").0);
+        assert_eq!(table.len(), 1);
+        assert_eq!(graph.len(), 1);
+        assert!(table[0]["spec"].get("serviceAccountName").is_none());
+        assert_eq!(graph[0]["spec"]["serviceAccountName"], "web");
+
+        let (_, second) = to_row(&object("2"), &pods).unwrap();
+        group.apply(key, second);
+        let table = rows_of(&group.take_events("table").0);
+        let graph = rows_of(&group.take_events("graph").0);
+        assert_eq!(table[0]["metadata"]["resourceVersion"], "2");
+        assert!(table[0]["spec"].get("serviceAccountName").is_none());
+        // A graph row keeps no resourceVersion, so a label shows it is the new row.
+        assert_eq!(graph[0]["metadata"]["labels"]["version"], "2");
+        assert_eq!(graph[0]["spec"]["serviceAccountName"], "web");
+    }
+
+    #[test]
+    fn registered_subscriptions_share_the_counter_and_unsubscribe_cancels_them() {
+        let hub = WatchHub::default();
+        let first = hub.register(CancellationToken::new());
+        assert_eq!(first, "watch-1");
+        assert_eq!(hub.new_subscription(), "watch-2");
+
+        let stop = CancellationToken::new();
+        let third = hub.register(stop.clone());
+        assert_eq!(third, "watch-3");
+        hub.unsubscribe(&third);
+        assert!(stop.is_cancelled());
+
+        let kept = CancellationToken::new();
+        let fourth = hub.register(kept.clone());
+        hub.deregister(&fourth);
+        hub.unsubscribe(&fourth);
+        assert!(!kept.is_cancelled(), "a released id is no longer known");
+    }
+
+    #[test]
+    fn a_stripped_object_is_stamped_and_has_secret_values_blanked() {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "metadata": { "name": "s", "namespace": "a", "managedFields": [{ "manager": "m" }] },
+            "data": { "password": "czNjcjN0" },
+        }))
+        .unwrap();
+        let secrets = ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            plural: "secrets".into(),
+            kind: "ConfigMap".into(),
+            namespaced: true,
+        };
+
+        let (key, value) = stripped_object(&object, &secrets).unwrap();
+
+        assert_eq!(key.name, "s");
+        assert_eq!(value["kind"], "Secret");
+        assert_eq!(value["apiVersion"], "v1");
+        assert_eq!(value["data"]["password"], "");
+        assert!(value["metadata"].get("managedFields").is_none());
+    }
+
+    fn stored(name: &str, version: &str) -> (ObjectKey, StoredRow) {
+        let key = ObjectKey {
+            namespace: Some("a".to_owned()),
+            name: name.to_owned(),
+        };
+        let row = Row::new(&serde_json::json!({
+            "metadata": { "name": name, "namespace": "a", "resourceVersion": version },
+        }))
+        .unwrap();
+        (
+            key,
+            StoredRow {
+                table: row,
+                graph: None,
+            },
+        )
+    }
+
+    struct Rig {
+        hub: Arc<WatchHub>,
+        group: Arc<Group>,
+        rx: mpsc::Receiver<WatchEvent>,
+        stop: CancellationToken,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    /// One flusher over a group with no watcher behind it, so a test is the API server.
+    fn flusher_rig(batch: Duration) -> Rig {
+        let hub = Arc::new(WatchHub::default());
+        *lock(&hub.timing) = Timing {
+            batch,
+            linger: Duration::from_secs(30),
+        };
+        let group = Arc::new(Group::new(resource("", "pods"), CancellationToken::new()));
+        let wake = Arc::new(Notify::new());
+        assert!(group.attach("watch-1", RowShape::Table, wake.clone()));
+        let (tx, rx) = mpsc::channel(16);
+        let stop = group.token.child_token();
+        let task = tokio::spawn(flush_subscriber(
+            hub.clone(),
+            group.clone(),
+            "watch-1".to_owned(),
+            wake,
+            tx,
+            stop.clone(),
+        ));
+        Rig {
+            hub,
+            group,
+            rx,
+            stop,
+            task,
+        }
+    }
+
+    impl Rig {
+        /// Takes the status a subscriber starts with, then syncs the group and takes the
+        /// empty snapshot and the Live status that follow.
+        async fn synced(&mut self) {
+            assert!(matches!(
+                self.rx.recv().await,
+                Some(WatchEvent::Status {
+                    status: WatchStatus::Syncing,
+                    ..
+                })
+            ));
+            self.group.finish_init(&None, HashMap::new());
+            assert!(matches!(
+                self.rx.recv().await,
+                Some(WatchEvent::Snapshot { .. })
+            ));
+            assert!(matches!(
+                self.rx.recv().await,
+                Some(WatchEvent::Status {
+                    status: WatchStatus::Live,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_does_not_wake_while_idle() {
+        let mut rig = flusher_rig(Duration::from_millis(150));
+        rig.synced().await;
+        let wakes = rig.hub.flusher_wakes();
+
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+
+        assert_eq!(rig.hub.flusher_wakes(), wakes, "an idle flusher polled");
+        assert!(rig.rx.try_recv().is_err());
+        rig.stop.cancel();
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_sends_a_change_at_once_after_idle_and_one_batch_after_a_flush() {
+        let batch = Duration::from_millis(150);
+        let mut rig = flusher_rig(batch);
+        rig.synced().await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let started = Instant::now();
+        let (key, first) = stored("web", "1");
+        rig.group.apply(key.clone(), first);
+        assert!(matches!(
+            rig.rx.recv().await,
+            Some(WatchEvent::Batch { .. })
+        ));
+        assert!(
+            started.elapsed() <= batch,
+            "late by {:?}",
+            started.elapsed()
         );
-        assert_eq!(
-            RowShape::Graph.of(&resource("example.com", "pods")),
-            RowShape::Table
-        );
-        assert_eq!(RowShape::Table.of(&resource("", "pods")), RowShape::Table);
+
+        // A change right after a flush waits out the interval, and folds into one batch.
+        let started = Instant::now();
+        for version in ["2", "3", "4"] {
+            rig.group.apply(key.clone(), stored("web", version).1);
+        }
+        let Some(WatchEvent::Batch { upserts, deletes }) = rig.rx.recv().await else {
+            panic!("expected a batch");
+        };
+        assert_eq!(started.elapsed(), batch);
+        assert!(deletes.is_empty());
+        assert_eq!(upserts.len(), 1);
+        assert_eq!(upserts[0].to_value()["metadata"]["resourceVersion"], "4");
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(rig.rx.try_recv().is_err(), "nothing more was queued");
+        rig.stop.cancel();
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_wakes_for_a_status_a_due_snapshot_and_the_final_status() {
+        let mut rig = flusher_rig(Duration::from_millis(150));
+        rig.synced().await;
+
+        rig.group.set_failing(&None, "boom".to_owned());
+        let Some(WatchEvent::Status { status, message }) = rig.rx.recv().await else {
+            panic!("expected a status");
+        };
+        assert_eq!(status, WatchStatus::Reconnecting);
+        assert_eq!(message.as_deref(), Some("boom"));
+
+        // After its first snapshot a subscriber gets the status before the next one.
+        rig.group.finish_init(&None, HashMap::new());
+        assert!(matches!(
+            rig.rx.recv().await,
+            Some(WatchEvent::Status {
+                status: WatchStatus::Live,
+                ..
+            })
+        ));
+        assert!(matches!(
+            rig.rx.recv().await,
+            Some(WatchEvent::Snapshot { .. })
+        ));
+
+        rig.group
+            .finish(WatchStatus::NotServed, Some("gone".to_owned()));
+        let Some(WatchEvent::Status { status, .. }) = rig.rx.recv().await else {
+            panic!("expected the final status");
+        };
+        assert_eq!(status, WatchStatus::NotServed);
+        assert!(rig.rx.recv().await.is_none(), "the final status ends it");
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_ends_when_the_receiver_closes_without_any_change() {
+        let mut rig = flusher_rig(Duration::from_millis(150));
+        rig.synced().await;
+
+        drop(rig.rx);
+
+        tokio::time::timeout(Duration::from_secs(1), rig.task)
+            .await
+            .expect("the flusher did not end")
+            .unwrap();
     }
 }

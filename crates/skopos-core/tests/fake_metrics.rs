@@ -3,7 +3,7 @@
 
 mod support;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use k8s_openapi::jiff::Timestamp;
 use serde_json::{json, Value};
@@ -415,7 +415,7 @@ async fn auto_picks_the_first_candidate_that_answers_the_probe() {
     // A higher tier, but nothing answers behind it.
     kube_prometheus_stack(&fake);
     community_chart(&fake, up);
-    // A lower tier, never probed.
+    // A lower tier. It may be probed meanwhile (up to four at once) but never chosen.
     fake.upsert(
         "services",
         prometheus_service(
@@ -444,9 +444,6 @@ async fn auto_picks_the_first_candidate_that_answers_the_probe() {
         probes[0].params.get("query").map(String::as_str),
         Some("up")
     );
-    assert!(fake
-        .proxy_requests("default", "my-prometheus:9090")
-        .is_empty());
 }
 
 #[tokio::test]
@@ -489,6 +486,73 @@ async fn a_probe_that_is_refused_or_too_slow_moves_on() {
         fake.proxy_requests("obs", "prometheus-operated:9090").len(),
         1
     );
+}
+
+#[tokio::test]
+async fn stalled_candidates_are_probed_four_at_a_time_and_the_good_one_is_chosen() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    core.set_metrics_limits_for_test(MetricsLimits {
+        probe: Duration::from_millis(600),
+        ..MetricsLimits::default()
+    });
+    // Eight operator-tier services that never answer in time, ahead of the chart's.
+    for number in 0..8 {
+        let name = format!("operated-{number}");
+        fake.upsert(
+            "services",
+            prometheus_service(
+                "obs",
+                &name,
+                json!({ "operated-prometheus": "true" }),
+                "web",
+                9090,
+            ),
+        );
+        fake.serve_proxy("obs", &format!("{name}:9090"), |request| {
+            up(request).after(Duration::from_secs(5))
+        });
+    }
+    community_chart(&fake, up);
+
+    let started = Instant::now();
+    let chosen = core.metrics_provider(&id, false).await.unwrap();
+    let took = started.elapsed();
+
+    assert_eq!(chosen, chart_provider());
+    // One at a time this is 8 x 0.6 s = 4.8 s before the good one is even asked.
+    assert!(took < Duration::from_millis(3000), "took {took:?}");
+}
+
+#[tokio::test]
+async fn the_best_candidate_that_answered_wins_even_when_a_worse_one_answers_first() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    // The operator tier answers slowly; the community chart answers at once.
+    fake.upsert(
+        "services",
+        prometheus_service(
+            "obs",
+            "prometheus-operated",
+            json!({ "operated-prometheus": "true" }),
+            "web",
+            9090,
+        ),
+    );
+    fake.serve_proxy("obs", "prometheus-operated:9090", |request| {
+        up(request).after(Duration::from_millis(400))
+    });
+    community_chart(&fake, up);
+
+    let chosen = core.metrics_provider(&id, false).await.unwrap();
+
+    match chosen {
+        MetricsProvider::Prometheus {
+            service, chosen_by, ..
+        } => {
+            assert_eq!(service, "prometheus-operated");
+            assert_eq!(chosen_by, PrometheusChoice::Operator);
+        }
+        other => panic!("expected the operator's Prometheus, got {other:?}"),
+    }
 }
 
 #[tokio::test]

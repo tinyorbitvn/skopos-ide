@@ -131,3 +131,16 @@ test("prefix colors cycle in the order Pods appear", () => {
     "var(--border-accent)",
   ]);
 });
+
+test("the limited marker says how many containers are followed", () => {
+  expect(
+    markerText({
+      kind: "marker",
+      seq: 0,
+      pod: "web",
+      container: null,
+      marker: { type: "limited", streaming: 20, total: 34 },
+      message: null,
+    }),
+  ).toBe("Following 20 of 34 containers; the others start as streams end");
+});

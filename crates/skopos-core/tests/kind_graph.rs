@@ -4,6 +4,7 @@
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
@@ -434,7 +435,7 @@ impl Snapshot {
 
 struct Map {
     id: String,
-    rx: mpsc::Receiver<GraphEvent>,
+    rx: mpsc::Receiver<Arc<GraphEvent>>,
 }
 
 impl Map {
@@ -458,7 +459,8 @@ impl Map {
                 .await
                 .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
                 .expect("the subscription ended");
-            let json = serde_json::to_string(&event).unwrap();
+            let json = serde_json::to_string(event.as_ref()).unwrap();
+            let event = Arc::unwrap_or_clone(event);
             for value in [SECRET_VALUE, SECRET_BASE64, PLAIN_VALUE] {
                 assert!(!json.contains(value), "{value} left the core");
             }

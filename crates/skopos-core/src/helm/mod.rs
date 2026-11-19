@@ -3,8 +3,10 @@
 //! commands pass the per-context kubeconfig that F3 writes.
 mod actions;
 mod charts;
+mod refusal;
 mod releases;
 mod repos;
+mod watch;
 
 pub use actions::{ChartRef, HelmInstallRequest, HelmPreview, HelmUpgradeRequest};
 pub use charts::{ChartSearch, ChartSummary, ChartVersion, RepoProblem, RepoProblemKind};
@@ -12,8 +14,11 @@ pub use releases::{
     HelmRelease, HelmReleaseDetail, HelmReleaseList, HelmRevision, ManifestResource,
 };
 pub use repos::{HelmRepo, HelmRepoAdd};
+pub use watch::HelmReleasesEvent;
 
 use charts::{HelmDirs, RepoIndex};
+use refusal::RefusalMemo;
+use watch::ReleaseWatches;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -329,6 +334,10 @@ pub(crate) struct Helm {
     dirs: Mutex<HashMap<PathBuf, HelmDirs>>,
     /// Parsed repo indexes by file, with the stamp the file had when it was read.
     indexes: Mutex<HashMap<PathBuf, (FileStamp, Arc<RepoIndex>)>>,
+    /// Clusters that refused `helm list --all-namespaces`, for a minute each.
+    refusals: Mutex<RefusalMemo>,
+    /// The releases subscriptions of `helm_releases_subscribe`.
+    watches: ReleaseWatches,
 }
 
 impl Helm {
@@ -338,6 +347,8 @@ impl Helm {
             homes: Mutex::new(None),
             dirs: Mutex::new(HashMap::new()),
             indexes: Mutex::new(HashMap::new()),
+            refusals: Mutex::new(RefusalMemo::default()),
+            watches: ReleaseWatches::new(),
         }
     }
 

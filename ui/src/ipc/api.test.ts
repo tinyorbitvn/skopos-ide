@@ -4,12 +4,15 @@ import { mockBackend } from "../test/ipc";
 import { api } from "./api";
 import type { GraphEvent } from "./generated/GraphEvent";
 import type { HelmInstallRequest } from "./generated/HelmInstallRequest";
+import type { HelmReleasesEvent } from "./generated/HelmReleasesEvent";
 import type { HelmRepoAdd } from "./generated/HelmRepoAdd";
 import type { HelmUpgradeRequest } from "./generated/HelmUpgradeRequest";
 import type { MetricsTarget } from "./generated/MetricsTarget";
 import type { MoveOutcome } from "./generated/MoveOutcome";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
+import type { ResourceRef } from "./generated/ResourceRef";
 import type { SessionEvent } from "./generated/SessionEvent";
+import type { WatchEvent } from "./generated/WatchEvent";
 import type { WindowLayout } from "./generated/WindowLayout";
 
 const SIZE = { cols: 120, rows: 32 };
@@ -202,6 +205,30 @@ test("a helm run's channels hand its output and its events over", async () => {
   expect(seen).toEqual([{ type: "exited", code: 0 }]);
 });
 
+test("a helm releases subscription hands its events over and ends by id", async () => {
+  const seen: HelmReleasesEvent[] = [];
+  const backend = mockBackend({
+    helm_releases_subscribe: () => "helm-1",
+    helm_releases_unsubscribe: () => null,
+  });
+  await expect(
+    api.helmReleasesSubscribe("c1", (event) => seen.push(event)),
+  ).resolves.toBe("helm-1");
+  const sent = backend.callsTo("helm_releases_subscribe")[0] ?? {};
+  expect(sent.clusterId).toBe("c1");
+  const onEvent = sent.onEvent as Channel<HelmReleasesEvent>;
+  onEvent.onmessage({ type: "changed" });
+  onEvent.onmessage({ type: "forbidden", message: "no" });
+  expect(seen).toEqual([
+    { type: "changed" },
+    { type: "forbidden", message: "no" },
+  ]);
+  await api.helmReleasesUnsubscribe("helm-1");
+  expect(backend.callsTo("helm_releases_unsubscribe")[0]).toEqual({
+    subscriptionId: "helm-1",
+  });
+});
+
 const ADD: HelmRepoAdd = {
   name: "bitnami",
   url: "https://charts.example/stable",
@@ -275,6 +302,11 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
     "helm_release_history",
     () => api.helmReleaseHistory("c1", "shop", "web"),
     { clusterId: "c1", namespace: "shop", name: "web" },
+  ],
+  [
+    "helm_releases_unsubscribe",
+    () => api.helmReleasesUnsubscribe("helm-1"),
+    { subscriptionId: "helm-1" },
   ],
   [
     "helm_install_preview",
@@ -363,6 +395,49 @@ test("resource_graph_unsubscribe names the subscription", async () => {
   expect(backend.calls).toEqual([
     { cmd: "resource_graph_unsubscribe", args: { subscriptionId: "g1" } },
   ]);
+});
+
+const POD_REF: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "pods",
+  kind: "Pod",
+  namespaced: true,
+};
+
+test("resources_subscribe_object gets the object and a channel, and gives the id", async () => {
+  const events: WatchEvent[] = [];
+  const backend = mockBackend({ resources_subscribe_object: () => "watch-9" });
+  await expect(
+    api.resourcesSubscribeObject("c1", POD_REF, "shop", "web-1", (event) =>
+      events.push(event),
+    ),
+  ).resolves.toBe("watch-9");
+  const sent = backend.callsTo("resources_subscribe_object")[0];
+  expect(sent).toMatchObject({
+    clusterId: "c1",
+    resource: POD_REF,
+    namespace: "shop",
+    name: "web-1",
+  });
+  const channel = sent?.onEvent as Channel<WatchEvent>;
+  expect(channel).toBeInstanceOf(Channel);
+  channel.onmessage({ type: "snapshot", items: [] });
+  expect(events).toEqual([{ type: "snapshot", items: [] }]);
+});
+
+test("resources_subscribe_object sends null for a cluster-scoped object", async () => {
+  const backend = mockBackend({ resources_subscribe_object: () => "watch-9" });
+  await api.resourcesSubscribeObject(
+    "c1",
+    { ...POD_REF, plural: "nodes", kind: "Node", namespaced: false },
+    null,
+    "worker-1",
+    () => {},
+  );
+  expect(
+    backend.callsTo("resources_subscribe_object")[0]?.namespace,
+  ).toBeNull();
 });
 
 const LAYOUT: WindowLayout = {

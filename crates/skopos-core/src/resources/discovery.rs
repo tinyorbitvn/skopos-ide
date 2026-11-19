@@ -99,7 +99,28 @@ impl AppCore {
     /// The resources the cluster serves and what the user may do with each.
     /// The result is kept until the cluster disconnects; `refresh` runs discovery
     /// and the access checks again and replaces `cluster_discovery`'s answer.
+    /// Refreshes of one cluster that arrive together share one run, and one that
+    /// arrives during a run starts one more, so a change made meanwhile is seen.
     pub async fn resources_discover(
+        &self,
+        id: &ClusterId,
+        refresh: bool,
+    ) -> CoreResult<Vec<ApiResourceInfo>> {
+        if !refresh {
+            return self.discover_once(id, false).await;
+        }
+        let core = self.clone();
+        let target = id.clone();
+        self.discovery_flight(id)
+            .run(Box::pin(
+                async move { core.discover_once(&target, true).await },
+            ))
+            .await
+    }
+
+    /// One discovery run: the cached answer unless `refresh`, else a new one that is kept
+    /// when the connection is still the one it started on.
+    async fn discover_once(
         &self,
         id: &ClusterId,
         refresh: bool,
