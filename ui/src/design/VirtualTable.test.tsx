@@ -537,15 +537,16 @@ test("dragging a column that shares the spare room starts from its width on scre
     "getBoundingClientRect",
   ).mockReturnValue({ width: 300 } as DOMRect);
   fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId: 1 });
-  fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1 });
+  // The pointer leaves the narrow handle at once; the drag follows it anywhere.
+  fireEvent.pointerMove(document.body, { clientX: 160, pointerId: 1 });
   expect(tracks()).toBe("360px 80px 80px");
-  fireEvent.pointerUp(handle, { clientX: 160, pointerId: 1 });
+  fireEvent.pointerUp(document.body, { clientX: 160, pointerId: 1 });
   // Once the button is up, moving the pointer resizes nothing.
-  fireEvent.pointerMove(handle, { clientX: 400, pointerId: 1 });
+  fireEvent.pointerMove(document.body, { clientX: 400, pointerId: 1 });
   expect(tracks()).toBe("360px 80px 80px");
   // Only the main button drags.
   fireEvent.pointerDown(handle, { button: 2, clientX: 100, pointerId: 1 });
-  fireEvent.pointerMove(handle, { clientX: 50, pointerId: 1 });
+  fireEvent.pointerMove(document.body, { clientX: 50, pointerId: 1 });
   expect(tracks()).toBe("360px 80px 80px");
 });
 

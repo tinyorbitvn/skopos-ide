@@ -129,10 +129,12 @@ function ColumnResizer(props: {
   testId: string;
 }) {
   const { width, base, onResize } = props;
-  const drag = useRef<{ fromX: number; from: number } | null>(null);
   const [active, setActive] = useState(false);
+  // The drag's listeners outlive the render that started it, so they read the latest.
+  const resizeRef = useRef(onResize);
+  resizeRef.current = onResize;
   const set = (next: number) =>
-    onResize(
+    resizeRef.current(
       Math.round(Math.min(MAX_COLUMN_PX, Math.max(MIN_COLUMN_PX, next))),
     );
   const current = (handle: HTMLElement) =>
@@ -141,22 +143,31 @@ function ColumnResizer(props: {
     handle.parentElement?.getBoundingClientRect().width ??
     MIN_COLUMN_PX;
 
+  /** Ends a drag in progress; also run if the table goes away during one. */
+  const endDrag = useRef<(() => void) | null>(null);
+  useEffect(() => () => endDrag.current?.(), []);
+
+  // The window follows the pointer, not the 9px handle, which the pointer leaves at
+  // once: pointer capture is not there for every kind of input.
   function start(event: PointerEvent<HTMLDivElement>): void {
     if (event.button !== 0) return;
     event.preventDefault();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    drag.current = { fromX: event.clientX, from: current(event.currentTarget) };
+    endDrag.current?.();
+    const fromX = event.clientX;
+    const from = current(event.currentTarget);
+    const move = (e: globalThis.PointerEvent) => set(from + e.clientX - fromX);
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      endDrag.current = null;
+      setActive(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    endDrag.current = stop;
     setActive(true);
-  }
-
-  function move(event: PointerEvent<HTMLDivElement>): void {
-    if (!drag.current) return;
-    set(drag.current.from + event.clientX - drag.current.fromX);
-  }
-
-  function stop(): void {
-    drag.current = null;
-    setActive(false);
   }
 
   function key(event: KeyboardEvent<HTMLDivElement>): void {
@@ -182,9 +193,6 @@ function ColumnResizer(props: {
       title="Drag to resize, double-click to reset"
       tabIndex={0}
       onPointerDown={start}
-      onPointerMove={move}
-      onPointerUp={stop}
-      onPointerCancel={stop}
       onDoubleClick={() => onResize(null)}
       onKeyDown={key}
       data-testid={props.testId}
