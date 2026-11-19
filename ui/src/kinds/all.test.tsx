@@ -218,6 +218,10 @@ test("every kind of the plan is registered", () => {
     "rbac.authorization.k8s.io/clusterroles",
     "rbac.authorization.k8s.io/rolebindings",
     "rbac.authorization.k8s.io/roles",
+    "resource.k8s.io/deviceclasses",
+    "resource.k8s.io/resourceclaims",
+    "resource.k8s.io/resourceclaimtemplates",
+    "resource.k8s.io/resourceslices",
     "scheduling.k8s.io/priorityclasses",
     "storage.k8s.io/storageclasses",
   ]);

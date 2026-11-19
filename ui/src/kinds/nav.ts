@@ -39,6 +39,8 @@ function r(label: string, group: string, plural: string): NavResource {
 const GATEWAY = "gateway.networking.k8s.io";
 const GATEWAY_EXPERIMENTAL = "gateway.networking.x-k8s.io";
 const ARGO = "argoproj.io";
+/** Dynamic Resource Allocation: Device Resources lists its kinds. */
+const RESOURCE = "resource.k8s.io";
 
 /** The Gateway API's standard and experimental groups. Network lists every served kind of both (spec M3). */
 export const GATEWAY_GROUPS: ReadonlySet<string> = new Set([
@@ -52,7 +54,8 @@ export const GATEWAY_GROUPS: ReadonlySet<string> = new Set([
  * Charts and Releases are routes of the cluster screen, not resource kinds. Custom Resources starts with Definitions; the
  * entries for each CRD are added by `customResourceGroups`. Helm and Argo CD come right under Nodes (spec M1). The Gateway
  * API kinds are under Network, where `visibleSections` adds the other served kinds of `GATEWAY_GROUPS` (spec M2, M3), and
- * Argo CD has its own section (spec G §3); their items hide where the cluster does not serve them.
+ * Argo CD has its own section (spec G §3), as do the Dynamic Resource Allocation kinds (Device Resources); their items hide
+ * where the cluster does not serve them.
  */
 export const NAV_SECTIONS: NavSection[] = [
   { id: "nodes", label: "Nodes", items: [r("Nodes", "", "nodes")] },
@@ -141,6 +144,16 @@ export const NAV_SECTIONS: NavSection[] = [
       r("PersistentVolumeClaims", "", "persistentvolumeclaims"),
       r("PersistentVolumes", "", "persistentvolumes"),
       r("StorageClasses", "storage.k8s.io", "storageclasses"),
+    ],
+  },
+  {
+    id: "devices",
+    label: "Device Resources",
+    items: [
+      r("ResourceClaims", RESOURCE, "resourceclaims"),
+      r("ResourceClaimTemplates", RESOURCE, "resourceclaimtemplates"),
+      r("DeviceClasses", RESOURCE, "deviceclasses"),
+      r("ResourceSlices", RESOURCE, "resourceslices"),
     ],
   },
   {

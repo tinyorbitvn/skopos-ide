@@ -74,6 +74,12 @@ const SIDEBAR: Record<string, string[]> = {
     "core-persistentvolumes",
     "storage.k8s.io-storageclasses",
   ],
+  devices: [
+    "resource.k8s.io-resourceclaims",
+    "resource.k8s.io-resourceclaimtemplates",
+    "resource.k8s.io-deviceclasses",
+    "resource.k8s.io-resourceslices",
+  ],
   namespaces: ["core-namespaces"],
   events: ["core-events"],
   access: [
@@ -217,6 +223,65 @@ describe("resource browsing on a real cluster", () => {
       for (const item of items) {
         expect(await byTestId(`nav-item-${item}`).isExisting()).toBe(true);
       }
+    }
+  });
+
+  it("lists Device Resources: a DeviceClass with its selector and a Pending ResourceClaim", async () => {
+    const CLASS = "skopos-e2e.example.com";
+    const CLAIM = "skopos-e2e-claim";
+    await kubectl(
+      ["apply", "-f", "-"],
+      `apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: ${CLASS}
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "${CLASS}"
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: ${CLAIM}
+  namespace: ${NS}
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: ${CLASS}
+`,
+    );
+    try {
+      await openResource("nav-item-resource.k8s.io-deviceclasses", "DeviceClass");
+      await clickWhenShown(`resource-row-${CLASS}`);
+      await shown("detail-drawer");
+      await browser.waitUntil(
+        async () =>
+          (await byTestId("detail-drawer").getText()).includes(
+            `device.driver == "${CLASS}"`,
+          ),
+        { timeoutMsg: "the DeviceClass drawer never showed its selector" },
+      );
+      await clickWhenShown("detail-close");
+      await gone("detail-drawer");
+
+      await openResource("nav-item-resource.k8s.io-resourceclaims", "ResourceClaim");
+      const row = await shown(rowId(NS, CLAIM));
+      await browser.waitUntil(async () => (await row.getText()).includes("Pending"), {
+        timeoutMsg: "the claim never showed Pending",
+      });
+      expect(await row.getText()).toContain(CLASS);
+      await row.click();
+      await shown("device-requests");
+      expect(await byTestId("device-requests").getText()).toContain(CLASS);
+      expect(await byTestId("claim-devices").isExisting()).toBe(false);
+      await clickWhenShown("detail-close");
+      await gone("detail-drawer");
+    } finally {
+      await kubectl(["-n", NS, "delete", "resourceclaim", CLAIM, "--ignore-not-found"]);
+      await kubectl(["delete", "deviceclass", CLASS, "--ignore-not-found"]);
     }
   });
 

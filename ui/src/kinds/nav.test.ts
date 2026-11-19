@@ -100,6 +100,15 @@ const EXPECTED: [string, string[]][] = [
       "storage.k8s.io/storageclasses",
     ],
   ],
+  [
+    "devices",
+    [
+      "resource.k8s.io/resourceclaims",
+      "resource.k8s.io/resourceclaimtemplates",
+      "resource.k8s.io/deviceclasses",
+      "resource.k8s.io/resourceslices",
+    ],
+  ],
   ["namespaces", ["/namespaces"]],
   ["events", ["/events"]],
   [
@@ -131,6 +140,7 @@ test("NAV_SECTIONS covers every F4 resource", () => {
     "Config",
     "Network",
     "Storage",
+    "Device Resources",
     "Namespaces",
     "Events",
     "Access Control",
