@@ -315,6 +315,12 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
     () => api.metricsUsage("c1", "pods", null),
     { clusterId: "c1", of: "pods", namespace: null },
   ],
+  ["cluster_control_plane", () => api.clusterControlPlane("c1"), { id: "c1" }],
+  [
+    "nodes_disk_usage",
+    () => api.nodesDiskUsage("c1", ["n1", "n2"]),
+    { id: "c1", names: ["n1", "n2"] },
+  ],
   [
     "metrics_secret_set",
     () => api.metricsSecretSet("c1", "s3cret", { kind: "metricsServer" }),

@@ -13,6 +13,7 @@ import type { ClusterEntry } from "./generated/ClusterEntry";
 import type { ClusterSettings } from "./generated/ClusterSettings";
 import type { ConnectionLogEntry } from "./generated/ConnectionLogEntry";
 import type { ConnectionState } from "./generated/ConnectionState";
+import type { ControlPlane } from "./generated/ControlPlane";
 import type { DataChange } from "./generated/DataChange";
 import type { DrainEvent } from "./generated/DrainEvent";
 import type { DrainOptions } from "./generated/DrainOptions";
@@ -40,6 +41,7 @@ import type { MetricsResult } from "./generated/MetricsResult";
 import type { MetricsTarget } from "./generated/MetricsTarget";
 import type { MoveOutcome } from "./generated/MoveOutcome";
 import type { MoveTarget } from "./generated/MoveTarget";
+import type { NodeDiskSnapshot } from "./generated/NodeDiskSnapshot";
 import type { ObjectNames } from "./generated/ObjectNames";
 import type { PortForward } from "./generated/PortForward";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
@@ -89,6 +91,9 @@ export const api = {
     call<ConnectionState>("cluster_connect", { id }),
   clusterDisconnect: (id: string) => call<void>("cluster_disconnect", { id }),
   clusterState: (id: string) => call<ConnectionState>("cluster_state", { id }),
+  /** Health of the API server and the control-plane components; what is not visible is null. */
+  clusterControlPlane: (id: string) =>
+    call<ControlPlane>("cluster_control_plane", { id }),
   clusterLog: (id: string) => call<ConnectionLogEntry[]>("cluster_log", { id }),
   clusterSettingsGet: (id: string) =>
     call<ClusterSettings>("cluster_settings_get", { id }),
@@ -590,6 +595,12 @@ export const api = {
   /** metrics.k8s.io; null lists every namespace. NotFound "noMetricsServer" when not served. */
   metricsUsage: (clusterId: string, of: UsageOf, namespace: string | null) =>
     call<UsageSnapshot>("metrics_usage", { clusterId, of, namespace }),
+  /**
+   * Root filesystem use of the named nodes, from each kubelet through the node proxy. A node
+   * that cannot be read is left out; Forbidden when every node answered 403.
+   */
+  nodesDiskUsage: (id: string, names: string[]) =>
+    call<NodeDiskSnapshot>("nodes_disk_usage", { id, names }),
   /**
    * Saves the metrics URL's password or token in the keychain, replacing the saved one. The
    * core validates `provider`, the setting about to be saved, first and refuses the secret
