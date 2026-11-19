@@ -7,6 +7,7 @@ import {
   EmptyState,
   ErrorNotice,
   Spinner,
+  type ColumnWidths,
   type TableColumn,
   type TableSort,
   VirtualTable,
@@ -139,6 +140,11 @@ export function ResourceScreen(props: {
   );
   const [choices, setChoices] = useUiState<ColumnChoices>(
     `columns:${resource.group}/${resource.plural}`,
+    {},
+  );
+  // Kept per kind, as the column choices are, so each list keeps the widths it was given.
+  const [columnWidths, setColumnWidths] = useUiState<ColumnWidths>(
+    `column-widths:${resource.group}/${resource.plural}`,
     {},
   );
   const namespaces = namespaced ? savedNamespaces : [];
@@ -378,6 +384,8 @@ export function ResourceScreen(props: {
                   : o.metadata.name
               }
               hiddenColumns={hiddenColumns}
+              columnWidths={columnWidths}
+              onColumnWidthsChange={setColumnWidths}
               sort={sort}
               onSortChange={setSort}
               selected={selected}

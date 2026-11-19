@@ -473,3 +473,87 @@ test("a row's checkbox carries the test id selectTestId gives", () => {
     true,
   );
 });
+
+/** The grid tracks the table lays its columns out with, as one string. */
+function tracks(): string {
+  const scroller = screen.getByTestId("table").parentElement as HTMLElement;
+  return scroller.style.getPropertyValue("--vt-columns");
+}
+
+const resizer = (id: string) => screen.getByTestId(`column-resize-${id}`);
+
+test("a column's handle resizes it from the keyboard; a double-click resets it", () => {
+  const withActions: TableColumn<Row>[] = [
+    ...columns,
+    { id: "actions", header: "Actions", width: 40, stickyEnd: true, render: () => "" },
+  ];
+  render(
+    <VirtualTable
+      rows={[row("a")]}
+      columns={withActions}
+      rowKey={rowKey}
+      testId="table"
+    />,
+  );
+  expect(tracks()).toBe("1fr 80px 80px 40px");
+  const size = screen.getByRole("separator", { name: "Resize Size" });
+  expect(size.getAttribute("aria-orientation")).toBe("vertical");
+  expect(size.tabIndex).toBe(0);
+  // The column at the sticky end holds the row actions and keeps its width.
+  expect(screen.queryByTestId("column-resize-actions")).toBeNull();
+
+  fireEvent.keyDown(resizer("size"), { key: "ArrowRight" });
+  expect(tracks()).toBe("1fr 96px 80px 40px");
+  expect(resizer("size").getAttribute("aria-valuenow")).toBe("96");
+  // Shift takes four steps, and a column is never narrower than 48 px.
+  fireEvent.keyDown(resizer("size"), { key: "ArrowLeft", shiftKey: true });
+  expect(tracks()).toBe("1fr 48px 80px 40px");
+  const scroller = screen.getByTestId("table").parentElement as HTMLElement;
+  expect(scroller.style.getPropertyValue("--vt-min-width")).toBe("168px");
+
+  fireEvent.doubleClick(resizer("size"));
+  expect(tracks()).toBe("1fr 80px 80px 40px");
+  expect(resizer("size").getAttribute("aria-valuenow")).toBeNull();
+});
+
+test("dragging a column that shares the spare room starts from its width on screen", () => {
+  render(
+    <VirtualTable rows={[row("a")]} columns={columns} rowKey={rowKey} testId="table" />,
+  );
+  const handle = resizer("name");
+  vi.spyOn(handle.parentElement as HTMLElement, "getBoundingClientRect").mockReturnValue(
+    { width: 300 } as DOMRect,
+  );
+  fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1 });
+  expect(tracks()).toBe("360px 80px 80px");
+  fireEvent.pointerUp(handle, { clientX: 160, pointerId: 1 });
+  // Once the button is up, moving the pointer resizes nothing.
+  fireEvent.pointerMove(handle, { clientX: 400, pointerId: 1 });
+  expect(tracks()).toBe("360px 80px 80px");
+  // Only the main button drags.
+  fireEvent.pointerDown(handle, { button: 2, clientX: 100, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 50, pointerId: 1 });
+  expect(tracks()).toBe("360px 80px 80px");
+});
+
+test("a table given its widths shows them and reports each change", () => {
+  const changes: Record<string, number>[] = [];
+  render(
+    <VirtualTable
+      rows={[row("a")]}
+      columns={columns}
+      rowKey={rowKey}
+      testId="table"
+      columnWidths={{ size: 120, gone: 300 }}
+      onColumnWidthsChange={(w) => changes.push({ ...w })}
+    />,
+  );
+  // A width kept for a column the table no longer has changes nothing.
+  expect(tracks()).toBe("1fr 120px 80px");
+  fireEvent.keyDown(resizer("size"), { key: "ArrowLeft" });
+  fireEvent.doubleClick(resizer("note"));
+  expect(changes).toEqual([{ size: 104, gone: 300 }, { size: 120, gone: 300 }]);
+  // What it shows is what it is given.
+  expect(tracks()).toBe("1fr 120px 80px");
+});
