@@ -31,9 +31,18 @@ function emptyText(stream: LogStream, sources: LogSources): string | null {
   return "No log lines for this selection.";
 }
 
-/** A Logs dock tab: the toolbar, the note row and the lines. */
-export function LogsTab({ tab }: { tab: LogsDockTab }) {
-  const stream = useLogStream(tab);
+/**
+ * A Logs dock tab: the toolbar, the note row and the lines. `shown` is false while
+ * the dock hides this tab; the stream keeps buffering.
+ */
+export function LogsTab({
+  tab,
+  shown = true,
+}: {
+  tab: LogsDockTab;
+  shown?: boolean;
+}) {
+  const stream = useLogStream(tab, shown);
   const sources = useLogSources(tab);
   const download = useLogDownload(tab);
   const [query, setQuery] = useState("");

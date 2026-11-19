@@ -425,3 +425,35 @@ test("a marker goes into the buffer as an entry of its own", async () => {
   ]);
   expect(result.current.status).toBe("following");
 });
+
+test("a hidden tab buffers lines without a new version, and renders once when shown", async () => {
+  const view = renderHook(
+    (props: { shown: boolean }) => useLogStream(POD_TAB, props.shown),
+    { initialProps: { shown: false } },
+  );
+  await answer(starts[0], "s1");
+  nextFrame();
+  const before = view.result.current.version;
+  send(starts[0], lines("a", "b"));
+  nextFrame();
+  send(starts[0], lines("c"));
+  nextFrame();
+  expect(view.result.current.version).toBe(before);
+  expect(texts(view.result.current.buffer)).toEqual(["a", "b", "c"]);
+  expect(backend.callsTo("session_ack").length).toBe(2);
+  view.rerender({ shown: true });
+  expect(view.result.current.version).toBe(before + 1);
+  nextFrame();
+  expect(view.result.current.version).toBe(before + 1);
+});
+
+test("showing a tab that got no lines does not render", async () => {
+  const view = renderHook(
+    (props: { shown: boolean }) => useLogStream(POD_TAB, props.shown),
+    { initialProps: { shown: false } },
+  );
+  await answer(starts[0], "s1");
+  const before = view.result.current.version;
+  view.rerender({ shown: true });
+  expect(view.result.current.version).toBe(before);
+});

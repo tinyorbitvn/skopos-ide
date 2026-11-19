@@ -189,3 +189,12 @@ test("a list shown again after display:none comes back where it was left", () =>
   expect(el.scrollTop).toBe(300);
   vi.unstubAllGlobals();
 });
+
+test("a new version does not ask every row for its key again", () => {
+  fill(numbered(500));
+  const { rerender } = render(draw());
+  const at = vi.spyOn(buffer, "at");
+  version += 1;
+  rerender(draw());
+  expect(at.mock.calls.length).toBeLessThan(100);
+});

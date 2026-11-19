@@ -88,7 +88,7 @@ function TabBody({
     case "create":
       return <CreateResourceTab tab={tab} />;
     case "logs":
-      return <LogsTab tab={tab} />;
+      return <LogsTab tab={tab} shown={shown} />;
     case "terminal":
     case "shell":
     case "attach":
