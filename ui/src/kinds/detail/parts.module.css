@@ -127,6 +127,14 @@
   overflow-wrap: anywhere;
 }
 
+/* The toggle and, at the row's end, the button that copies its summary. */
+.expandHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .expandToggle {
   display: grid;
   grid-template-columns: 104px auto minmax(0, 1fr);
@@ -197,6 +205,11 @@
   min-width: 0;
 }
 
+.itemCopy {
+  display: inline-flex;
+  margin-inline-start: auto;
+}
+
 .subRow {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
@@ -251,11 +264,27 @@
 }
 
 .chip {
-  padding: 1px var(--space-5);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 1px var(--space-3) 1px var(--space-5);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
+}
+
+.chipText {
+  min-width: 0;
+  user-select: text;
+}
+
+/* A smaller button, so a chip grows by little; it shows as a row's button does. */
+.chipCopy {
+  width: 16px;
+  height: 16px;
+  margin-block: -2px;
 }
 
 .table {

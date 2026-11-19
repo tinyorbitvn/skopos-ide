@@ -4,6 +4,7 @@ import { copyText } from "../../design/clipboard";
 import { HardDrive } from "../../design/icons";
 import { flush, mockBackend } from "../../test/ipc";
 import {
+  Chips,
   DrawerKindContext,
   ExpandRow,
   FactList,
@@ -238,4 +239,101 @@ test("fact rows, stats, items and sub-rows", () => {
   expect(stat.textContent).toBe("Ready1/1");
   expect(stat.getAttribute("title")).toBe("Containers ready");
   expect(screen.getByTestId("item-a").textContent).toBe("aImagenginx");
+});
+
+test("stats, item heads, chips and expand summaries each copy their value", async () => {
+  render(
+    <>
+      <StatGrid
+        stats={[{ id: "ready", label: "Ready", value: <strong>1/1</strong> }]}
+      />
+      <ItemList>
+        <Item
+          testId="item-web"
+          head={
+            <>
+              <span>web</span>
+              <span>Running</span>
+            </>
+          }
+          copy={{ what: "container name", value: "web" }}
+        />
+      </ItemList>
+      <Chips values={["app=web", "tier=front"]} />
+      <ExpandRow label="Tolerations" count={2} summary="a=1:NoSchedule, b">
+        <p>body</p>
+      </ExpandRow>
+    </>,
+  );
+  expect(await copyField("Ready")).toBe("1/1");
+  expect(screen.getByTestId("copy-field-ready")).toBeTruthy();
+  // An item copies its name, not the badges beside it.
+  expect(await copyField("container name")).toBe("web");
+  expect(await copyField("app=web")).toBe("app=web");
+  expect(await copyField("tier=front")).toBe("tier=front");
+  expect(await copyField("Tolerations")).toBe("a=1:NoSchedule, b");
+  // The copy button sits beside the toggle: copying does not open the row.
+  const toggle = screen.getByTestId("detail-expand-tolerations");
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(
+    toggle.contains(screen.getByRole("button", { name: /Tolerations$/ })),
+  ).toBe(false);
+  // After a copy the button says so, with Check in place of Copy.
+  expect(
+    screen
+      .getByRole("button", { name: "Copied Tolerations" })
+      .getAttribute("data-state"),
+  ).toBe("done");
+  // An item given nothing to copy has no button, and a chip's text is still the value.
+  render(
+    <ItemList>
+      <Item testId="item-plain" head={<span>plain</span>} />
+    </ItemList>,
+  );
+  expect(
+    within(screen.getByTestId("item-plain")).queryByRole("button"),
+  ).toBeNull();
+  expect(screen.getAllByTestId("copy-chip")).toHaveLength(2);
+});
+
+/** Selects the text of `node`, as a drag over it would. */
+function select(node: Node) {
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+test("a toggle clicked at the end of a text selection in its row stays as it was", () => {
+  render(
+    <>
+      <p>elsewhere</p>
+      <ExpandRow label="Labels" count={1} summary="app=web">
+        <p>labels body</p>
+      </ExpandRow>
+      <Part title="Summary">
+        <p>summary body</p>
+      </Part>
+    </>,
+  );
+  const expand = screen.getByTestId("detail-expand-labels");
+  select(screen.getByText("app=web"));
+  fireEvent.click(expand);
+  expect(expand.getAttribute("aria-expanded")).toBe("false");
+  const card = screen.getByTestId("detail-section-toggle-summary");
+  select(screen.getByText("summary body"));
+  fireEvent.click(card);
+  expect(card.getAttribute("aria-expanded")).toBe("true");
+  // A selection somewhere else does not stop the click.
+  select(screen.getByText("elsewhere"));
+  fireEvent.click(expand);
+  fireEvent.click(card);
+  expect(expand.getAttribute("aria-expanded")).toBe("true");
+  expect(card.getAttribute("aria-expanded")).toBe("false");
+  // Nor does a collapsed selection, which a plain click leaves.
+  window.getSelection()?.collapse(screen.getByText("app=web"), 0);
+  fireEvent.click(expand);
+  expect(expand.getAttribute("aria-expanded")).toBe("false");
+  window.getSelection()?.removeAllRanges();
 });

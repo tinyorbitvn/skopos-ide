@@ -1,4 +1,5 @@
-//! Workload, pod, node, Secret and ConfigMap actions against the fake API server.
+//! Workload, pod, node, PersistentVolumeClaim, Secret and ConfigMap actions against the fake
+//! API server.
 //! Every kubeconfig lives in a temp `<home>/.kube`; `KUBECONFIG` is never read.
 
 use std::time::{Duration, Instant};
@@ -270,6 +271,73 @@ async fn cordon_and_uncordon_patch_unschedulable() {
     let writes = fake.writes("PATCH", "/api/v1/nodes/n1");
     assert_eq!(writes[0].body, json!({ "spec": { "unschedulable": true } }));
     assert_eq!(writes[1].body, json!({ "spec": { "unschedulable": null } }));
+}
+
+const CLAIM_PATH: &str = "/api/v1/namespaces/default/persistentvolumeclaims/data";
+
+fn serve_claim(fake: &FakeKube) {
+    fake.serve_resource(FakeResource::new(
+        "",
+        "v1",
+        "PersistentVolumeClaim",
+        "persistentvolumeclaims",
+        true,
+    ));
+    fake.upsert(
+        "persistentvolumeclaims",
+        json!({
+            "metadata": { "name": "data", "namespace": "default" },
+            "spec": { "resources": { "requests": { "storage": "10Gi" } } },
+        }),
+    );
+}
+
+#[tokio::test]
+async fn resize_patches_the_storage_request() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    serve_claim(&fake);
+    core.pvc_resize(&id, "default", "data", " 20Gi ")
+        .await
+        .unwrap();
+    let writes = fake.writes("PATCH", CLAIM_PATH);
+    assert_eq!(
+        writes[0].body,
+        json!({ "spec": { "resources": { "requests": { "storage": "20Gi" } } } })
+    );
+}
+
+#[tokio::test]
+async fn resize_refuses_a_size_that_is_not_a_quantity() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    serve_claim(&fake);
+    for size in ["", "lots", "20 Gi", "0", "-1Gi"] {
+        let error = core
+            .pvc_resize(&id, "default", "data", size)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput, "{size:?}");
+    }
+    assert!(fake.writes("PATCH", CLAIM_PATH).is_empty());
+}
+
+#[tokio::test]
+async fn a_refused_resize_shows_the_api_message() {
+    let config = FakeKubeConfig {
+        deny: vec![DenyRule {
+            verb: "patch".into(),
+            plural: "persistentvolumeclaims".into(),
+            namespace: None,
+        }],
+        ..Default::default()
+    };
+    let (core, fake, id, _root) = connected(config).await;
+    serve_claim(&fake);
+    let error = core
+        .pvc_resize(&id, "default", "data", "20Gi")
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Forbidden);
+    assert!(error.message.contains("forbidden"), "{}", error.message);
 }
 
 #[tokio::test]

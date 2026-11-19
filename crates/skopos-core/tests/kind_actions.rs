@@ -365,6 +365,34 @@ async fn stale_configmap_update_is_a_conflict() {
 }
 
 /// A kubeconfig for the same server and CA that signs in with `token`.
+#[tokio::test]
+#[ignore = "needs make test-kind"]
+async fn resizing_a_claim_that_is_not_bound_shows_the_api_message() {
+    let (core, id, _root) = connected().await;
+    let client = core.cluster_client(&id).unwrap();
+    with_namespace(&client, async {
+        // kind's `standard` class waits for a consumer, so this claim stays Pending.
+        create::<k8s_openapi::api::core::v1::PersistentVolumeClaim>(
+            &client,
+            json!({
+                "metadata": { "name": "data" },
+                "spec": {
+                    "accessModes": ["ReadWriteOnce"],
+                    "storageClassName": "standard",
+                    "resources": { "requests": { "storage": "1Mi" } },
+                },
+            }),
+        )
+        .await;
+        let error = core
+            .pvc_resize(&id, NAMESPACE, "data", "2Mi")
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("bound claims"), "{}", error.message);
+    })
+    .await;
+}
+
 fn kubeconfig_with_token(token: &str) -> String {
     let source: Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(kind_kubeconfig()).unwrap()).unwrap();

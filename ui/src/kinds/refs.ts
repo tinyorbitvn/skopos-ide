@@ -70,3 +70,10 @@ export const NODES: ResourceRef = {
   kind: "Node",
   namespaced: false,
 };
+export const STORAGE_CLASSES: ResourceRef = {
+  group: "storage.k8s.io",
+  version: "v1",
+  plural: "storageclasses",
+  kind: "StorageClass",
+  namespaced: false,
+};

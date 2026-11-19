@@ -9,6 +9,7 @@ import {
   ObjectLink,
   Part,
 } from "../../kinds/detail/parts";
+import { endsSelection } from "../../kinds/detail/selection";
 import { formatCreated, type KubeObject } from "../../kinds/objects";
 import { CopyRow } from "./CopyRow";
 import styles from "./DetailDrawer.module.css";
@@ -43,7 +44,9 @@ function Annotation(props: { name: string; value: string }) {
           className={styles.link}
           aria-expanded={open}
           aria-label={`${open ? "Collapse" : "Expand"} annotation ${name}`}
-          onClick={() => setOpen(!open)}
+          onClick={(e) => {
+            if (!endsSelection(e.currentTarget.parentElement)) setOpen(!open);
+          }}
         >
           {open ? "Collapse" : "Expand"}
         </button>

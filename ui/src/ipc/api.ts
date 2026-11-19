@@ -274,6 +274,13 @@ export const api = {
       name,
       replicas,
     }),
+  /** Asks for `storage` (a quantity, as "20Gi") on the claim; the server expands the volume. */
+  pvcResize: (
+    clusterId: string,
+    namespace: string,
+    name: string,
+    storage: string,
+  ) => call<void>("pvc_resize", { clusterId, namespace, name, storage }),
   workloadRestart: (
     clusterId: string,
     resource: ResourceRef,

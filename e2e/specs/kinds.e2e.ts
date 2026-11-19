@@ -129,6 +129,45 @@ describe("kinds on a real cluster", () => {
     await until(async () => !(await byTestId(rowId(NS, "tick")).getText()).includes("Suspended"), "never resumed");
   });
 
+  it("says why a claim cannot be resized: not Bound, then a class that does not expand", async () => {
+    const reason = async () => (await shown("resize-blocked")).getText();
+    const resizeData = async () => {
+      await resourceRowMenu("data", "resize");
+      await shown("resize-size");
+    };
+    await openResource("nav-item-core-persistentvolumeclaims", "PersistentVolumeClaim");
+    await searchResources("data");
+    await resizeData();
+    expect(await reason()).toBe("This claim is Pending. Only a Bound claim can be resized.");
+    expect(await byTestId("resize-confirm").isEnabled()).toBe(false);
+    await (await dialogButton("Cancel")).click();
+    await gone("resize-size");
+
+    // kind's standard class binds a claim once a Pod uses it, and does not allow expansion.
+    await kubectl(["-n", NS, "run", "data-user", "--image=registry.k8s.io/pause:3.10", "--restart=Never",
+      "--overrides", JSON.stringify({ spec: { volumes: [{ name: "data", persistentVolumeClaim: { claimName: "data" } }],
+        containers: [{ name: "data-user", image: "registry.k8s.io/pause:3.10", volumeMounts: [{ name: "data", mountPath: "/data" }] }] } })]);
+    try {
+      await until(
+        async () => (await kubectl(["-n", NS, "get", "pvc", "data", "-o", "jsonpath={.status.phase}"])) === "Bound",
+        "the claim was never bound",
+      );
+      await until(async () => (await byTestId(rowId(NS, "data")).getText()).includes("Bound"), "the row never showed Bound");
+      await resizeData();
+      await until(
+        async () => (await reason()) === "StorageClass standard does not allow volume expansion.",
+        "the dialog never said the class does not expand",
+      );
+      expect(await (await shown("resize-facts")).getText()).toContain("standard, does not allow expansion");
+      expect(await byTestId("resize-confirm").isEnabled()).toBe(false);
+      expect(await byTestId("resize-size").isEnabled()).toBe(false);
+      await (await dialogButton("Cancel")).click();
+      await gone("resize-size");
+    } finally {
+      await kubectl(["-n", NS, "delete", "pod", "data-user", "--wait=false"]);
+    }
+  });
+
   it("links a binding to its ClusterRole", async () => {
     await openResource("nav-item-rbac.authorization.k8s.io-rolebindings", "RoleBinding");
     await searchResources("admin-robot");
