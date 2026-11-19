@@ -167,6 +167,27 @@ async fn the_exit_code_is_reported() {
     assert!(core.sessions_wait_idle(LIMIT).await);
 }
 
+/// Past the first second the waiter polls slowly, and an exit must still come soon.
+#[tokio::test]
+async fn a_shell_that_exits_after_the_first_second_is_reported_within_a_poll() {
+    let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    let (session, mut rx) = start_shell(&core, &id, WIDE).await;
+    answer_cursor_query(&core, &session, &mut rx).await;
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+
+    run(&core, &session, "exit 4");
+    let asked = std::time::Instant::now();
+    assert_eq!(wait_for_exit(&core, &session, &mut rx).await, Some(4));
+
+    // One 250 ms poll and the shell's own exit, with plenty of room for a slow machine.
+    assert!(
+        asked.elapsed() < Duration::from_millis(1500),
+        "took {:?}",
+        asked.elapsed()
+    );
+    assert!(core.sessions_wait_idle(LIMIT).await);
+}
+
 #[tokio::test]
 async fn stopping_twice_is_safe_and_disconnecting_stops_the_terminal() {
     let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
@@ -317,6 +338,20 @@ mod unix_only {
         core.session_stop(&session);
         assert_eq!(wait_for_exit(&core, &session, &mut rx).await, None);
         wait_until_gone(&pid).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_stop_of_a_shell_that_ignores_hangup_still_goes() {
+        let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+        let (session, mut rx) = start_shell(&core, &id, WIDE).await;
+        let pid = run_for_pid(&core, &session, &mut rx, "trap '' HUP; echo pid=$$-ready").await;
+        // The waiter is on its slow poll by now.
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        assert!(is_running(&pid));
+        core.session_stop(&session);
+        assert_eq!(wait_for_exit(&core, &session, &mut rx).await, None);
+        wait_until_gone(&pid).await;
+        assert!(core.sessions_wait_idle(LIMIT).await);
     }
 
     #[tokio::test]

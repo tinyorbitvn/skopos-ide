@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tokio::runtime::Handle;
@@ -22,8 +22,14 @@ use crate::tools::append_to_path;
 
 const READ_CHUNK: usize = 16 * 1024;
 const INPUT_BACKLOG: usize = 64;
-/// How often the waiter looks at the child.
-const WAIT_POLL: Duration = Duration::from_millis(50);
+/// How often the waiter looks at the child just after the spawn, when a command that fails
+/// at once or a short-lived shell is likely.
+const WAIT_POLL_FAST: Duration = Duration::from_millis(50);
+/// How often it looks once the shell has been up for `FAST_WINDOW`.
+const WAIT_POLL_SLOW: Duration = Duration::from_millis(250);
+const FAST_WINDOW: Duration = Duration::from_secs(1);
+/// However slow the poll, a stop is seen within this long.
+const STOP_SLICE: Duration = Duration::from_millis(50);
 /// After the shell has gone, how long what is left in the PTY may take to arrive.
 const DRAIN_LIMIT: Duration = Duration::from_secs(2);
 /// How long a stopped shell may take to die: SIGHUP, a grace period, then SIGKILL.
@@ -185,15 +191,37 @@ fn spawn_writer(mut writer: Box<dyn Write + Send>, mut input: mpsc::Receiver<Vec
     });
 }
 
+fn poll_interval(age: Duration) -> Duration {
+    if age < FAST_WINDOW {
+        WAIT_POLL_FAST
+    } else {
+        WAIT_POLL_SLOW
+    }
+}
+
+/// Sleeps up to `total`, in slices, and returns early once `token` is cancelled.
+fn sleep_unless_stopped(token: &CancellationToken, total: Duration) {
+    let end = Instant::now() + total;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() || token.is_cancelled() {
+            return;
+        }
+        std::thread::sleep(left.min(STOP_SLICE));
+    }
+}
+
 /// Owns the child and polls it instead of blocking in `wait`, because only the child's own
 /// `kill` follows SIGHUP with SIGKILL. A killer cloned from it sends SIGHUP alone, which a
 /// shell may ignore, and that would leave a process behind after the session ended.
+/// It polls every 50 ms for the first second, then every 250 ms, and a stop is seen within 50 ms either way.
 fn spawn_waiter(
     mut child: Box<dyn Child + Send + Sync>,
     token: CancellationToken,
 ) -> oneshot::Receiver<Option<u32>> {
     let (exit, exit_rx) = oneshot::channel();
     std::thread::spawn(move || {
+        let spawned = Instant::now();
         let mut killed = false;
         let code = loop {
             if token.is_cancelled() && !killed {
@@ -202,7 +230,9 @@ fn spawn_waiter(
             }
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status.exit_code()),
-                Ok(None) => std::thread::sleep(WAIT_POLL),
+                // The token stays cancelled, so waiting on it would not wait at all.
+                Ok(None) if killed => std::thread::sleep(WAIT_POLL_FAST),
+                Ok(None) => sleep_unless_stopped(&token, poll_interval(spawned.elapsed())),
                 Err(_) => break None,
             }
         };
@@ -351,6 +381,45 @@ mod tests {
                 run_until_exit(Master(None), &token, &mut resize_rx, &mut exit).await;
             assert_eq!(code, None);
         }
+    }
+
+    #[test]
+    fn the_poll_is_fast_for_the_first_second_and_slow_after() {
+        assert_eq!(poll_interval(Duration::ZERO), WAIT_POLL_FAST);
+        assert_eq!(poll_interval(Duration::from_millis(999)), WAIT_POLL_FAST);
+        assert_eq!(poll_interval(FAST_WINDOW), WAIT_POLL_SLOW);
+        assert_eq!(poll_interval(Duration::from_secs(3600)), WAIT_POLL_SLOW);
+    }
+
+    #[test]
+    fn a_wait_without_a_stop_lasts_its_whole_length() {
+        let token = CancellationToken::new();
+        let started = Instant::now();
+        sleep_unless_stopped(&token, Duration::from_millis(120));
+        assert!(started.elapsed() >= Duration::from_millis(120));
+    }
+
+    #[test]
+    fn a_stop_ends_even_a_long_wait_within_a_slice() {
+        let token = CancellationToken::new();
+        let canceller = token.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            canceller.cancel();
+        });
+        let started = Instant::now();
+        sleep_unless_stopped(&token, Duration::from_secs(5));
+        let waited = started.elapsed();
+        assert!(waited < Duration::from_millis(500), "waited {waited:?}");
+    }
+
+    #[test]
+    fn a_wait_that_starts_stopped_does_not_sleep() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let started = Instant::now();
+        sleep_unless_stopped(&token, Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_millis(40));
     }
 
     #[test]
