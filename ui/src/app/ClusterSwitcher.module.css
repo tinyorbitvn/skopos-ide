@@ -1,23 +1,25 @@
-/* The top of the sidebar, on the column's glass: the column draws the background and the border. */
+/* The top of the sidebar, on the column's glass: the column draws the background and
+   the border (spec Q §1). The padding is the design's head. */
 .switcher {
   position: relative;
   flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-5) var(--space-5) var(--space-3);
+  padding: var(--space-6) var(--space-6) var(--space-4);
 }
 
 .trigger {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-6);
   width: 100%;
   min-width: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--border-subtle);
+  height: 52px;
+  padding: 0 var(--space-5) 0 var(--space-4);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: var(--surface-card);
+  background: transparent;
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
@@ -28,6 +30,12 @@
   background: var(--surface-hover);
 }
 
+/* While its menu is open. */
+.trigger[aria-expanded="true"] {
+  border-color: var(--border-accent);
+  background: var(--glass-field);
+}
+
 .trigger:focus-visible,
 .row:focus-visible,
 .link:focus-visible {
@@ -35,19 +43,35 @@
   box-shadow: var(--focus-ring);
 }
 
+/* The tile and its corner status dot, ringed in the card surface. */
+.tileBox {
+  position: relative;
+  flex: none;
+  display: flex;
+}
+
 .tile {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: #ffffff;
   font: var(--type-caption);
   font-weight: var(--weight-semibold);
   object-fit: cover;
+}
+
+.tileDot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: flex;
+  border: 2px solid var(--surface-card);
+  border-radius: 50%;
 }
 
 .text {
@@ -57,6 +81,7 @@
   min-width: 0;
 }
 
+.over,
 .name,
 .label {
   overflow: hidden;
@@ -64,16 +89,23 @@
   white-space: nowrap;
 }
 
-.name {
-  font: var(--type-label);
+/* `<DISTRIBUTION> · <VERSION>`, or the state word. */
+.over {
+  color: var(--text-secondary);
+  font: var(--type-overline);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
 }
 
-.status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+.name {
+  font: var(--type-label);
+  font-size: 14px;
+  font-weight: var(--weight-semibold);
+}
+
+.updown {
+  flex: none;
   color: var(--text-secondary);
-  font: var(--type-caption);
 }
 
 .icon {
@@ -101,20 +133,48 @@
   text-decoration: underline;
 }
 
+/* The menu, at the design's top: 54px and left: 8px from the trigger, which sits
+   inside the switcher's 10 px padding (spec Q §2). */
 .panel {
   position: absolute;
-  top: calc(100% - var(--space-2));
-  left: var(--space-5);
+  top: calc(var(--space-6) + 54px);
+  left: calc(var(--space-6) + 8px);
   z-index: 30;
   display: flex;
   flex-direction: column;
-  width: 280px;
+  width: 272px;
   max-width: calc(100vw - 32px);
   padding: var(--space-3);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
   box-shadow: var(--shadow-3);
+}
+
+/* Collapsed (spec Q §3): a centered tile, and the menu opens beside the column. */
+.switcher[data-collapsed="true"] {
+  align-items: center;
+  padding: var(--space-5) 0 var(--space-4);
+}
+
+.switcher[data-collapsed="true"] .trigger {
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+}
+
+.switcher[data-collapsed="true"] .text {
+  display: none;
+}
+
+.switcher[data-collapsed="true"] .updown {
+  display: none;
+}
+
+.switcher[data-collapsed="true"] .panel {
+  top: var(--space-5);
+  left: calc(100% + 6px);
 }
 
 .searchRow {

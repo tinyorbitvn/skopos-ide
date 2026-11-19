@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { StatusDot } from "../design";
+import { StatusDot, Tooltip } from "../design";
 import {
   ChevronDown,
   ChevronRight,
@@ -13,6 +13,7 @@ import {
   treeRows,
 } from "../features/catalog/folderTree";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
+import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { useCatalog } from "../stores/catalog";
 import { connectCluster } from "../stores/clusters";
 import { useFolders } from "../stores/folders";
@@ -27,6 +28,36 @@ import { useFocusedPath } from "./tabs/ShellRouter";
 const NAME = "Cluster shown in the sidebar";
 /** Each level of the list sits this much further in. */
 const INDENT_PX = 14;
+
+/**
+ * The line above the switcher's name: `<distribution> · <version>` while connected
+ * (CSS draws it in capitals), else the state word. An empty distribution reads
+ * "Kubernetes"; an empty version is left out (spec Q §2).
+ */
+export function switcherOverline(state: ConnectionState): string {
+  if (state.status !== "connected") return clusterStatus(state).label;
+  const distribution = state.info.distribution.trim() || "Kubernetes";
+  const version = state.info.version.trim();
+  return version === "" ? distribution : `${distribution} · ${version}`;
+}
+
+/** The trigger's accessible name (spec Q §2). */
+function triggerLabel(cluster: ClusterEntry | undefined): string {
+  if (cluster === undefined) return NAME;
+  const state = clusterStatus(cluster.state).label.toLowerCase();
+  return `Cluster ${cluster.name}, ${state}. Change the cluster shown in the sidebar`;
+}
+
+/** The trigger's title; none while collapsed, where a tooltip names the cluster. */
+function triggerTitle(
+  cluster: ClusterEntry | undefined,
+  collapsed: boolean,
+): string | undefined {
+  if (collapsed) return undefined;
+  if (cluster === undefined) return NAME;
+  const state = clusterStatus(cluster.state).label;
+  return `${cluster.name} · ${state}. Click to show another cluster in the sidebar`;
+}
 
 export interface SidebarCluster {
   /** The cluster the sidebar shows, or null. */
@@ -160,17 +191,20 @@ function Row(props: {
 }
 
 /**
- * The cluster switcher on top of the sidebar (spec P24, P25): the shown cluster's tile,
- * name and connection; a list of the clusters under their folders with a search; and,
- * while the sidebar shows another cluster than the focused tab's, a way back to it.
+ * The cluster switcher on top of the sidebar (spec P24, P25, Q §2): the shown cluster's
+ * tile, overline and name; a list of the clusters under their folders with a search;
+ * and, while the sidebar shows another cluster than the focused tab's, a way back to
+ * it. Collapsed (spec Q §3), it is the tile alone, with the name in a tooltip.
  */
 export function ClusterSwitcher(props: {
   clusterId: string | null;
   focused: string | null;
   onPick(id: string): void;
   onFollow(): void;
+  collapsed?: boolean;
 }) {
   const { clusterId, focused, onPick, onFollow } = props;
+  const collapsed = props.collapsed === true;
   const clusters = useCatalog((s) => s.clusters);
   const folders = useFolders((s) => s.folders);
   const placements = useFolders((s) => s.placements);
@@ -232,35 +266,60 @@ export function ClusterSwitcher(props: {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  return (
-    <div ref={wrap} className={styles.switcher}>
-      <button
-        ref={trigger}
-        type="button"
-        className={styles.trigger}
-        title={NAME}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        data-testid="switcher-trigger"
-        onClick={() => (open ? close(false) : setOpen(true))}
-      >
+  // Collapsing the sidebar closes the menu (spec Q §3).
+  useEffect(() => {
+    if (!collapsed) return;
+    setOpen(false);
+    setQuery("");
+  }, [collapsed]);
+
+  const name = cluster?.name ?? "No cluster";
+  const button = (
+    <button
+      ref={trigger}
+      type="button"
+      className={styles.trigger}
+      title={triggerTitle(cluster, collapsed)}
+      aria-label={triggerLabel(cluster)}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-testid="switcher-trigger"
+      onClick={() => (open ? close(false) : setOpen(true))}
+    >
+      <span className={styles.tileBox}>
         <Tile cluster={cluster} />
-        <span className={styles.text}>
-          <span className={styles.name}>{cluster?.name ?? "No cluster"}</span>
-          <span className={styles.status}>
-            {status ? (
-              <>
-                <StatusDot tone={status.tone} label={status.label} />
-                {status.label}
-              </>
-            ) : (
-              "Pick one to see its navigation"
-            )}
+        {status ? (
+          <span className={styles.tileDot}>
+            <StatusDot tone={status.tone} label={status.label} />
           </span>
+        ) : null}
+      </span>
+      <span className={styles.text}>
+        <span className={styles.over}>
+          {cluster
+            ? switcherOverline(cluster.state)
+            : "Pick one to see its navigation"}
         </span>
-        <ChevronsUpDown size={14} aria-hidden="true" className={styles.icon} />
-      </button>
-      {other !== null ? (
+        <span className={styles.name}>{name}</span>
+      </span>
+      <ChevronsUpDown size={14} aria-hidden="true" className={styles.updown} />
+    </button>
+  );
+
+  return (
+    <div
+      ref={wrap}
+      className={styles.switcher}
+      data-collapsed={collapsed ? "true" : undefined}
+    >
+      {collapsed ? (
+        <Tooltip content={name} side="right">
+          {button}
+        </Tooltip>
+      ) : (
+        button
+      )}
+      {other !== null && !collapsed ? (
         <p className={styles.follow} data-testid="switcher-follow">
           {`The focused tab is on ${other}. `}
           <button

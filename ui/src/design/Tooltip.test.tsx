@@ -58,3 +58,14 @@ test("the card follows the theme on the raised surface", () => {
   );
   expect(label.background).toBe("var(--surface-inverse)");
 });
+
+test("a tooltip opens on the side it is given", async () => {
+  render(
+    <Tooltip content="Workloads" side="right">
+      <button type="button">W</button>
+    </Tooltip>,
+  );
+  fireEvent.focus(screen.getByRole("button", { name: "W" }));
+  await screen.findByRole("tooltip");
+  expect(panel().getAttribute("data-side")).toBe("right");
+});
