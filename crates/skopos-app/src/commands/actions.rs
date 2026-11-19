@@ -44,6 +44,20 @@ pub async fn workload_restart(
 }
 
 #[tauri::command]
+pub async fn pvc_resize(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    namespace: String,
+    name: String,
+    storage: String,
+) -> Result<(), IpcError> {
+    state
+        .core
+        .pvc_resize(&cluster_id, &namespace, &name, &storage)
+        .await
+}
+
+#[tauri::command]
 pub async fn pod_evict(
     state: State<'_, AppState>,
     cluster_id: ClusterId,

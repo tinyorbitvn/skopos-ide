@@ -1,4 +1,5 @@
-//! One-request actions on workloads, pods, CronJobs, nodes, Secrets and ConfigMaps.
+//! One-request actions on workloads, pods, CronJobs, nodes, PersistentVolumeClaims, Secrets
+//! and ConfigMaps.
 //! Scale and evict go through subresources; the others patch the object.
 
 use base64::engine::general_purpose::STANDARD;
@@ -16,6 +17,7 @@ use super::types::ResourceRef;
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
+use crate::metrics::parse_quantity;
 
 const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 const INSTANTIATE: &str = "cronjob.kubernetes.io/instantiate";
@@ -453,6 +455,34 @@ impl AppCore {
         };
         let patch = Patch::Merge(json!({ "spec": { "unschedulable": value } }));
         self.patch_object(id, &nodes, None, name, patch).await
+    }
+
+    /// Asks for a larger volume by patching the claim's `spec.resources.requests.storage`.
+    /// The API server refuses a size smaller than the current one, a claim that is not bound
+    /// and a StorageClass that does not allow volume expansion; its message says which.
+    pub async fn pvc_resize(
+        &self,
+        id: &ClusterId,
+        namespace: &str,
+        name: &str,
+        storage: &str,
+    ) -> CoreResult<()> {
+        let storage = storage.trim();
+        if !parse_quantity(storage).is_some_and(|size| size > 0.0) {
+            return Err(invalid(format!("{storage:?} is not a size such as 20Gi")));
+        }
+        let claims = core_resource(
+            "PersistentVolumeClaim",
+            "persistentvolumeclaims",
+            "",
+            "v1",
+            true,
+        );
+        let patch = Patch::Merge(json!({ "spec": { "resources": {
+            "requests": { "storage": storage },
+        } } }));
+        self.patch_object(id, &claims, Some(namespace), name, patch)
+            .await
     }
 
     /// One key of a Secret, decoded.

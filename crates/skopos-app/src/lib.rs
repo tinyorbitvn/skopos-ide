@@ -126,6 +126,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::actions::service_account_kubeconfig_save,
             commands::actions::workload_restart,
             commands::actions::pod_evict,
+            commands::actions::pvc_resize,
             commands::actions::cronjob_trigger,
             commands::actions::cronjob_set_suspend,
             commands::actions::node_set_unschedulable,
