@@ -1,0 +1,40 @@
+/* A node's share of one resource: a bar, then the percentage. */
+.share {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.track {
+  position: relative;
+  flex: 1;
+  min-width: 48px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--surface-inset);
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--chart-series);
+}
+
+.track[data-level="warn"] .fill {
+  background: var(--status-warning);
+}
+
+.track[data-level="critical"] .fill {
+  background: var(--status-critical);
+}
+
+.percent {
+  flex: none;
+  min-width: 4ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-secondary);
+}

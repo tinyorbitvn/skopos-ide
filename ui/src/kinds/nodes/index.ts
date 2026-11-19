@@ -6,7 +6,7 @@ import { baseColumns, textColumn } from "../columns";
 import type { KindAction } from "../registry";
 import { registerKind } from "../registry";
 import { nodeStatusColumn } from "../statusCells";
-import { usageColumns } from "../usageColumns";
+import { nodeUsageColumns } from "../usageColumns";
 import { nodeShellAction } from "../workloads/sessionActions";
 import { DrainDialog } from "./DrainDialog";
 import { NodeDetail } from "./NodeDetail";
@@ -63,7 +63,7 @@ registerKind("", "nodes", {
         "Version",
         (o) => o.status?.nodeInfo?.kubeletVersion,
       ),
-      ...usageColumns(usage, (o) => o.metadata.name),
+      ...nodeUsageColumns(usage),
       textColumn("ip", "Internal IP", internalIp),
       {
         id: "taints",
