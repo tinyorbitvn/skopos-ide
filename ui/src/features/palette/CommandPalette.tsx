@@ -147,6 +147,26 @@ function objectsView(
   };
 }
 
+/** Entry count above which ranking waits for the typing to pause. */
+export const DEBOUNCE_ENTRY_COUNT = 2000;
+export const QUERY_DEBOUNCE_MS = 100;
+
+/** The query, held back by `delay` ms while `large`; a blank query or a small list is not. */
+export function useDebouncedQuery(
+  query: string,
+  large: boolean,
+  delay = QUERY_DEBOUNCE_MS,
+): string {
+  const [settled, setSettled] = useState(query);
+  const immediate = !large || isBlank(query);
+  useEffect(() => {
+    if (immediate) return;
+    const timer = window.setTimeout(() => setSettled(query), delay);
+    return () => window.clearTimeout(timer);
+  }, [query, immediate, delay]);
+  return immediate ? query : settled;
+}
+
 function PaletteBody({ onDone }: { onDone(): void }) {
   const ctx = useCommandContext();
   const catalog = useCatalog((s) => s.clusters);
@@ -173,10 +193,17 @@ function PaletteBody({ onDone }: { onDone(): void }) {
     () => objectsView(connectedId, names),
     [connectedId, names],
   );
+  const large =
+    commands.length +
+      clusters.length +
+      (pages?.length ?? 0) +
+      (objects.objects?.length ?? 0) >
+    DEBOUNCE_ENTRY_COUNT;
+  const rankQuery = useDebouncedQuery(query, large);
   const sections = useMemo(
     () =>
       buildSections({
-        query,
+        query: rankQuery,
         clusterName,
         commands,
         clusters,
@@ -184,7 +211,7 @@ function PaletteBody({ onDone }: { onDone(): void }) {
         objects: objects.objects,
         objectsStatus: objects.status,
       }),
-    [query, clusterName, commands, clusters, pages, objects],
+    [rankQuery, clusterName, commands, clusters, pages, objects],
   );
   const rows = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
   const active = rows.length === 0 ? -1 : Math.min(selected, rows.length - 1);

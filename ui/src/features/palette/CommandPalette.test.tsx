@@ -2,12 +2,13 @@ import {
   act,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { focusedTab, tabPath } from "../../app/tabs/layout";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
@@ -21,7 +22,7 @@ import {
   useWindowLayout,
 } from "../../stores/windowLayout";
 import { clusterEntry, emitEvent, mockBackend } from "../../test/ipc";
-import { CommandPalette } from "./CommandPalette";
+import { CommandPalette, useDebouncedQuery } from "./CommandPalette";
 
 const INFO: ClusterInfo = {
   version: "v1.31.0",
@@ -587,4 +588,32 @@ test("a double-click on a row shows its location, then pins the tab that shows i
   }
   const tab = focusedTab(useWindowLayout.getState().layout);
   expect(tab?.pinned).toBe(true);
+});
+
+test("useDebouncedQuery holds a large list's query back 100 ms, and a small one's not", () => {
+  vi.useFakeTimers();
+  try {
+    const small = renderHook(({ q }) => useDebouncedQuery(q, false), {
+      initialProps: { q: "" },
+    });
+    small.rerender({ q: "po" });
+    expect(small.result.current).toBe("po");
+
+    const large = renderHook(({ q }) => useDebouncedQuery(q, true), {
+      initialProps: { q: "" },
+    });
+    large.rerender({ q: "po" });
+    expect(large.result.current).toBe("");
+    act(() => vi.advanceTimersByTime(99));
+    expect(large.result.current).toBe("");
+    large.rerender({ q: "pod" });
+    act(() => vi.advanceTimersByTime(99));
+    expect(large.result.current).toBe("");
+    act(() => vi.advanceTimersByTime(1));
+    expect(large.result.current).toBe("pod");
+    large.rerender({ q: "  " });
+    expect(large.result.current).toBe("  ");
+  } finally {
+    vi.useRealTimers();
+  }
 });
