@@ -522,9 +522,9 @@ describe("resource browsing on a real cluster", () => {
 
   it("resizes a column by dragging its edge, keeps its width per kind, and resets it", async () => {
     /** The header cell's width on screen and the width its handle reports. */
-    const age = () =>
+    const namespace = () =>
       browser.execute(() => {
-        const handle = document.querySelector('[data-testid="column-resize-age"]');
+        const handle = document.querySelector('[data-testid="column-resize-namespace"]');
         const now = handle?.getAttribute("aria-valuenow");
         return {
           cell: Math.round(handle?.parentElement?.getBoundingClientRect().width ?? 0),
@@ -533,12 +533,14 @@ describe("resource browsing on a real cluster", () => {
       });
 
     await openResource(PODS, "Pod");
-    await shown("column-resize-age");
-    const before = await age();
+    await shown("column-resize-namespace");
+    const before = await namespace();
     expect(before.given).toBeNull();
 
-    // A real drag: press on the handle, move 60 px to the right in steps, release.
-    const handle = await byTestId("column-resize-age");
+    // A real drag: press on the handle, move 60 px to the right in steps, release. The
+    // Namespace column is on screen at every window width, where a column at the right
+    // end can sit under the table's own scroll edge.
+    const handle = await byTestId("column-resize-namespace");
     const at = await handle.getLocation();
     const size = await handle.getSize();
     const x = Math.round(at.x + size.width / 2);
@@ -552,30 +554,30 @@ describe("resource browsing on a real cluster", () => {
       .move({ x: x + 60, y, duration: 50 })
       .up({ button: 0 })
       .perform();
-    await browser.waitUntil(async () => (await age()).given === before.cell + 60, {
-      timeoutMsg: "the drag never made the Age column 60 px wider",
+    await browser.waitUntil(async () => (await namespace()).given === before.cell + 60, {
+      timeoutMsg: "the drag never made the Namespace column 60 px wider",
     });
-    expect((await age()).cell).toBe(before.cell + 60);
+    expect((await namespace()).cell).toBe(before.cell + 60);
 
     // Another kind has its own widths; Pods come back with the width given.
     await openResource(CONFIGMAPS, "ConfigMap");
-    await shown("column-resize-age");
-    expect((await age()).given).toBeNull();
+    await shown("column-resize-namespace");
+    expect((await namespace()).given).toBeNull();
     await openResource(PODS, "Pod");
-    await browser.waitUntil(async () => (await age()).given === before.cell + 60, {
-      timeoutMsg: "the Pod list lost the Age column's width",
+    await browser.waitUntil(async () => (await namespace()).given === before.cell + 60, {
+      timeoutMsg: "the Pod list lost the Namespace column's width",
     });
 
     // WebKitWebDriver's doubleClick sends no dblclick event, so the test sends it itself.
     await browser.execute(() => {
       document
-        .querySelector('[data-testid="column-resize-age"]')
+        .querySelector('[data-testid="column-resize-namespace"]')
         ?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 }));
     });
-    await browser.waitUntil(async () => (await age()).given === null, {
-      timeoutMsg: "a double-click never reset the Age column",
+    await browser.waitUntil(async () => (await namespace()).given === null, {
+      timeoutMsg: "a double-click never reset the Namespace column",
     });
-    expect((await age()).cell).toBe(before.cell);
+    expect((await namespace()).cell).toBe(before.cell);
   });
 
   it("back and forward navigate between resource views", async () => {
