@@ -150,7 +150,8 @@
   border-radius: var(--radius-xs);
 }
 
-.close {
+/* Close, and the selected tab's Tab actions (spec Q §5). */
+.tabControl {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -165,12 +166,12 @@
   cursor: pointer;
 }
 
-.close:hover {
+.tabControl:hover {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 
-.close:focus-visible {
+.tabControl:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -242,6 +243,12 @@
   background: var(--border-strong-color);
 }
 
+/* While dragged, the line is 2 px wide in the accent (spec Q §5). */
+.splitter[data-active="true"]::before {
+  width: 2px;
+  background: var(--border-accent);
+}
+
 .splitter:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
@@ -270,13 +277,14 @@
   background: var(--border-accent);
 }
 
+/* The body's drop zones, inset 8 px with 8 px between them (spec Q §5). */
 .zones {
   position: absolute;
   inset: 0;
   z-index: 4;
   display: flex;
-  gap: var(--space-3);
-  padding: var(--space-4);
+  gap: var(--space-5);
+  padding: var(--space-5);
 }
 
 .zone {
@@ -285,17 +293,19 @@
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
-  border: 2px dashed var(--border-subtle);
+  border: 2px dashed var(--border-strong-color);
   border-radius: var(--radius-md);
-  background: var(--surface-sunken);
+  background: var(--surface-raised);
   color: var(--text-secondary);
   font: var(--type-body-sm);
   text-align: center;
+  opacity: 0.94;
 }
 
 .zone[data-over="true"] {
+  border-style: solid;
   border-color: var(--border-accent);
-  background: var(--surface-selected);
+  background: var(--surface-accent-soft);
   color: var(--text-primary);
 }
 
@@ -328,4 +338,13 @@
 
 .dragLabel[data-drop="true"] .dragHint {
   color: var(--text-accent);
+}
+
+/* Over a pane body that offers no zone, the drop is refused (spec Q §5). */
+.dragLabel[data-refused="true"] {
+  border-color: var(--status-critical);
+}
+
+.dragLabel[data-refused="true"] .dragHint {
+  color: var(--status-critical);
 }

@@ -3,7 +3,8 @@
  * pane body shows, and the label that says what letting go does. The page marks its
  * targets with data attributes: a body zone `data-drop-zone` (left, right or here)
  * and `data-drop-pane`; a tab `data-drop-pane` and `data-drop-index`; a strip
- * `data-drop-pane` and `data-drop-count`.
+ * `data-drop-pane` and `data-drop-count`. While a tab is dragged, a pane body that
+ * offers no zone is `data-drop-refused="true"`.
  */
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
 import {
@@ -60,6 +61,15 @@ export function targetAt(el: Element | null, x: number): DropTarget | null {
     };
   }
   return null;
+}
+
+/**
+ * Whether the element under the pointer lies in a pane body that offers no zone, where
+ * the drop is refused rather than only cancelled (spec Q §5).
+ */
+export function refusedAt(el: Element | null): boolean {
+  if (el === null) return false;
+  return el.closest('[data-drop-refused="true"]') !== null;
 }
 
 /** Whether a point in client pixels lies outside this window's page. */

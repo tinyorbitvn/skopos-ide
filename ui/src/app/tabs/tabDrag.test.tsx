@@ -329,3 +329,30 @@ test("a drop outside that fails says why in a toast, and the tab stays (P44)", a
     "*/catalog^,/preferences | */cluster/c1/map,/cluster/c1",
   );
 });
+
+test("over a pane body that offers no zone, the label shows the drop is refused (spec Q §5)", () => {
+  render(<Panes />);
+  fireEvent.click(screen.getByTestId("pane-split-1"));
+  const area = (index: number) =>
+    screen.getByTestId(`pane-body-${index}`).parentElement?.dataset.dropRefused;
+  expect(area(0)).toBe("false");
+  down("t2");
+  move(20, 10);
+  // At 3 panes the tab's own pane offers no zone; the others take the tab.
+  expect([area(0), area(1), area(2)]).toEqual(["true", "false", "false"]);
+  under(screen.getByTestId("view-t1"));
+  move(100, 300);
+  expect(label()).toBe("PreferencesLet go here to cancel");
+  expect(screen.getByTestId("tab-drag-label").dataset.refused).toBe("true");
+  // Elsewhere, letting go only cancels: no deny state.
+  under(document.body);
+  move(110, 300);
+  expect(screen.getByTestId("tab-drag-label").dataset.refused).toBe("false");
+  under(screen.getByTestId("view-t1"));
+  move(100, 300);
+  up(100, 300);
+  expect(shape()).toBe(
+    "*/catalog^,/preferences | */cluster/c1/map,/cluster/c1 | */cluster/c1/map",
+  );
+  expect(area(0)).toBe("false");
+});

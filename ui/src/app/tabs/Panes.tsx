@@ -12,7 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { Button, ContextMenu, IconButton, Tooltip } from "../../design";
 import type { ContextMenuItem } from "../../design/ContextMenu";
-import { Columns2, LayoutGrid, Pin, X } from "../../design/icons";
+import { Columns2, Ellipsis, LayoutGrid, Pin, X } from "../../design/icons";
 import type { PaneState } from "../../ipc/generated/PaneState";
 import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
@@ -166,7 +166,8 @@ function onTabKey(
 
 /**
  * A tab in a pane's strip: its icon, screen and cluster chip; pinned tabs show a pin
- * and no Close (P9, P14). A double-click pins or unpins it, a middle-click closes it,
+ * and no Close (P9, P14). The selected tab has a Tab actions button that opens its
+ * menu (spec Q §5). A double-click pins or unpins it, a middle-click closes it,
  * a right-click opens its menu (P13 to P15), and a press drags it (P22). It takes only
  * the values it shows, so a change elsewhere in the layout, such as a splitter drag,
  * does not redraw it.
@@ -248,10 +249,25 @@ const TabItem = memo(function TabItem(props: {
             </span>
           ) : null}
         </button>
+        {selected ? (
+          <button
+            type="button"
+            className={styles.tabControl}
+            aria-label="Tab actions"
+            aria-haspopup="menu"
+            title="Tab actions"
+            tabIndex={-1}
+            data-testid={`tab-actions-${tabId}`}
+            // The same menu as a right-click or Shift+F10, under the button.
+            onClick={(event) => openMenuAt(event.currentTarget)}
+          >
+            <Ellipsis size={12} aria-hidden="true" />
+          </button>
+        ) : null}
         {pinned ? null : (
           <button
             type="button"
-            className={styles.close}
+            className={styles.tabControl}
             aria-label={`Close ${info.title}`}
             title="Close tab"
             tabIndex={-1}
@@ -328,7 +344,10 @@ function DropMark() {
 /** The width the drag label keeps from the right edge of the window. */
 const DRAG_LABEL_ROOM = 260;
 
-/** The dragged tab's title and what letting go does, beside the pointer (P22). */
+/**
+ * The dragged tab's title and what letting go does, beside the pointer (P22). Over a
+ * pane body that offers no zone it shows the drop is refused (spec Q §5).
+ */
 function DragLabel() {
   const drag = useTabDrag((s) => s.drag);
   if (drag === null) return null;
@@ -343,6 +362,7 @@ function DragLabel() {
       style={{ left, top }}
       aria-hidden="true"
       data-drop={drag.over !== null}
+      data-refused={drag.refused}
       data-testid="tab-drag-label"
     >
       <span className={styles.dragTitle}>{drag.title}</span>
@@ -450,7 +470,11 @@ function Pane(props: {
           }
         />
       </div>
-      <div className={styles.bodyArea}>
+      <div
+        className={styles.bodyArea}
+        // A body that offers no zone refuses the dragged tab (spec Q §5).
+        data-drop-refused={draggedId !== null && zones.length === 0}
+      >
         <div
           className={styles.body}
           data-testid={`pane-body-${index}`}
@@ -493,6 +517,8 @@ function Splitter(props: { index: number; share: number }) {
   const drag = useRef<{ fromX: number; from: number; total: number } | null>(
     null,
   );
+  // Drawn 2 px wide in the accent while it is dragged (spec Q §5).
+  const [active, setActive] = useState(false);
 
   function start(event: PointerEvent<HTMLDivElement>): void {
     if (event.button !== 0) return;
@@ -501,6 +527,7 @@ function Splitter(props: { index: number; share: number }) {
     if (total <= 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { fromX: event.clientX, from: share, total };
+    setActive(true);
   }
 
   function move(event: PointerEvent<HTMLDivElement>): void {
@@ -515,6 +542,7 @@ function Splitter(props: { index: number; share: number }) {
 
   function stop(): void {
     drag.current = null;
+    setActive(false);
   }
 
   function key(event: KeyboardEvent<HTMLDivElement>): void {
@@ -541,6 +569,7 @@ function Splitter(props: { index: number; share: number }) {
         aria-valuemax={Math.round((1 - MIN_PANE_SHARE) * 100)}
         aria-valuenow={Math.round(share * 100)}
         tabIndex={0}
+        data-active={active}
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={stop}

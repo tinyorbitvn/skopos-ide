@@ -8,6 +8,7 @@ import {
   type DropOver,
   outsideWindow,
   overAt,
+  refusedAt,
   targetAt,
 } from "./drag";
 
@@ -21,6 +22,8 @@ export interface TabDrag {
   y: number;
   /** What letting go there does; null cancels. */
   over: DropOver | null;
+  /** Over a pane body that offers no zone, where letting go is refused (spec Q §5). */
+  refused: boolean;
 }
 
 export const useTabDrag = create<{ drag: TabDrag | null }>()(() => ({
@@ -125,6 +128,7 @@ export function startTabDrag(
         // The same object while it means the same, so the panes do not redraw.
         over:
           before !== null && sameOver(before.over, over) ? before.over : over,
+        refused: over === null && refusedAt(document.elementFromPoint(x, y)),
       },
     });
   }

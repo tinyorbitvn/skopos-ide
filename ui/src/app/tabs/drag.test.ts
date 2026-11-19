@@ -7,6 +7,7 @@ import {
   markIndex,
   outsideWindow,
   overAt,
+  refusedAt,
   targetAt,
 } from "./drag";
 
@@ -175,4 +176,18 @@ test("the strip's mark shows where the tab lands: pinned tabs stay first (P22)",
   expect(markIndex(own, "p", { kind: "strip", paneId: "p1", index: 3 })).toBe(
     2,
   );
+});
+
+test("a body that offers no zone refuses the drop; anywhere else letting go only cancels (spec Q §5)", () => {
+  const refused = element({ "data-drop-refused": "true" });
+  const content = document.createElement("p");
+  refused.append(content);
+  const open = element({ "data-drop-refused": "false" });
+  document.body.append(refused, open);
+
+  expect(refusedAt(content)).toBe(true);
+  expect(refusedAt(refused)).toBe(true);
+  expect(refusedAt(open)).toBe(false);
+  expect(refusedAt(document.body)).toBe(false);
+  expect(refusedAt(null)).toBe(false);
 });
