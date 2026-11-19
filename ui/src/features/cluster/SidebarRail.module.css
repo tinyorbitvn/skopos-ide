@@ -1,0 +1,156 @@
+/* The collapsed sidebar (spec Q §3): one icon per section, groups between dividers.
+   The flyout sits outside the scrolling list, so the list's overflow never clips it. */
+.rail {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.icons {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-4) 0 var(--space-6);
+  overflow-y: auto;
+}
+
+.railIcon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.railIcon:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.railIcon:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* The icon whose flyout is open. */
+.railIcon[aria-expanded="true"] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* The section holding the current page. */
+.railIcon[aria-current="page"] {
+  background: var(--side-selected);
+  color: var(--text-primary);
+}
+
+.divider {
+  flex: none;
+  width: 28px;
+  height: 1px;
+  margin: var(--space-3) 0;
+  border: 0;
+  background: var(--tree-line);
+}
+
+.state {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-5) 0;
+}
+
+.flyout {
+  position: absolute;
+  left: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 236px;
+  max-height: calc(100% - 16px);
+  padding: var(--space-3);
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-3);
+}
+
+.flyoutHead {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-2) var(--space-3) var(--space-6);
+}
+
+.flyoutTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: var(--type-overline);
+  letter-spacing: var(--track-caps);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.flyoutList {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A branch or an API group above its kinds. */
+.caption {
+  margin: 0;
+  padding: var(--space-4) var(--space-6) var(--space-2);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font: var(--type-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A kind pill. */
+.flyoutItem {
+  display: block;
+  flex: none;
+  height: 30px;
+  margin: var(--space-1) 0;
+  padding: 0 var(--space-6);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  line-height: 30px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flyoutItem:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.flyoutItem:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.flyoutItem[aria-current="page"] {
+  background: var(--side-selected);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}

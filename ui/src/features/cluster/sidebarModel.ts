@@ -124,3 +124,91 @@ export function openTabPaths(layout: WindowLayout): Set<string> {
   }
   return paths;
 }
+
+/** A link of a rail flyout. */
+export interface FlyoutLinkEntry {
+  type: "link";
+  key: string;
+  label: string;
+  path: string;
+  testId: string;
+  /** Active on the path only, not under it: the Workloads Overview. */
+  end?: boolean;
+}
+
+/** A caption of a rail flyout: a branch or an API group above its kinds. */
+export interface FlyoutCaptionEntry {
+  type: "caption";
+  key: string;
+  label: string;
+}
+
+export type FlyoutEntry = FlyoutLinkEntry | FlyoutCaptionEntry;
+
+export function railItemTestId(item: NavItem): string {
+  return item.type === "route"
+    ? `rail-item-${item.path}`
+    : `rail-item-${groupSegment(item.group)}-${item.plural}`;
+}
+
+/**
+ * What a section's flyout lists (spec Q §3): its Overview and loose items, each branch
+ * under a caption with its label, and for Custom Resources each domain and API group
+ * under a caption with its full name.
+ */
+export function flyoutEntries(
+  clusterId: string,
+  section: NavSection,
+  crds: CrdDomainRow[],
+): FlyoutEntry[] {
+  const link = (item: NavItem): FlyoutLinkEntry => {
+    const path = itemPath(clusterId, item);
+    return {
+      type: "link",
+      key: `link:${path}`,
+      label: item.label,
+      path,
+      testId: railItemTestId(item),
+    };
+  };
+  const kind = (i: { label: string; group: string; plural: string }) =>
+    link({
+      type: "resource",
+      label: i.label,
+      group: i.group,
+      plural: i.plural,
+    });
+  const entries: FlyoutEntry[] = [];
+  if (section.overview !== undefined) {
+    entries.push({
+      type: "link",
+      key: "overview",
+      label: "Overview",
+      path: clusterPath(clusterId, section.overview),
+      testId: `rail-item-overview-${section.overview}`,
+      end: true,
+    });
+  }
+  entries.push(...looseItems(section).map(link));
+  for (const b of section.branches ?? []) {
+    entries.push(
+      { type: "caption", key: `branch:${b.id}`, label: b.label },
+      ...b.items.map(link),
+    );
+  }
+  if (section.id === "custom") {
+    for (const row of crds) {
+      entries.push(
+        { type: "caption", key: `domain:${row.domain}`, label: row.label },
+        ...row.items.map(kind),
+      );
+      for (const g of row.groups) {
+        entries.push(
+          { type: "caption", key: `group:${g.group}`, label: g.group },
+          ...g.items.map(kind),
+        );
+      }
+    }
+  }
+  return entries;
+}
