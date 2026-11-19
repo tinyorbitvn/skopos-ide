@@ -12,6 +12,8 @@ export function ForwardButton(props: {
       size="sm"
       variant="secondary"
       aria-label={`Forward port ${props.port}`}
+      // Not part of the port a drawer's copy button copies.
+      data-copy-skip=""
       data-testid={props.testId}
       onClick={props.onClick}
     >

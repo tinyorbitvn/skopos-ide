@@ -285,6 +285,27 @@ describe("the details drawer on a real cluster", () => {
     await closeDrawer();
   });
 
+  it("copies a container's image from its row, without the hints that wrap it", async () => {
+    await openPod(0);
+    const toggle = await shown("detail-section-toggle-containers");
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    const copy = await shown("copy-field-image");
+    await copy.click();
+    await until(
+      async () => (await copy.getAttribute("aria-label")) === "Copied Image",
+      "the image was never copied",
+    );
+    // Read back through the app's clipboard plugin, as the terminal's paste does.
+    const text: string = await browser.executeAsync((done: (t: string) => void) => {
+      const tauri = (window as unknown as {
+        __TAURI_INTERNALS__: { invoke(cmd: string): Promise<string> };
+      }).__TAURI_INTERNALS__;
+      tauri.invoke("plugin:clipboard-manager|read_text").then(done, (e) => done(`error: ${e}`));
+    });
+    expect(text).toBe("registry.k8s.io/pause:3.10");
+    await closeDrawer();
+  });
+
   it("shows the linked Secret's keys masked, and never its value", async () => {
     await openPod(0);
     expect(await leaks()).toBe(false);

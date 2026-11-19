@@ -4,9 +4,11 @@ import {
   type ReactNode,
   useContext,
   useId,
+  useRef,
   useState,
 } from "react";
 import { Link } from "react-router";
+import { CopyButton } from "../../design/CopyButton";
 import {
   ChevronDown,
   ChevronRight,
@@ -19,6 +21,62 @@ import { useUiState } from "../../stores/uiState";
 import { DrawerLinkContext, objectTarget, targetKey } from "./links";
 import styles from "./parts.module.css";
 
+/** What a value shows that is not part of the value: controls and decoration. */
+const NOT_COPIED =
+  '[data-copy-skip], [aria-hidden="true"], [role="status"], input, select, textarea';
+
+/**
+ * The text `cell` shows, one line per line of the value, without the controls in it or
+ * the break hints that long paths carry. The copy it reads is laid out as the value is,
+ * for a moment, since only text on the page knows where its lines break.
+ */
+export function shownText(cell: HTMLElement): string {
+  const copy = cell.cloneNode(true) as HTMLElement;
+  for (const skip of copy.querySelectorAll(NOT_COPIED)) skip.remove();
+  Object.assign(copy.style, {
+    position: "fixed",
+    top: "0",
+    left: "-10000px",
+    opacity: "0",
+    pointerEvents: "none",
+  });
+  copy.setAttribute("aria-hidden", "true");
+  copy.removeAttribute("id");
+  cell.after(copy);
+  const text =
+    typeof copy.innerText === "string" ? copy.innerText : copy.textContent;
+  copy.remove();
+  return (text ?? "")
+    .replaceAll("\u200b", "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** A value with a copy button at its end, shown while its row is hovered or focused. */
+function CopyCell(props: {
+  label: string;
+  className: string;
+  textClassName?: string;
+  children: ReactNode;
+}) {
+  const text = useRef<HTMLDivElement>(null);
+  return (
+    <div className={`${props.className} ${styles.copyCell}`}>
+      <div ref={text} className={props.textClassName ?? styles.copyText}>
+        {props.children}
+      </div>
+      <CopyButton
+        className={styles.copy}
+        what={props.label}
+        value={() => (text.current ? shownText(text.current) : "")}
+        testId={`copy-field-${sectionSlug(props.label)}`}
+      />
+    </div>
+  );
+}
+
 /** Label and value pairs; an item whose value is empty is left out. */
 export function Facts(props: {
   items: [string, ReactNode | undefined | null][];
@@ -30,9 +88,13 @@ export function Facts(props: {
   return (
     <dl className={styles.facts}>
       {shown.map(([label, value]) => (
-        <div key={label} className={styles.fact}>
+        <div key={label} className={`${styles.fact} ${styles.copyHost}`}>
           <dt className={styles.key}>{label}</dt>
-          <dd className={styles.value}>{value}</dd>
+          <dd className={styles.value}>
+            <CopyCell label={label} className={styles.copyFill}>
+              {value}
+            </CopyCell>
+          </dd>
         </div>
       ))}
     </dl>
@@ -206,12 +268,26 @@ export function FactList(props: { children: ReactNode }): ReactElement {
 export function FactRow(props: {
   label: string;
   testId?: string;
+  /** False for a row that says there is nothing, such as "None". */
+  copy?: boolean;
   children: ReactNode;
 }): ReactElement {
+  const copy = props.copy ?? true;
   return (
-    <div className={styles.factRow} data-testid={props.testId}>
+    <div
+      className={copy ? `${styles.factRow} ${styles.copyHost}` : styles.factRow}
+      data-testid={props.testId}
+    >
       <dt className={styles.factKey}>{props.label}</dt>
-      <dd className={styles.factValue}>{props.children}</dd>
+      <dd className={styles.factValue}>
+        {copy ? (
+          <CopyCell label={props.label} className={styles.copyFill}>
+            {props.children}
+          </CopyCell>
+        ) : (
+          props.children
+        )}
+      </dd>
     </div>
   );
 }
@@ -260,15 +336,21 @@ export function Item(props: {
   );
 }
 
-/** A 72 px key and its lines, inside an item. */
+/** A 72 px key and its lines, inside an item, with a button that copies the lines. */
 export function SubRow(props: {
   label: string;
   children: ReactNode;
 }): ReactElement {
   return (
-    <div className={styles.subRow}>
+    <div className={`${styles.subRow} ${styles.copyHost}`}>
       <span className={styles.subKey}>{props.label}</span>
-      <div className={styles.subLines}>{props.children}</div>
+      <CopyCell
+        label={props.label}
+        className={styles.copyFill}
+        textClassName={styles.subLines}
+      >
+        {props.children}
+      </CopyCell>
     </div>
   );
 }

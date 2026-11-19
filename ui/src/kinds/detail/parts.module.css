@@ -298,3 +298,34 @@ button.link {
   text-align: left;
   cursor: pointer;
 }
+
+/* A value with its copy button at the end; the button shows while the row is hovered,
+   or while it has focus. */
+.copyCell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.copyFill {
+  min-width: 0;
+}
+
+.copyText {
+  min-width: 0;
+}
+
+/* The 22px button sits in a row of text without making the row taller. */
+.copy {
+  margin-block: -3px;
+}
+
+.copyHost .copy {
+  color: transparent;
+}
+
+.copyHost:hover .copy,
+.copyHost .copy:focus-visible {
+  color: var(--text-tertiary);
+}

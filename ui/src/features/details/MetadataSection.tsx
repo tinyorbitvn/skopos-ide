@@ -55,7 +55,7 @@ function Annotation(props: { name: string; value: string }) {
 function None(props: { label: string; testId: string }) {
   return (
     <FactList>
-      <FactRow label={props.label} testId={props.testId}>
+      <FactRow label={props.label} testId={props.testId} copy={false}>
         <span className={styles.muted}>None</span>
       </FactRow>
     </FactList>
