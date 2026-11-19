@@ -307,6 +307,7 @@ test("choosing an item navigates with the sidebar's link handlers and closes the
   fireEvent.click(icon("workloads"));
   fireEvent.click(screen.getByTestId("rail-item-core-pods"));
   expect(paths()).toEqual(["/cluster/c1/r/core/pods"]);
+  await act(() => new Promise((r) => setTimeout(r, 400)));
   expect(flyout("workloads")).toBeNull();
   fireEvent.click(icon("workloads"));
   fireEvent.click(screen.getByTestId("rail-item-apps-deployments"), {
@@ -324,6 +325,21 @@ test("choosing an item navigates with the sidebar's link handlers and closes the
   );
   expect(useWindowLayout.getState().layout.panes).toHaveLength(2);
   expect(flyout("workloads")).toBeNull();
+});
+
+test("double-clicking a flyout item pins its tab and closes the flyout", async () => {
+  await show();
+  fireEvent.click(icon("workloads"));
+  const pods = screen.getByTestId("rail-item-core-pods");
+  fireEvent.click(pods, { detail: 1 });
+  // The flyout is still there for the second click.
+  expect(flyout("workloads")).not.toBeNull();
+  fireEvent.click(pods, { detail: 2 });
+  fireEvent.doubleClick(pods, { detail: 2 });
+  expect(flyout("workloads")).toBeNull();
+  const tab = useWindowLayout.getState().layout.panes[0]?.tabs[0];
+  expect(tab && tabPath(tab)).toBe("/cluster/c1/r/core/pods");
+  expect(tab?.pinned).toBe(true);
 });
 
 test("a rail icon names its section in a tooltip on the right", async () => {

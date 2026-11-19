@@ -126,10 +126,15 @@ function RailRetry(props: { onRetry(): void }) {
   );
 }
 
+/** How long a flyout stays after a plain click, for a second click to pin the tab. */
+const DOUBLE_CLICK_MS = 350;
+
 /** A kind pill of a flyout: the sidebar's link handlers, and choosing it closes the flyout. */
 function FlyoutLink(props: { entry: FlyoutLinkEntry; onChosen(): void }) {
   const { entry, onChosen } = props;
   const handlers = useNavItem(entry.path);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
   return (
     <NavLink
       end={entry.end}
@@ -140,14 +145,25 @@ function FlyoutLink(props: { entry: FlyoutLinkEntry; onChosen(): void }) {
       title={entry.label}
       onClick={(event) => {
         handlers.onClick(event);
-        if (event.defaultPrevented) onChosen();
+        if (!event.defaultPrevented) return;
+        // A plain click waits out a possible double-click, so the second click lands
+        // on the item (which pins the tab) and not on the pane under the flyout.
+        if (event.ctrlKey || event.metaKey) onChosen();
+        else {
+          clearTimeout(closeTimer.current);
+          closeTimer.current = setTimeout(onChosen, DOUBLE_CLICK_MS);
+        }
       }}
       onAuxClick={(event) => {
         handlers.onAuxClick(event);
         if (event.defaultPrevented) onChosen();
       }}
       onMouseDown={handlers.onMouseDown}
-      onDoubleClick={handlers.onDoubleClick}
+      onDoubleClick={(event) => {
+        clearTimeout(closeTimer.current);
+        handlers.onDoubleClick(event);
+        onChosen();
+      }}
     >
       {entry.label}
     </NavLink>
