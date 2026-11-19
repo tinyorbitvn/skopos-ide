@@ -7,6 +7,7 @@ import {
   formatCores,
   parseQuantity,
 } from "../features/metrics/format";
+import { type DiskView, NO_ACCESS_TIP } from "../features/metrics/useNodesDisk";
 import type { UsageItem } from "../ipc/generated/UsageItem";
 import type { KubeObject } from "./objects";
 import styles from "./usageColumns.module.css";
@@ -16,6 +17,8 @@ export interface UsageView {
   items: Map<string, UsageItem> | null;
   /** The cluster does not serve metrics.k8s.io: cells read "—" with a tooltip. */
   notServed: boolean;
+  /** The Nodes list's disk, from the kubelets; undefined for any other list. */
+  disk?: DiskView;
 }
 
 export const NOT_SERVED_TIP = "metrics.k8s.io is not served";
@@ -166,7 +169,8 @@ export function allocatable(
 
 /**
  * The Nodes list's CPU and Memory: what metrics-server measured against what each node
- * can give (its allocatable), drawn as bars.
+ * can give (its allocatable), drawn as bars; then Disk: the root filesystem the kubelet
+ * reports against its size.
  */
 export function nodeUsageColumns(
   usage: UsageView | undefined,
@@ -196,6 +200,18 @@ export function nodeUsageColumns(
       share((i) => i.memoryBytes, "memory"),
       formatBytes,
       tip,
+    ),
+    shareColumn(
+      "disk",
+      "Disk",
+      (row) => {
+        const item = usage?.disk?.items?.get(row.metadata.name);
+        return item
+          ? { used: item.usedBytes, total: item.capacityBytes }
+          : null;
+      },
+      formatBytes,
+      usage?.disk?.forbidden ? NO_ACCESS_TIP : undefined,
     ),
   ];
 }

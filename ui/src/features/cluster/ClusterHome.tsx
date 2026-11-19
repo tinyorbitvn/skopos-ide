@@ -7,6 +7,7 @@ import { OverviewMetrics } from "../metrics/OverviewMetrics";
 import { settingsPath } from "../settings/paths";
 import { useClusterContext } from "./ClusterLayout";
 import styles from "./ClusterScreen.module.css";
+import { ControlPlaneSection } from "./ControlPlaneSection";
 
 /** The content of a connected cluster. It is the Overview page of the sidebar. */
 export function ClusterHome(props: {
@@ -50,6 +51,7 @@ export function ClusterHome(props: {
           </Button>
         </div>
       ) : null}
+      <ControlPlaneSection clusterId={clusterId} />
       <OverviewMetrics
         clusterId={clusterId}
         clusterName={props.clusterName}
