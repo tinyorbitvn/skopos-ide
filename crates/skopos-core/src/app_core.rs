@@ -499,6 +499,10 @@ impl AppCore {
         self.inner.connections.client(id)
     }
 
+    pub(crate) fn cluster_server_url(&self, id: &ClusterId) -> CoreResult<String> {
+        self.inner.connections.server_url(id)
+    }
+
     pub fn cluster_kubeconfig_path(&self, id: &ClusterId) -> CoreResult<PathBuf> {
         self.inner.connections.kubeconfig_path(id)
     }
