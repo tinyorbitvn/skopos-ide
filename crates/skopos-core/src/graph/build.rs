@@ -138,13 +138,29 @@ impl Store {
 
 /// The whole graph, as the builder publishes it. Nodes are sorted by id, edges by
 /// (from, to, rel).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) struct Built {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
     pub counts: Vec<GraphNamespaceCount>,
     pub missing: Vec<String>,
     pub gateway_api: bool,
+    /// Which published graph this is: set by `Graph::publish`, `0` until then. Subscribers
+    /// compare it instead of the graphs.
+    pub generation: u64,
+}
+
+/// Two builds are equal when they hold the same graph. `generation` says when a build was
+/// published, not what it holds, so it is left out: a rebuild that changed nothing must
+/// still compare equal to the last one.
+impl PartialEq for Built {
+    fn eq(&self, other: &Self) -> bool {
+        self.nodes == other.nodes
+            && self.edges == other.edges
+            && self.counts == other.counts
+            && self.missing == other.missing
+            && self.gateway_api == other.gateway_api
+    }
 }
 
 fn edge(from: &str, to: &str, rel: GraphRel) -> GraphEdge {
@@ -361,6 +377,7 @@ pub(crate) fn build(store: &Store) -> Built {
             .collect(),
         missing: store.missing(),
         gateway_api: store.gateway_api(),
+        generation: 0,
     }
 }
 
@@ -370,6 +387,7 @@ pub(crate) fn build(store: &Store) -> Built {
 /// binding in the view, and the edges between them. A GatewayClass or LoadBalancer is brought
 /// in but not expanded from, so a shared class or address does not pull in the whole cluster.
 /// Counts, missing kinds and the Gateway API flag always describe the whole graph.
+/// With no namespaces it clones the whole graph; the hub calls it once per generation and shares the result.
 pub(crate) fn view(built: &Built, namespaces: Option<&[String]>) -> GraphEvent {
     let (nodes, edges) = match namespaces {
         None => (built.nodes.clone(), built.edges.clone()),

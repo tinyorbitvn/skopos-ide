@@ -2,6 +2,7 @@
 //! Every kubeconfig lives in a temp `<home>/.kube`; `KUBECONFIG` is never read.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -1453,7 +1454,7 @@ fn seed_mounting_pods(fake: &FakeKube) {
 
 /// Reads graph events until a snapshot holds the edge from Pod `pod` to the ConfigMap, and
 /// gives it as the text that crosses to the interface.
-async fn graph_mounting(graph: &mut mpsc::Receiver<GraphEvent>, pod: &str) -> String {
+async fn graph_mounting(graph: &mut mpsc::Receiver<Arc<GraphEvent>>, pod: &str) -> String {
     let from = format!("Pod/default/{pod}");
     let deadline = tokio::time::Instant::now() + WAIT;
     loop {
@@ -1461,14 +1462,14 @@ async fn graph_mounting(graph: &mut mpsc::Receiver<GraphEvent>, pod: &str) -> St
             .await
             .unwrap_or_else(|_| panic!("timed out waiting for the Mounts edge of {pod}"))
             .expect("the graph subscription ended");
-        if let GraphEvent::Snapshot { edges, .. } = &event {
+        if let GraphEvent::Snapshot { edges, .. } = event.as_ref() {
             let mounted = edges.iter().any(|edge| {
                 edge.from == from
                     && edge.to == "ConfigMap/default/web-config"
                     && edge.rel == GraphRel::Mounts
             });
             if mounted {
-                return serde_json::to_string(&event).unwrap();
+                return serde_json::to_string(event.as_ref()).unwrap();
             }
         }
     }
