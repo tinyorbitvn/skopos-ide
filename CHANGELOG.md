@@ -7,6 +7,11 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **Secret values stay out of Helm manifests:** the manifest of a release, and the one a preview renders, shows each Secret's keys with their values hidden. A document that cannot be read and names a Secret is hidden whole.
+- **Safer paste in terminals:** control characters are removed from pasted text, whichever way it is pasted, so text copied from a cluster cannot end the paste early and run commands in a local shell. Links in terminal output open through the same check as every other link.
+- **Windows stay on the app's own pages:** a window refuses to load any other page, and a file or link dropped on a window no longer opens in it.
+- **Hardening:** the log folder is kept to your user account, a failed access review no longer logs text the server sent, the connection log warns when a kubeconfig turns off TLS verification, and the content security policy forbids frames, plugins, form posts and a changed base address.
+
 ## [0.9.0] - 2026-11-20
 
 - **A glass sidebar in groups:** the cluster switcher and the sidebar share one glass-tinted column, 248 px wide by default; drag its edge between 200 and 360 px, or double-click it to reset. Overview and Resource map come first, then Apps (Helm, and Argo with Argo CD inside it), Cluster (Nodes, Namespaces, Events) and Resources. Each section has its icon, Helm and Argo show their project logos, and a section with one screen is a plain link. The kinds of an open section hang on tree lines, the current page has a soft highlight, and a kind open in another tab of the window shows a small dot. The switcher shows the cluster's tile with a status dot, its distribution and version, and its name.
