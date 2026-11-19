@@ -3,7 +3,8 @@ import { type KubeObject, objectKey } from "../../kinds/objects";
 import { PODS } from "../../kinds/refs";
 import { type LabelSelector, matchesSelector } from "../../kinds/selectors";
 import { isPodTab, type LogsDockTab } from "../../stores/dock";
-import { useResourceList } from "../../stores/resources";
+import { useWatchedObject } from "../../stores/objectWatch";
+import { rowsAreTrimmed, useResourceList } from "../../stores/resources";
 import { useWholeObject } from "../details/useWholeObject";
 
 export interface ContainerChoice {
@@ -54,24 +55,23 @@ function namesOf(spec: ContainerSpecs | undefined): string[] {
 }
 
 /**
- * The live data behind the toolbar's choices. Watched Pod rows keep container names,
- * statuses and the phase, but no condition messages, so a Pending target is fetched
- * whole for its `PodScheduled` message.
+ * The live data behind the toolbar's choices. A Pod tab reads its Pod, and a workload
+ * tab its workload, with `useWatchedObject`: from a list the store already has, or else
+ * from a watch of that one object. A workload tab also lists every Pod to find the
+ * workload's own by its selector. Watched Pod rows keep container names, statuses and
+ * the phase, but no condition messages, so a Pending target read from a Pods list is
+ * fetched whole for its `PodScheduled` message; the single-object watch's row is whole.
  */
 export function useLogSources(tab: LogsDockTab): LogSources {
   const podTab = isPodTab(tab);
-  const pods = useResourceList(tab.clusterId, PODS);
-  const workloads = useResourceList(
+  const own = useWatchedObject(
     tab.clusterId,
-    podTab ? null : tab.resource,
+    tab.resource,
+    tab.namespace,
+    tab.name,
   );
-  const workload = podTab
-    ? undefined
-    : workloads.items.find(
-        (o) =>
-          o.metadata.namespace === tab.namespace &&
-          o.metadata.name === tab.name,
-      );
+  const pods = useResourceList(tab.clusterId, podTab ? null : PODS);
+  const workload = podTab ? undefined : own.object;
   const selector: LabelSelector | undefined = workload?.spec?.selector;
 
   const members = useMemo(
@@ -91,14 +91,17 @@ export function useLogSources(tab: LogsDockTab): LogSources {
     : tab.options.pod === "all"
       ? null
       : tab.options.pod;
-  const target =
-    targetName === null
+  const target = podTab
+    ? own.object
+    : targetName === null
       ? undefined
       : pods.items.find(
           (p) =>
             p.metadata.namespace === tab.namespace &&
             p.metadata.name === targetName,
         );
+  // A workload tab's target is a row of the Pods list.
+  const targetTrimmed = podTab ? own.trimmed : rowsAreTrimmed(PODS);
   const spec: ContainerSpecs | undefined =
     targetName === null ? workload?.spec?.template?.spec : target?.spec;
   const statuses = target ? statusesOf(target) : members.flatMap(statusesOf);
@@ -108,10 +111,11 @@ export function useLogSources(tab: LogsDockTab): LogSources {
   const whole = useWholeObject(
     tab.clusterId,
     PODS,
-    pendingRow ? objectKey(pendingRow) : null,
+    pendingRow && targetTrimmed ? objectKey(pendingRow) : null,
     pendingRow,
   );
-  const conditions: PodCondition[] = whole.object?.status?.conditions ?? [];
+  const pendingPod = targetTrimmed ? whole.object : pendingRow;
+  const conditions: PodCondition[] = pendingPod?.status?.conditions ?? [];
   const scheduled = conditions.find((c) => c.type === "PodScheduled");
 
   return {

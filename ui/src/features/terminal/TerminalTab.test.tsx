@@ -66,6 +66,14 @@ function mock(): void {
       watchers.set(a.resource.plural, (event) => a.onEvent.onmessage(event));
       return `sub-${a.resource.plural}`;
     },
+    // A Shell or Attach tab reads its Pod with a single-object watch.
+    resources_subscribe_object: (a: {
+      resource: { plural: string };
+      onEvent: { onmessage(event: WatchEvent): void };
+    }) => {
+      watchers.set(a.resource.plural, (event) => a.onEvent.onmessage(event));
+      return `object-${a.resource.plural}`;
+    },
     resources_unsubscribe: () => null,
   });
 }

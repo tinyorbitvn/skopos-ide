@@ -82,6 +82,14 @@ function fakeBackend(over: { get?(args: { name: string }): unknown } = {}) {
       subs.set(a.resource.plural, a.onEvent.onmessage);
       return `sub-${a.resource.plural}`;
     },
+    // An object whose list nobody holds is read with a single-object watch.
+    resources_subscribe_object: (a: {
+      resource: ResourceRef;
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      subs.set(a.resource.plural, a.onEvent.onmessage);
+      return `object-${a.resource.plural}`;
+    },
     resources_unsubscribe: () => null,
     resource_get: (a: { name: string }) => {
       if (over.get) return over.get(a);

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { KubeObject } from "../../kinds/objects";
 import { PODS } from "../../kinds/refs";
 import type { PodSessionDockTab } from "../../stores/dock";
-import { useResourceList } from "../../stores/resources";
+import { useWatchedObject } from "../../stores/objectWatch";
 
 export interface ContainerOption {
   value: string;
@@ -31,20 +31,19 @@ export function containerChoices(
   });
 }
 
-/** The container choices of a Shell or Attach tab, from the live Pod row. */
+/**
+ * The container choices of a Shell or Attach tab, from the live Pod: its row in a Pods
+ * list the store already has, or else a watch of that one Pod, so the tab does not
+ * hold a watch of every Pod.
+ */
 export function useContainerChoices(
   tab: PodSessionDockTab | null,
 ): ContainerOption[] {
-  const pods = useResourceList(tab?.clusterId ?? "", tab ? PODS : null);
-  const namespace = tab?.namespace;
-  const name = tab?.pod;
-  return useMemo(
-    () =>
-      containerChoices(
-        pods.items.find(
-          (p) => p.metadata.namespace === namespace && p.metadata.name === name,
-        ),
-      ),
-    [pods.items, namespace, name],
+  const pod = useWatchedObject(
+    tab?.clusterId ?? "",
+    tab ? PODS : null,
+    tab?.namespace ?? null,
+    tab?.pod ?? null,
   );
+  return useMemo(() => containerChoices(pod.object), [pod.object]);
 }

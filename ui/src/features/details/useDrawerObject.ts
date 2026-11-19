@@ -4,8 +4,8 @@ import { failureMessage, IpcFailure } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { type DrawerTarget, targetKey } from "../../kinds/detail/links";
-import { type KubeObject, objectKey } from "../../kinds/objects";
-import { rowsAreTrimmed, useResourceList } from "../../stores/resources";
+import type { KubeObject } from "../../kinds/objects";
+import { useWatchedObject } from "../../stores/objectWatch";
 import { useWholeObject } from "./useWholeObject";
 
 export type DrawerObjectStatus =
@@ -105,11 +105,12 @@ function useOneGet(
 }
 
 /**
- * The object a drawer entry shows, and its state (spec H49, H50). A listable kind reads
- * the shared live list, so a link to the screen's own kind shares its subscription; an
- * object the synced list lacks is confirmed with one `resourceGet`. A kind the user
- * cannot list or watch is read with one `resourceGet`, again on Retry. Secrets come
- * blanked from both reads (H53).
+ * The object a drawer entry shows, and its state (spec H49, H50). A listable kind is
+ * read live with `useWatchedObject`: from the list the store already has, so a link to
+ * the screen's own kind shares its subscription, or else from a single-object watch.
+ * An object a synced list lacks is confirmed with one `resourceGet`; the object watch
+ * answers that itself. A kind the user cannot list or watch is read with one
+ * `resourceGet`, again on Retry. Secrets come blanked from every read (H53).
  */
 export function useDrawerObject(
   clusterId: string,
@@ -117,29 +118,38 @@ export function useDrawerObject(
   target: DrawerTarget | null,
   lastSeen: KubeObject | null,
 ): DrawerObject {
-  const listing = info !== undefined && info.canList && target !== null;
-  const list = useResourceList(clusterId, listing ? info.resource : null);
-  const listUsable =
-    listing && list.status !== "forbidden" && list.status !== "notServed";
+  const watchedResource =
+    info?.canList && target !== null ? info.resource : null;
+  const watching = watchedResource !== null;
+  const watched = useWatchedObject(
+    clusterId,
+    watchedResource,
+    target?.namespace ?? null,
+    target?.name ?? null,
+  );
+  const usable =
+    watching &&
+    watched.status !== "forbidden" &&
+    watched.status !== "notServed";
+  const found = usable ? watched.object : undefined;
+  const fromList = usable && watched.source === "list";
   const key = target ? `${target.namespace ?? ""}/${target.name}` : null;
-  const found =
-    listUsable && key !== null
-      ? list.items.find((o) => objectKey(o) === key)
-      : undefined;
-  // A trimmed row lacks what the drawer shows, so the drawer shows the fetched object.
+  // A trimmed row lacks what the drawer shows, so the drawer shows the fetched object,
+  // or the one it last showed while that has the row's version.
   const whole = useWholeObject(
     clusterId,
     info?.resource ?? NONE,
-    listUsable ? key : null,
+    fromList && watched.trimmed ? key : null,
     found,
+    lastSeen,
   );
   const needGet =
     info !== undefined &&
     target !== null &&
     (!info.canList ||
-      list.status === "forbidden" ||
-      (listUsable &&
-        !list.loading &&
+      watched.status === "forbidden" ||
+      (fromList &&
+        !watched.loading &&
         found === undefined &&
         lastSeen === null));
   const get = useOneGet(clusterId, info?.resource ?? null, target, needGet);
@@ -153,18 +163,20 @@ export function useDrawerObject(
 
   if (target === null) return state("loading");
   if (info === undefined) return state("notServed");
-  if (listing && list.status === "notServed") {
-    return state("notServed", null, list.message);
+  if (watching && watched.status === "notServed") {
+    return state("notServed", null, watched.message);
   }
   if (found) {
-    if (!rowsAreTrimmed(info.resource)) return state("live", found);
+    if (!watched.trimmed) return state("live", found);
     if (whole.error) {
       return state("error", whole.object, whole.error, whole.retry);
     }
     return whole.object ? state("live", whole.object) : state("loading");
   }
-  if (listUsable && list.loading) return state("loading");
-  if (listUsable && lastSeen) return state("deleted", lastSeen);
+  if (usable && watched.loading) return state("loading");
+  if (usable && lastSeen) return state("deleted", lastSeen);
+  // The object watch's empty snapshot already says there is no such object.
+  if (usable && !fromList) return state("notFound");
   const answer = get.answer;
   if (answer === null) return state("loading");
   if (answer.object) return state("fetched", answer.object, null, get.retry);

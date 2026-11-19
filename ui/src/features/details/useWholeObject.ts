@@ -25,13 +25,15 @@ interface Fetched {
  * `resourceGet` when `objectKey` (`<namespace>/<name>`) opens, and again when the row's
  * `metadata.resourceVersion` changes. Between fetches the last object stays, so an update
  * does not blank the drawer. For a resource whose rows are whole, nothing is fetched and
- * `object` stays null.
+ * `object` stays null. `known` is a whole object already in hand, such as the one last
+ * shown: while it has the row's version it stands in for the fetch.
  */
 export function useWholeObject(
   clusterId: string,
   resource: ResourceRef,
   objectKey: string | null,
   row: KubeObject | undefined,
+  known: KubeObject | null = null,
 ): WholeObject {
   const enabled = objectKey !== null && rowsAreTrimmed(resource);
   const owner = enabled
@@ -43,19 +45,27 @@ export function useWholeObject(
     error: null,
   });
   const [attempt, setAttempt] = useState(0);
-  // Another object, or the same one opened again, starts with nothing fetched.
-  if (fetched.owner !== owner) {
-    setFetched({ owner, object: null, error: null });
+  const rowVersion = row?.metadata.resourceVersion;
+  const seed =
+    enabled &&
+    rowVersion !== undefined &&
+    known?.metadata.resourceVersion === rowVersion
+      ? known
+      : null;
+  // Another object, or the same one opened again, starts with nothing fetched, or
+  // with `known` when it has the row's version. It then stays as a fetched one would.
+  if (fetched.owner !== owner || (fetched.object === null && seed !== null)) {
+    setFetched({ owner, object: seed, error: null });
   }
   const mine = fetched.owner === owner ? fetched : null;
 
-  const rowVersion = row?.metadata.resourceVersion;
-  const haveVersion = mine?.object?.metadata.resourceVersion;
+  const object = mine?.object ?? seed;
+  const haveVersion = object?.metadata.resourceVersion;
   // A deleted row fetches nothing: the last object stays with the "deleted" notice.
   const wanted =
     enabled &&
     row !== undefined &&
-    (mine?.object == null || haveVersion !== rowVersion);
+    (object == null || haveVersion !== rowVersion);
 
   // The effect runs on `owner`, the row's version and `attempt`; it reads the rest here.
   const latest = useRef({ clusterId, resource, objectKey });
@@ -96,7 +106,7 @@ export function useWholeObject(
   }, [wanted, owner, rowVersion, attempt]);
 
   return {
-    object: mine?.object ?? null,
+    object,
     error: row !== undefined ? (mine?.error ?? null) : null,
     retry: () => {
       setFetched((f) => (f.owner === owner ? { ...f, error: null } : f));

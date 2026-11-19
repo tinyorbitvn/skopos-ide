@@ -15,13 +15,24 @@ import type { WatchStatus } from "../ipc/generated/WatchStatus";
 import { type KubeObject, objectKey } from "../kinds/objects";
 import { useCatalog } from "./catalog";
 
+/** The kinds whose watched rows are trimmed, as `<group>/<plural>`. */
+const TRIMMED = new Set([
+  "/pods",
+  "/nodes",
+  "/configmaps",
+  "apps/replicasets",
+  "apiextensions.k8s.io/customresourcedefinitions",
+]);
+
 /**
- * Whether the watch sends this resource's rows with only some of their fields. Core
- * `v1` Pods are trimmed: "Watched Pod rows" in the backend IPC contract lists what a
- * row keeps. Read only those fields from a row, or fetch the object with `resourceGet`.
+ * Whether the list watch sends this resource's rows with only some of their fields:
+ * core Pods, Nodes and ConfigMaps, `apps` ReplicaSets and CustomResourceDefinitions.
+ * "Watched Pod rows" and "Watched rows of other trimmed kinds" in the backend IPC
+ * contract list what a row keeps. Read only those fields from a row, or read the
+ * object with `resourceGet` or a single-object watch, whose rows are whole.
  */
 export function rowsAreTrimmed(resource: ResourceRef): boolean {
-  return resource.group === "" && resource.plural === "pods";
+  return TRIMMED.has(`${resource.group}/${resource.plural}`);
 }
 
 export interface ResourceListState {
@@ -53,7 +64,10 @@ const LOADING: ResourceListState = { ...IDLE, loading: true };
  */
 export const LINGER_MS = 20_000;
 
-/** One backend subscription, shared by every component showing the same list. */
+/**
+ * One backend subscription, shared by every component showing the same list, or the
+ * same object for a single-object watch, whose rows hold 0 or 1 objects.
+ */
 interface Entry {
   key: string;
   clusterId: string;
@@ -81,9 +95,29 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
+/** Told when an entry is added to `entries` or removed from it. */
+const storeListeners = new Set<() => void>();
+
+function notifyStore(): void {
+  for (const listener of [...storeListeners]) listener();
+}
+
 function entryKey(clusterId: string, r: ResourceRef): string {
   return JSON.stringify([clusterId, r.group, r.plural]);
 }
+
+/** Never equal to a list's key, which has three parts. */
+function objectEntryKey(
+  clusterId: string,
+  r: ResourceRef,
+  namespace: string | null,
+  name: string,
+): string {
+  return JSON.stringify([clusterId, r.group, r.plural, namespace, name]);
+}
+
+/** Starts a backend subscription that sends its events to `onEvent`. */
+type Start = (onEvent: (event: WatchEvent) => void) => Promise<string>;
 
 function notify(entry: Entry): void {
   for (const listener of [...entry.listeners]) listener();
@@ -218,7 +252,7 @@ function listen(): void {
   });
 }
 
-function open(key: string, clusterId: string, resource: ResourceRef): Entry {
+function open(key: string, clusterId: string, start: Start): Entry {
   listen();
   const entry: Entry = {
     key,
@@ -234,30 +268,28 @@ function open(key: string, clusterId: string, resource: ResourceRef): Entry {
     ended: false,
     linger: null,
   };
-  api
-    .resourcesSubscribe(clusterId, resource, (event) => {
-      if (!entry.closed) apply(entry, event);
-    })
-    .then(
-      (id) => {
-        entry.subscriptionId = id;
-        if (entry.closed) void api.resourcesUnsubscribe(id).catch(() => {});
-      },
-      (error) => {
-        if (entry.closed) return;
-        entry.state = {
-          ...entry.state,
-          status:
-            error instanceof IpcFailure && error.code === "Forbidden"
-              ? "forbidden"
-              : "notServed",
-          message: failureMessage(error),
-          loading: false,
-        };
-        publish(entry);
-        end(entry);
-      },
-    );
+  start((event) => {
+    if (!entry.closed) apply(entry, event);
+  }).then(
+    (id) => {
+      entry.subscriptionId = id;
+      if (entry.closed) void api.resourcesUnsubscribe(id).catch(() => {});
+    },
+    (error) => {
+      if (entry.closed) return;
+      entry.state = {
+        ...entry.state,
+        status:
+          error instanceof IpcFailure && error.code === "Forbidden"
+            ? "forbidden"
+            : "notServed",
+        message: failureMessage(error),
+        loading: false,
+      };
+      publish(entry);
+      end(entry);
+    },
+  );
   return entry;
 }
 
@@ -266,9 +298,12 @@ function drop(entry: Entry): void {
   if (entry.linger !== null) clearTimeout(entry.linger);
   entry.linger = null;
   entry.closed = true;
-  if (entries.get(entry.key) === entry) entries.delete(entry.key);
   if (entry.subscriptionId !== null) {
     void api.resourcesUnsubscribe(entry.subscriptionId).catch(() => {});
+  }
+  if (entries.get(entry.key) === entry) {
+    entries.delete(entry.key);
+    notifyStore();
   }
 }
 
@@ -278,11 +313,12 @@ function end(entry: Entry): void {
   if (entry.refs === 0 && !entry.closed) drop(entry);
 }
 
-function acquire(key: string, clusterId: string, resource: ResourceRef): Entry {
+function acquire(key: string, clusterId: string, start: Start): Entry {
   let entry = entries.get(key);
   if (!entry) {
-    entry = open(key, clusterId, resource);
+    entry = open(key, clusterId, start);
     entries.set(key, entry);
+    notifyStore();
   }
   if (entry.linger !== null) {
     clearTimeout(entry.linger);
@@ -310,26 +346,26 @@ function release(entry: Entry): void {
 }
 
 /**
- * The live objects of a resource. One subscription is kept per cluster, group and
- * plural, and ended `LINGER_MS` after the last component using it goes away.
+ * Holds the entry of `key` while the component uses it, starting its subscription
+ * with `start` if the store has none, and returns its state.
  */
-export function useResourceList(
+function useEntry(
+  key: string | null,
   clusterId: string,
-  resource: ResourceRef | null,
+  start: Start | null,
 ): ResourceListState {
-  const key = resource ? entryKey(clusterId, resource) : null;
   // The effect depends on the identity in `key`, so it reads the latest props from a ref.
-  const latest = useRef({ clusterId, resource });
-  latest.current = { clusterId, resource };
+  const latest = useRef({ clusterId, start });
+  latest.current = { clusterId, start };
   const [entry, setEntry] = useState<Entry | null>(null);
 
   useEffect(() => {
-    const { clusterId: cluster, resource: wanted } = latest.current;
-    if (key === null || wanted === null) {
+    const { clusterId: cluster, start: begin } = latest.current;
+    if (key === null || begin === null) {
       setEntry(null);
       return;
     }
-    const acquired = acquire(key, cluster, wanted);
+    const acquired = acquire(key, cluster, begin);
     setEntry(acquired);
     return () => release(acquired);
   }, [key]);
@@ -349,6 +385,97 @@ export function useResourceList(
   // belong to another cluster or resource, so they are never returned here.
   const current = entries.get(key);
   return current === entry ? shown : (current?.state ?? LOADING);
+}
+
+/**
+ * The live objects of a resource. One subscription is kept per cluster, group and
+ * plural, and ended `LINGER_MS` after the last component using it goes away.
+ */
+export function useResourceList(
+  clusterId: string,
+  resource: ResourceRef | null,
+): ResourceListState {
+  return useEntry(
+    resource ? entryKey(clusterId, resource) : null,
+    clusterId,
+    resource
+      ? (onEvent) => api.resourcesSubscribe(clusterId, resource, onEvent)
+      : null,
+  );
+}
+
+/**
+ * One object, live, from a single-object watch ("Single-object watch" in the backend
+ * IPC contract): `items` holds the object while it exists. Its rows are whole, even
+ * for a kind whose list rows are trimmed. One subscription is kept per cluster,
+ * resource, namespace and name, and ended `LINGER_MS` after the last component using
+ * it goes away. `namespace` is sent only for a namespaced resource, as the backend
+ * refuses one that does not match the resource's scope.
+ */
+export function useObjectWatch(
+  clusterId: string,
+  resource: ResourceRef | null,
+  namespace: string | null,
+  name: string | null,
+): ResourceListState {
+  const scoped = resource?.namespaced ? namespace : null;
+  const wanted = resource !== null && name !== null;
+  return useEntry(
+    wanted ? objectEntryKey(clusterId, resource, scoped, name) : null,
+    clusterId,
+    wanted
+      ? (onEvent) =>
+          api.resourcesSubscribeObject(
+            clusterId,
+            resource,
+            scoped,
+            name,
+            onEvent,
+          )
+      : null,
+  );
+}
+
+/**
+ * The state of the list of a resource that the store already has, because a
+ * component uses it or it lingers, read without holding it: null when there is none,
+ * and again once it is dropped. It never starts a subscription.
+ */
+export function useHeldList(
+  clusterId: string,
+  resource: ResourceRef | null,
+): ResourceListState | null {
+  const key = resource ? entryKey(clusterId, resource) : null;
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      if (key === null) return () => {};
+      // Follows the entry of `key` as the store adds and drops it.
+      let followed: Entry | undefined;
+      const follow = () => {
+        const next = entries.get(key);
+        if (next === followed) return;
+        followed?.listeners.delete(listener);
+        followed = next;
+        followed?.listeners.add(listener);
+      };
+      const onStore = () => {
+        follow();
+        listener();
+      };
+      storeListeners.add(onStore);
+      follow();
+      return () => {
+        storeListeners.delete(onStore);
+        followed?.listeners.delete(listener);
+      };
+    },
+    [key],
+  );
+  const snapshot = useCallback(
+    () => (key === null ? null : (entries.get(key)?.state ?? null)),
+    [key],
+  );
+  return useSyncExternalStore(subscribe, snapshot);
 }
 
 export function findResource(

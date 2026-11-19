@@ -22,7 +22,7 @@ import { resetCatalogForTest } from "../../stores/catalog";
 import { detailsTab, resetDockForTest, useDock } from "../../stores/dock";
 import { resetGraphForTest } from "../../stores/graph";
 import { resetMetricsForTest } from "../../stores/metrics";
-import { resetResourcesForTest } from "../../stores/resources";
+import { resetResourcesForTest, useResourceList } from "../../stores/resources";
 import { CSS_FILES, cssRules } from "../../test/css";
 import { flush, mockBackend } from "../../test/ipc";
 import {
@@ -84,14 +84,15 @@ function pod(over: Partial<KubeObject> = {}): KubeObject {
 }
 
 /**
- * The drawer with the history `ResourceScreen` would own for `objectKey`, inside a root
- * that closes it on Escape as the screen root does.
+ * The drawer with the history and the list `ResourceScreen` would own for `objectKey`,
+ * inside a root that closes it on Escape as the screen root does.
  */
 function Harness(
   props: Omit<DetailDrawerProps, "history"> & { objectKey: string | null },
 ) {
   const { objectKey, ...rest } = props;
   const history = useDrawerHistory(rest.resource, objectKey);
+  useResourceList(rest.clusterId, rest.resource);
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: it stands in for the screen root, which only listens for Escape.
     <div
@@ -180,6 +181,14 @@ function fake(
       send = a.onEvent.onmessage;
       byPlural.set(a.resource.plural, send);
       return "sub";
+    },
+    // A linked kind whose list nobody holds is read with a single-object watch.
+    resources_subscribe_object: (a: {
+      resource: ResourceRef;
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      byPlural.set(a.resource.plural, a.onEvent.onmessage);
+      return "object-sub";
     },
     resources_unsubscribe: () => null,
     resource_events: () => events(),
@@ -703,19 +712,23 @@ test("a deleted pod keeps the last fetched object with the deleted notice", asyn
   expect(f.backend.callsTo("resource_get")).toHaveLength(1);
 });
 
-test("opening the pod again fetches it again", async () => {
-  const f = fake(undefined, () => wholePod());
+test("opening the pod again shows the object last fetched, and fetches only a newer version", async () => {
+  let version = "1";
+  const f = fake(undefined, () => wholePod(version, `v${version}`));
   const view = render(drawer());
   await act(flush);
-  await f.snapshot([trimmedRow()]);
+  await f.snapshot([trimmedRow("1")]);
   view.rerender(drawer(() => {}, null));
   await act(flush);
   view.rerender(drawer());
   await act(flush);
-  // The drawer subscribes to the list only while it is open, so reopening gets a new snapshot.
-  await f.snapshot([trimmedRow()]);
+  // The row still has the version last shown, so that object stands in for a fetch.
+  expect(screen.getByText("v1")).toBeTruthy();
+  expect(f.backend.callsTo("resource_get")).toHaveLength(1);
+  version = "2";
+  await f.batch([trimmedRow("2")]);
   expect(f.backend.callsTo("resource_get")).toHaveLength(2);
-  expect(screen.getByText("whole")).toBeTruthy();
+  expect(screen.getByText("v2")).toBeTruthy();
 });
 
 test("a failed fetch shows the error and Retry fetches again", async () => {
@@ -738,11 +751,11 @@ test("a failed fetch shows the error and Retry fetches again", async () => {
 });
 
 test("other kinds show their row and fetch nothing", async () => {
-  const CM: ResourceRef = {
+  const SERVICES: ResourceRef = {
     group: "",
     version: "v1",
-    plural: "configmaps",
-    kind: "ConfigMap",
+    plural: "services",
+    kind: "Service",
     namespaced: true,
   };
   const f = fake();
@@ -750,7 +763,7 @@ test("other kinds show their row and fetch nothing", async () => {
     <MemoryRouter>
       <Harness
         clusterId="c1"
-        resource={CM}
+        resource={SERVICES}
         objectKey="team-a/web"
         onClose={() => {}}
       />
