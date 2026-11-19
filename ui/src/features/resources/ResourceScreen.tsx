@@ -53,6 +53,15 @@ const FIXED_COLUMNS: ReadonlySet<string> = new Set(["name", ACTIONS_COLUMN]);
 /** A choice made in the columns menu, which wins over the column's default. */
 type ColumnChoices = Record<string, "shown" | "hidden">;
 
+function isHiddenBy(choices: ColumnChoices, c: TableColumn<KubeObject>) {
+  return choices[c.id] ? choices[c.id] === "hidden" : Boolean(c.defaultHidden);
+}
+
+/** The same empty list on every render, so what is memoised on the namespaces holds. */
+const NO_NAMESPACES: string[] = [];
+/** What the suggestions read while they are closed. */
+const NO_INDEX = buildFilterIndex([]);
+
 function rowTestId(o: KubeObject): string {
   const { namespace, name } = o.metadata;
   return namespace
@@ -148,7 +157,7 @@ export function ResourceScreen(props: {
     `column-widths:${resource.group}/${resource.plural}`,
     {},
   );
-  const namespaces = namespaced ? savedNamespaces : [];
+  const namespaces = namespaced ? savedNamespaces : NO_NAMESPACES;
 
   const allNamespaces = useMemo(() => {
     const found = new Set<string>();
@@ -164,10 +173,13 @@ export function ResourceScreen(props: {
       (o) => allowed.size === 0 || allowed.has(o.metadata.namespace ?? ""),
     );
   }, [list.items, namespaces]);
-  // The suggestions read the objects after the namespace filter (spec M17).
+  // The suggestions read the objects after the namespace filter (spec M17). They show
+  // only while the box has focus, so the index is counted only then: on a large list each
+  // watch batch would otherwise count every label and annotation again for nothing.
+  const [suggesting, setSuggesting] = useState(false);
   const filterIndex = useMemo(
-    () => buildFilterIndex(namespaceRows),
-    [namespaceRows],
+    () => (suggesting ? buildFilterIndex(namespaceRows) : NO_INDEX),
+    [suggesting, namespaceRows],
   );
   const typed = useMemo(() => typedFilter(search), [search]);
   const rows = useMemo(
@@ -234,9 +246,12 @@ export function ResourceScreen(props: {
   const KindDeleteDialog =
     kindSpec(resource.group, resource.plural)?.deleteDialog ?? DeleteDialog;
 
-  const isHidden = (c: TableColumn<KubeObject>) =>
-    choices[c.id] ? choices[c.id] === "hidden" : Boolean(c.defaultHidden);
-  const hiddenColumns = columns.filter(isHidden).map((c) => c.id);
+  const isHidden = (c: TableColumn<KubeObject>) => isHiddenBy(choices, c);
+  // The same list while nothing it reads changes, so the table keeps its columns.
+  const hiddenColumns = useMemo(
+    () => columns.filter((c) => isHiddenBy(choices, c)).map((c) => c.id),
+    [columns, choices],
+  );
 
   // Only what is on screen is deleted, so a search cannot hide part of a bulk delete.
   const selectedRows = rows.filter((o) => selected.has(objectKey(o)));
@@ -281,7 +296,7 @@ export function ResourceScreen(props: {
   }
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: the root only listens for the Escape that closes the drawer (spec H19).
+    // biome-ignore lint/a11y/noStaticElementInteractions: the root only listens for the Escape that closes the drawer (spec H19) and for the filter box's focus.
     <div
       ref={screenRef}
       className={styles.screen}
@@ -290,6 +305,16 @@ export function ResourceScreen(props: {
         if (!isDrawerEscape(e)) return;
         e.stopPropagation();
         openObject(null);
+      }}
+      // The filter box opens its suggestions on focus or typing and closes them on blur.
+      onFocus={(e) => {
+        if (e.target === filterBox.current) setSuggesting(true);
+      }}
+      onChange={(e) => {
+        if (e.target === filterBox.current) setSuggesting(true);
+      }}
+      onBlur={(e) => {
+        if (e.target === filterBox.current) setSuggesting(false);
       }}
     >
       <div className={styles.toolbar}>

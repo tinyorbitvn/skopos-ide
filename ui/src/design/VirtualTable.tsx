@@ -4,8 +4,10 @@ import {
   createContext,
   type KeyboardEvent,
   type MouseEvent,
+  memo,
   type PointerEvent,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -211,6 +213,103 @@ function belongsToControl(event: MouseEvent | KeyboardEvent): boolean {
   );
 }
 
+interface BodyRowProps<T> {
+  row: T;
+  index: number;
+  /** Where the virtualizer puts the row, in pixels from the top of the body. */
+  start: number;
+  height: number;
+  columns: TableColumn<T>[];
+  selectable: boolean;
+  isSelected: boolean;
+  isActive: boolean;
+  clickable: boolean;
+  endInert: boolean;
+  testId: string | undefined;
+  label: string;
+  selectTestId: string | undefined;
+  /** Stable for the table's life, so a row with nothing new does not render again. */
+  onActivate(row: T): void;
+  onToggle(row: T, index: number, shift: boolean): void;
+}
+
+function BodyRowView<T>(props: BodyRowProps<T>): React.JSX.Element {
+  const { row, index, columns, onActivate } = props;
+  return (
+    <tr
+      className={[
+        styles.row,
+        styles.bodyRow,
+        props.clickable ? styles.clickable : "",
+        props.isSelected ? styles.selected : "",
+        props.isActive ? styles.active : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      style={{
+        height: props.height,
+        transform: `translateY(${props.start}px)`,
+      }}
+      aria-rowindex={index + 2}
+      aria-selected={props.isSelected}
+      aria-current={props.isActive ? "true" : undefined}
+      data-testid={props.testId}
+      tabIndex={props.clickable ? 0 : undefined}
+      onClick={
+        props.clickable
+          ? (e) => {
+              if (!belongsToControl(e)) onActivate(row);
+            }
+          : undefined
+      }
+      onKeyDown={
+        props.clickable
+          ? (e) => {
+              if (e.key === "Enter" && e.target === e.currentTarget) {
+                onActivate(row);
+              }
+            }
+          : undefined
+      }
+    >
+      {props.selectable ? (
+        <td className={styles.cell}>
+          <input
+            type="checkbox"
+            aria-label={`Select ${props.label}`}
+            data-testid={props.selectTestId}
+            checked={props.isSelected}
+            onChange={(e) =>
+              props.onToggle(
+                row,
+                index,
+                (e.nativeEvent as globalThis.MouseEvent).shiftKey,
+              )
+            }
+          />
+        </td>
+      ) : null}
+      {columns.map((c) => (
+        <td
+          key={c.id}
+          className={
+            c.stickyEnd ? `${styles.cell} ${styles.stickyEnd}` : styles.cell
+          }
+          inert={props.endInert && c.stickyEnd ? true : undefined}
+        >
+          {c.render(row)}
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+/**
+ * One body row. A watch batch renders the table again; a row whose object, columns,
+ * selection and place are as they were keeps what it rendered.
+ */
+const BodyRow = memo(BodyRowView) as typeof BodyRowView;
+
 export function VirtualTable<T>(props: {
   rows: T[];
   columns: TableColumn<T>[];
@@ -272,20 +371,25 @@ export function VirtualTable<T>(props: {
     );
   }, [props.columns, props.hiddenColumns]);
 
+  // Keyed on what the order depends on, so a render that changes none of it, such as a
+  // selection or a new hidden list, does not sort again.
+  const sortBy = sort
+    ? columns.find((c) => c.id === sort.id)?.sortValue
+    : undefined;
+  const sortDir = sort?.dir;
   const rows = useMemo(() => {
-    const value = columns.find((c) => c.id === sort?.id)?.sortValue;
-    if (!sort || !value) return props.rows;
-    const sign = sort.dir === "asc" ? 1 : -1;
+    if (!sortBy || !sortDir) return props.rows;
+    const sign = sortDir === "asc" ? 1 : -1;
     // Each row's value is read once: it may mean evaluating a JSONPath.
     return props.rows
-      .map((row) => ({ row, key: value(row) }))
+      .map((row) => ({ row, key: sortBy(row) }))
       .sort((a, b) => {
         if (a.key === null) return b.key === null ? 0 : 1;
         if (b.key === null) return -1;
         return sign * compare(a.key, b.key);
       })
       .map(({ row }) => row);
-  }, [props.rows, columns, sort]);
+  }, [props.rows, sortBy, sortDir]);
 
   function changeSort(id: string): void {
     let next: TableSort | null = { id, dir: "asc" };
@@ -326,6 +430,20 @@ export function VirtualTable<T>(props: {
     anchor.current = key;
     onSelectedChange?.(next);
   }
+
+  // The rows are memoised, so they are given handlers that stay the same and call the
+  // ones of the latest render: the caller's onRowClick, and toggleRow over the rows shown.
+  const handlers = useRef({ onRowClick, toggleRow });
+  handlers.current = { onRowClick, toggleRow };
+  const activate = useCallback(
+    (row: T) => handlers.current.onRowClick?.(row),
+    [],
+  );
+  const toggle = useCallback(
+    (row: T, index: number, shift: boolean) =>
+      handlers.current.toggleRow(row, index, shift),
+    [],
+  );
 
   const selectedShown = selected
     ? rows.filter((r) => selected.has(rowKey(r))).length
@@ -449,79 +567,25 @@ export function VirtualTable<T>(props: {
             {items.map((item) => {
               const row = rows[item.index];
               const key = rowKey(row);
-              const isSelected = selected?.has(key) ?? false;
               return (
-                <tr
+                <BodyRow
                   key={key}
-                  className={[
-                    styles.row,
-                    styles.bodyRow,
-                    onRowClick ? styles.clickable : "",
-                    isSelected ? styles.selected : "",
-                    key === props.activeKey ? styles.active : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  style={{
-                    height: rowHeight,
-                    transform: `translateY(${item.start}px)`,
-                  }}
-                  aria-rowindex={item.index + 2}
-                  aria-selected={isSelected}
-                  aria-current={key === props.activeKey ? "true" : undefined}
-                  data-testid={props.rowTestId?.(row)}
-                  tabIndex={onRowClick ? 0 : undefined}
-                  onClick={
-                    onRowClick
-                      ? (e) => {
-                          if (!belongsToControl(e)) onRowClick(row);
-                        }
-                      : undefined
-                  }
-                  onKeyDown={
-                    onRowClick
-                      ? (e) => {
-                          if (
-                            e.key === "Enter" &&
-                            e.target === e.currentTarget
-                          ) {
-                            onRowClick(row);
-                          }
-                        }
-                      : undefined
-                  }
-                >
-                  {selectable ? (
-                    <td className={styles.cell}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${props.rowLabel?.(row) ?? key}`}
-                        data-testid={props.selectTestId?.(row)}
-                        checked={isSelected}
-                        onChange={(e) =>
-                          toggleRow(
-                            row,
-                            item.index,
-                            (e.nativeEvent as globalThis.MouseEvent).shiftKey,
-                          )
-                        }
-                      />
-                    </td>
-                  ) : null}
-                  {columns.map((c) => (
-                    <td
-                      key={c.id}
-                      className={
-                        c.stickyEnd
-                          ? `${styles.cell} ${styles.stickyEnd}`
-                          : styles.cell
-                      }
-                      inert={props.endInert && c.stickyEnd ? true : undefined}
-                    >
-                      {c.render(row)}
-                    </td>
-                  ))}
-                </tr>
+                  row={row}
+                  index={item.index}
+                  start={item.start}
+                  height={rowHeight}
+                  columns={columns}
+                  selectable={selectable}
+                  isSelected={selected?.has(key) ?? false}
+                  isActive={key === props.activeKey}
+                  clickable={onRowClick !== undefined}
+                  endInert={props.endInert ?? false}
+                  testId={props.rowTestId?.(row)}
+                  label={props.rowLabel?.(row) ?? key}
+                  selectTestId={props.selectTestId?.(row)}
+                  onActivate={activate}
+                  onToggle={toggle}
+                />
               );
             })}
           </FreshClock>

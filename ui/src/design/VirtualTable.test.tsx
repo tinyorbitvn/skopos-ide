@@ -573,3 +573,97 @@ test("a table given its widths shows them and reports each change", () => {
   // What it shows is what it is given.
   expect(tracks()).toBe("1fr 120px 80px");
 });
+
+test("a render with the same rows, sort column and direction does not sort again", () => {
+  const rows = [row("b"), row("a")];
+  const sortValue = vi.fn((r: Row) => r.name);
+  const sorted = [{ ...columns[0], sortValue }, ...columns.slice(1)];
+  // A caller may give a new hidden list, sort and handlers on each render.
+  const view = (selected: ReadonlySet<string>, dir: "asc" | "desc" = "asc") => (
+    <VirtualTable
+      rows={rows}
+      columns={sorted}
+      rowKey={rowKey}
+      rowTestId={rowTestId}
+      hiddenColumns={["note"]}
+      sort={{ id: "name", dir }}
+      selected={selected}
+      onSelectedChange={() => {}}
+    />
+  );
+  const { rerender } = render(view(new Set()));
+  expect(sortValue).toHaveBeenCalledTimes(2);
+
+  rerender(view(new Set(["a"])));
+  expect(sortValue).toHaveBeenCalledTimes(2);
+  expect(shownIds()).toEqual(["a", "b"]);
+
+  rerender(view(new Set(["a"]), "desc"));
+  expect(sortValue).toHaveBeenCalledTimes(4);
+  expect(shownIds()).toEqual(["b", "a"]);
+});
+
+test("a row renders again only when its object, selection or active state changes", () => {
+  const cell = vi.fn((r: Row) => r.name);
+  const counted: TableColumn<Row>[] = [
+    { id: "name", header: "Name", width: 120, render: cell },
+  ];
+  const renderedIds = () => cell.mock.calls.map(([r]) => r.id);
+  const a = row("a");
+  const b = row("b");
+  const changedB = row("b", "b2");
+  const firstClick = vi.fn();
+  // New handlers on every render, as a caller writing them inline gives.
+  const view = (
+    rows: Row[],
+    selected: ReadonlySet<string>,
+    activeKey?: string,
+    onRowClick: (r: Row) => void = (r) => firstClick(r),
+  ) => (
+    <VirtualTable
+      rows={rows}
+      columns={counted}
+      rowKey={rowKey}
+      rowTestId={rowTestId}
+      testId="table"
+      selected={selected}
+      onSelectedChange={() => {}}
+      onRowClick={onRowClick}
+      activeKey={activeKey}
+    />
+  );
+  const { rerender } = render(view([a, b], new Set()));
+  expect(renderedIds()).toEqual(["a", "b"]);
+
+  cell.mockClear();
+  rerender(view([a, changedB], new Set()));
+  expect(renderedIds()).toEqual(["b"]);
+
+  cell.mockClear();
+  rerender(view([a, changedB], new Set(["a"])));
+  expect(renderedIds()).toEqual(["a"]);
+  expect(screen.getByTestId("row-a").getAttribute("aria-selected")).toBe(
+    "true",
+  );
+
+  cell.mockClear();
+  rerender(view([a, changedB], new Set(["a"]), "b"));
+  expect(renderedIds()).toEqual(["b"]);
+  expect(screen.getByTestId("row-b").getAttribute("aria-current")).toBe("true");
+
+  // A column's new width is laid out by the table, not by its rows.
+  cell.mockClear();
+  fireEvent.keyDown(resizer("name"), { key: "ArrowRight" });
+  expect(tracks()).toBe("44px 136px");
+  expect(renderedIds()).toEqual([]);
+
+  // A row that did not render again still calls the handler it was last given.
+  const secondClick = vi.fn();
+  rerender(view([a, changedB], new Set(["a"]), "b", secondClick));
+  expect(renderedIds()).toEqual([]);
+  fireEvent.click(screen.getByText("a"));
+  fireEvent.keyDown(screen.getByTestId("row-a"), { key: "Enter" });
+  expect(firstClick).not.toHaveBeenCalled();
+  expect(secondClick).toHaveBeenCalledTimes(2);
+  expect(secondClick).toHaveBeenLastCalledWith(a);
+});
