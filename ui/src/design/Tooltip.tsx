@@ -13,11 +13,14 @@ export function Tooltip({
   children,
   variant = "label",
   label,
+  side,
 }: {
   content: ReactNode;
   children: ReactElement;
   variant?: "label" | "card";
   label?: string;
+  /** Where it opens; Radix's default, top, when left out. */
+  side?: "top" | "right" | "bottom" | "left";
 }) {
   return (
     <RT.Provider delayDuration={400}>
@@ -30,6 +33,7 @@ export function Tooltip({
                 ? `${styles.content} ${styles.card}`
                 : styles.content
             }
+            side={side}
             sideOffset={6}
             collisionPadding={variant === "card" ? 8 : 0}
             onEscapeKeyDown={

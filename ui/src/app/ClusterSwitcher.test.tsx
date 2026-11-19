@@ -6,10 +6,12 @@ import {
   within,
 } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetFoldersForTest, useFolders } from "../stores/folders";
+import { CSS_FILES, cssRules } from "../test/css";
 import { clusterEntry } from "../test/ipc";
-import { ClusterSwitcher } from "./ClusterSwitcher";
+import { ClusterSwitcher, switcherOverline } from "./ClusterSwitcher";
 
 const INFO = {
   version: "v1",
@@ -69,23 +71,42 @@ function rows(): string[] {
     .map((row) => row.getAttribute("aria-label") ?? "");
 }
 
-test("the switcher shows the sidebar's cluster: tile, name and state (P24)", () => {
+test("the switcher shows the sidebar's cluster: tile with its status dot, overline and name (P24, spec Q §2)", () => {
   renderSwitcher("id-prod-eu-1");
 
   const trigger = screen.getByTestId("switcher-trigger");
   expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
   expect(trigger.getAttribute("aria-expanded")).toBe("false");
-  expect(trigger.textContent).toContain("PE");
-  expect(trigger.textContent).toContain("prod-eu-1");
-  expect(trigger.textContent).toContain("Connected");
+  expect(trigger.querySelector(".tile")?.textContent).toBe("PE");
+  expect(
+    trigger.querySelector(".tileDot [role='img']")?.getAttribute("aria-label"),
+  ).toBe("Connected");
+  expect(trigger.querySelector(".over")?.textContent).toBe("kind · v1");
+  expect(trigger.querySelector(".name")?.textContent).toBe("prod-eu-1");
+  expect(
+    trigger.querySelector('[data-icon="chevrons-up-down"]'),
+  ).not.toBeNull();
+  expect(trigger.getAttribute("aria-label")).toBe(
+    "Cluster prod-eu-1, connected. Change the cluster shown in the sidebar",
+  );
+  expect(trigger.getAttribute("title")).toBe(
+    "prod-eu-1 · Connected. Click to show another cluster in the sidebar",
+  );
 });
 
 test("with no cluster the switcher asks for one", () => {
   renderSwitcher(null);
 
-  expect(screen.getByTestId("switcher-trigger").textContent).toContain(
-    "No cluster",
+  const trigger = screen.getByTestId("switcher-trigger");
+  expect(trigger.textContent).toContain("No cluster");
+  expect(trigger.querySelector(".over")?.textContent).toBe(
+    "Pick one to see its navigation",
   );
+  expect(trigger.querySelector(".tileDot")).toBeNull();
+  expect(trigger.getAttribute("aria-label")).toBe(
+    "Cluster shown in the sidebar",
+  );
+  expect(trigger.getAttribute("title")).toBe("Cluster shown in the sidebar");
 });
 
 test("the list shows the clusters under their folders, each with its connection (P24)", () => {
@@ -195,4 +216,175 @@ test("no line while the sidebar follows the focused tab, or on a tab without a c
 
   renderSwitcher("id-demo", null);
   expect(screen.queryByTestId("switcher-follow")).toBeNull();
+});
+
+test("the overline reads the distribution and version, or the state word", () => {
+  const connected = (
+    distribution: string,
+    version: string,
+  ): ConnectionState => ({
+    status: "connected",
+    info: { ...INFO, distribution, version },
+  });
+  expect(switcherOverline(connected("kind", "v1.31.0"))).toBe("kind · v1.31.0");
+  expect(switcherOverline(connected("", "v1.31.0"))).toBe(
+    "Kubernetes · v1.31.0",
+  );
+  expect(switcherOverline(connected("  ", "v1.31.0"))).toBe(
+    "Kubernetes · v1.31.0",
+  );
+  expect(switcherOverline(connected("eks", ""))).toBe("eks");
+  expect(switcherOverline({ status: "disconnected" })).toBe("Disconnected");
+  expect(switcherOverline({ status: "connecting" })).toBe("Connecting");
+  expect(
+    switcherOverline({ status: "failed", kind: "unreachable", message: "x" }),
+  ).toBe("Failed");
+
+  useCatalog.setState({
+    clusters: [
+      clusterEntry({
+        contextName: "bare",
+        state: { status: "connected", info: { ...INFO, distribution: "" } },
+      }),
+      clusterEntry({ contextName: "idle" }),
+    ],
+  });
+  renderSwitcher("id-bare");
+  expect(
+    screen.getByTestId("switcher-trigger").querySelector(".over")?.textContent,
+  ).toBe("Kubernetes · v1");
+  cleanup();
+  renderSwitcher("id-idle");
+  const idle = screen.getByTestId("switcher-trigger");
+  expect(idle.querySelector(".over")?.textContent).toBe("Disconnected");
+  expect(idle.getAttribute("aria-label")).toBe(
+    "Cluster idle, disconnected. Change the cluster shown in the sidebar",
+  );
+});
+
+test("the trigger and its menu have the design's metrics and open look (spec Q §2)", () => {
+  const rules = cssRules(CSS_FILES["/src/app/ClusterSwitcher.module.css"]);
+  const decl = (selector: string, prop: string) =>
+    rules
+      .find((r) => r.selector === selector)
+      ?.decls.find(([p]) => p === prop)?.[1];
+  expect([
+    decl(".switcher", "padding"),
+    decl(".trigger", "height"),
+    decl(".trigger", "gap"),
+    decl(".trigger", "padding"),
+    decl(".trigger", "border"),
+    decl(".trigger", "background"),
+    decl(".trigger", "border-radius"),
+    decl(".trigger:hover", "background"),
+    decl('.trigger[aria-expanded="true"]', "border-color"),
+    decl('.trigger[aria-expanded="true"]', "background"),
+  ]).toEqual([
+    "var(--space-6) var(--space-6) var(--space-4)",
+    "52px",
+    "var(--space-6)",
+    "0 var(--space-5) 0 var(--space-4)",
+    "1px solid transparent",
+    "transparent",
+    "var(--radius-md)",
+    "var(--surface-hover)",
+    "var(--border-accent)",
+    "var(--glass-field)",
+  ]);
+  expect([
+    decl(".tile", "width"),
+    decl(".tile", "height"),
+    decl(".tile", "border-radius"),
+    decl(".tileDot", "right"),
+    decl(".tileDot", "bottom"),
+    decl(".tileDot", "border"),
+    decl(".over", "text-transform"),
+    decl(".name", "font-size"),
+    decl(".name", "font-weight"),
+    decl(".name", "text-overflow"),
+  ]).toEqual([
+    "36px",
+    "36px",
+    "var(--radius-sm)",
+    "-3px",
+    "-3px",
+    "2px solid var(--surface-card)",
+    "uppercase",
+    "14px",
+    "var(--weight-semibold)",
+    undefined,
+  ]);
+  expect(
+    rules.find(
+      (r) => r.selector.includes(".name") && r.selector.includes(".over"),
+    )?.decls,
+  ).toContainEqual(["text-overflow", "ellipsis"]);
+  expect([
+    decl(".panel", "top"),
+    decl(".panel", "left"),
+    decl(".panel", "width"),
+    decl('.switcher[data-collapsed="true"] .panel', "top"),
+    decl('.switcher[data-collapsed="true"] .panel', "left"),
+    decl('.switcher[data-collapsed="true"] .trigger', "width"),
+    decl('.switcher[data-collapsed="true"] .trigger', "height"),
+    decl('.switcher[data-collapsed="true"] .text', "display"),
+    decl('.switcher[data-collapsed="true"] .updown', "display"),
+  ]).toEqual([
+    "calc(var(--space-6) + 54px)",
+    "calc(var(--space-6) + 8px)",
+    "272px",
+    "var(--space-5)",
+    "calc(100% + 6px)",
+    "48px",
+    "48px",
+    "none",
+    "none",
+  ]);
+});
+
+test("collapsed, the switcher is the tile alone, named in a tooltip on the right, with no follow line", async () => {
+  render(
+    <ClusterSwitcher
+      clusterId="id-prod-eu-1"
+      focused="id-demo"
+      onPick={vi.fn()}
+      onFollow={vi.fn()}
+      collapsed
+    />,
+  );
+  const trigger = screen.getByTestId("switcher-trigger");
+  expect(
+    trigger.closest("[data-collapsed]")?.getAttribute("data-collapsed"),
+  ).toBe("true");
+  expect(trigger.getAttribute("title")).toBeNull();
+  expect(trigger.getAttribute("aria-label")).toBe(
+    "Cluster prod-eu-1, connected. Change the cluster shown in the sidebar",
+  );
+  expect(screen.queryByTestId("switcher-follow")).toBeNull();
+  fireEvent.focus(trigger);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip.textContent).toBe("prod-eu-1");
+  expect(
+    document
+      .querySelector("[data-radix-popper-content-wrapper] > *")
+      ?.getAttribute("data-side"),
+  ).toBe("right");
+  fireEvent.click(trigger);
+  expect(screen.getByTestId("switcher-menu")).toBeTruthy();
+});
+
+test("collapsing closes the open menu", () => {
+  const props = {
+    clusterId: "id-prod-eu-1",
+    focused: "id-prod-eu-1",
+    onPick: vi.fn(),
+    onFollow: vi.fn(),
+  };
+  const { rerender } = render(<ClusterSwitcher {...props} />);
+  fireEvent.click(screen.getByTestId("switcher-trigger"));
+  expect(screen.getByTestId("switcher-menu")).toBeTruthy();
+  rerender(<ClusterSwitcher {...props} collapsed />);
+  expect(screen.queryByTestId("switcher-menu")).toBeNull();
+  rerender(<ClusterSwitcher {...props} />);
+  expect(screen.queryByTestId("switcher-menu")).toBeNull();
 });
