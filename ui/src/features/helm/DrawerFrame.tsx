@@ -1,11 +1,10 @@
 import { type ReactNode, useEffect, useRef } from "react";
-import { IconButton } from "../../design";
-import { X } from "../../design/icons";
-import styles from "../details/DetailDrawer.module.css";
+import { DrawerShell } from "../details/DrawerShell";
+import bar from "../resources/ObjectActionBar.module.css";
 
 /**
- * The resource drawer's frame: focus comes in on open and goes back on close, and
- * Escape inside the drawer closes it.
+ * A Helm drawer in the frame every drawer shares: focus comes in on open and goes back on
+ * close, and Escape inside the drawer closes it.
  */
 export function DrawerFrame(props: {
   label: string;
@@ -14,12 +13,11 @@ export function DrawerFrame(props: {
   kind: string;
   /** After the kind line, such as a status badge. */
   extra?: ReactNode;
-  /** Before the divider and the Close button. */
+  /** Icon buttons before the divider and the Close button. */
   actions?: ReactNode;
   onClose(): void;
   children: ReactNode;
 }) {
-  const { onClose } = props;
   const drawerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const before = document.activeElement;
@@ -29,38 +27,26 @@ export function DrawerFrame(props: {
     };
   }, []);
   return (
-    <aside
+    <DrawerShell
       ref={drawerRef}
-      tabIndex={-1}
-      className={styles.drawer}
-      aria-label={props.label}
-      data-testid={props.testId}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        // A menu or tooltip in a portal still bubbles its keys here; that Escape is its own.
-        if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target))
-          return;
-        e.stopPropagation();
-        onClose();
-      }}
+      label={props.label}
+      testId={props.testId}
+      kind={props.kind}
+      title={props.title}
+      extra={props.extra}
+      closeTestId={`${props.testId}-close`}
+      onClose={props.onClose}
+      closeOnEscape
+      actions={
+        props.actions ? (
+          // biome-ignore lint/a11y/useSemanticElements: a fieldset brings a border and a legend that a header toolbar does not want.
+          <div role="group" aria-label="Actions" className={bar.bar}>
+            {props.actions}
+          </div>
+        ) : null
+      }
     >
-      <header className={styles.header}>
-        <h3 className={styles.title} title={props.title}>
-          {props.title}
-        </h3>
-        <span className={styles.kind}>{props.kind}</span>
-        {props.extra}
-        <div className={styles.grow} />
-        {props.actions}
-        <span className={styles.divider} aria-hidden="true" />
-        <IconButton
-          label="Close details"
-          icon={<X size={14} aria-hidden="true" />}
-          onClick={onClose}
-          data-testid={`${props.testId}-close`}
-        />
-      </header>
       {props.children}
-    </aside>
+    </DrawerShell>
   );
 }

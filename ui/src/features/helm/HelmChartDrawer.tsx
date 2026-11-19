@@ -1,14 +1,15 @@
 import { useNavigate } from "react-router";
 import {
   Badge,
-  Button,
   type Column,
   DataTable,
   ErrorNotice,
+  IconButton,
   Spinner,
   Tabs,
   useNow,
 } from "../../design";
+import { PackagePlus } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { ChartVersion } from "../../ipc/generated/ChartVersion";
 import { useHelm } from "../../stores/helm";
@@ -184,14 +185,12 @@ export function HelmChartDrawer(props: {
       onClose={onClose}
       actions={
         chart ? (
-          <Button
-            size="sm"
-            variant="primary"
+          <IconButton
+            label="Install"
+            icon={<PackagePlus size={16} aria-hidden="true" />}
             onClick={() => install(chart.latest.version)}
             data-testid="helm-chart-install"
-          >
-            Install
-          </Button>
+          />
         ) : null
       }
     >

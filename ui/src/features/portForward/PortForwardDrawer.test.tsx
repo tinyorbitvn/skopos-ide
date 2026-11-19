@@ -49,6 +49,10 @@ test("the header names the target, where it is and its status", () => {
   expect(screen.getByText("Port forward in shop")).toBeTruthy();
   expect(screen.getByTestId("pf-drawer-status").textContent).toBe("Running");
   expect(screen.getByRole("tab", { name: "Overview" })).toBeTruthy();
+  expect(screen.getByTestId("pf-drawer").hasAttribute("data-drawer")).toBe(
+    true,
+  );
+  expect(screen.getByTestId("drawer-resize")).toBeTruthy();
 });
 
 test("the Port forward section lists the target, the ports, the address, the status and the connections", () => {

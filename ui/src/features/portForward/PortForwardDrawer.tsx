@@ -1,13 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
 import { ErrorNotice, IconButton, Tabs } from "../../design";
-import { X } from "../../design/icons";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { resourcePath } from "../../kinds/nav";
-import { DRAWER_PANE, usePaneSize } from "../../stores/paneSize";
 import { CopyRow } from "../details/CopyRow";
 import styles from "../details/DetailDrawer.module.css";
-import { DrawerResize } from "../details/DrawerResize";
+import { DrawerShell } from "../details/DrawerShell";
+import bar from "../resources/ObjectActionBar.module.css";
 import { ForwardStatus } from "./ForwardStatus";
 import { forwardActions } from "./forwardActions";
 import { localAddress, portText, STATE_LOOK, targetText } from "./forwardText";
@@ -27,7 +26,6 @@ export function PortForwardDrawer(props: {
   const { clusterId, forward, onClose } = props;
   const { kind, namespace, name } = forward.target;
   const drawerRef = useRef<HTMLElement>(null);
-  const [drawerWidth, setDrawerWidth] = usePaneSize(DRAWER_PANE);
 
   // As in the object drawer: focus comes in on open and goes back where it was.
   useEffect(() => {
@@ -46,43 +44,27 @@ export function PortForwardDrawer(props: {
       : `Each connection goes to Pod ${name}. A Pod forward ends with its Pod; forward the Service to follow replacements.`;
 
   return (
-    <aside
+    <DrawerShell
       ref={drawerRef}
-      tabIndex={-1}
-      className={styles.drawer}
-      aria-label="Port forward details"
-      data-testid="pf-drawer"
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        // A tooltip or menu in a portal still bubbles its keys here; that Escape is its own.
-        if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target))
-          return;
-        e.stopPropagation();
-        onClose();
-      }}
-      style={{ flexBasis: drawerWidth }}
-    >
-      <DrawerResize width={drawerWidth} onChange={setDrawerWidth} />
-      <header className={styles.header}>
-        <h3
-          className={styles.title}
-          data-testid="pf-drawer-title"
-          title={targetText(forward)}
-        >
-          {targetText(forward)}
-        </h3>
-        <span className={styles.kind}>Port forward in {namespace}</span>
-        <ForwardStatus forward={forward} testId="pf-drawer-status" />
-        <div className={styles.grow} />
-        {/* biome-ignore lint/a11y/useSemanticElements: a fieldset brings a border and a legend that a header toolbar does not want. */}
-        <div role="group" aria-label="Actions" className={own.actions}>
+      label="Port forward details"
+      testId="pf-drawer"
+      kind={`Port forward in ${namespace}`}
+      title={targetText(forward)}
+      titleTestId="pf-drawer-title"
+      closeTestId="pf-drawer-close"
+      onClose={onClose}
+      closeOnEscape
+      extra={<ForwardStatus forward={forward} testId="pf-drawer-status" />}
+      actions={
+        // biome-ignore lint/a11y/useSemanticElements: a fieldset brings a border and a legend that a header toolbar does not want.
+        <div role="group" aria-label="Actions" className={bar.bar}>
           {forwardActions(forward).map((action) => {
             const Icon = action.icon;
             return (
               <IconButton
                 key={action.id}
                 label={action.label}
-                icon={<Icon size={14} aria-hidden="true" />}
+                icon={<Icon size={16} aria-hidden="true" />}
                 onClick={() => {
                   void action.run();
                 }}
@@ -91,14 +73,8 @@ export function PortForwardDrawer(props: {
             );
           })}
         </div>
-        <span className={styles.divider} aria-hidden="true" />
-        <IconButton
-          label="Close details"
-          icon={<X size={14} aria-hidden="true" />}
-          onClick={onClose}
-          data-testid="pf-drawer-close"
-        />
-      </header>
+      }
+    >
       <Tabs value="overview" onChange={() => {}} tabs={TABS} />
       <div className={styles.content}>
         <section className={styles.section} data-testid="pf-drawer-forward">
@@ -142,6 +118,6 @@ export function PortForwardDrawer(props: {
           <p className={own.paragraph}>{BOTH}</p>
         </section>
       </div>
-    </aside>
+    </DrawerShell>
   );
 }
