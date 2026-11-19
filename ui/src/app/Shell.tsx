@@ -8,9 +8,9 @@ import { ShortcutsDialog } from "../features/shortcuts/ShortcutsDialog";
 import { events } from "../ipc/events";
 import { useCatalog } from "../stores/catalog";
 import { useClusterState, useConnect } from "../stores/clusters";
+import { useDiscovery } from "../stores/discovery";
 import { useFolders } from "../stores/folders";
 import { NAV_PANE, usePaneSize } from "../stores/paneSize";
-import { useApiResources } from "../stores/resources";
 import { useShell } from "../stores/shell";
 import { startWindowLayout, useWindowLayout } from "../stores/windowLayout";
 import { AppHeader } from "./AppHeader";
@@ -117,7 +117,7 @@ function SidebarColumn() {
 }
 
 function ConnectedDock(props: { clusterId: string }) {
-  const { resources } = useApiResources(props.clusterId);
+  const { resources } = useDiscovery(props.clusterId);
   // Ctrl/Cmd and middle clicks on links in the dock go to the focused tab's pane.
   const links = useMemo(() => screenLinkHandlers(), []);
   return (
