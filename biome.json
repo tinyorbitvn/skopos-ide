@@ -13,12 +13,7 @@
           "options": {
             "patterns": [
               {
-                "group": [
-                  "lucide-react",
-                  "lucide-react/**",
-                  "@animateicons/react",
-                  "@animateicons/react/**"
-                ],
+                "group": ["lucide-react", "lucide-react/**"],
                 "message": "Import icons from design/icons, the one module that maps them."
               }
             ]
