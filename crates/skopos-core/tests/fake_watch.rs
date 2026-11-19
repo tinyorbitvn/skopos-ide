@@ -1545,3 +1545,31 @@ async fn the_pod_watcher_outlives_a_table_while_the_graph_still_reads_it() {
     core.resource_graph_unsubscribe(&graph_id);
     eventually("every watch to close", || fake.open_watch_count() == 0).await;
 }
+
+#[tokio::test]
+async fn a_quiet_subscription_sends_nothing_and_a_late_change_still_arrives_within_a_batch() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.serve_resource(fake_widgets());
+    fake.upsert("widgets", widget("one"));
+    let mut table = Consumer::subscribe(&core, &id, widgets()).await;
+    table
+        .until("the snapshot and Live", |c| {
+            c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+        })
+        .await;
+    let seen = table.seen.len();
+
+    table.drain_for(Duration::from_millis(600)).await;
+    assert_eq!(table.seen.len(), seen, "{}", table.summary());
+
+    let started = Instant::now();
+    fake.upsert("widgets", widget("two"));
+    table
+        .until("the late change", |c| c.has("default", "two"))
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "took {:?}",
+        started.elapsed()
+    );
+}

@@ -12,12 +12,13 @@ use std::time::Duration;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
+use futures::FutureExt;
 use kube::api::{ApiResource, DynamicObject};
 use kube::runtime::watcher;
 use kube::{Api, Client};
 use serde_json::Value;
-use tokio::sync::mpsc;
-use tokio::time::{Instant, MissedTickBehavior};
+use tokio::sync::{mpsc, Notify};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::discovery::state_name;
@@ -110,6 +111,9 @@ struct Subscriber {
     /// Built from the store when flushed, so a stalled subscriber holds no copy.
     snapshot_due: bool,
     got_snapshot: bool,
+    /// Signalled whenever something is queued for this subscriber, so its flusher sleeps
+    /// until then. `notify_one` keeps a permit, so a signal during a flush is not lost.
+    wake: Arc<Notify>,
 }
 
 struct GroupState {
@@ -142,6 +146,13 @@ impl GroupState {
         status
     }
 
+    /// Tells every subscriber's flusher to look at what is queued.
+    fn wake_all(&self) {
+        for subscriber in self.subscribers.values() {
+            subscriber.wake.notify_one();
+        }
+    }
+
     fn set_status(&mut self, status: StatusUpdate) {
         if self.status == status {
             return;
@@ -149,6 +160,7 @@ impl GroupState {
         self.status = status;
         for subscriber in self.subscribers.values_mut() {
             subscriber.status = Some(self.status.clone());
+            subscriber.wake.notify_one();
         }
     }
 
@@ -164,6 +176,7 @@ impl GroupState {
         for subscriber in self.subscribers.values_mut() {
             subscriber.snapshot_due = true;
             subscriber.changes.clear();
+            subscriber.wake.notify_one();
         }
     }
 
@@ -183,6 +196,7 @@ impl GroupState {
                 subscriber.changes.clear();
                 subscriber.snapshot_due = true;
             }
+            subscriber.wake.notify_one();
         }
     }
 }
@@ -218,8 +232,9 @@ impl Group {
         self.token.is_cancelled() || self.lock().terminal
     }
 
-    /// False when the group stopped, and the caller needs a new one.
-    fn attach(&self, subscription: &str, shape: RowShape) -> bool {
+    /// False when the group stopped, and the caller needs a new one. `wake` is signalled
+    /// whenever something is queued for the new subscriber, which starts with a status.
+    fn attach(&self, subscription: &str, shape: RowShape, wake: Arc<Notify>) -> bool {
         let mut state = self.lock();
         if state.terminal || self.token.is_cancelled() {
             return false;
@@ -228,8 +243,10 @@ impl Group {
             shape,
             status: Some(state.status.clone()),
             snapshot_due: state.synced(),
+            wake,
             ..Default::default()
         };
+        subscriber.wake.notify_one();
         state
             .subscribers
             .insert(subscription.to_owned(), subscriber);
@@ -378,6 +395,8 @@ impl Group {
         let mut state = self.lock();
         state.terminal = true;
         state.set_status((status, message));
+        // A subscriber must learn it is over even when the status did not change.
+        state.wake_all();
     }
 }
 
@@ -395,6 +414,9 @@ pub(crate) struct WatchHub {
     subscriptions: DashMap<String, CancellationToken>,
     next_subscription: AtomicU64,
     timing: Mutex<Timing>,
+    /// How many times a flusher reached `take_events`.
+    #[cfg(test)]
+    flusher_wakes: AtomicU64,
 }
 
 impl Default for WatchHub {
@@ -407,6 +429,8 @@ impl Default for WatchHub {
                 batch: DEFAULT_BATCH,
                 linger: DEFAULT_LINGER,
             }),
+            #[cfg(test)]
+            flusher_wakes: AtomicU64::new(0),
         }
     }
 }
@@ -421,6 +445,11 @@ pub(super) struct Connection {
 impl WatchHub {
     fn timing(&self) -> Timing {
         *lock(&self.timing)
+    }
+
+    #[cfg(test)]
+    fn flusher_wakes(&self) -> u64 {
+        self.flusher_wakes.load(Ordering::Relaxed)
     }
 
     /// How long a watcher outlives its last subscriber. The graph lingers as long.
@@ -455,6 +484,7 @@ impl WatchHub {
         connection: &Connection,
     ) -> CoreResult<String> {
         let subscription = self.new_subscription();
+        let wake = Arc::new(Notify::new());
         let group = loop {
             // A disconnect that just happened would leave every new group closed.
             if connection.token.is_cancelled() {
@@ -464,7 +494,7 @@ impl WatchHub {
                 ));
             }
             let group = self.group_for(id, &resource, connection);
-            if group.attach(&subscription, shape) {
+            if group.attach(&subscription, shape, wake.clone()) {
                 break group;
             }
         };
@@ -475,6 +505,7 @@ impl WatchHub {
             self.clone(),
             group,
             subscription.clone(),
+            wake,
             tx,
             stop,
         ));
@@ -513,24 +544,43 @@ impl WatchHub {
     }
 }
 
-/// Sends a subscriber what has piled up, once per batch interval, until it leaves,
-/// its group ends or the receiver closes.
+/// Sends a subscriber what has piled up, until it leaves, its group ends or the receiver
+/// closes. It sleeps until the group queues something for the subscriber, and then until a
+/// batch interval has passed since its last flush. So an idle subscriber never wakes, a busy
+/// one is sent at most once per interval, and a change waits no longer than one interval.
 async fn flush_subscriber(
     hub: Arc<WatchHub>,
     group: Arc<Group>,
     subscription: String,
+    wake: Arc<Notify>,
     tx: mpsc::Sender<WatchEvent>,
     stop: CancellationToken,
 ) {
-    let mut ticks = tokio::time::interval(hub.timing().batch);
-    ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let batch = hub.timing().batch;
+    let mut last_flush: Option<Instant> = None;
     'flushing: loop {
         tokio::select! {
             () = stop.cancelled() => break,
             () = tx.closed() => break,
-            _ = ticks.tick() => {}
+            () = wake.notified() => {}
         }
+        if let Some(last) = last_flush {
+            tokio::select! {
+                () = stop.cancelled() => break,
+                () = tx.closed() => break,
+                () = tokio::time::sleep_until(last + batch) => {}
+            }
+        }
+        // This flush takes everything queued so far, so a signal stored since the wake
+        // (several queueings, or one during the sleep) would only wake it for nothing.
+        // A queueing after this point stores a new one, so nothing is missed.
+        let _ = wake.notified().now_or_never();
+        #[cfg(test)]
+        hub.flusher_wakes.fetch_add(1, Ordering::Relaxed);
         let (events, last) = group.take_events(&subscription);
+        // A wake whose changes an earlier flush already took sends nothing, and must not
+        // push the next flush back.
+        let sent_any = !events.is_empty();
         for event in events {
             tokio::select! {
                 () = stop.cancelled() => break 'flushing,
@@ -540,6 +590,9 @@ async fn flush_subscriber(
                     }
                 }
             }
+        }
+        if sent_any {
+            last_flush = Some(Instant::now());
         }
         if last {
             break;
@@ -1066,8 +1119,8 @@ mod tests {
             .unwrap()
         };
         let group = Group::new(pods.clone(), CancellationToken::new());
-        assert!(group.attach("table", RowShape::Table));
-        assert!(group.attach("graph", RowShape::Graph));
+        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        assert!(group.attach("graph", RowShape::Graph, Arc::default()));
 
         let (key, first) = to_row(&object("1"), &pods).unwrap();
         group.finish_init(&None, HashMap::from([(key.clone(), first)]));
@@ -1131,5 +1184,188 @@ mod tests {
         assert_eq!(value["apiVersion"], "v1");
         assert_eq!(value["data"]["password"], "");
         assert!(value["metadata"].get("managedFields").is_none());
+    }
+
+    fn stored(name: &str, version: &str) -> (ObjectKey, StoredRow) {
+        let key = ObjectKey {
+            namespace: Some("a".to_owned()),
+            name: name.to_owned(),
+        };
+        let row = Row::new(&serde_json::json!({
+            "metadata": { "name": name, "namespace": "a", "resourceVersion": version },
+        }))
+        .unwrap();
+        (
+            key,
+            StoredRow {
+                table: row,
+                graph: None,
+            },
+        )
+    }
+
+    struct Rig {
+        hub: Arc<WatchHub>,
+        group: Arc<Group>,
+        rx: mpsc::Receiver<WatchEvent>,
+        stop: CancellationToken,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    /// One flusher over a group with no watcher behind it, so a test is the API server.
+    fn flusher_rig(batch: Duration) -> Rig {
+        let hub = Arc::new(WatchHub::default());
+        *lock(&hub.timing) = Timing {
+            batch,
+            linger: Duration::from_secs(30),
+        };
+        let group = Arc::new(Group::new(resource("", "pods"), CancellationToken::new()));
+        let wake = Arc::new(Notify::new());
+        assert!(group.attach("watch-1", RowShape::Table, wake.clone()));
+        let (tx, rx) = mpsc::channel(16);
+        let stop = group.token.child_token();
+        let task = tokio::spawn(flush_subscriber(
+            hub.clone(),
+            group.clone(),
+            "watch-1".to_owned(),
+            wake,
+            tx,
+            stop.clone(),
+        ));
+        Rig {
+            hub,
+            group,
+            rx,
+            stop,
+            task,
+        }
+    }
+
+    impl Rig {
+        /// Takes the status a subscriber starts with, then syncs the group and takes the
+        /// empty snapshot and the Live status that follow.
+        async fn synced(&mut self) {
+            assert!(matches!(
+                self.rx.recv().await,
+                Some(WatchEvent::Status {
+                    status: WatchStatus::Syncing,
+                    ..
+                })
+            ));
+            self.group.finish_init(&None, HashMap::new());
+            assert!(matches!(
+                self.rx.recv().await,
+                Some(WatchEvent::Snapshot { .. })
+            ));
+            assert!(matches!(
+                self.rx.recv().await,
+                Some(WatchEvent::Status {
+                    status: WatchStatus::Live,
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_does_not_wake_while_idle() {
+        let mut rig = flusher_rig(Duration::from_millis(150));
+        rig.synced().await;
+        let wakes = rig.hub.flusher_wakes();
+
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+
+        assert_eq!(rig.hub.flusher_wakes(), wakes, "an idle flusher polled");
+        assert!(rig.rx.try_recv().is_err());
+        rig.stop.cancel();
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_sends_a_change_at_once_after_idle_and_one_batch_after_a_flush() {
+        let batch = Duration::from_millis(150);
+        let mut rig = flusher_rig(batch);
+        rig.synced().await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let started = Instant::now();
+        let (key, first) = stored("web", "1");
+        rig.group.apply(key.clone(), first);
+        assert!(matches!(
+            rig.rx.recv().await,
+            Some(WatchEvent::Batch { .. })
+        ));
+        assert!(
+            started.elapsed() <= batch,
+            "late by {:?}",
+            started.elapsed()
+        );
+
+        // A change right after a flush waits out the interval, and folds into one batch.
+        let started = Instant::now();
+        for version in ["2", "3", "4"] {
+            rig.group.apply(key.clone(), stored("web", version).1);
+        }
+        let Some(WatchEvent::Batch { upserts, deletes }) = rig.rx.recv().await else {
+            panic!("expected a batch");
+        };
+        assert_eq!(started.elapsed(), batch);
+        assert!(deletes.is_empty());
+        assert_eq!(upserts.len(), 1);
+        assert_eq!(upserts[0].to_value()["metadata"]["resourceVersion"], "4");
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(rig.rx.try_recv().is_err(), "nothing more was queued");
+        rig.stop.cancel();
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_wakes_for_a_status_a_due_snapshot_and_the_final_status() {
+        let mut rig = flusher_rig(Duration::from_millis(150));
+        rig.synced().await;
+
+        rig.group.set_failing(&None, "boom".to_owned());
+        let Some(WatchEvent::Status { status, message }) = rig.rx.recv().await else {
+            panic!("expected a status");
+        };
+        assert_eq!(status, WatchStatus::Reconnecting);
+        assert_eq!(message.as_deref(), Some("boom"));
+
+        // After its first snapshot a subscriber gets the status before the next one.
+        rig.group.finish_init(&None, HashMap::new());
+        assert!(matches!(
+            rig.rx.recv().await,
+            Some(WatchEvent::Status {
+                status: WatchStatus::Live,
+                ..
+            })
+        ));
+        assert!(matches!(
+            rig.rx.recv().await,
+            Some(WatchEvent::Snapshot { .. })
+        ));
+
+        rig.group
+            .finish(WatchStatus::NotServed, Some("gone".to_owned()));
+        let Some(WatchEvent::Status { status, .. }) = rig.rx.recv().await else {
+            panic!("expected the final status");
+        };
+        assert_eq!(status, WatchStatus::NotServed);
+        assert!(rig.rx.recv().await.is_none(), "the final status ends it");
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn flusher_ends_when_the_receiver_closes_without_any_change() {
+        let mut rig = flusher_rig(Duration::from_millis(150));
+        rig.synced().await;
+
+        drop(rig.rx);
+
+        tokio::time::timeout(Duration::from_secs(1), rig.task)
+            .await
+            .expect("the flusher did not end")
+            .unwrap();
     }
 }

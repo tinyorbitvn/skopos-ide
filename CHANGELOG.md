@@ -13,6 +13,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **Watch one object (backend):** a new `resources_subscribe_object` command streams a single object, by name, as a snapshot of one row and then its changes, with the same events and statuses as a table's watch. It sends the whole object, so a drawer no longer needs a table's watcher or a refetch.
 - **Helm releases subscription (backend):** new `helm_releases_subscribe` and `helm_releases_unsubscribe` commands watch the Secrets Helm labels `owner=helm` (metadata only, no payload) and send one `changed` per burst of changes, so the releases screen can list again without polling. `forbidden` or `failed` end the subscription once; the screen then polls every 60 s. Releases kept in ConfigMaps or SQL are not seen. A cluster that refuses the cluster-wide `helm list` is also remembered for 60 s, so each refresh skips the call that cannot succeed.
 - **One Pod watch for the table and the Map (backend):** with a Pods table and the Map open, the core now watches Pods once instead of twice; each view still gets its own, differently trimmed rows.
+- **No idle wake-ups in watches (backend):** a watch subscriber's flush timer no longer ticks every 150 ms while nothing changes; it sleeps until a change, a status or a snapshot is queued. A change still reaches the interface within the same 150 ms batch.
 
 ## [0.8.0] - 2026-11-18
 
