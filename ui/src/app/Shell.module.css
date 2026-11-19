@@ -24,44 +24,6 @@
   min-height: 0;
 }
 
-/* The sidebar and its resize handle, which sits on the right border. */
-.nav {
-  position: relative;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.nav > nav {
-  flex: 1;
-}
-
-/* Draws the sidebar's border, as the cluster navigation does. */
-.navNote {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-7) var(--space-6);
-  border-right: 1px solid var(--border-subtle);
-}
-
-.navName {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: 0;
-  font: var(--type-label);
-}
-
-.navText {
-  margin: 0;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
-
 .work {
   flex: 1;
   display: flex;

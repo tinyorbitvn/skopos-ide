@@ -8,11 +8,11 @@ export interface PaneSize {
   max: number;
 }
 
-/** The cluster navigation; its bounds are the boards'. */
+/** The cluster navigation; its bounds are the glass design's (spec Q §2). */
 export const NAV_PANE: PaneSize = {
   key: "layout.navWidth",
-  initial: 220,
-  min: 168,
+  initial: 248,
+  min: 200,
   max: 360,
 };
 

@@ -1,0 +1,44 @@
+/* The sidebar column, between the hotbar and the panes: one glass layer under the
+   switcher and the navigation, with the column's only border (spec Q §1). Its z-index
+   keeps what it opens over the panes (the switcher's menu, the rail's flyouts) above
+   their strips, splitters and drop zones (z-index 6 at most). */
+.column {
+  position: relative;
+  z-index: 7;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--glass-tint);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.column > nav {
+  flex: 1;
+}
+
+/* The waiting and empty states: a dashed box under the switcher (spec Q §2). */
+.note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-4) var(--space-6);
+  padding: var(--space-7);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+.noteName {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font: var(--type-label);
+}
+
+.noteText {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}

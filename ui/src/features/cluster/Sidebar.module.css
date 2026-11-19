@@ -4,8 +4,6 @@
   gap: var(--space-5);
   min-height: 0;
   padding: var(--space-7) var(--space-5);
-  background: var(--surface-sunken);
-  border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
 }
 

@@ -578,7 +578,7 @@ spec:
     await browser.waitUntil(
       async () =>
         (await valueOf("drawer-resize")) === 420 &&
-        (await valueOf("nav-resize")) === 220,
+        (await valueOf("nav-resize")) === 248,
       { timeoutMsg: "a double-click never reset the widths" },
     );
     await clickWhenShown("detail-close");
