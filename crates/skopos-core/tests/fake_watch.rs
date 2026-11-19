@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use skopos_core::app_core::AppCore;
 use skopos_core::cluster::ConnectionState;
 use skopos_core::error::ErrorCode;
+use skopos_core::graph::{GraphEvent, GraphRel};
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
 use skopos_core::resources::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
@@ -1421,4 +1422,126 @@ async fn an_object_watch_refuses_a_name_or_scope_that_does_not_fit_before_any_re
         .resources_subscribe_object(&id, pods(), Some("default".into()), "web".into(), tx)
         .await
         .is_err());
+}
+
+/// A Pod the graph follows to a ConfigMap, with what only the Pods table reads (the ports)
+/// and what only the graph reads (the volumes and the service account).
+fn mounting_pod(name: &str) -> Value {
+    json!({
+        "metadata": { "name": name, "namespace": "default" },
+        "spec": {
+            "serviceAccountName": "web",
+            "volumes": [{ "name": "config", "configMap": { "name": "web-config" } }],
+            "containers": [{
+                "name": "main",
+                "image": "registry.k8s.io/pause:3.10",
+                "ports": [{ "containerPort": 8080 }],
+                "env": [{ "name": "A", "value": "hidden-value" }],
+            }],
+        },
+        "status": { "phase": "Running" },
+    })
+}
+
+fn seed_mounting_pods(fake: &FakeKube) {
+    fake.upsert(
+        "configmaps",
+        json!({ "metadata": { "name": "web-config", "namespace": "default" }, "data": { "a": "1" } }),
+    );
+    fake.upsert("pods", mounting_pod("web"));
+}
+
+/// Reads graph events until a snapshot holds the edge from Pod `pod` to the ConfigMap, and
+/// gives it as the text that crosses to the interface.
+async fn graph_mounting(graph: &mut mpsc::Receiver<GraphEvent>, pod: &str) -> String {
+    let from = format!("Pod/default/{pod}");
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, graph.recv())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for the Mounts edge of {pod}"))
+            .expect("the graph subscription ended");
+        if let GraphEvent::Snapshot { edges, .. } = &event {
+            let mounted = edges.iter().any(|edge| {
+                edge.from == from
+                    && edge.to == "ConfigMap/default/web-config"
+                    && edge.rel == GraphRel::Mounts
+            });
+            if mounted {
+                return serde_json::to_string(&event).unwrap();
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_table_and_the_graph_share_one_pod_watcher_and_each_gets_its_own_rows() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_graph_interval_for_test(Duration::from_millis(100));
+    seed_mounting_pods(&fake);
+
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    let (tx, mut graph) = mpsc::channel(16);
+    core.resource_graph_subscribe(&id, None, tx).unwrap();
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    let snapshot = graph_mounting(&mut graph, "web").await;
+
+    // The table's row keeps the ports and not what only the graph reads.
+    let row = &table.rows[&(Some("default".to_owned()), "web".to_owned())];
+    assert_eq!(
+        row["spec"]["containers"][0]["ports"][0]["containerPort"],
+        8080
+    );
+    assert!(row["spec"].get("volumes").is_none());
+    assert!(row["spec"].get("serviceAccountName").is_none());
+    // The graph read the volumes from its own row, and no env value reached it.
+    assert!(!snapshot.contains("hidden-value"), "{snapshot}");
+
+    // A change reaches both shapes.
+    fake.upsert("pods", mounting_pod("web-2"));
+    table
+        .until("the second pod", |c| c.has("default", "web-2"))
+        .await;
+    graph_mounting(&mut graph, "web-2").await;
+    let row = &table.rows[&(Some("default".to_owned()), "web-2".to_owned())];
+    assert!(row["spec"].get("volumes").is_none());
+
+    assert_eq!(
+        fake.watch_request_count(PODS),
+        1,
+        "the table and the graph share one Pod watch"
+    );
+}
+
+#[tokio::test]
+async fn the_pod_watcher_outlives_a_table_while_the_graph_still_reads_it() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let linger = Duration::from_millis(200);
+    core.set_watch_timing_for_test(FAST_BATCH, linger);
+    core.set_graph_interval_for_test(Duration::from_millis(100));
+    seed_mounting_pods(&fake);
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    let (tx, mut graph) = mpsc::channel(16);
+    let graph_id = core.resource_graph_subscribe(&id, None, tx).unwrap();
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    graph_mounting(&mut graph, "web").await;
+    assert_eq!(fake.watch_request_count(PODS), 1);
+
+    core.resources_unsubscribe(&table.id);
+    table.until_closed("the table", QUIET).await;
+    tokio::time::sleep(linger * 3).await;
+
+    // The graph is the group's last subscriber, so the table's leaving closed nothing.
+    let mut again = Consumer::subscribe(&core, &id, pods()).await;
+    again.until("the snapshot", |c| c.snapshots() == 1).await;
+    assert!(again.has("default", "web"));
+    assert_eq!(
+        fake.watch_request_count(PODS),
+        1,
+        "a table that comes back finds the Pod watch open"
+    );
+
+    core.resources_unsubscribe(&again.id);
+    core.resource_graph_unsubscribe(&graph_id);
+    eventually("every watch to close", || fake.open_watch_count() == 0).await;
 }
