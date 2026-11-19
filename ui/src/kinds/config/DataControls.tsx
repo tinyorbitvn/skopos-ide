@@ -1,5 +1,6 @@
 import { type ReactNode, useId, useState } from "react";
-import { Button, ErrorNotice, Input, Segmented } from "../../design";
+import { Button, ErrorNotice, IconButton, Input, Segmented } from "../../design";
+import { RotateCcw, Trash2 } from "../../design/icons";
 import styles from "./config.module.css";
 import {
   convertText,
@@ -81,7 +82,7 @@ export function FormSwitch(props: {
   );
 }
 
-/** One key: its name, its actions and Remove, then its value unless removed. */
+/** One key: its name, its actions and a Remove icon, then its value unless removed. */
 export function DataRow(props: {
   name: string;
   edits: DataEditState;
@@ -96,17 +97,21 @@ export function DataRow(props: {
         <code className={removed ? styles.removedKey : styles.key}>{name}</code>
         <span className={styles.actions}>
           {removed ? null : props.actions}
-          <Button
-            size="sm"
-            variant="ghost"
+          <IconButton
+            label={removed ? `Undo remove ${name}` : `Remove ${name}`}
+            icon={
+              removed ? (
+                <RotateCcw size={16} aria-hidden="true" />
+              ) : (
+                <Trash2 size={16} aria-hidden="true" />
+              )
+            }
             disabled={edits.saving}
             data-testid={`data-remove-${name}`}
             onClick={() =>
               removed ? edits.undoRemove(name) : edits.remove(name)
             }
-          >
-            {removed ? `Undo remove ${name}` : `Remove ${name}`}
-          </Button>
+          />
         </span>
       </div>
       {removed ? null : props.children}

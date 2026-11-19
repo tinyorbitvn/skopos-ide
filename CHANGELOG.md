@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **Remove a key with an icon:** each key of a Secret or ConfigMap has a trash icon instead of a Remove button, and a removed key shows an undo icon.
+
 ## [0.8.0] - 2026-11-18
 
 - **One main view with tabs, splits and windows:** the Workspace page is gone. Every screen opens in a tab; tabs can be pinned, split side by side into up to three panes, and dragged into their own windows, and they come back after a restart. The sidebar follows the focused tab, and the Catalog can be sorted into nested folders.
