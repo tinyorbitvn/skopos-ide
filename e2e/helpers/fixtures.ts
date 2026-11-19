@@ -236,6 +236,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
   tabs: { kubeconfigs: {}, start: startKindFixture },
+  "sidebar-rail": { kubeconfigs: {}, start: startKindFixture },
   "tabs-restart-1-save": {
     kubeconfigs: {},
     envGroup: "tabs-restart",
