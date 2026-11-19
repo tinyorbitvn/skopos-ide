@@ -92,8 +92,10 @@ function stop(session: Session): void {
  * The backend session of one Logs tab. It is the only caller of `logs_start`,
  * `logs_stop` and `session_ack`. The pod, container, tail and Previous start a new
  * session; Follow off stops the session and keeps the lines; Follow on starts again.
+ * While `shown` is false the lines are still buffered and acknowledged, but `version`
+ * does not change; it changes once when `shown` turns true again.
  */
-export function useLogStream(tab: LogsDockTab): LogStream {
+export function useLogStream(tab: LogsDockTab, shown = true): LogStream {
   const [buffer] = useState(() => new LogBuffer());
   const [version, setVersion] = useState(0);
   const [status, setStatus] = useState<LogStatus>("connecting");
@@ -105,6 +107,10 @@ export function useLogStream(tab: LogsDockTab): LogStream {
   latest.current = tab;
   const session = useRef<Session | null>(null);
   const framePending = useRef(false);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  /** The buffer changed while hidden, so showing needs a render. */
+  const staleWhileHidden = useRef(false);
   /** The Follow value the current session was started, or stopped, for. */
   const shownFollow = useRef(tab.options.follow);
 
@@ -130,10 +136,18 @@ export function useLogStream(tab: LogsDockTab): LogStream {
     setEndReason(null);
 
     function render(): void {
+      if (!shownRef.current) {
+        staleWhileHidden.current = true;
+        return;
+      }
       if (framePending.current) return;
       framePending.current = true;
       requestAnimationFrame(() => {
         framePending.current = false;
+        if (!shownRef.current) {
+          staleWhileHidden.current = true;
+          return;
+        }
         setVersion((v) => v + 1);
       });
     }
@@ -191,6 +205,13 @@ export function useLogStream(tab: LogsDockTab): LogStream {
     );
     return () => stop(mine);
   }, [key, attempt, buffer]);
+
+  // Showing again draws what was buffered meanwhile, once.
+  useEffect(() => {
+    if (!shown || !staleWhileHidden.current) return;
+    staleWhileHidden.current = false;
+    setVersion((v) => v + 1);
+  }, [shown]);
 
   // Follow off stops the session and keeps the lines; Follow on starts a new one.
   useEffect(() => {

@@ -139,11 +139,13 @@ export function LogView(props: {
   /** The buffer as last drawn, to tell dropped lines from a clear. */
   const shown = useRef({ firstSeq: buffer.firstSeq, epoch: buffer.epoch });
 
-  // Keys are the entries' `seq`, so the rows that stay keep their elements.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `version` says when the buffer changed.
+  // The key function stays the same across versions: a new one makes the virtualizer
+  // measure every row again (4 ms at 100,000 lines). It reads the live buffer.
+  const bufferRef = useRef(buffer);
+  bufferRef.current = buffer;
   const getItemKey = useCallback(
-    (index: number) => buffer.at(index)?.seq ?? index,
-    [buffer, version],
+    (index: number) => bufferRef.current.at(index)?.seq ?? index,
+    [],
   );
   const virtualizer = useVirtualizer({
     count: buffer.size,
@@ -174,11 +176,16 @@ export function LogView(props: {
       stick.current = true;
       jumpTarget.current = null;
     }
+    // The cached keys and measured heights are by index and no longer match the
+    // entries after a clear, or after drops with measured (wrapped) rows.
+    const dropped = buffer.firstSeq - before.firstSeq;
+    if (before.epoch !== buffer.epoch || (wrap && dropped > 0)) {
+      virtualizer.measure();
+    }
     if (stick.current) {
       el.scrollTop = el.scrollHeight;
       return;
     }
-    const dropped = buffer.firstSeq - before.firstSeq;
     if (!wrap && dropped > 0) {
       el.scrollTop = Math.max(0, el.scrollTop - dropped * ROW_HEIGHT);
     }
@@ -284,7 +291,7 @@ export function LogView(props: {
           const marker = entry.kind === "marker";
           return (
             <div
-              key={item.key}
+              key={entry.seq}
               ref={wrap ? virtualizer.measureElement : undefined}
               data-index={item.index}
               data-seq={entry.seq}
