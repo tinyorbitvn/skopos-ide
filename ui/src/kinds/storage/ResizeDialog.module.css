@@ -1,0 +1,30 @@
+.facts {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: var(--space-3) var(--space-5);
+  margin: 0 0 var(--space-6);
+}
+
+.facts dt {
+  color: var(--text-secondary);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.blocked,
+.note {
+  margin: 0 0 var(--space-6);
+  user-select: text;
+}
+
+.blocked {
+  color: var(--status-warning-text);
+}
+
+.note {
+  color: var(--text-secondary);
+}

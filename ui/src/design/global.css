@@ -73,6 +73,11 @@ td {
   user-select: text;
 }
 
+/* Inside selectable content, its controls are still chrome. */
+[data-selectable] :is(button, [role="tab"], [role="button"], svg) {
+  user-select: none;
+}
+
 code,
 kbd,
 samp,

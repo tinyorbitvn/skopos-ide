@@ -1,5 +1,6 @@
 import { baseColumns, statusColumn, textColumn } from "../columns";
 import { registerKind } from "../registry";
+import { resizeAction } from "./actions";
 import {
   PersistentVolumeClaimDetail,
   PersistentVolumeDetail,
@@ -53,6 +54,7 @@ registerKind("", "persistentvolumeclaims", {
       ),
     ),
   detail: PersistentVolumeClaimDetail,
+  actions: [resizeAction],
 });
 
 registerKind("storage.k8s.io", "storageclasses", {
