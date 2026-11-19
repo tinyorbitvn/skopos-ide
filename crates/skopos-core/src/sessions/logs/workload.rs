@@ -173,7 +173,10 @@ impl Followed {
             context.follow_replacements = false;
             self.streams.add(context, target);
         }
-        self.streams.announce().await;
+        // The first listing announces once, at `InitDone`, not once per pod.
+        if announce {
+            self.streams.announce().await;
+        }
         let uid = pod.metadata.uid.clone();
         self.pods.insert(name, FollowedPod { uid, token });
     }
@@ -279,6 +282,7 @@ async fn follow_pods(
                 }
                 Some(Ok(Event::InitDone)) => {
                     followed.keep_only(&listing).await;
+                    followed.streams.announce().await;
                     listed = true;
                     backoff = MIN_BACKOFF;
                 }
