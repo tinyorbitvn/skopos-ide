@@ -29,16 +29,20 @@ export interface ArrangeOptions {
   focusId: string;
 }
 
-/** The layout's positions for the drawn ids, before any move by hand. */
+/**
+ * The layout's positions for the drawn ids, before any move by hand. `prev` is the
+ * earlier result for the same options: Force starts from it.
+ */
 export function arrange(
   model: MapModel,
   ids: readonly string[],
   o: ArrangeOptions,
+  prev?: Positions,
 ): Positions {
   if (o.layout === "grouped") {
     return layoutGrouped(model, ids, o.flow, o.focusId);
   }
-  if (o.layout === "force") return layoutCluster(model, ids);
+  if (o.layout === "force") return layoutCluster(model, ids, prev);
   return o.page === "cluster"
     ? layoutClusterLayered(model, ids)
     : layoutFocus(model, ids, o.flow === "v");
