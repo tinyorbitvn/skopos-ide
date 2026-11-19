@@ -69,6 +69,10 @@ interface Session {
   tty: boolean | null;
   /** Bytes xterm has taken in before the id came. */
   unacked: number;
+  /** Bytes xterm has parsed that no `session_ack` has reported yet. */
+  pendingAck: number;
+  /** Fires the batched acknowledgement, 50 ms after the first unsent byte. */
+  ackTimer: number | null;
   /** The newest fitted size. */
   size: TerminalSize;
   /** The size the backend has. */
@@ -287,6 +291,8 @@ function start(entry: Entry, size: TerminalSize): void {
     started: false,
     tty: null,
     unacked: 0,
+    pendingAck: 0,
+    ackTimer: null,
     size,
     sentSize: size,
     writes: Promise.resolve(),
@@ -301,6 +307,7 @@ function start(entry: Entry, size: TerminalSize): void {
 
   function end(info: SessionInfo): void {
     session.over = true;
+    dropAcks(session);
     view.setInputEnabled(false);
     setInfo(tab.id, info);
   }
@@ -312,7 +319,7 @@ function start(entry: Entry, size: TerminalSize): void {
       // Reconnect or Close may have come while xterm parsed the chunk.
       if (!current() || session.over) return;
       if (session.id === null) session.unacked += bytes.length;
-      else void api.sessionAck(session.id, bytes.length).catch(() => {});
+      else queueAck(session, session.id, bytes.length);
     });
   }
 
@@ -415,10 +422,46 @@ function sendInput(entry: Entry, data: string): void {
     .catch(() => {});
 }
 
+/** Send the batched acknowledgement at this many unsent bytes... */
+const ACK_BATCH_BYTES = 64 * 1024;
+/** ...or this long after the first one (the backend pauses at 1 MiB unacknowledged). */
+const ACK_BATCH_MS = 50;
+
+/** Adds parsed bytes to the batch, and sends it when it is big enough or old enough. */
+function queueAck(session: Session, id: string, bytes: number): void {
+  session.pendingAck += bytes;
+  if (session.pendingAck >= ACK_BATCH_BYTES) {
+    flushAcks(session, id);
+  } else if (session.ackTimer === null) {
+    session.ackTimer = window.setTimeout(
+      () => flushAcks(session, id),
+      ACK_BATCH_MS,
+    );
+  }
+}
+
+function flushAcks(session: Session, id: string): void {
+  if (session.ackTimer !== null) window.clearTimeout(session.ackTimer);
+  session.ackTimer = null;
+  const bytes = session.pendingAck;
+  session.pendingAck = 0;
+  if (bytes > 0 && !session.stopped && !session.over) {
+    void api.sessionAck(id, bytes).catch(() => {});
+  }
+}
+
+/** A stopped or ended session's backend is gone: its unsent acknowledgements are dropped. */
+function dropAcks(session: Session): void {
+  if (session.ackTimer !== null) window.clearTimeout(session.ackTimer);
+  session.ackTimer = null;
+  session.pendingAck = 0;
+}
+
 function stopSession(entry: Entry): void {
   const { session } = entry;
   if (!session || session.stopped) return;
   session.stopped = true;
+  dropAcks(session);
   // Without an id yet, the start's answer stops it (see `start`).
   if (session.id !== null && !session.over) {
     void api.sessionStop(session.id).catch(() => {});
