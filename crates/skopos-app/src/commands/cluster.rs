@@ -1,4 +1,4 @@
-use skopos_core::cluster::{ConnectionLogEntry, ConnectionState};
+use skopos_core::cluster::{ConnectionLogEntry, ConnectionState, ControlPlane};
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use tauri::State;
@@ -24,6 +24,14 @@ pub async fn cluster_state(
     id: ClusterId,
 ) -> Result<ConnectionState, IpcError> {
     Ok(state.core.cluster_state(&id))
+}
+
+#[tauri::command]
+pub async fn cluster_control_plane(
+    state: State<'_, AppState>,
+    id: ClusterId,
+) -> Result<ControlPlane, IpcError> {
+    state.core.cluster_control_plane(&id).await
 }
 
 #[tauri::command]

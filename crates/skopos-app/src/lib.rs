@@ -116,6 +116,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::cluster::cluster_connect,
             commands::cluster::cluster_disconnect,
             commands::cluster::cluster_state,
+            commands::cluster::cluster_control_plane,
             commands::cluster::cluster_log,
             commands::actions::workload_scale,
             commands::actions::pod_force_delete,
