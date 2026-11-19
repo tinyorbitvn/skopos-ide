@@ -14,7 +14,12 @@ afterEach(() => {
 });
 
 function actions() {
-  return { palette: vi.fn(), shortcuts: vi.fn(), preferences: vi.fn() };
+  return {
+    palette: vi.fn(),
+    shortcuts: vi.fn(),
+    preferences: vi.fn(),
+    sidebar: vi.fn(),
+  };
 }
 
 function press(
@@ -115,4 +120,43 @@ test("removing the listener stops it", () => {
   installShellKeys(a, false)();
   press(CTRL_SHIFT_P);
   expect(a.palette).not.toHaveBeenCalled();
+});
+
+test("Mod+B toggles the sidebar, but not from a field", () => {
+  const a = actions();
+  remove = installShellKeys(a, false);
+  const ctrlB = { key: "b", code: "KeyB", ctrlKey: true };
+  expect(press(ctrlB).defaultPrevented).toBe(true);
+  expect(a.sidebar).toHaveBeenCalledTimes(1);
+  for (const [html, selector] of [
+    ["<input />", "input"],
+    ["<textarea></textarea>", "textarea"],
+    ['<div contenteditable="true"><p>x</p></div>', "p"],
+    [
+      '<div class="monaco-editor"><div class="view-lines"></div></div>',
+      ".view-lines",
+    ],
+    [
+      '<div class="xterm"><div class="xterm-screen"></div></div>',
+      ".xterm-screen",
+    ],
+  ]) {
+    document.body.innerHTML = html;
+    const target = document.body.querySelector(selector) as Element;
+    expect([html, press(ctrlB, target).defaultPrevented]).toEqual([
+      html,
+      false,
+    ]);
+  }
+  expect(a.sidebar).toHaveBeenCalledTimes(1);
+  press({ key: "B", code: "KeyB", ctrlKey: true, shiftKey: true });
+  expect(a.sidebar).toHaveBeenCalledTimes(1);
+  remove();
+
+  const mac = actions();
+  remove = installShellKeys(mac, true);
+  press(ctrlB);
+  expect(mac.sidebar).not.toHaveBeenCalled();
+  press({ key: "b", code: "KeyB", metaKey: true });
+  expect(mac.sidebar).toHaveBeenCalledTimes(1);
 });

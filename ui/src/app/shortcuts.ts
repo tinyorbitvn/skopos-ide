@@ -49,6 +49,7 @@ export type ShortcutId =
   | "palette"
   | "shortcuts"
   | "preferences"
+  | "toggleSidebar"
   | "close"
   | "back"
   | "forward"
@@ -134,6 +135,12 @@ export const SHORTCUTS: readonly ShortcutRow[] = [
     group: "General",
     action: "Preferences",
     keys: one("Mod+,"),
+  },
+  {
+    id: "toggleSidebar",
+    group: "General",
+    action: "Collapse or expand the sidebar",
+    keys: one("Mod+B"),
   },
   {
     id: "close",

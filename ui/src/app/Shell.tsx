@@ -10,6 +10,7 @@ import { useClusterState } from "../stores/clusters";
 import { useDiscovery } from "../stores/discovery";
 import { useFolders } from "../stores/folders";
 import { useShell } from "../stores/shell";
+import { toggleSidebar } from "../stores/sidebarCollapse";
 import { startWindowLayout, useWindowLayout } from "../stores/windowLayout";
 import { AppHeader } from "./AppHeader";
 import { runCommand, runMenuCommand, useCommandContext } from "./commands";
@@ -93,6 +94,7 @@ function ShellEffects() {
           palette: () => useShell.getState().open("palette"),
           shortcuts: () => useShell.getState().open("shortcuts"),
           preferences: () => runCommand("preferences", contextRef.current),
+          sidebar: toggleSidebar,
         },
         IS_MAC,
       ),

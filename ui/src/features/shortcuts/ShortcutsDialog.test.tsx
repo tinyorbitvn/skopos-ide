@@ -62,6 +62,7 @@ test("the groups and rows follow the table, with words off macOS", () => {
     "shortcut-palette",
     "shortcut-shortcuts",
     "shortcut-preferences",
+    "shortcut-toggleSidebar",
     "shortcut-close",
     "shortcut-back",
     "shortcut-forward",

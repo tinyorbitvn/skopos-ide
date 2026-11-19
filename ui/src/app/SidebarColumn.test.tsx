@@ -1,14 +1,28 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { mockWindows } from "@tauri-apps/api/mocks";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetDiscoveryForTest } from "../stores/discovery";
+import {
+  resetSidebarToggleForTest,
+  toggleSidebar,
+  useSidebarToggle,
+} from "../stores/sidebarCollapse";
 import { resetWindowLayoutForTest } from "../stores/windowLayout";
 import { CSS_FILES, type CssRule, cssRules } from "../test/css";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
+import { runCommand } from "./commands";
 import { SidebarColumn } from "./SidebarColumn";
+import { installShellKeys } from "./shellKeys";
 import { ShellRouter } from "./tabs/ShellRouter";
 
 const INFO: ClusterInfo = {
@@ -91,6 +105,7 @@ beforeEach(() => {
   resetCatalogForTest();
   resetWindowLayoutForTest();
   resetDiscoveryForTest();
+  resetSidebarToggleForTest();
 });
 
 test("the column draws one glass layer and the only border; the switcher and the nav draw none (spec Q §1)", () => {
@@ -165,4 +180,162 @@ test("a tab without a cluster shows the empty note in the same box", async () =>
   expect(empty.textContent).toBe(
     "Pick a cluster above, or open one, to see its navigation here.",
   );
+});
+
+const COLLAPSED = { "sidebar.collapsed.main": true };
+
+function column(): HTMLElement {
+  return screen.getByTestId("sidebar-column");
+}
+
+test("the handle collapses the column to a 64 px rail and expands it again, saved for this window", async () => {
+  const backend = await show("/cluster/c1/r/core/pods");
+  const handle = screen.getByTestId("sidebar-collapse");
+  expect([
+    handle.getAttribute("aria-label"),
+    handle.getAttribute("title"),
+    handle.querySelector("[data-icon]")?.getAttribute("data-icon"),
+  ]).toEqual([
+    "Collapse the sidebar",
+    "Collapse the sidebar to icons (Ctrl+B)",
+    "chevron-left",
+  ]);
+  vi.useFakeTimers();
+  fireEvent.click(handle);
+  act(() => {
+    vi.advanceTimersByTime(300);
+  });
+  vi.useRealTimers();
+  expect([
+    column().style.width,
+    column().getAttribute("data-collapsed"),
+  ]).toEqual(["64px", "true"]);
+  expect(screen.queryByTestId("nav-resize")).toBeNull();
+  expect(screen.queryByTestId("cluster-sidebar")).toBeNull();
+  expect(screen.getByTestId("cluster-rail")).toBeTruthy();
+  expect(
+    screen
+      .getByTestId("switcher-trigger")
+      .closest("[data-collapsed]")
+      ?.getAttribute("data-collapsed"),
+  ).toBe("true");
+  expect(backend.callsTo("ui_state_set")).toContainEqual({
+    key: "sidebar.collapsed.main",
+    value: true,
+  });
+  expect([
+    handle.getAttribute("aria-label"),
+    handle.getAttribute("title"),
+    handle.querySelector("[data-icon]")?.getAttribute("data-icon"),
+  ]).toEqual([
+    "Expand the sidebar",
+    "Expand the sidebar (Ctrl+B)",
+    "chevron-right",
+  ]);
+  fireEvent.click(handle);
+  expect(column().style.width).toBe("248px");
+  expect(column().getAttribute("data-collapsed")).toBeNull();
+  expect(screen.getByTestId("nav-resize")).toBeTruthy();
+  expect(screen.getByTestId("cluster-sidebar")).toBeTruthy();
+});
+
+test("each window opens with its own saved state", async () => {
+  mockWindows("window-2");
+  const backend = await show("/cluster/c1/r/core/pods", {
+    "sidebar.collapsed.main": false,
+    "sidebar.collapsed.window-2": true,
+  });
+  expect(column().style.width).toBe("64px");
+  expect(backend.callsTo("ui_state_get").map((a) => a.key)).toContain(
+    "sidebar.collapsed.window-2",
+  );
+});
+
+test("Ctrl+B and the palette command toggle the mounted sidebar", async () => {
+  await show("/cluster/c1/r/core/pods");
+  const remove = installShellKeys(
+    {
+      palette: () => {},
+      shortcuts: () => {},
+      preferences: () => {},
+      sidebar: toggleSidebar,
+    },
+    false,
+  );
+  try {
+    act(() => {
+      fireEvent.keyDown(window, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    expect(column().style.width).toBe("64px");
+    expect(useSidebarToggle.getState().collapsed).toBe(true);
+    act(() => {
+      runCommand("toggle-sidebar", {
+        navigate: () => {},
+        pathname: "/cluster/c1/r/core/pods",
+        cluster: null,
+      });
+    });
+    expect(column().style.width).toBe("248px");
+  } finally {
+    remove();
+  }
+});
+
+test("collapsing closes the switcher's menu, and expanding closes a flyout", async () => {
+  await show("/cluster/c1/r/core/pods");
+  fireEvent.click(screen.getByTestId("switcher-trigger"));
+  expect(screen.getByTestId("switcher-menu")).toBeTruthy();
+  act(() => {
+    toggleSidebar();
+  });
+  expect(screen.queryByTestId("switcher-menu")).toBeNull();
+  fireEvent.click(screen.getByTestId("rail-workloads"));
+  expect(screen.getByTestId("rail-flyout-workloads")).toBeTruthy();
+  act(() => {
+    toggleSidebar();
+  });
+  expect(screen.queryByTestId("rail-flyout-workloads")).toBeNull();
+});
+
+test("collapsed and waiting, one icon connects the cluster; collapsed and empty, only the tile shows", async () => {
+  const backend = await show("/cluster/c2", COLLAPSED);
+  const waiting = screen.getByTestId("sidebar-waiting");
+  const connect = screen.getByTestId("sidebar-connect");
+  expect([
+    waiting.tagName,
+    waiting.querySelectorAll("button").length,
+    connect.getAttribute("aria-label"),
+    connect.querySelector("[data-icon]")?.getAttribute("data-icon"),
+  ]).toEqual(["NAV", 1, "Connect staging", "plug"]);
+  fireEvent.click(connect);
+  await act(flush);
+  expect(backend.callsTo("cluster_connect")).toEqual([{ id: "c2" }]);
+  cleanup();
+  await show("/catalog", COLLAPSED);
+  expect(screen.queryByTestId("sidebar-empty")).toBeNull();
+  expect(screen.getByTestId("switcher-trigger")).toBeTruthy();
+  expect(column().style.width).toBe("64px");
+});
+
+test("the handle is the design's round button on the column's edge (spec Q §3)", () => {
+  const rules = cssRules(CSS_FILES["/src/app/SidebarColumn.module.css"]);
+  expect(
+    [
+      "top",
+      "right",
+      "width",
+      "height",
+      "border-radius",
+      "background",
+      "box-shadow",
+    ].map((prop) => decl(rules, ".collapse", prop)),
+  ).toEqual([
+    "24px",
+    "-12px",
+    "24px",
+    "24px",
+    "50%",
+    "var(--surface-card)",
+    "var(--shadow-2)",
+  ]);
 });

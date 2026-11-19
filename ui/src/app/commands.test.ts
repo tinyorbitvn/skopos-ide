@@ -1,11 +1,16 @@
 import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
+import { ChevronLeft, ChevronRight } from "../design/icons";
 import { openTerminal } from "../features/dock/openTerminal";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetPrefsForTest } from "../stores/prefs";
 import { resetShellForTest, useShell } from "../stores/shell";
+import {
+  resetSidebarToggleForTest,
+  useSidebarToggle,
+} from "../stores/sidebarCollapse";
 import {
   resetWindowLayoutForTest,
   useWindowLayout,
@@ -46,6 +51,7 @@ beforeEach(() => {
   resetShellForTest();
   resetPrefsForTest();
   resetWindowLayoutForTest();
+  resetSidebarToggleForTest();
 });
 
 test("the registry lists the spec's commands in order", () => {
@@ -65,6 +71,7 @@ test("the registry lists the spec's commands in order", () => {
       ["theme-dark", "Theme: Dark", null],
       ["theme-light", "Theme: Light", null],
       ["theme-system", "Theme: System", null],
+      ["toggle-sidebar", "Collapse the sidebar", "toggleSidebar"],
       ["back", "Go back", "back"],
       ["forward", "Go forward", "forward"],
       ["split-right", "Split right", "splitRight"],
@@ -78,7 +85,8 @@ test("the registry lists the spec's commands in order", () => {
 test("terminal, disconnect, install-chart and resource-map need the current cluster connected; cluster-settings any cluster", () => {
   const available = (ctx: CommandContext) =>
     COMMANDS.filter((c) => c.available(ctx)).map((c) => c.id);
-  const all = COMMANDS.map((c) => c.id);
+  // toggle-sidebar needs a mounted sidebar, not a cluster; its own test covers it.
+  const all = COMMANDS.map((c) => c.id).filter((id) => id !== "toggle-sidebar");
   const onCluster = all.filter(
     (id) =>
       id !== "terminal" &&
@@ -338,4 +346,24 @@ test("the commands that open a location name it, so the click modes can open it 
     ["resource-map", "/cluster/c1/map"],
   ]);
   expect(commandById("resource-map").path?.(context())).toBeNull();
+});
+
+test("toggle-sidebar collapses or expands the mounted sidebar, named and drawn for its state", () => {
+  const ctx = context();
+  const command = commandById("toggle-sidebar");
+  expect(command.available(ctx)).toBe(false);
+  const toggle = vi.fn();
+  useSidebarToggle.setState({ toggle, collapsed: false });
+  expect([
+    command.available(ctx),
+    command.label(ctx),
+    command.iconFor?.(),
+  ]).toEqual([true, "Collapse the sidebar", ChevronLeft]);
+  runCommand("toggle-sidebar", ctx);
+  expect(toggle).toHaveBeenCalledTimes(1);
+  useSidebarToggle.setState({ toggle, collapsed: true });
+  expect([command.label(ctx), command.iconFor?.()]).toEqual([
+    "Expand the sidebar",
+    ChevronRight,
+  ]);
 });
