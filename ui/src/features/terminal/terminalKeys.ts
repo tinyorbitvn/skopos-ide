@@ -1,6 +1,7 @@
 import { matchesShortcut } from "../../app/shortcuts";
 import { toast } from "../../design";
 import { copyText, readClipboardText } from "../../design/clipboard";
+import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
 
 export type TerminalKeyAction = "copy" | "paste" | "app";
@@ -59,10 +60,53 @@ function copySelection(target: KeyTarget): void {
   );
 }
 
+/**
+ * Drops the control characters a paste must not carry. xterm wraps a paste in
+ * `ESC[200~ ... ESC[201~` without filtering it, so text copied from a cluster that holds
+ * `ESC[201~` would end the paste early and run what follows in the local shell. Tab, line
+ * feed and carriage return stay; so do all printable and non-ASCII characters.
+ */
+export function sanitizePaste(text: string): string {
+  let clean = "";
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    const keep = code === 0x09 || code === 0x0a || code === 0x0d;
+    const control = code < 0x20 || (code >= 0x7f && code <= 0x9f);
+    if (keep || !control) clean += char;
+  }
+  return clean;
+}
+
+/**
+ * A browser paste (Shift+Insert, the context menu, middle click) in a terminal. It is
+ * always kept from xterm's own listeners, which would paste the text unfiltered; the
+ * sanitized text goes through the same paste as the keyboard.
+ */
+export function handleNativePaste(
+  event: ClipboardEvent,
+  target: KeyTarget,
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  if (!target.inputEnabled()) return;
+  const clean = sanitizePaste(event.clipboardData?.getData("text/plain") ?? "");
+  if (clean !== "") target.paste(clean);
+}
+
+/** Opens a hyperlink from terminal output through the app's checked opener. */
+export function openTerminalLink(uri: string): void {
+  void api
+    .openExternal(uri)
+    .catch((error: unknown) =>
+      toast.error("Could not open the link", failureMessage(error)),
+    );
+}
+
 function pasteInto(target: KeyTarget): void {
   if (!target.inputEnabled()) return;
   void readClipboardText().then(
-    (text) => {
+    (raw) => {
+      const text = sanitizePaste(raw);
       if (text !== "" && target.inputEnabled()) target.paste(text);
     },
     (error: unknown) => toast.error("Could not paste", failureMessage(error)),
