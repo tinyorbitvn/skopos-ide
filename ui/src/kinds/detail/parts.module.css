@@ -325,7 +325,12 @@ button.link {
   color: transparent;
 }
 
-.copyHost:hover .copy,
+.copyHost:hover .copy {
+  color: var(--text-tertiary);
+}
+
 .copyHost .copy:focus-visible {
   color: var(--text-tertiary);
+  outline: none;
+  box-shadow: var(--focus-ring);
 }

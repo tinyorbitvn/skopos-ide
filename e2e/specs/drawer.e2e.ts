@@ -296,11 +296,13 @@ describe("the details drawer on a real cluster", () => {
       "the image was never copied",
     );
     // Read back through the app's clipboard plugin, as the terminal's paste does.
-    const text: string = await browser.executeAsync((done: (t: string) => void) => {
+    const text: string = await browser.execute(() => {
       const tauri = (window as unknown as {
         __TAURI_INTERNALS__: { invoke(cmd: string): Promise<string> };
       }).__TAURI_INTERNALS__;
-      tauri.invoke("plugin:clipboard-manager|read_text").then(done, (e) => done(`error: ${e}`));
+      return tauri
+        .invoke("plugin:clipboard-manager|read_text")
+        .catch((e: unknown) => `error: ${e}`);
     });
     expect(text).toBe("registry.k8s.io/pause:3.10");
     await closeDrawer();
