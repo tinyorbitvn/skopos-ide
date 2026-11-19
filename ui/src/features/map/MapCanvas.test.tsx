@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEMO,
@@ -270,6 +270,34 @@ describe("MapCanvas", () => {
     expect(node(DEMO.podA).getAttribute("transform")).toBe(before);
   });
 
+  it("draws a node drag once per frame, with the last point of the frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) => frames.push(cb));
+    try {
+      draw({ layout: "layered", memoryKey: "c1|cluster|layered" });
+      const before = node(DEMO.podA).getAttribute("transform");
+      fireEvent.pointerDown(node(DEMO.podA), {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+      });
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 70, clientY: 10 });
+      fireEvent.pointerMove(window, { clientX: 110, clientY: 60 });
+      expect(frames).toHaveLength(1);
+      expect(node(DEMO.podA).getAttribute("transform")).toBe(before);
+      act(() => frames[0](0));
+      const moved = node(DEMO.podA).getAttribute("transform");
+      expect(moved).not.toBe(before);
+      fireEvent.pointerUp(window);
+      expect(node(DEMO.podA).getAttribute("transform")).toBe(moved);
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   it("does not select a node at the end of a drag", () => {
     const { props } = draw();
     fireEvent.pointerDown(node(DEMO.podA), {
@@ -449,7 +477,12 @@ describe("MapCanvas", () => {
           "",
       )?.[1],
     );
-    const mark = bridge.querySelector("circle") as SVGCircleElement;
+    const marks = screen.getAllByTestId("map-via-mark");
+    const mark = marks.find(
+      (el) =>
+        el.getAttribute("data-from") === DEMO.deployment &&
+        el.getAttribute("data-to") === DEMO.podA,
+    ) as Element;
     expect(Number(mark.getAttribute("r"))).toBeCloseTo(Math.min(4 / k, 8));
     expect(Number(mark.getAttribute("stroke-width"))).toBeCloseTo(
       Math.min(1.5 / k, 3),
@@ -458,7 +491,37 @@ describe("MapCanvas", () => {
       (el) => el.getAttribute("data-rel") === "selects",
     ) as Element;
     expect(real.hasAttribute("data-via")).toBe(false);
-    expect(real.querySelector("circle")).toBeNull();
+    expect(
+      marks.some(
+        (el) =>
+          el.getAttribute("data-from") === real.getAttribute("data-from") &&
+          el.getAttribute("data-to") === real.getAttribute("data-to"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps the via marks the same size on screen as the map zooms", () => {
+    const model = drawnHiding(["ReplicaSet"]);
+    draw({
+      model,
+      ids: model.nodes.map((n) => n.id),
+      layout: "layered",
+      memoryKey: "c1|cluster|layered",
+    });
+    const scale = () =>
+      Number(
+        /scale\(([^)]+)\)/.exec(
+          document
+            .querySelector("svg g[transform]")
+            ?.getAttribute("transform") ?? "",
+        )?.[1],
+      );
+    const before = scale();
+    fireEvent.click(screen.getByTestId("map-zoom-out"));
+    const k = scale();
+    expect(k).toBeLessThan(before);
+    const mark = screen.getAllByTestId("map-via-mark")[0];
+    expect(Number(mark.getAttribute("r"))).toBeCloseTo(Math.min(4 / k, 8));
   });
 
   it("draws a selected bridge on top, still dashed", () => {

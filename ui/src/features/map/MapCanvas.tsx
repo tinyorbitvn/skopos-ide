@@ -1,4 +1,5 @@
 import {
+  memo,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
@@ -10,11 +11,19 @@ import {
 } from "react";
 import { IconButton } from "../../design/IconButton";
 import { Info, Scan, ZoomIn, ZoomOut } from "../../design/icons";
+import type { GraphStatus } from "../../ipc/generated/GraphStatus";
 import { KindIcon } from "./icons/KindIcon";
 import type { Flow, Positions } from "./layout/grouped";
 import styles from "./MapCanvas.module.css";
 import { levelSort, type MapModel, nodeOf, statusLine } from "./model";
-import { arrange, buildScene, type LayoutName, type SceneEdge } from "./scene";
+import {
+  arrange,
+  buildScene,
+  type LayoutName,
+  type SceneBox,
+  type SceneEdge,
+  type SceneIcon,
+} from "./scene";
 
 /** Positions moved by hand, per cluster, page and layout, for the session (spec E §8.2). */
 const MOVED = new Map<string, Positions>();
@@ -92,6 +101,199 @@ function shortName(name: string): string {
   return name.length > 30 ? `${name.slice(0, 29)}…` : name;
 }
 
+/**
+ * What the layout and the scene are made of: the drawn ids and the edges. A snapshot
+ * that changes only statuses or facts has the same shape, and keeps the drawing.
+ */
+function shapeOf(model: MapModel, ids: readonly string[]): string {
+  const edges = model.edges.map(
+    (e) => `${e.from}>${e.rel}>${e.to}>${e.via?.join(",") ?? ""}`,
+  );
+  return `${ids.join("\n")}\n\n${edges.join("\n")}`;
+}
+
+/** True when the edge has the selected node at an end, or stands for it. */
+function touches(e: SceneEdge, selected: string | null): boolean {
+  return (
+    selected !== null &&
+    (e.from === selected || e.to === selected || e.ids.includes(selected))
+  );
+}
+
+const classes = (...names: (string | false | undefined)[]) =>
+  names.filter(Boolean).join(" ");
+
+/**
+ * The drawing's parts each redraw only when what they show changes: a pan or zoom
+ * redraws none of them, and a selection only the parts it changes.
+ */
+const MapHull = memo(function MapHull({ namespace, rect }: SceneHullProps) {
+  return (
+    <g
+      data-testid="map-namespace"
+      data-namespace={namespace}
+      data-hull={namespace}
+      className={styles.hull}
+    >
+      <rect
+        x={rect.x0}
+        y={rect.y0}
+        width={rect.x1 - rect.x0}
+        height={rect.y1 - rect.y0}
+      />
+      <text x={rect.x0 + 12} y={rect.y0 + 20} className={styles.hullLabel}>
+        {namespace}
+      </text>
+    </g>
+  );
+});
+
+type SceneHullProps = { namespace: string; rect: SceneBox["rect"] };
+
+const MapBox = memo(function MapBox(props: {
+  box: SceneBox;
+  status: GraphStatus | undefined;
+  focus: boolean;
+  selected: boolean;
+  dim: boolean;
+}) {
+  const { box: b, status } = props;
+  const r = b.rect;
+  const node = b.node;
+  const nodeProps = node
+    ? {
+        "data-testid": "map-node",
+        "data-id": node.id,
+        "data-kind": node.kind,
+        "data-status": status,
+        "aria-selected": props.selected,
+      }
+    : b.kind === "Namespace"
+      ? { "data-testid": "map-namespace", "data-namespace": b.namespace }
+      : b.kind === "Access"
+        ? { "data-testid": "map-access" }
+        : {};
+  return (
+    <g
+      className={classes(
+        styles.box,
+        styles[`box${b.kind}`] ?? styles.boxOwner,
+        props.focus && styles.focus,
+        props.selected && styles.selected,
+        props.dim && styles.dim,
+      )}
+      data-box={b.key}
+      {...nodeProps}
+    >
+      <rect x={r.x0} y={r.y0} width={r.x1 - r.x0} height={r.y1 - r.y0} />
+      <KindIcon
+        kind={node ? node.kind : BOX_ICON[b.kind]}
+        size={28}
+        x={r.x0 + 10}
+        y={r.y0 + 9}
+      />
+      <text x={r.x0 + 46} y={r.y0 + 22} className={styles.boxTitle}>
+        {b.title}
+      </text>
+      <text x={r.x0 + 46} y={r.y0 + 38} className={styles.boxSub}>
+        {b.sub}
+      </text>
+    </g>
+  );
+});
+
+const MapEdgeLine = memo(function MapEdgeLine(props: {
+  edge: SceneEdge;
+  dim: boolean;
+}) {
+  const e = props.edge;
+  return (
+    <g
+      data-testid="map-edge"
+      data-from={e.from}
+      data-rel={e.rel}
+      data-to={e.to}
+      data-via={e.via?.join(",")}
+      className={classes(styles.edge, styles[e.style], props.dim && styles.dim)}
+    >
+      <path d={e.d} className={styles.line} />
+      {e.head ? <path d={e.head} className={styles.head} /> : null}
+      {e.via ? (
+        // A wide invisible stroke, so the hidden kinds show on hover.
+        <path d={e.d} className={styles.hit}>
+          <title>{`via ${e.via.join(", ")}`}</title>
+        </path>
+      ) : null}
+    </g>
+  );
+});
+
+/** The marks on bridges, which keep their size on screen as the view zooms. */
+function ViaMarks(props: {
+  edges: readonly SceneEdge[];
+  k: number;
+  dim(e: SceneEdge): boolean;
+}) {
+  const r = Math.min(4 / props.k, 8);
+  const width = Math.min(1.5 / props.k, 3);
+  return (
+    <g>
+      {props.edges.map((e) =>
+        e.via && e.mid ? (
+          <circle
+            key={e.key}
+            data-testid="map-via-mark"
+            data-from={e.from}
+            data-to={e.to}
+            cx={e.mid.x}
+            cy={e.mid.y}
+            r={r}
+            strokeWidth={width}
+            className={classes(styles.viaMark, props.dim(e) && styles.dim)}
+          />
+        ) : null,
+      )}
+    </g>
+  );
+}
+
+const MapIcon = memo(function MapIcon(props: {
+  icon: SceneIcon;
+  status: GraphStatus;
+  selected: boolean;
+  dim: boolean;
+}) {
+  const { icon: s, status } = props;
+  return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: spec E §8.4 marks the selected node; the drawing is hidden from assistive technology and the live region announces the selection.
+    <g
+      data-testid="map-node"
+      data-id={s.id}
+      data-kind={s.node.kind}
+      data-status={status}
+      aria-selected={props.selected}
+      className={classes(
+        styles.node,
+        props.selected && styles.selected,
+        props.dim && styles.dim,
+      )}
+      transform={`translate(${s.x} ${s.y})`}
+    >
+      <title>{s.node.name}</title>
+      <circle r={s.size / 2 + 4} className={styles[status]} />
+      <KindIcon
+        kind={s.node.kind}
+        size={s.size}
+        x={-s.size / 2}
+        y={-s.size / 2}
+      />
+      <text y={s.size / 2 + 18} className={styles.label}>
+        {shortName(s.node.name)}
+      </text>
+    </g>
+  );
+});
+
 function matches(search: string, name: string, kind: string): boolean {
   const q = search.trim().toLowerCase();
   return (
@@ -134,9 +336,14 @@ export function MapCanvas({
     () => ({ layout, page, flow, focusId }),
     [layout, page, flow, focusId],
   );
+  // The layout and the scene follow the shape alone, built from the newest model and ids.
+  const shape = useMemo(() => shapeOf(model, ids), [model, ids]);
+  const latest = useRef({ model, ids });
+  latest.current = { model, ids };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new shape is what lays the drawing out again; the model and ids are read from `latest`.
   const base = useMemo(
-    () => arrange(model, ids, options),
-    [model, ids, options],
+    () => arrange(latest.current.model, latest.current.ids, options),
+    [shape, options],
   );
   const [, setVersion] = useState(0);
   const moved = MOVED.get(memoryKey);
@@ -145,9 +352,10 @@ export function MapCanvas({
     for (const [k, p] of Object.entries(moved ?? {})) if (k in out) out[k] = p;
     return out;
   }, [base, moved]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: as for `base`: the shape, not each snapshot, rebuilds the scene.
   const scene = useMemo(
-    () => buildScene(model, ids, options, pos),
-    [model, ids, options, pos],
+    () => buildScene(latest.current.model, latest.current.ids, options, pos),
+    [shape, options, pos],
   );
 
   const root = useRef<HTMLDivElement>(null);
@@ -288,7 +496,20 @@ export function MapCanvas({
       e.stopPropagation();
       drag.current = next;
       clickBlocked.current = false;
+      // One drawing per frame: the moves between frames only leave their last point.
+      let frame = 0;
+      let pending: PointerEvent | null = null;
+      const flush = () => {
+        frame = 0;
+        const ev = pending;
+        pending = null;
+        if (ev) apply(ev);
+      };
       const onMove = (ev: PointerEvent) => {
+        pending = ev;
+        if (frame === 0) frame = requestAnimationFrame(flush);
+      };
+      const apply = (ev: PointerEvent) => {
         const d = drag.current;
         if (!d) return;
         const dx = ev.clientX - d.x;
@@ -311,6 +532,10 @@ export function MapCanvas({
         setVersion((v) => v + 1);
       };
       const onUp = () => {
+        if (frame !== 0) {
+          cancelAnimationFrame(frame);
+          flush();
+        }
         clickBlocked.current = drag.current?.moved ?? false;
         drag.current = null;
         window.removeEventListener("pointermove", onMove);
@@ -416,29 +641,83 @@ export function MapCanvas({
     }
   };
 
-  const lit = (id: string) => {
-    const node = model.byId.get(id);
-    return node ? matches(search, node.name, node.kind) : false;
-  };
   const searching = search.trim() !== "";
-  const touches = (e: SceneEdge) =>
-    selected !== null &&
-    (e.from === selected || e.to === selected || e.ids.includes(selected));
-  // Under Force, edges between namespaces are drawn only for the selected node.
-  const edges = scene.edges.filter(
-    (e) => layout !== "force" || !e.across || touches(e),
+  const lit = useCallback(
+    (id: string) => {
+      const node = model.byId.get(id);
+      return node ? matches(search, node.name, node.kind) : false;
+    },
+    [model, search],
   );
-  const hot = edges.filter(touches);
+  const dimEdge = useCallback(
+    (e: SceneEdge) => searching && !lit(e.from) && !lit(e.to),
+    [searching, lit],
+  );
+  // Under Force, edges between namespaces are drawn only for the selected node.
+  const edges = useMemo(
+    () =>
+      scene.edges.filter(
+        (e) => layout !== "force" || !e.across || touches(e, selected),
+      ),
+    [scene.edges, layout, selected],
+  );
+  const hot = useMemo(
+    () => edges.filter((e) => touches(e, selected)),
+    [edges, selected],
+  );
   const selectedNode = selected === null ? undefined : model.byId.get(selected);
 
-  const edgeClass = (e: SceneEdge) =>
-    [
-      styles.edge,
-      styles[e.style],
-      searching && !lit(e.from) && !lit(e.to) ? styles.dim : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
+  // What is under the bridges' marks, and what is over them. Neither depends on the view.
+  const under = useMemo(
+    () => (
+      <>
+        {scene.hulls.map((h) => (
+          <MapHull key={h.namespace} namespace={h.namespace} rect={h.rect} />
+        ))}
+        {scene.boxes.map((b) => (
+          <MapBox
+            key={b.key}
+            box={b}
+            status={b.node ? model.byId.get(b.node.id)?.status : undefined}
+            focus={b.node !== null && b.node.id === focusId}
+            selected={b.node !== null && b.node.id === selected}
+            dim={searching && b.node !== null && !lit(b.node.id)}
+          />
+        ))}
+        <g>
+          {edges.map((e) => (
+            <MapEdgeLine key={e.key} edge={e} dim={dimEdge(e)} />
+          ))}
+        </g>
+      </>
+    ),
+    [scene, model, edges, focusId, selected, searching, lit, dimEdge],
+  );
+  const over = useMemo(
+    () => (
+      <>
+        {scene.icons.map((s) => (
+          <MapIcon
+            key={s.id}
+            icon={s}
+            status={model.byId.get(s.id)?.status ?? s.node.status}
+            selected={s.id === selected}
+            dim={searching && !lit(s.id)}
+          />
+        ))}
+        <g className={styles.hot}>
+          {hot.map((e) => (
+            <path
+              key={e.key}
+              d={`${e.d}${e.head}`}
+              className={e.via ? styles.hotBridge : undefined}
+            />
+          ))}
+        </g>
+      </>
+    ),
+    [scene, model, hot, selected, searching, lit],
+  );
 
   // Nodes, boxes and areas are found from the event's target, so the drawing itself
   // holds no handlers.
@@ -504,164 +783,9 @@ export function MapCanvas({
           }
         >
           <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
-            {scene.hulls.map((h) => (
-              <g
-                key={h.namespace}
-                data-testid="map-namespace"
-                data-namespace={h.namespace}
-                data-hull={h.namespace}
-                className={styles.hull}
-              >
-                <rect
-                  x={h.rect.x0}
-                  y={h.rect.y0}
-                  width={h.rect.x1 - h.rect.x0}
-                  height={h.rect.y1 - h.rect.y0}
-                />
-                <text
-                  x={h.rect.x0 + 12}
-                  y={h.rect.y0 + 20}
-                  className={styles.hullLabel}
-                >
-                  {h.namespace}
-                </text>
-              </g>
-            ))}
-            {scene.boxes.map((b) => {
-              const r = b.rect;
-              const node = b.node;
-              const boxClass = [
-                styles.box,
-                styles[`box${b.kind}`] ?? styles.boxOwner,
-                node && node.id === focusId ? styles.focus : "",
-                node && node.id === selected ? styles.selected : "",
-                searching && node && !lit(node.id) ? styles.dim : "",
-              ]
-                .filter(Boolean)
-                .join(" ");
-              const nodeProps = node
-                ? {
-                    "data-testid": "map-node",
-                    "data-id": node.id,
-                    "data-kind": node.kind,
-                    "data-status": node.status,
-                    "aria-selected": node.id === selected,
-                  }
-                : b.kind === "Namespace"
-                  ? {
-                      "data-testid": "map-namespace",
-                      "data-namespace": b.namespace,
-                    }
-                  : b.kind === "Access"
-                    ? { "data-testid": "map-access" }
-                    : {};
-              return (
-                <g
-                  key={b.key}
-                  className={boxClass}
-                  data-box={b.key}
-                  {...nodeProps}
-                >
-                  <rect
-                    x={r.x0}
-                    y={r.y0}
-                    width={r.x1 - r.x0}
-                    height={r.y1 - r.y0}
-                  />
-                  <KindIcon
-                    kind={node ? node.kind : BOX_ICON[b.kind]}
-                    size={28}
-                    x={r.x0 + 10}
-                    y={r.y0 + 9}
-                  />
-                  <text x={r.x0 + 46} y={r.y0 + 22} className={styles.boxTitle}>
-                    {b.title}
-                  </text>
-                  <text x={r.x0 + 46} y={r.y0 + 38} className={styles.boxSub}>
-                    {b.sub}
-                  </text>
-                </g>
-              );
-            })}
-            <g>
-              {edges.map((e) => (
-                <g
-                  key={e.key}
-                  data-testid="map-edge"
-                  data-from={e.from}
-                  data-rel={e.rel}
-                  data-to={e.to}
-                  data-via={e.via?.join(",")}
-                  className={edgeClass(e)}
-                >
-                  <path d={e.d} className={styles.line} />
-                  {e.head ? <path d={e.head} className={styles.head} /> : null}
-                  {e.via ? (
-                    <>
-                      {e.mid ? (
-                        <circle
-                          cx={e.mid.x}
-                          cy={e.mid.y}
-                          r={Math.min(4 / view.k, 8)}
-                          strokeWidth={Math.min(1.5 / view.k, 3)}
-                          className={styles.viaMark}
-                        />
-                      ) : null}
-                      {/* A wide invisible stroke, so the hidden kinds show on hover. */}
-                      <path d={e.d} className={styles.hit}>
-                        <title>{`via ${e.via.join(", ")}`}</title>
-                      </path>
-                    </>
-                  ) : null}
-                </g>
-              ))}
-            </g>
-            {scene.icons.map((s) => {
-              const cls = [
-                styles.node,
-                s.id === selected ? styles.selected : "",
-                searching && !lit(s.id) ? styles.dim : "",
-              ]
-                .filter(Boolean)
-                .join(" ");
-              return (
-                // biome-ignore lint/a11y/useAriaPropsSupportedByRole: spec E §8.4 marks the selected node; the drawing is hidden from assistive technology and the live region announces the selection.
-                <g
-                  key={s.id}
-                  data-testid="map-node"
-                  data-id={s.id}
-                  data-kind={s.node.kind}
-                  data-status={s.node.status}
-                  aria-selected={s.id === selected}
-                  className={cls}
-                  transform={`translate(${s.x} ${s.y})`}
-                >
-                  <title>{s.node.name}</title>
-                  <circle
-                    r={s.size / 2 + 4}
-                    className={styles[s.node.status]}
-                  />
-                  <KindIcon
-                    kind={s.node.kind}
-                    size={s.size}
-                    x={-s.size / 2}
-                    y={-s.size / 2}
-                  />
-                  <text y={s.size / 2 + 18} className={styles.label}>
-                    {shortName(s.node.name)}
-                  </text>
-                </g>
-              );
-            })}
-            <g className={styles.hot}>
-              {hot.map((e) => (
-                <path
-                  key={e.key}
-                  d={`${e.d}${e.head}`}
-                  className={e.via ? styles.hotBridge : undefined}
-                />
-              ))}
-            </g>
+            {under}
+            <ViaMarks edges={edges} k={view.k} dim={dimEdge} />
+            {over}
           </g>
         </svg>
       </div>
