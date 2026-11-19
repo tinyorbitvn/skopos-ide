@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { NAV_SECTIONS } from "../../kinds/nav";
+import { resetWindowLayoutForTest } from "../../stores/windowLayout";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { flush, mockBackend } from "../../test/ipc";
+import { MAP_ICON, OVERVIEW_ICON, SECTION_ICONS } from "../palette/icons";
 import { Sidebar } from "./Sidebar";
 
 function info(
@@ -57,6 +60,27 @@ async function show(
   await act(flush);
   return backend;
 }
+
+beforeEach(() => {
+  resetWindowLayoutForTest();
+});
+
+const RULES = cssRules(CSS_FILES["/src/features/cluster/Sidebar.module.css"]);
+
+function decl(selector: string, prop: string) {
+  return RULES.find((r) => r.selector === selector)?.decls.find(
+    ([p]) => p === prop,
+  )?.[1];
+}
+
+/** Every group of the spec, with one direct section of each kind and the Argo CD kinds. */
+const WIDE = [
+  ...SERVED,
+  info("", "nodes", "Node"),
+  info("", "namespaces", "Namespace"),
+  info("", "events", "Event"),
+  info("argoproj.io", "applications", "Application"),
+];
 
 test("shows the visible sections and items", async () => {
   await show();
@@ -405,4 +429,325 @@ test("a closed domain still marks the active page", async () => {
   await act(flush);
   expect(domain.getAttribute("aria-expanded")).toBe("false");
   expect(domain.getAttribute("data-active")).toBe("true");
+});
+
+test("the screens come first, then Apps, Cluster and Resources under their captions (spec Q §2)", async () => {
+  await show({ resources: WIDE });
+  const nav = screen.getByTestId("cluster-sidebar");
+  expect(
+    [...nav.querySelectorAll('[data-testid^="nav-group-"]')].map((g) => [
+      g.getAttribute("data-testid"),
+      g.querySelector("p")?.textContent ?? null,
+    ]),
+  ).toEqual([
+    ["nav-group-top", null],
+    ["nav-group-apps", "Apps"],
+    ["nav-group-cluster", "Cluster"],
+    ["nav-group-resources", "Resources"],
+  ]);
+  const caption = within(screen.getByTestId("nav-group-apps")).getByText(
+    "Apps",
+  );
+  expect([caption.tagName, caption.className]).toEqual(["P", "groupLabel"]);
+  expect(
+    [...nav.querySelectorAll('[data-testid^="nav-section-"]')].map((s) =>
+      s.getAttribute("data-testid"),
+    ),
+  ).toEqual([
+    "nav-section-helm",
+    "nav-section-argo",
+    "nav-section-nodes",
+    "nav-section-namespaces",
+    "nav-section-events",
+    "nav-section-workloads",
+    "nav-section-network",
+    "nav-section-custom",
+  ]);
+});
+
+test("Overview, Resource map, Nodes, Namespaces and Events are direct links with their icons", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/core/nodes");
+  const nodes = screen.getByTestId("nav-item-core-nodes");
+  expect([
+    nodes.tagName,
+    nodes.getAttribute("href"),
+    nodes.textContent,
+    nodes.getAttribute("aria-current"),
+    nodes.classList.contains("row"),
+  ]).toEqual(["A", "/cluster/c1/r/core/nodes", "Nodes", "page", true]);
+  expect(nodes.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe(
+    SECTION_ICONS.nodes?.iconName,
+  );
+  expect(
+    within(screen.getByTestId("nav-section-nodes")).queryByRole("button"),
+  ).toBeNull();
+  for (const [id, href] of [
+    ["nav-item-core-namespaces", "/cluster/c1/r/core/namespaces"],
+    ["nav-item-core-events", "/cluster/c1/r/core/events"],
+    ["nav-overview", "/cluster/c1"],
+    ["nav-map", "/cluster/c1/map"],
+  ]) {
+    const link = screen.getByTestId(id);
+    expect([
+      id,
+      link.getAttribute("href"),
+      link.classList.contains("row"),
+    ]).toEqual([id, href, true]);
+  }
+  const icon = (id: string) =>
+    screen
+      .getByTestId(id)
+      .querySelector("[data-icon]")
+      ?.getAttribute("data-icon");
+  expect(icon("nav-overview")).toBe(OVERVIEW_ICON.iconName);
+  expect(icon("nav-map")).toBe(MAP_ICON.iconName);
+});
+
+test("Helm and Argo show their logos, Workloads its icon, and Argo holds the Argo CD branch", async () => {
+  await show({ resources: WIDE });
+  const row = (section: string, name: string) =>
+    within(screen.getByTestId(`nav-section-${section}`)).getByRole("button", {
+      name,
+    });
+  expect(
+    row("helm", "Helm").querySelector("[data-logo]")?.getAttribute("data-logo"),
+  ).toBe("helm");
+  expect(
+    row("argo", "Argo").querySelector("[data-logo]")?.getAttribute("data-logo"),
+  ).toBe("argo");
+  expect(
+    row("workloads", "Workloads")
+      .querySelector("[data-icon]")
+      ?.getAttribute("data-icon"),
+  ).toBe(SECTION_ICONS.workloads?.iconName);
+  const branch = screen.getByTestId("nav-branch-toggle-argocd");
+  expect([
+    branch.textContent,
+    branch.getAttribute("aria-expanded"),
+    branch.getAttribute("aria-controls"),
+    branch.getAttribute("title"),
+  ]).toEqual(["Argo CD1", "true", "nav-branch-panel-argocd", "Argo CD"]);
+  expect(
+    within(screen.getByTestId("nav-branch-panel-argocd"))
+      .getAllByRole("link")
+      .map((l) => l.getAttribute("data-testid")),
+  ).toEqual(["nav-item-argoproj.io-applications"]);
+});
+
+test("closing the Argo CD branch is saved under today's Argo CD key", async () => {
+  const backend = await show({ resources: WIDE });
+  vi.useFakeTimers();
+  fireEvent.click(screen.getByTestId("nav-branch-toggle-argocd"));
+  act(() => {
+    vi.advanceTimersByTime(300);
+  });
+  vi.useRealTimers();
+  expect(screen.getByTestId("nav-branch-panel-argocd").childElementCount).toBe(
+    0,
+  );
+  expect(backend.callsTo("ui_state_set")).toContainEqual({
+    key: "cluster.c1.nav.argocd",
+    value: false,
+  });
+});
+
+test("kinds hang on tree lines, as pills, in the design's metrics (spec Q §2)", async () => {
+  await show();
+  const pods = screen.getByTestId("nav-item-core-pods");
+  expect(pods.classList.contains("pill")).toBe(true);
+  expect(pods.parentElement?.className).toBe("leaf");
+  expect(pods.parentElement?.parentElement?.className).toBe("tree");
+  fireEvent.click(screen.getByTestId("nav-crd-toggle-acme.io"));
+  await act(flush);
+  expect(screen.getByTestId("nav-crd-panel-acme.io").className).toBe(
+    "tree subTree",
+  );
+  expect(screen.getByTestId("nav-crd-group-acme.io").className).toBe("leaf");
+  expect(
+    screen
+      .getByTestId("nav-crd-toggle-acme.io")
+      .classList.contains("branchRow"),
+  ).toBe(true);
+  expect([
+    decl(".tree", "margin"),
+    decl(".tree", "padding"),
+    decl(".subTree", "margin"),
+  ]).toEqual([
+    "0 0 var(--space-3) var(--space-8)",
+    "0 0 0 var(--space-7)",
+    "0 0 var(--space-2) var(--space-6)",
+  ]);
+  expect([
+    decl(".leaf::before", "width"),
+    decl(".leaf::before", "height"),
+    decl(".leaf::before", "border-left"),
+    decl(".leaf::before", "border-bottom"),
+    decl(".leaf::before", "border-bottom-left-radius"),
+    decl(".leaf:not(:last-child)::after", "border-left"),
+  ]).toEqual([
+    "10px",
+    "16px",
+    "1px solid var(--tree-line)",
+    "1px solid var(--tree-line)",
+    "var(--radius-sm)",
+    "1px solid var(--tree-line)",
+  ]);
+  expect([
+    decl(".pill", "height"),
+    decl(".pill", "border-radius"),
+    decl(".pill", "padding"),
+    decl(".pill", "margin"),
+  ]).toEqual([
+    "30px",
+    "var(--radius-full)",
+    "0 var(--space-6)",
+    "var(--space-1) 0",
+  ]);
+  expect([
+    decl(".row", "height"),
+    decl(".row", "gap"),
+    decl(".row", "padding"),
+    decl(".row", "border-radius"),
+    decl(".row:hover", "background"),
+    decl(".rowChevron", "margin-left"),
+  ]).toEqual([
+    "32px",
+    "var(--space-6)",
+    "0 var(--space-5)",
+    "var(--radius-sm)",
+    "var(--surface-hover)",
+    "auto",
+  ]);
+  expect([
+    decl(".branchRow", "gap"),
+    decl(".branchRow", "padding"),
+    decl(".branchRow", "color"),
+    decl(".count", "margin-left"),
+    decl(".count", "font"),
+    decl(".groupLabel", "padding"),
+    decl(".groupLabel", "font"),
+  ]).toEqual([
+    "var(--space-3)",
+    "0 var(--space-6) 0 var(--space-4)",
+    "var(--text-secondary)",
+    "auto",
+    "var(--type-caption)",
+    "0 var(--space-5) var(--space-3)",
+    "var(--type-overline)",
+  ]);
+});
+
+test("the current page is a selected pill, and the section holding it is marked", async () => {
+  await show({}, "/cluster/c1/r/apps/deployments");
+  expect(
+    screen
+      .getByTestId("nav-item-apps-deployments")
+      .getAttribute("aria-current"),
+  ).toBe("page");
+  const row = (section: string, name: string) =>
+    within(screen.getByTestId(`nav-section-${section}`)).getByRole("button", {
+      name,
+    });
+  expect(row("workloads", "Workloads").getAttribute("data-active")).toBe(
+    "true",
+  );
+  expect(row("network", "Network").getAttribute("data-active")).toBeNull();
+  for (const selector of [
+    '.pill[aria-current="page"]',
+    '.row[aria-current="page"]',
+  ]) {
+    expect([
+      selector,
+      decl(selector, "background"),
+      decl(selector, "color"),
+      decl(selector, "font-weight"),
+    ]).toEqual([
+      selector,
+      "var(--side-selected)",
+      "var(--text-primary)",
+      "var(--weight-semibold)",
+    ]);
+  }
+  expect([
+    decl('.row[data-active="true"]', "color"),
+    decl('.row[data-active="true"]', "font-weight"),
+    decl('.branchRow[data-active="true"]', "color"),
+  ]).toEqual([
+    "var(--text-primary)",
+    "var(--weight-semibold)",
+    "var(--text-primary)",
+  ]);
+  // The accent-blue `.active` look is gone.
+  expect(CSS_FILES["/src/features/cluster/Sidebar.module.css"]).not.toContain(
+    "--text-accent",
+  );
+});
+
+test("a section saved closed opens when it holds the current page", async () => {
+  await show({}, "/cluster/c1/r/core/pods", {
+    ui_state_get: ((a: { key: string }) =>
+      a.key === "cluster.c1.nav.workloads" ? false : null) as never,
+  });
+  const toggle = within(screen.getByTestId("nav-section-workloads")).getByRole(
+    "button",
+    { name: "Workloads" },
+  );
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("a kind open in another tab of this window shows a dot", async () => {
+  resetWindowLayoutForTest({
+    label: "main",
+    bounds: null,
+    panes: [
+      {
+        id: "p1",
+        width: 1,
+        selected: "t1",
+        tabs: [
+          {
+            id: "t1",
+            pinned: false,
+            history: ["/cluster/c1/r/core/pods"],
+            index: 0,
+          },
+          {
+            id: "t2",
+            pinned: false,
+            history: ["/cluster/c1/r/apps/deployments?object=default%2Fweb"],
+            index: 0,
+          },
+          {
+            id: "t3",
+            pinned: false,
+            history: ["/cluster/c1/map?focus=default"],
+            index: 0,
+          },
+        ],
+      },
+    ],
+    focusedPane: 0,
+  });
+  await show({}, "/cluster/c1/r/core/pods");
+  const dot = (id: string) =>
+    screen.getByTestId(id).querySelector('[data-testid="nav-open-dot"]');
+  expect(dot("nav-item-apps-deployments")?.getAttribute("aria-hidden")).toBe(
+    "true",
+  );
+  expect(dot("nav-map")).not.toBeNull();
+  // The current page never shows one, and a path no tab shows has none.
+  expect(dot("nav-item-core-pods")).toBeNull();
+  expect(dot("nav-overview")).toBeNull();
+  expect(screen.getByTestId("nav-item-apps-deployments").textContent).toBe(
+    "Deployments",
+  );
+  expect([
+    decl(".openDot", "width"),
+    decl(".openDot", "height"),
+    decl(".openDot", "background"),
+    decl(".openDot", "border-radius"),
+  ]).toEqual(["6px", "6px", "var(--text-tertiary)", "50%"]);
+  act(() => resetWindowLayoutForTest());
+  expect(dot("nav-item-apps-deployments")).toBeNull();
+  expect(dot("nav-map")).toBeNull();
 });

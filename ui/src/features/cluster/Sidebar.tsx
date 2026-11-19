@@ -1,6 +1,11 @@
-import { type ReactNode, useEffect, useMemo } from "react";
-import { NavLink, type NavLinkProps, useLocation } from "react-router";
-import { useNavItem } from "../../app/tabs/navigation";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+} from "react";
+import { useLocation } from "react-router";
 import { ErrorNotice, Spinner } from "../../design";
 import { ChevronDown, ChevronRight } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
@@ -10,67 +15,106 @@ import {
   crdTree,
 } from "../../kinds/crdTree";
 import {
-  groupSegment,
+  NAV_SCREENS,
+  type NavBranch,
+  type NavIcon,
   type NavSection,
   navItemKey,
   resourcePath,
-  visibleSections,
 } from "../../kinds/nav";
 import { useUiState } from "../../stores/uiState";
+import { useWindowLayout } from "../../stores/windowLayout";
 import styles from "./Sidebar.module.css";
+import {
+  clusterPath,
+  isAt,
+  itemPath,
+  itemTestId,
+  kindTestId,
+  looseItems,
+  openTabPaths,
+  screenTestId,
+  sectionActive,
+  sidebarGroups,
+} from "./sidebarModel";
+import { NavItemLink, SectionIcon } from "./sidebarParts";
 
-/**
- * A navigation item: a click, Ctrl/Cmd+click, middle-click or double-click opens its
- * location in a tab (spec P11 to P13), and it is active on the focused tab's location.
- */
-function NavItemLink(props: Omit<NavLinkProps, "to"> & { to: string }) {
-  const handlers = useNavItem(props.to);
-  return <NavLink {...props} {...handlers} />;
+/** The locations open in this window's tabs, for the open-tab dots (spec Q §2). */
+const OpenPaths = createContext<ReadonlySet<string>>(new Set());
+
+function useOpenPaths(): ReadonlySet<string> {
+  // A string, so the sidebar renders again only when the set of paths changes.
+  const joined = useWindowLayout((s) => [...openTabPaths(s.layout)].join("\n"));
+  return useMemo(
+    () => new Set(joined === "" ? [] : joined.split("\n")),
+    [joined],
+  );
 }
 
-function Item(props: {
-  clusterId: string;
-  group: string;
-  plural: string;
-  label: string;
-  /** Tree depth of a Custom Resources kind: 1 under a level-1 row, 2 under a level-2 row. */
-  indent?: 1 | 2;
-}) {
-  const { clusterId, group, plural, label, indent } = props;
-  const base = indent
-    ? `${styles.link} ${styles[`indent${indent}`]}`
-    : styles.link;
+/** A link's open-tab dot: no copy, hidden from assistive technology. */
+function OpenDot() {
   return (
-    <li>
+    <span
+      className={styles.openDot}
+      aria-hidden="true"
+      data-testid="nav-open-dot"
+    />
+  );
+}
+
+/** A kind or a route under an open section or branch: a pill on the tree lines. */
+function Pill(props: {
+  to: string;
+  label: string;
+  testId: string;
+  end?: boolean;
+}) {
+  const open = useContext(OpenPaths);
+  return (
+    <li className={styles.leaf}>
       <NavItemLink
-        to={resourcePath(clusterId, group, plural)}
-        className={({ isActive }) =>
-          isActive ? `${base} ${styles.active}` : base
-        }
-        data-testid={`nav-item-${groupSegment(group)}-${plural}`}
-        title={label}
+        end={props.end}
+        to={props.to}
+        className={styles.pill}
+        data-testid={props.testId}
+        title={props.label}
       >
-        {label}
+        {({ isActive }) => (
+          <>
+            <span className={styles.text}>{props.label}</span>
+            {!isActive && open.has(props.to) ? <OpenDot /> : null}
+          </>
+        )}
       </NavItemLink>
     </li>
   );
 }
 
-function RouteItem(props: { clusterId: string; path: string; label: string }) {
-  const { clusterId, path, label } = props;
+/** A section row that is a link: a screen, or a section with one screen. */
+function DirectLink(props: {
+  to: string;
+  label: string;
+  icon: NavIcon;
+  testId: string;
+  end?: boolean;
+}) {
+  const open = useContext(OpenPaths);
   return (
-    <li>
-      <NavItemLink
-        to={`/cluster/${encodeURIComponent(clusterId)}/${path}`}
-        className={({ isActive }) =>
-          isActive ? `${styles.link} ${styles.active}` : styles.link
-        }
-        data-testid={`nav-${path}`}
-        title={label}
-      >
-        {label}
-      </NavItemLink>
-    </li>
+    <NavItemLink
+      end={props.end}
+      to={props.to}
+      className={styles.row}
+      data-testid={props.testId}
+      title={props.label}
+    >
+      {({ isActive }) => (
+        <>
+          <SectionIcon icon={props.icon} size={16} className={styles.rowIcon} />
+          <span className={styles.text}>{props.label}</span>
+          {!isActive && open.has(props.to) ? <OpenDot /> : null}
+        </>
+      )}
+    </NavItemLink>
   );
 }
 
@@ -87,8 +131,7 @@ function activeCrdGroup(
 ): string | null {
   for (const row of rows) {
     for (const item of [...row.items, ...row.groups.flatMap((g) => g.items)]) {
-      const path = resourcePath(clusterId, item.group, item.plural);
-      if (pathname === path || pathname.startsWith(`${path}/`)) {
+      if (isAt(pathname, resourcePath(clusterId, item.group, item.plural))) {
         return item.group;
       }
     }
@@ -104,14 +147,16 @@ function activeCrdGroup(
 function useRowOpen(
   key: string,
   active: boolean,
+  initial = false,
 ): [boolean, (v: boolean) => void] {
-  const [open, setOpen] = useUiState<boolean>(key, false);
+  const [open, setOpen] = useUiState<boolean>(key, initial);
   useEffect(() => {
     if (active) setOpen(true);
   }, [active, setOpen]);
   return [open, setOpen];
 }
 
+/** A sub-branch row: Argo CD, or a Custom Resources domain or API group. */
 function RowToggle(props: {
   open: boolean;
   active: boolean;
@@ -119,18 +164,13 @@ function RowToggle(props: {
   title: string;
   label: string;
   count: number;
-  depth: 1 | 2;
   testId: string;
   onToggle(): void;
 }) {
   return (
     <button
       type="button"
-      className={
-        props.depth === 2
-          ? `${styles.groupToggle} ${styles.depth2}`
-          : styles.groupToggle
-      }
+      className={styles.branchRow}
       data-active={props.active ? "true" : undefined}
       aria-expanded={props.open}
       aria-controls={props.panel}
@@ -138,30 +178,24 @@ function RowToggle(props: {
       data-testid={props.testId}
       onClick={props.onToggle}
     >
-      <span aria-hidden="true" className={styles.chevron}>
+      <span aria-hidden="true" className={styles.branchChevron}>
         {props.open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </span>
-      <span className={styles.groupName}>{props.label}</span>
-      <span className={styles.groupCount}>{props.count}</span>
+      <span className={styles.text}>{props.label}</span>
+      <span className={styles.count}>{props.count}</span>
     </button>
   );
 }
 
-function KindLinks(props: {
-  clusterId: string;
-  items: CrdKindItem[];
-  indent: 1 | 2;
-}) {
+function KindLinks(props: { clusterId: string; items: CrdKindItem[] }) {
   return (
     <>
       {props.items.map((i) => (
-        <Item
+        <Pill
           key={`${i.group}/${i.plural}`}
-          clusterId={props.clusterId}
-          group={i.group}
-          plural={i.plural}
+          to={resourcePath(props.clusterId, i.group, i.plural)}
           label={i.label}
-          indent={props.indent}
+          testId={kindTestId(i.group, i.plural)}
         />
       ))}
     </>
@@ -176,14 +210,13 @@ function GroupRow(props: {
   title: string;
   items: CrdKindItem[];
   storageKey: string;
-  depth: 1 | 2;
   activeGroup: string | null;
 }) {
   const active = props.activeGroup === props.group;
   const [open, setOpen] = useRowOpen(props.storageKey, active);
   const panel = `nav-crd-panel-${props.group}`;
   return (
-    <li data-testid={`nav-crd-group-${props.group}`}>
+    <li className={styles.leaf} data-testid={`nav-crd-group-${props.group}`}>
       <RowToggle
         open={open}
         active={active}
@@ -191,18 +224,18 @@ function GroupRow(props: {
         title={props.title}
         label={props.label}
         count={props.items.length}
-        depth={props.depth}
         testId={`nav-crd-toggle-${props.group}`}
         onToggle={() => setOpen(!open)}
       />
       {/* A closed row keeps its panel for aria-controls and mounts nothing in it. */}
-      <ul id={panel} data-testid={panel} className={styles.list} hidden={!open}>
+      <ul
+        id={panel}
+        data-testid={panel}
+        className={`${styles.tree} ${styles.subTree}`}
+        hidden={!open}
+      >
         {open ? (
-          <KindLinks
-            clusterId={props.clusterId}
-            items={props.items}
-            indent={props.depth}
-          />
+          <KindLinks clusterId={props.clusterId} items={props.items} />
         ) : null}
       </ul>
     </li>
@@ -226,7 +259,7 @@ function DomainRow(props: {
   );
   const panel = `nav-crd-domain-panel-${row.domain}`;
   return (
-    <li data-testid={`nav-crd-domain-${row.domain}`}>
+    <li className={styles.leaf} data-testid={`nav-crd-domain-${row.domain}`}>
       <RowToggle
         open={open}
         active={active}
@@ -234,14 +267,18 @@ function DomainRow(props: {
         title={row.title}
         label={row.label}
         count={row.count}
-        depth={1}
         testId={`nav-crd-domain-toggle-${row.domain}`}
         onToggle={() => setOpen(!open)}
       />
-      <ul id={panel} data-testid={panel} className={styles.list} hidden={!open}>
+      <ul
+        id={panel}
+        data-testid={panel}
+        className={`${styles.tree} ${styles.subTree}`}
+        hidden={!open}
+      >
         {open ? (
           <>
-            <KindLinks clusterId={clusterId} items={row.items} indent={1} />
+            <KindLinks clusterId={clusterId} items={row.items} />
             {row.groups.map((g) => (
               <GroupRow
                 key={g.group}
@@ -251,7 +288,6 @@ function DomainRow(props: {
                 title={g.group}
                 items={g.items}
                 storageKey={rowKey(clusterId, "group", g.group)}
-                depth={2}
                 activeGroup={activeGroup}
               />
             ))}
@@ -282,86 +318,151 @@ function CrdRow(props: {
       title={row.title}
       items={row.items}
       storageKey={rowKey(clusterId, "domain", row.domain)}
-      depth={1}
       activeGroup={activeGroup}
     />
   );
 }
 
-function Section(props: {
-  clusterId: string;
-  id: string;
-  label: string;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useUiState<boolean>(
-    `cluster.${props.clusterId}.nav.${props.id}`,
+/** A section's sub-branch, such as Argo's "Argo CD": open by default, kept per cluster. */
+function BranchRow(props: { clusterId: string; branch: NavBranch }) {
+  const { clusterId, branch } = props;
+  const { pathname } = useLocation();
+  const active = branch.items.some((i) =>
+    isAt(pathname, itemPath(clusterId, i)),
+  );
+  const [open, setOpen] = useRowOpen(
+    `cluster.${clusterId}.nav.${branch.id}`,
+    active,
     true,
   );
-  const panel = `nav-panel-${props.id}`;
+  const panel = `nav-branch-panel-${branch.id}`;
   return (
-    <section data-testid={`nav-section-${props.id}`} className={styles.section}>
-      <h3 className={styles.heading}>
-        <button
-          type="button"
-          className={styles.toggle}
-          aria-expanded={open}
-          aria-controls={panel}
-          onClick={() => setOpen(!open)}
-        >
-          <span aria-hidden="true" className={styles.chevron}>
-            {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          </span>
-          {props.label}
-        </button>
-      </h3>
-      <ul id={panel} className={styles.list} hidden={!open}>
+    <li className={styles.leaf} data-testid={`nav-branch-${branch.id}`}>
+      <RowToggle
+        open={open}
+        active={active}
+        panel={panel}
+        title={branch.label}
+        label={branch.label}
+        count={branch.items.length}
+        testId={`nav-branch-toggle-${branch.id}`}
+        onToggle={() => setOpen(!open)}
+      />
+      <ul
+        id={panel}
+        data-testid={panel}
+        className={`${styles.tree} ${styles.subTree}`}
+        hidden={!open}
+      >
+        {open ? <KindLinks clusterId={clusterId} items={branch.items} /> : null}
+      </ul>
+    </li>
+  );
+}
+
+/** An expandable section: its row, then its items on tree lines. */
+function Section(props: {
+  clusterId: string;
+  section: NavSection;
+  active: boolean;
+  children: ReactNode;
+}) {
+  const { clusterId, section, active } = props;
+  const [open, setOpen] = useRowOpen(
+    `cluster.${clusterId}.nav.${section.id}`,
+    active,
+    true,
+  );
+  const panel = `nav-panel-${section.id}`;
+  return (
+    <section
+      data-testid={`nav-section-${section.id}`}
+      className={styles.section}
+    >
+      <button
+        type="button"
+        className={styles.row}
+        data-active={active ? "true" : undefined}
+        aria-expanded={open}
+        aria-controls={panel}
+        onClick={() => setOpen(!open)}
+      >
+        <SectionIcon icon={section.icon} size={16} className={styles.rowIcon} />
+        <span className={styles.text}>{section.label}</span>
+        <span aria-hidden="true" className={styles.rowChevron}>
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+      </button>
+      <ul id={panel} className={styles.tree} hidden={!open}>
         {props.children}
       </ul>
     </section>
   );
 }
 
-function SectionItems(props: { clusterId: string; section: NavSection }) {
+/** A section with one screen (Nodes, Namespaces, Events): a direct link to it. */
+function DirectSection(props: { clusterId: string; section: NavSection }) {
   const { clusterId, section } = props;
-  const overview = section.overview;
-  const items = section.items.map((i) =>
-    i.type === "route" ? (
-      <RouteItem
-        key={navItemKey(i)}
-        clusterId={clusterId}
-        path={i.path}
-        label={i.label}
+  const item = section.items[0];
+  if (item === undefined) return null;
+  return (
+    <div className={styles.section} data-testid={`nav-section-${section.id}`}>
+      <DirectLink
+        to={itemPath(clusterId, item)}
+        label={section.label}
+        icon={section.icon}
+        testId={itemTestId(item)}
       />
-    ) : (
-      <Item
-        key={navItemKey(i)}
-        clusterId={clusterId}
-        group={i.group}
-        plural={i.plural}
-        label={i.label}
-      />
-    ),
+    </div>
   );
-  if (overview === undefined) return items;
-  return [
-    <li key="overview">
-      <NavItemLink
-        end
-        to={`/cluster/${encodeURIComponent(clusterId)}/${overview}`}
-        className={({ isActive }) =>
-          isActive ? `${styles.link} ${styles.active}` : styles.link
-        }
-        data-testid={`nav-overview-${overview}`}
-      >
-        Overview
-      </NavItemLink>
-    </li>,
-    ...items,
-  ];
 }
 
-/** The cluster navigation: Overview, then the resource sections the user can see. */
+function SectionItems(props: {
+  clusterId: string;
+  section: NavSection;
+  crds: CrdDomainRow[];
+  activeGroup: string | null;
+}) {
+  const { clusterId, section, crds, activeGroup } = props;
+  return (
+    <>
+      {section.overview === undefined ? null : (
+        <Pill
+          end
+          to={clusterPath(clusterId, section.overview)}
+          label="Overview"
+          testId={`nav-overview-${section.overview}`}
+        />
+      )}
+      {looseItems(section).map((i) => (
+        <Pill
+          key={navItemKey(i)}
+          to={itemPath(clusterId, i)}
+          label={i.label}
+          testId={itemTestId(i)}
+        />
+      ))}
+      {(section.branches ?? []).map((b) => (
+        <BranchRow key={b.id} clusterId={clusterId} branch={b} />
+      ))}
+      {section.id === "custom"
+        ? crds.map((row) => (
+            <CrdRow
+              key={row.domain}
+              clusterId={clusterId}
+              row={row}
+              activeGroup={activeGroup}
+            />
+          ))
+        : null}
+    </>
+  );
+}
+
+/**
+ * The cluster navigation (spec Q §2): Overview and Resource map, then the Apps, Cluster
+ * and Resources groups with the sections the user can see.
+ */
 export function Sidebar(props: {
   clusterId: string;
   resources: ApiResourceInfo[];
@@ -370,14 +471,17 @@ export function Sidebar(props: {
   onRetry(): void;
 }) {
   const { clusterId, resources } = props;
-  const sections = visibleSections(resources);
   const crds = useMemo(() => crdTree(resources), [resources]);
+  const groups = useMemo(
+    () => sidebarGroups(resources, crds),
+    [resources, crds],
+  );
   const { pathname } = useLocation();
   const activeGroup = useMemo(
     () => activeCrdGroup(crds, clusterId, pathname),
     [crds, clusterId, pathname],
   );
-  const custom = sections.find((s) => s.id === "custom");
+  const openPaths = useOpenPaths();
 
   let body: ReactNode;
   if (props.loading && resources.length === 0) {
@@ -387,71 +491,67 @@ export function Sidebar(props: {
       </div>
     );
   } else {
-    body = (
-      <>
-        {sections
-          .filter((s) => s.id !== "custom")
-          .map((s) => (
-            <Section key={s.id} clusterId={clusterId} id={s.id} label={s.label}>
-              <SectionItems clusterId={clusterId} section={s} />
-            </Section>
-          ))}
-        {custom || crds.length > 0 ? (
-          <Section clusterId={clusterId} id="custom" label="Custom Resources">
-            {custom ? (
-              <SectionItems clusterId={clusterId} section={custom} />
-            ) : null}
-            {crds.map((row) => (
-              <CrdRow
-                key={row.domain}
+    body = groups.map(({ group, sections }) => (
+      <div
+        key={group.id}
+        className={styles.group}
+        data-testid={`nav-group-${group.id}`}
+      >
+        <p className={styles.groupLabel}>{group.label}</p>
+        {sections.map((s) =>
+          s.direct ? (
+            <DirectSection key={s.id} clusterId={clusterId} section={s} />
+          ) : (
+            <Section
+              key={s.id}
+              clusterId={clusterId}
+              section={s}
+              active={sectionActive(pathname, clusterId, s, crds)}
+            >
+              <SectionItems
                 clusterId={clusterId}
-                row={row}
+                section={s}
+                crds={crds}
                 activeGroup={activeGroup}
               />
-            ))}
-          </Section>
-        ) : null}
-      </>
-    );
+            </Section>
+          ),
+        )}
+      </div>
+    ));
   }
 
   return (
-    <nav
-      className={styles.sidebar}
-      aria-label="Cluster navigation"
-      data-testid="cluster-sidebar"
-    >
-      <NavItemLink
-        end
-        to={`/cluster/${encodeURIComponent(clusterId)}`}
-        className={({ isActive }) =>
-          isActive ? `${styles.link} ${styles.active}` : styles.link
-        }
-        data-testid="nav-overview"
+    <OpenPaths.Provider value={openPaths}>
+      <nav
+        className={styles.sidebar}
+        aria-label="Cluster navigation"
+        data-testid="cluster-sidebar"
       >
-        Overview
-      </NavItemLink>
-      <NavItemLink
-        to={`/cluster/${encodeURIComponent(clusterId)}/map`}
-        className={({ isActive }) =>
-          isActive ? `${styles.link} ${styles.active}` : styles.link
-        }
-        data-testid="nav-map"
-        title="Resource map"
-      >
-        Resource map
-      </NavItemLink>
-      {/* A failed refresh keeps the last resources, so the error sits above them. */}
-      {props.error !== null ? (
-        <div className={styles.state}>
-          <ErrorNotice
-            title="Could not load resources"
-            message={props.error}
-            onRetry={props.onRetry}
-          />
+        <div className={styles.group} data-testid="nav-group-top">
+          {NAV_SCREENS.map((s) => (
+            <DirectLink
+              key={s.id}
+              end={s.id === "overview"}
+              to={clusterPath(clusterId, s.path)}
+              label={s.label}
+              icon={s.icon}
+              testId={screenTestId(s)}
+            />
+          ))}
         </div>
-      ) : null}
-      {body}
-    </nav>
+        {/* A failed refresh keeps the last resources, so the error sits above them. */}
+        {props.error !== null ? (
+          <div className={styles.state}>
+            <ErrorNotice
+              title="Could not load resources"
+              message={props.error}
+              onRetry={props.onRetry}
+            />
+          </div>
+        ) : null}
+        {body}
+      </nav>
+    </OpenPaths.Provider>
   );
 }
