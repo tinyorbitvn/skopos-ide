@@ -1,14 +1,16 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../ipc/generated/WatchEvent";
 import type { KubeObject } from "../kinds/objects";
 import { flush, mockBackend } from "../test/ipc";
+import { CONNECTED, connectClusters, setClusterState } from "../test/terminal";
+import { resetCatalogForTest } from "./catalog";
 import {
   findResource,
+  LINGER_MS,
   type ResourceListState,
   resetResourcesForTest,
-  useApiResources,
   useResourceList,
 } from "./resources";
 
@@ -65,7 +67,39 @@ const status = (
 ): WatchEvent => ({ type: "status", status: s, message });
 
 beforeEach(() => resetResourcesForTest());
-afterEach(() => resetResourcesForTest());
+afterEach(() => {
+  resetResourcesForTest();
+  resetCatalogForTest();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+/**
+ * Fakes the clock, so a test can pass the linger at once. The fake clock still
+ * follows real time, so `flush` keeps working.
+ */
+function fakeClock(): void {
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout"],
+    shouldAdvanceTime: true,
+  });
+}
+
+/** Makes the window hidden until `show` is called. */
+function hideWindow(): { show(): Promise<void> } {
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("hidden");
+  return {
+    async show() {
+      visibility.mockReturnValue("visible");
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        await flush();
+      });
+    },
+  };
+}
 
 async function mount(clusterId = "a", resource: ResourceRef | null = pods) {
   const hook = renderHook(
@@ -236,16 +270,16 @@ test("clusters_do_not_share_rows", async () => {
   expect(first.result.current.items.map((o) => o.metadata.name)).toEqual([
     "only-in-b",
   ]);
-  // Back on a, none of b's rows show while a's list loads again.
+  // Back on a, a's kept list shows its own rows at once, and none of b's.
   first.rerender({ c: "a", r: pods });
-  await act(flush);
-  expect(first.result.current.items).toEqual([]);
-  expect(first.result.current.loading).toBe(true);
-  expect(subs[2].clusterId).toBe("a");
-  await subs[2].send(snapshot(pod("only-in-a")));
   expect(first.result.current.items.map((o) => o.metadata.name)).toEqual([
     "only-in-a",
   ]);
+  await act(flush);
+  expect(first.result.current.items.map((o) => o.metadata.name)).toEqual([
+    "only-in-a",
+  ]);
+  expect(subs).toHaveLength(2);
 });
 
 /** Keeps the state of every render, including those before the effects run. */
@@ -286,7 +320,8 @@ test("the first render of a list is loading, not an empty list", async () => {
   expect(renders[0].loading).toBe(true);
 });
 
-test("two components share one subscription and unsubscribe on the last unmount", async () => {
+test("two components share one subscription and unsubscribe a linger after the last unmount", async () => {
+  fakeClock();
   const { subs, backend } = setup();
   const one = await mount();
   const two = await mount();
@@ -302,9 +337,165 @@ test("two components share one subscription and unsubscribe on the last unmount"
 
   two.unmount();
   await act(flush);
+  vi.advanceTimersByTime(LINGER_MS - 1_000);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([]);
+  vi.advanceTimersByTime(1_000);
   expect(backend.callsTo("resources_unsubscribe")).toEqual([
     { subscriptionId: "sub-1" },
   ]);
+});
+
+test("a list opened again within the linger reuses its subscription and never shows loading", async () => {
+  fakeClock();
+  const { subs, backend } = setup();
+  const first = await mount();
+  await subs[0].send(snapshot(pod("a")));
+  await subs[0].send(status("live"));
+  first.unmount();
+  await act(flush);
+  vi.advanceTimersByTime(LINGER_MS - 1_000);
+
+  const { renders } = recordRenders("a");
+  await act(flush);
+  expect(backend.callsTo("resources_subscribe")).toHaveLength(1);
+  expect(renders.length).toBeGreaterThan(0);
+  for (const state of renders) {
+    expect(state.loading).toBe(false);
+    expect(state.status).toBe("live");
+    expect(state.items.map((o) => o.metadata.name)).toEqual(["a"]);
+  }
+
+  // The kept subscription goes on delivering, and the new reference ends the linger.
+  await subs[0].send({ type: "batch", upserts: [pod("b")], deletes: [] });
+  expect(renders.at(-1)?.items.map((o) => o.metadata.name)).toEqual(["a", "b"]);
+  vi.advanceTimersByTime(LINGER_MS);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([]);
+});
+
+test("a list opened after the linger subscribes again and loads", async () => {
+  fakeClock();
+  const { subs, backend } = setup();
+  const first = await mount();
+  await subs[0].send(snapshot(pod("a")));
+  first.unmount();
+  await act(flush);
+  vi.advanceTimersByTime(LINGER_MS);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "sub-1" },
+  ]);
+
+  const second = await mount();
+  expect(subs).toHaveLength(2);
+  expect(second.result.current.loading).toBe(true);
+  expect(second.result.current.items).toEqual([]);
+});
+
+test("a list that ended with a final status is dropped on its last unmount", async () => {
+  fakeClock();
+  const { subs, backend } = setup();
+  const first = await mount();
+  await subs[0].send(status("forbidden", "cannot list pods"));
+  first.unmount();
+  await act(flush);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "sub-1" },
+  ]);
+
+  const second = await mount();
+  expect(subs).toHaveLength(2);
+  expect(second.result.current.loading).toBe(true);
+  expect(second.result.current.status).toBe("syncing");
+});
+
+test("a final status that arrives during the linger drops the list", async () => {
+  fakeClock();
+  const { subs, backend } = setup();
+  const first = await mount();
+  await subs[0].send(snapshot(pod("a")));
+  first.unmount();
+  await act(flush);
+  await subs[0].send(status("notServed", "the server has no pods"));
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "sub-1" },
+  ]);
+
+  const second = await mount();
+  expect(subs).toHaveLength(2);
+  expect(second.result.current.loading).toBe(true);
+});
+
+test("a refused subscribe is tried again on the next mount", async () => {
+  fakeClock();
+  let refuse = true;
+  const backend = mockBackend({
+    resources_subscribe: () => {
+      if (refuse) throw { code: "Forbidden", message: "pods is forbidden" };
+      return "sub-ok";
+    },
+    resources_unsubscribe: () => null,
+  });
+  const first = await mount();
+  expect(first.result.current.status).toBe("forbidden");
+  first.unmount();
+  await act(flush);
+
+  refuse = false;
+  const second = await mount();
+  expect(backend.callsTo("resources_subscribe")).toHaveLength(2);
+  expect(second.result.current.status).toBe("syncing");
+  expect(second.result.current.loading).toBe(true);
+});
+
+test("a cluster disconnect drops its lingering lists and keeps other clusters'", async () => {
+  fakeClock();
+  connectClusters({ id: "a", name: "a" }, { id: "b", name: "b" });
+  const { subs, backend } = setup();
+  const onA = await mount("a");
+  const onB = await mount("b");
+  await subs[0].send(snapshot(pod("only-in-a")));
+  await subs[1].send(snapshot(pod("only-in-b")));
+  onA.unmount();
+  onB.unmount();
+  await act(flush);
+
+  setClusterState("a", { status: "disconnected" });
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "sub-1" },
+  ]);
+
+  // A quick reconnect does not bring back the list the disconnect ended.
+  setClusterState("a", CONNECTED);
+  const again = await mount("a");
+  expect(subs).toHaveLength(3);
+  expect(subs[2].clusterId).toBe("a");
+  expect(again.result.current.loading).toBe(true);
+
+  const otherAgain = await mount("b");
+  expect(subs).toHaveLength(3);
+  expect(otherAgain.result.current.items.map((o) => o.metadata.name)).toEqual([
+    "only-in-b",
+  ]);
+});
+
+test("a list in use when its cluster disconnects is dropped on its last unmount", async () => {
+  fakeClock();
+  connectClusters({ id: "a", name: "a" });
+  const { subs, backend } = setup();
+  const first = await mount("a");
+  await subs[0].send(snapshot(pod("a")));
+  setClusterState("a", { status: "disconnected" });
+  // The rows stay while the list is shown, as before.
+  expect(first.result.current.items).toHaveLength(1);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([]);
+
+  first.unmount();
+  await act(flush);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "sub-1" },
+  ]);
+  setClusterState("a", CONNECTED);
+  await mount("a");
+  expect(subs).toHaveLength(2);
 });
 
 test("a null resource subscribes to nothing", async () => {
@@ -401,7 +592,8 @@ test("a subscribe refused as forbidden reports forbidden", async () => {
   expect(result.current.message).toBe("pods is forbidden");
 });
 
-test("unmounting before the subscription id arrives still unsubscribes", async () => {
+test("unmounting before the subscription id arrives still unsubscribes after the linger", async () => {
+  fakeClock();
   let release: (id: string) => void = () => {};
   const backend = mockBackend({
     resources_subscribe: () => new Promise<string>((r) => (release = r)),
@@ -411,8 +603,99 @@ test("unmounting before the subscription id arrives still unsubscribes", async (
   hook.unmount();
   release("late");
   await act(flush);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([]);
+  vi.advanceTimersByTime(LINGER_MS);
   expect(backend.callsTo("resources_unsubscribe")).toEqual([
     { subscriptionId: "late" },
+  ]);
+});
+
+test("a list dropped before the subscription id arrives unsubscribes on arrival", async () => {
+  fakeClock();
+  let release: (id: string) => void = () => {};
+  const backend = mockBackend({
+    resources_subscribe: () => new Promise<string>((r) => (release = r)),
+    resources_unsubscribe: () => null,
+  });
+  const hook = await mount();
+  hook.unmount();
+  vi.advanceTimersByTime(LINGER_MS);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([]);
+  release("late");
+  await act(flush);
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "late" },
+  ]);
+});
+
+test("while the window is hidden, batches are applied and shown in one update when it shows", async () => {
+  const { subs } = setup();
+  let renders = 0;
+  const hook = renderHook(() => {
+    renders += 1;
+    return useResourceList("a", pods);
+  });
+  await act(flush);
+  await subs[0].send(snapshot(pod("a"), pod("m")));
+  const hidden = hideWindow();
+  const before = renders;
+
+  await subs[0].send({ type: "batch", upserts: [pod("z")], deletes: [] });
+  await subs[0].send({
+    type: "batch",
+    upserts: [pod("b"), pod("m", "default", "2")],
+    deletes: [{ namespace: "default", name: "a" }],
+  });
+  expect(renders).toBe(before);
+  expect(keysOf(hook.result.current.items)).toEqual(["default/a", "default/m"]);
+
+  await hidden.show();
+  expect(renders - before).toBe(1);
+  expect(keysOf(hook.result.current.items)).toEqual([
+    "default/b",
+    "default/m",
+    "default/z",
+  ]);
+  expect(hook.result.current.items[1].metadata.resourceVersion).toBe("2");
+
+  // Nothing new arrived, so showing the window again renders nothing.
+  await hidden.show();
+  expect(renders - before).toBe(1);
+});
+
+test("while the window is hidden, the first snapshot and statuses show at once", async () => {
+  const { subs } = setup();
+  hideWindow();
+  const { result } = await mount();
+  await subs[0].send(snapshot(pod("a")));
+  expect(result.current.loading).toBe(false);
+  expect(keysOf(result.current.items)).toEqual(["default/a"]);
+
+  // A status shows with every row applied before it.
+  await subs[0].send({ type: "batch", upserts: [pod("b")], deletes: [] });
+  expect(keysOf(result.current.items)).toEqual(["default/a"]);
+  await subs[0].send(status("reconnecting", "connection reset"));
+  expect(result.current.status).toBe("reconnecting");
+  expect(result.current.message).toBe("connection reset");
+  expect(keysOf(result.current.items)).toEqual(["default/a", "default/b"]);
+});
+
+test("a list kept while the window is hidden shows its latest rows when the window shows", async () => {
+  fakeClock();
+  const { subs, backend } = setup();
+  const first = await mount();
+  await subs[0].send(snapshot(pod("a")));
+  first.unmount();
+  await act(flush);
+  const hidden = hideWindow();
+  await subs[0].send({ type: "batch", upserts: [pod("b")], deletes: [] });
+
+  await hidden.show();
+  const second = await mount();
+  expect(backend.callsTo("resources_subscribe")).toHaveLength(1);
+  expect(keysOf(second.result.current.items)).toEqual([
+    "default/a",
+    "default/b",
   ]);
 });
 
@@ -431,62 +714,4 @@ test("findResource matches group and plural", () => {
   const all = [info("", "pods"), info("apps", "deployments")];
   expect(findResource(all, "apps", "deployments")).toBe(all[1]);
   expect(findResource(all, "apps", "pods")).toBeUndefined();
-});
-
-test("useApiResources discovers and refreshes", async () => {
-  let calls = 0;
-  const backend = mockBackend({
-    resources_discover: () => {
-      calls += 1;
-      return [];
-    },
-  });
-  const { result } = renderHook(() => useApiResources("a"));
-  expect(result.current.loading).toBe(true);
-  await act(flush);
-  expect(result.current.loading).toBe(false);
-  expect(result.current.error).toBeNull();
-  await act(() => result.current.refresh());
-  expect(calls).toBe(2);
-  expect(backend.callsTo("resources_discover")).toEqual([
-    { clusterId: "a", refresh: false },
-    { clusterId: "a", refresh: true },
-  ]);
-});
-
-test("useApiResources reports a failure", async () => {
-  mockBackend({
-    resources_discover: () => {
-      throw { code: "InvalidInput", message: "cluster a is disconnected" };
-    },
-  });
-  const { result } = renderHook(() => useApiResources("a"));
-  await act(flush);
-  expect(result.current.error).toBe("cluster a is disconnected");
-  expect(result.current.loading).toBe(false);
-});
-
-test("useApiResources keeps the last resources when a refresh fails", async () => {
-  let fail = false;
-  mockBackend({
-    resources_discover: () => {
-      if (fail) throw { code: "InvalidInput", message: "api blip" };
-      return [
-        {
-          resource: pods,
-          canList: true,
-          canWatch: true,
-          canCreate: true,
-          canDelete: true,
-        },
-      ];
-    },
-  });
-  const { result } = renderHook(() => useApiResources("a"));
-  await act(flush);
-  expect(result.current.resources).toHaveLength(1);
-  fail = true;
-  await act(() => result.current.refresh());
-  expect(result.current.error).toBe("api blip");
-  expect(result.current.resources).toHaveLength(1);
 });

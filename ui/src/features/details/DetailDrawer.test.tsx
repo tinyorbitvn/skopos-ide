@@ -155,6 +155,12 @@ type Get = (a: {
  * `resource_get` answers with the row as it is now, or NotFound once it is deleted.
  * `extra` adds handlers, such as the metrics commands.
  */
+/** The kinds of the watches a test names in `snapshot`. */
+const KIND_OF: Record<string, string> = {
+  pods: "Pod",
+  replicasets: "ReplicaSet",
+};
+
 function fake(
   events: () => unknown = () => [],
   get?: Get,
@@ -192,7 +198,12 @@ function fake(
     // subscription gets the snapshot.
     snapshot: async (items: KubeObject[], plural?: string) => {
       await act(async () => {
-        rows.clear();
+        // A named watch's snapshot replaces only the rows of its kind: a list that
+        // lingers is reused, so other kinds' rows stay where `resource_get` finds them.
+        const kind = plural === undefined ? undefined : KIND_OF[plural];
+        for (const [key, o] of rows) {
+          if (kind === undefined || o.kind === kind) rows.delete(key);
+        }
         items.forEach(keep);
         const to = plural === undefined ? send : byPlural.get(plural);
         to?.({ type: "snapshot", items } as WatchEvent);
@@ -1162,8 +1173,9 @@ test("an entry deleted while it waits in the history shows how it last looked on
   await f.snapshot([replicaSet], "replicasets");
   fireEvent.click(screen.getByTestId("detail-back"));
   await act(flush);
-  // The Pod went away while the ReplicaSet was shown.
-  await f.snapshot([]);
+  // The Pod went away while the ReplicaSet was shown. Back reuses the Pods watch,
+  // which lingers, so the snapshot goes to it.
+  await f.snapshot([], "pods");
   expect(screen.getByTestId("detail-removed").textContent).toBe(
     "This Pod was deleted. What is shown is how it last looked.",
   );
@@ -1287,7 +1299,7 @@ test("a linked entry starts on the Overview and Back restores the earlier tab", 
   ).toBe("true");
   fireEvent.click(screen.getByTestId("detail-back"));
   await act(flush);
-  await f.snapshot([owned()]);
+  await f.snapshot([owned()], "pods");
   expect(
     screen.getByTestId("detail-tab-events").getAttribute("aria-selected"),
   ).toBe("true");
