@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { copyText } from "../../design/clipboard";
 import { HardDrive } from "../../design/icons";
 import { flush, mockBackend } from "../../test/ipc";
 import {
@@ -7,6 +8,7 @@ import {
   ExpandRow,
   FactList,
   FactRow,
+  Facts,
   Item,
   ItemList,
   Part,
@@ -16,7 +18,82 @@ import {
   titleKey,
 } from "./parts";
 
-afterEach(() => vi.useRealTimers());
+vi.mock("../../design/clipboard", () => ({ copyText: vi.fn() }));
+const copied = vi.mocked(copyText);
+
+afterEach(() => {
+  vi.useRealTimers();
+  copied.mockReset();
+});
+
+/** Presses the copy button of the field `label` and returns what it put on the clipboard. */
+async function copyField(label: string): Promise<string> {
+  copied.mockResolvedValue(undefined);
+  const button = screen.getByRole("button", { name: `Copy ${label}` });
+  await act(async () => {
+    fireEvent.click(button);
+  });
+  return copied.mock.calls.at(-1)?.[0] ?? "";
+}
+
+test("every fact and container row copies the value it shows", async () => {
+  render(
+    <>
+      <Facts items={[["Node", "worker-1"], ["Empty", ""]]} />
+      <FactList>
+        <FactRow label="Service account">default</FactRow>
+        <FactRow label="Labels" copy={false}>
+          None
+        </FactRow>
+      </FactList>
+      <SubRow label="Image">
+        <span>{"registry.k8s.io/\u200bpause:3.10"}</span>
+      </SubRow>
+      <SubRow label="Ports">
+        <span>
+          80/TCP{" "}
+          <button type="button" data-copy-skip="">
+            Forward
+          </button>
+        </span>
+      </SubRow>
+    </>,
+  );
+  expect(await copyField("Node")).toBe("worker-1");
+  expect(screen.getByTestId("copy-field-node")).toBeTruthy();
+  expect(await copyField("Service account")).toBe("default");
+  // A row that says there is nothing has nothing to copy, nor does a fact left out.
+  expect(screen.queryByRole("button", { name: "Copy Labels" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Copy Empty" })).toBeNull();
+  // Not the hints that let a long path wrap, nor the controls beside the value.
+  expect(await copyField("Image")).toBe("registry.k8s.io/pause:3.10");
+  expect(await copyField("Ports")).toBe("80/TCP");
+  // The copy that was read is gone from the page.
+  expect(screen.getAllByText("80/TCP", { exact: false })).toHaveLength(1);
+});
+
+test("a value of several lines is copied a line each, without blank lines", async () => {
+  // jsdom lays nothing out, so innerText reads here as a browser reads blocks: a line each.
+  Object.defineProperty(HTMLElement.prototype, "innerText", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return Array.from(this.children)
+        .map((line) => `  ${line.textContent}  `)
+        .join("\n\n");
+    },
+  });
+  try {
+    render(
+      <SubRow label="Env">
+        <span>A=1</span>
+        <span>B=2</span>
+      </SubRow>,
+    );
+    expect(await copyField("Env")).toBe("A=1\nB=2");
+  } finally {
+    Reflect.deleteProperty(HTMLElement.prototype, "innerText");
+  }
+});
 
 test("slugs and title keys", () => {
   expect(sectionSlug("Access Control")).toBe("access-control");

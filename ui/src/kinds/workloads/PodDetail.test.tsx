@@ -171,7 +171,8 @@ function lines(item: HTMLElement, label: string): string[] {
   const key = [...item.querySelectorAll(".subKey")].find(
     (k) => k.textContent === label,
   );
-  const box = key?.nextElementSibling;
+  // The lines sit beside the row's copy button.
+  const box = key?.nextElementSibling?.querySelector(".subLines");
   return box ? [...box.children].map((c) => c.textContent ?? "") : [];
 }
 
