@@ -333,6 +333,7 @@ function ContainerItem(props: {
   return (
     <Item
       testId={`detail-container-${info.name}`}
+      copy={{ what: "container name", value: info.name }}
       head={
         <>
           <span className={styles.name} title={info.name}>

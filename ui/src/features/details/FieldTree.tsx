@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "../../design/icons";
+import { endsSelection } from "../../kinds/detail/selection";
 import styles from "./DetailDrawer.module.css";
 
 /** Levels below the top that start expanded. */
@@ -44,7 +45,9 @@ function Node(props: { name: string; value: unknown; depth: number }) {
         className={styles.fieldToggle}
         aria-expanded={open}
         aria-label={`${name} ${summary(value)}`}
-        onClick={() => setOpen(!open)}
+        onClick={(e) => {
+          if (!endsSelection(e.currentTarget.parentElement)) setOpen(!open);
+        }}
       >
         {open ? (
           <ChevronDown size={12} aria-hidden="true" />

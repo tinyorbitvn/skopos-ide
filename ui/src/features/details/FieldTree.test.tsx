@@ -38,3 +38,17 @@ test("empty structures and a bare null render without crashing", () => {
   render(<FieldTree value={null} />);
   expect(screen.getByText("null")).toBeTruthy();
 });
+
+test("a field's toggle clicked at the end of selecting its values stays open", () => {
+  render(<FieldTree value={{ spec: { replicas: 2 } }} />);
+  const spec = screen.getByRole("button", { name: "spec {1}" });
+  const range = document.createRange();
+  range.selectNodeContents(screen.getByText("2"));
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(range);
+  fireEvent.click(spec);
+  expect(spec.getAttribute("aria-expanded")).toBe("true");
+  window.getSelection()?.removeAllRanges();
+  fireEvent.click(spec);
+  expect(spec.getAttribute("aria-expanded")).toBe("false");
+});
