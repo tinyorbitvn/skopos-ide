@@ -10,8 +10,10 @@ use std::sync::Arc;
 use keychain::KeychainStore;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::IpcError;
+use skopos_core::navigation::stays_in_app;
 use skopos_core::paths::AppPaths;
 use state::AppState;
+use tauri::plugin::TauriPlugin;
 use tauri::webview::PageLoadEvent;
 use tauri::{Context, Manager, RunEvent, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -89,6 +91,30 @@ pub fn run(shell_env_warning: Option<String>) {
     }
 }
 
+/// Keeps every window on the app's own pages, since a page a window loads can call every
+/// command. A link meant for the browser goes through `open_external` and never loads
+/// here. No automated test reaches this hook; the core's `stays_in_app` has its own.
+fn navigation_guard() -> TauriPlugin<Wry> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|webview, url| {
+            let config = webview.config();
+            // The development server is one of the app's pages only while the app runs from it.
+            let dev = config.build.dev_url.as_ref().filter(|_| tauri::is_dev());
+            let stays = stays_in_app(url, dev);
+            if !stays {
+                // The rest of the address can hold anything, so only its start is logged.
+                tracing::warn!(
+                    "window {} was kept from loading a page of {}://{}",
+                    webview.label(),
+                    url.scheme(),
+                    url.host_str().unwrap_or_default()
+                );
+            }
+            stays
+        })
+        .build()
+}
+
 fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<Wry>) {
     let builder = tauri::Builder::default();
     #[cfg(feature = "e2e")]
@@ -98,6 +124,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(navigation_guard())
         .manage(AppState { core: core.clone() })
         .manage(windows::WindowTracker::default())
         .on_window_event(windows::on_window_event)
