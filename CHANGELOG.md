@@ -15,6 +15,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **Every drawer looks the same:** the drawers of Helm releases, Helm charts and port forwards now float over their list like an object's drawer, with the same dimmed screen, resize handle and header: the kind above the name, icon buttons for the actions, then Close. They share the object drawer's width.
 - **A faster resource map:** zooming, panning and selecting no longer redraw the whole map, and a new snapshot of the same graph redraws only what changed. With 1,500 resources on the map, a zoom step takes about 10 ms instead of half a second, and dragging a node draws once per frame.
 - **Remove a key with an icon:** each key of a Secret or ConfigMap has a trash icon instead of a Remove button, and a removed key shows an undo icon.
+- **Control plane health for the Overview (backend):** a new `cluster_control_plane` command reports the API server's version, `/livez` and `/readyz` checks, and the state of etcd, the scheduler, the controller manager, DNS and kube-proxy from their Pods, Leases, Deployments and DaemonSet in `kube-system`. What you may not read is left out instead of failing.
+- **Disk use per node (backend):** a new `nodes_disk_usage` command reads each node's root filesystem use from its kubelet through the API server's node proxy, up to eight nodes at a time; a node that does not answer is left out.
 
 ## [0.8.0] - 2026-11-18
 

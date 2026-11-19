@@ -85,6 +85,8 @@ pub(crate) struct Established {
     pub(crate) client: Client,
     pub(crate) discovery: Arc<Discovery>,
     pub(crate) info: ClusterInfo,
+    /// The kubeconfig's server URL for the context.
+    pub(crate) server: Option<String>,
 }
 
 /// Writes the per-context kubeconfig to `dest` and reads it back.
@@ -277,6 +279,7 @@ pub(crate) async fn establish(
         client,
         discovery: Arc::new(discovery),
         info,
+        server: entry.server.clone(),
     })
 }
 

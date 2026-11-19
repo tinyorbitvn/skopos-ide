@@ -96,6 +96,8 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 struct Live {
     client: Client,
     discovery: Arc<Discovery>,
+    /// The kubeconfig's server URL for the context.
+    server: Option<String>,
     /// Told apart from the connection that replaces this one, so a late result
     /// of the old one is not stored.
     epoch: u64,
@@ -210,6 +212,7 @@ impl ClusterHandle {
                 shared.live = Some(Live {
                     client: established.client,
                     discovery: established.discovery,
+                    server: established.server,
                     epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
                     resources: None,
                     names: None,
@@ -404,6 +407,11 @@ impl ClusterManager {
 
     pub(crate) fn discovery(&self, id: &ClusterId) -> CoreResult<Arc<Discovery>> {
         self.with_live(id, |live, _, _| live.discovery.clone())
+    }
+
+    /// The context's server URL from the kubeconfig, `""` when it has none.
+    pub(crate) fn server_url(&self, id: &ClusterId) -> CoreResult<String> {
+        self.with_live(id, |live, _, _| live.server.clone().unwrap_or_default())
     }
 
     pub(crate) fn kubeconfig_path(&self, id: &ClusterId) -> CoreResult<PathBuf> {
