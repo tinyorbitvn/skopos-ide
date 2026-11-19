@@ -4,6 +4,7 @@ import { mockBackend } from "../test/ipc";
 import { api } from "./api";
 import type { GraphEvent } from "./generated/GraphEvent";
 import type { HelmInstallRequest } from "./generated/HelmInstallRequest";
+import type { HelmReleasesEvent } from "./generated/HelmReleasesEvent";
 import type { HelmRepoAdd } from "./generated/HelmRepoAdd";
 import type { HelmUpgradeRequest } from "./generated/HelmUpgradeRequest";
 import type { MetricsTarget } from "./generated/MetricsTarget";
@@ -204,6 +205,30 @@ test("a helm run's channels hand its output and its events over", async () => {
   expect(seen).toEqual([{ type: "exited", code: 0 }]);
 });
 
+test("a helm releases subscription hands its events over and ends by id", async () => {
+  const seen: HelmReleasesEvent[] = [];
+  const backend = mockBackend({
+    helm_releases_subscribe: () => "helm-1",
+    helm_releases_unsubscribe: () => null,
+  });
+  await expect(
+    api.helmReleasesSubscribe("c1", (event) => seen.push(event)),
+  ).resolves.toBe("helm-1");
+  const sent = backend.callsTo("helm_releases_subscribe")[0] ?? {};
+  expect(sent.clusterId).toBe("c1");
+  const onEvent = sent.onEvent as Channel<HelmReleasesEvent>;
+  onEvent.onmessage({ type: "changed" });
+  onEvent.onmessage({ type: "forbidden", message: "no" });
+  expect(seen).toEqual([
+    { type: "changed" },
+    { type: "forbidden", message: "no" },
+  ]);
+  await api.helmReleasesUnsubscribe("helm-1");
+  expect(backend.callsTo("helm_releases_unsubscribe")[0]).toEqual({
+    subscriptionId: "helm-1",
+  });
+});
+
 const ADD: HelmRepoAdd = {
   name: "bitnami",
   url: "https://charts.example/stable",
@@ -277,6 +302,11 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
     "helm_release_history",
     () => api.helmReleaseHistory("c1", "shop", "web"),
     { clusterId: "c1", namespace: "shop", name: "web" },
+  ],
+  [
+    "helm_releases_unsubscribe",
+    () => api.helmReleasesUnsubscribe("helm-1"),
+    { subscriptionId: "helm-1" },
   ],
   [
     "helm_install_preview",
