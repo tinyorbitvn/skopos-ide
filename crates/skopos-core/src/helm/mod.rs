@@ -3,6 +3,7 @@
 //! commands pass the per-context kubeconfig that F3 writes.
 mod actions;
 mod charts;
+mod refusal;
 mod releases;
 mod repos;
 
@@ -14,6 +15,7 @@ pub use releases::{
 pub use repos::{HelmRepo, HelmRepoAdd};
 
 use charts::{HelmDirs, RepoIndex};
+use refusal::RefusalMemo;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -329,6 +331,8 @@ pub(crate) struct Helm {
     dirs: Mutex<HashMap<PathBuf, HelmDirs>>,
     /// Parsed repo indexes by file, with the stamp the file had when it was read.
     indexes: Mutex<HashMap<PathBuf, (FileStamp, Arc<RepoIndex>)>>,
+    /// Clusters that refused `helm list --all-namespaces`, for a minute each.
+    refusals: Mutex<RefusalMemo>,
 }
 
 impl Helm {
@@ -338,6 +342,7 @@ impl Helm {
             homes: Mutex::new(None),
             dirs: Mutex::new(HashMap::new()),
             indexes: Mutex::new(HashMap::new()),
+            refusals: Mutex::new(RefusalMemo::default()),
         }
     }
 

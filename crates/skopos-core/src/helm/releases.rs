@@ -4,6 +4,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use futures::stream::{self, StreamExt};
 use kube::core::discovery::Scope;
@@ -16,7 +17,8 @@ use serde_yaml_ng::Value as Yaml;
 use ts_rs::TS;
 
 use super::{
-    args, check_name, check_namespace, cluster_args, flag, parse_json, HelmBinary, LooseVersion,
+    args, check_name, check_namespace, cluster_args, flag, lock, parse_json, HelmBinary,
+    LooseVersion,
 };
 use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
@@ -364,7 +366,8 @@ fn sorted(mut releases: Vec<HelmRelease>) -> Vec<HelmRelease> {
 
 impl AppCore {
     /// `None` lists every namespace. When that is forbidden, each namespace the connection
-    /// found is listed instead and the list is partial.
+    /// found is listed instead and the list is partial. The refusal is remembered for a
+    /// minute per connection, so the next lists go straight to the namespaces.
     pub async fn helm_release_list(
         &self,
         id: &ClusterId,
@@ -378,24 +381,39 @@ impl AppCore {
         if let Some(namespaces) = namespaces {
             return self.list_each(&helm, &kubeconfig, namespaces, false).await;
         }
-        match self.list_in(&helm, &kubeconfig, None).await {
-            Ok(releases) => Ok(HelmReleaseList {
-                releases: sorted(releases),
-                partial: false,
-                failed_namespaces: Vec::new(),
-            }),
-            Err(error) if error.code == ErrorCode::Forbidden => {
-                let namespaces = match self.cluster_state(id) {
-                    ConnectionState::Connected { info } => info.namespaces,
-                    _ => Vec::new(),
-                };
-                if namespaces.is_empty() {
-                    return Err(error);
+        let epoch = self.connections().epoch(id)?;
+        let remembered = lock(&self.helm().refusals).recall(id, epoch, Instant::now());
+        let refusal = match remembered {
+            Some(error) => error,
+            None => match self.list_in(&helm, &kubeconfig, None).await {
+                Ok(releases) => {
+                    return Ok(HelmReleaseList {
+                        releases: sorted(releases),
+                        partial: false,
+                        failed_namespaces: Vec::new(),
+                    })
                 }
-                self.list_each(&helm, &kubeconfig, namespaces, true).await
-            }
-            Err(error) => Err(error),
+                Err(error) if error.code == ErrorCode::Forbidden => {
+                    lock(&self.helm().refusals).remember(
+                        id.clone(),
+                        epoch,
+                        Instant::now(),
+                        error.clone(),
+                    );
+                    error
+                }
+                Err(error) => return Err(error),
+            },
+        };
+        let namespaces = match self.cluster_state(id) {
+            ConnectionState::Connected { info } => info.namespaces,
+            _ => Vec::new(),
+        };
+        // Nothing to list instead: the refusal is the answer, as it was before the memo.
+        if namespaces.is_empty() {
+            return Err(refusal);
         }
+        self.list_each(&helm, &kubeconfig, namespaces, true).await
     }
 
     async fn list_in(
