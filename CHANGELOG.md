@@ -9,6 +9,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 - **Control plane health for the Overview (backend):** a new `cluster_control_plane` command reports the API server's version, `/livez` and `/readyz` checks, and the state of etcd, the scheduler, the controller manager, DNS and kube-proxy from their Pods, Leases, Deployments and DaemonSet in `kube-system`. What you may not read is left out instead of failing.
 - **Disk use per node (backend):** a new `nodes_disk_usage` command reads each node's root filesystem use from its kubelet through the API server's node proxy, up to eight nodes at a time; a node that does not answer is left out.
+- **Lighter watched rows (backend):** the rows of Nodes, ConfigMaps, ReplicaSets and CustomResourceDefinitions keep only what the lists, actions and graph read: Nodes drop their image list and most `nodeInfo`, ConfigMaps keep their keys with empty values, ReplicaSets keep the selector, container names and replica counts, and CRDs drop their schemas and conversion webhook. The detail drawer fetches the whole object.
 
 ## [0.8.0] - 2026-11-18
 
