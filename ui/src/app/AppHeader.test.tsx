@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useLocation } from "react-router";
 import { beforeEach, expect, test, vi } from "vitest";
-import { openTerminal } from "../features/dock/openTerminal";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
@@ -132,7 +131,7 @@ test("the Settings route is titled Settings with the cluster's name (P9)", async
 
   expect(text("header-title")).toBe("Settings · prod");
   expect(text("connection-status")).toBe("Connected");
-  expect(screen.getByTestId("header-terminal")).toBeTruthy();
+  expect(screen.queryByTestId("header-terminal")).toBeNull();
   fireEvent.click(screen.getByTestId("header-cluster-settings"));
   expect(text("where")).toBe("/cluster/c1/settings");
 });
@@ -147,15 +146,15 @@ test("an object map keeps the cluster map's title", async () => {
   expect(text("header-title")).toBe("Resource map · prod");
 });
 
-test("a connected cluster: the distribution, Terminal and Disconnect", async () => {
+test("a connected cluster: the distribution and Disconnect, and no Terminal button (spec Q §4)", async () => {
   const ipc = await show(["/cluster/c1/r/core/pods"]);
 
   expect(text("header-title")).toBe("Pods · prod");
   expect(text("connection-status")).toBe("Connected");
   expect(text("header-distribution")).toBe("kind · v1.31.0");
   expect(screen.getByTestId("header-cluster-settings")).toBeTruthy();
-  fireEvent.click(screen.getByTestId("header-terminal"));
-  expect(openTerminal).toHaveBeenCalledWith("c1");
+  expect(screen.queryByTestId("header-terminal")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
   fireEvent.click(screen.getByTestId("cluster-disconnect"));
   await waitFor(() =>
     expect(ipc.callsTo("cluster_disconnect")).toEqual([{ id: "c1" }]),

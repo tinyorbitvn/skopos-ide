@@ -7,7 +7,6 @@ import {
   Power,
   Search,
   Settings,
-  SquareTerminal,
 } from "../design/icons";
 import { useCatalog } from "../stores/catalog";
 import { useConnect } from "../stores/clusters";
@@ -31,28 +30,21 @@ function useFocusedTitle(): string {
   );
 }
 
-/** Terminal and Disconnect on a connected cluster route (spec C §5, item 7). */
+/**
+ * Disconnect on a connected cluster route (spec C §5, item 7). A terminal opens from the
+ * dock's Create menu, the palette or Ctrl+` (spec Q §4).
+ */
 function ConnectedActions({ id }: { id: string }) {
-  const ctx = useCommandContext();
   const { disconnect, busy } = useConnect(id);
   return (
-    <>
-      <Button
-        data-testid="header-terminal"
-        onClick={() => runCommand("terminal", ctx)}
-      >
-        <SquareTerminal size={14} aria-hidden="true" />
-        Terminal
-      </Button>
-      <Button
-        data-testid="cluster-disconnect"
-        disabled={busy}
-        onClick={() => void disconnect()}
-      >
-        <Power size={14} aria-hidden="true" />
-        Disconnect
-      </Button>
-    </>
+    <Button
+      data-testid="cluster-disconnect"
+      disabled={busy}
+      onClick={() => void disconnect()}
+    >
+      <Power size={14} aria-hidden="true" />
+      Disconnect
+    </Button>
   );
 }
 
