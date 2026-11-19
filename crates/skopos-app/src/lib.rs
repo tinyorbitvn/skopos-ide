@@ -28,7 +28,7 @@ const KEPT_LOG_FILES: usize = 7;
 /// directory the app still runs, without a log file.
 fn init_logging(paths: &AppPaths) -> Option<WorkerGuard> {
     // The appender lists the directory for pruning before it would create it.
-    let appender = std::fs::create_dir_all(&paths.logs)
+    let appender = skopos_core::paths::create_private_dir(&paths.logs)
         .map_err(|e| e.to_string())
         .and_then(|()| {
             RollingFileAppender::builder()

@@ -64,7 +64,12 @@ impl AppPaths {
 
     pub fn ensure_dirs(&self) -> CoreResult<()> {
         for dir in [&self.config, &self.data, &self.logs, &self.cache] {
-            std::fs::create_dir_all(dir).map_err(|e| {
+            let created = if dir == &self.logs {
+                create_private_dir(dir)
+            } else {
+                std::fs::create_dir_all(dir)
+            };
+            created.map_err(|e| {
                 let mut err = IpcError::from(e);
                 // Shown to the user when the app cannot start, where the bare OS error says too little.
                 err.message = format!("cannot create {}: {}", dir.display(), err.message);
@@ -73,6 +78,19 @@ impl AppPaths {
         }
         Ok(())
     }
+}
+
+/// Creates the directory, and its parents, and keeps it to its owner where the system has
+/// file modes: what it holds, such as log lines that name clusters and their objects, is
+/// not for the machine's other accounts. A directory that exists is closed as well.
+pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -88,6 +106,37 @@ mod tests {
         p.ensure_dirs().unwrap();
         assert!(p.config.is_dir() && p.data.is_dir() && p.logs.is_dir() && p.cache.is_dir());
         assert_eq!(p.home, home);
+    }
+
+    #[cfg(unix)]
+    fn mode(dir: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(dir).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_dirs_keeps_the_logs_to_their_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let p = AppPaths::under(&root.path().join("r"), root.path());
+
+        p.ensure_dirs().unwrap();
+
+        assert_eq!(mode(&p.logs), 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_dirs_closes_a_logs_directory_an_earlier_version_left_open() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let p = AppPaths::under(&root.path().join("r"), root.path());
+        std::fs::create_dir_all(&p.logs).unwrap();
+        std::fs::set_permissions(&p.logs, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        p.ensure_dirs().unwrap();
+
+        assert_eq!(mode(&p.logs), 0o700);
     }
 
     #[test]
