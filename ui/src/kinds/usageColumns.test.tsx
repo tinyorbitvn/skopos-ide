@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { expect, test } from "vitest";
+import { NO_ACCESS_TIP } from "../features/metrics/useNodesDisk";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { UsageItem } from "../ipc/generated/UsageItem";
 import { usageItem } from "../test/metrics";
@@ -128,7 +129,7 @@ function infoFor(
   };
 }
 
-test("Pods and Nodes show CPU and Memory where spec §11 puts them", () => {
+test("Pods and Nodes show CPU and Memory where spec §11 puts them, and Nodes Disk too", () => {
   const shown = (plural: string, kind: string, namespaced: boolean) =>
     (kindSpec("", plural)?.columns?.(infoFor(plural, kind, namespaced)) ?? [])
       .filter((c) => !c.defaultHidden)
@@ -151,6 +152,7 @@ test("Pods and Nodes show CPU and Memory where spec §11 puts them", () => {
     "Version",
     "CPU",
     "Memory",
+    "Disk",
     "Internal IP",
     "Taints",
     "Age",
@@ -226,4 +228,40 @@ test("a full node's bar turns critical, and it never draws past the end", () => 
   expect(bar.getAttribute("data-level")).toBe("critical");
   expect(bar.getAttribute("aria-valuenow")).toBe("100");
   expect(screen.getByTestId("usage-cpu").textContent).toBe("110%");
+});
+
+test("a node's Disk is a bar of its root filesystem, and says when kubelets are out of reach", () => {
+  const disk = (forbidden: boolean): UsageView => ({
+    items: null,
+    notServed: false,
+    disk: {
+      items: forbidden
+        ? null
+        : new Map([
+            [
+              "node-1",
+              {
+                name: "node-1",
+                usedBytes: 30 * 2 ** 30,
+                capacityBytes: 100 * 2 ** 30,
+              },
+            ],
+          ]),
+      forbidden,
+    },
+  });
+  const [, , diskColumn] = nodeUsageColumns(disk(false));
+  expect(diskColumn.header).toBe("Disk");
+  render(<>{diskColumn.render(NODE)}</>);
+  const cell = screen.getByTestId("usage-disk");
+  expect(cell.textContent).toBe("30%");
+  expect(cell.getAttribute("title")).toBe("30 GiB of 100 GiB");
+  cleanup();
+
+  const [, , blocked] = nodeUsageColumns(disk(true));
+  render(<>{blocked.render(NODE)}</>);
+  expect(screen.getByTestId("usage-disk").textContent).toBe("—");
+  expect(screen.getByTestId("usage-disk").getAttribute("title")).toBe(
+    NO_ACCESS_TIP,
+  );
 });

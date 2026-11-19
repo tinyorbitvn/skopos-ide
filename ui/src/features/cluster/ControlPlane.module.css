@@ -1,0 +1,83 @@
+/* The Overview's Control plane (spec: cluster Overview). */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font: var(--type-subheading);
+}
+
+.list {
+  display: grid;
+  grid-template-columns: max-content max-content max-content 1fr;
+  align-items: center;
+  gap: var(--space-4) var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each row lays its four parts on the list's columns. */
+.row {
+  display: contents;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.state {
+  color: var(--text-secondary);
+}
+
+.detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.checks summary {
+  width: max-content;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.checks summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
+.checkList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3) var(--space-6);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkList li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mono {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

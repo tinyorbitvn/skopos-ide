@@ -24,6 +24,7 @@ import { DetailDrawer, isDrawerEscape } from "../details/DetailDrawer";
 import { drawerTabOf } from "../details/drawerHistory";
 import { useDrawerHistory } from "../details/useDrawerHistory";
 import { useListUsage } from "../metrics/useListUsage";
+import { useNodesDisk } from "../metrics/useNodesDisk";
 import { DeleteDialog } from "./DeleteDialog";
 import { cutText, FilterTokens } from "./FilterTokens";
 import {
@@ -174,8 +175,18 @@ export function ResourceScreen(props: {
     [namespaceRows, tokens, join, typed],
   );
 
-  // CPU and Memory for Pods and Nodes; undefined for every other kind.
-  const usage = useListUsage(clusterId, resource, namespaces);
+  // CPU and Memory for Pods and Nodes, and Disk for Nodes; undefined for every other kind.
+  const metricsUsage = useListUsage(clusterId, resource, namespaces);
+  const isNodes = resource.group === "" && resource.plural === "nodes";
+  const nodeNames = useMemo(
+    () => (isNodes ? list.items.map((o) => o.metadata.name).sort() : null),
+    [isNodes, list.items],
+  );
+  const disk = useNodesDisk(clusterId, nodeNames);
+  const usage = useMemo(
+    () => (metricsUsage && disk ? { ...metricsUsage, disk } : metricsUsage),
+    [metricsUsage, disk],
+  );
   // Each workload's Pods, for the workload kinds' Status (spec N3); undefined otherwise.
   const owned = useOwnedPods(clusterId, info);
   const columns = useMemo<TableColumn<KubeObject>[]>(() => {
