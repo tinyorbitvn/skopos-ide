@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogEvent } from "../../ipc/generated/LogEvent";
 import type { LogLine } from "../../ipc/generated/LogLine";
@@ -12,7 +19,7 @@ import {
   resetDockForTest,
   useDock,
 } from "../../stores/dock";
-import { resetResourcesForTest } from "../../stores/resources";
+import { resetResourcesForTest, useResourceList } from "../../stores/resources";
 import { type Backend, flush, mockBackend } from "../../test/ipc";
 import { mockElementSize } from "../../test/size";
 import { LogsTab } from "./LogsTab";
@@ -38,6 +45,14 @@ function backend(extra: Parameters<typeof mockBackend>[0] = {}): Backend {
     }) => {
       watchers.set(a.resource.plural, (event) => a.onEvent.onmessage(event));
       return `sub-${a.resource.plural}`;
+    },
+    // A tab's own Pod or workload is read with a single-object watch.
+    resources_subscribe_object: (a: {
+      resource: { plural: string };
+      onEvent: { onmessage(event: WatchEvent): void };
+    }) => {
+      watchers.set(a.resource.plural, (event) => a.onEvent.onmessage(event));
+      return `object-${a.resource.plural}`;
     },
     resources_unsubscribe: () => null,
     ...extra,
@@ -461,23 +476,60 @@ test("the empty list reads Connecting, then that the selection has no lines", as
   expect(status()).toBe("Paused");
 });
 
-test("a Pending Pod says so, with the scheduler's message", async () => {
-  const b = backend({
-    resource_get: () => ({
-      ...pod("web-7d9f-aaaaa"),
-      status: {
-        phase: "Pending",
-        conditions: [
-          {
-            type: "PodScheduled",
-            status: "False",
-            reason: "Unschedulable",
-            message: "0/1 nodes are available: 1 Insufficient cpu.",
-          },
-        ],
-      },
-    }),
-  });
+/** A Pending Pod as `resource_get` and a single-object watch send it, whole. */
+function pendingWhole(): KubeObject {
+  return {
+    ...pod("web-7d9f-aaaaa"),
+    status: {
+      phase: "Pending",
+      conditions: [
+        {
+          type: "PodScheduled",
+          status: "False",
+          reason: "Unschedulable",
+          message: "0/1 nodes are available: 1 Insufficient cpu.",
+        },
+      ],
+    },
+  };
+}
+
+test("a Pod tab watches its one Pod, not every Pod", async () => {
+  const b = backend();
+  await show(POD_TAB);
+  await objects("pods", [pod("web-7d9f-aaaaa", { containers: ["a", "b"] })]);
+  expect(b.callsTo("resources_subscribe")).toEqual([]);
+  expect(b.callsTo("resources_subscribe_object")).toEqual([
+    {
+      clusterId: "c1",
+      resource: PODS,
+      namespace: "shop",
+      name: "web-7d9f-aaaaa",
+      onEvent: expect.anything(),
+    },
+  ]);
+  // The containers come from the watched Pod.
+  expect(await openSelect("logs-container")).toEqual(
+    expect.arrayContaining(["a", "b"]),
+  );
+});
+
+test("a Pending Pod says so, with the scheduler's message from its whole object", async () => {
+  const b = backend();
+  await show(POD_TAB);
+  await objects("pods", [pendingWhole()]);
+  await act(flush);
+
+  expect(empty()).toBe(
+    "No logs yet. The Pod is Pending. 0/1 nodes are available: 1 Insufficient cpu.",
+  );
+  expect(b.callsTo("resource_get")).toEqual([]);
+});
+
+test("a Pending Pod read from a Pods list another view holds is fetched whole", async () => {
+  const b = backend({ resource_get: () => pendingWhole() });
+  renderHook(() => useResourceList("c1", PODS));
+  await act(flush);
   await show(POD_TAB);
   await objects("pods", [pod("web-7d9f-aaaaa", { phase: "Pending" })]);
   await act(flush);
@@ -485,6 +537,7 @@ test("a Pending Pod says so, with the scheduler's message", async () => {
   expect(empty()).toBe(
     "No logs yet. The Pod is Pending. 0/1 nodes are available: 1 Insufficient cpu.",
   );
+  expect(b.callsTo("resources_subscribe_object")).toEqual([]);
   expect(b.callsTo("resource_get")).toEqual([
     {
       clusterId: "c1",

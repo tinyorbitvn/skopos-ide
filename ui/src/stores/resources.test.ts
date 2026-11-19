@@ -11,6 +11,9 @@ import {
   LINGER_MS,
   type ResourceListState,
   resetResourcesForTest,
+  rowsAreTrimmed,
+  useHeldList,
+  useObjectWatch,
   useResourceList,
 } from "./resources";
 
@@ -714,4 +717,222 @@ test("findResource matches group and plural", () => {
   const all = [info("", "pods"), info("apps", "deployments")];
   expect(findResource(all, "apps", "deployments")).toBe(all[1]);
   expect(findResource(all, "apps", "pods")).toBeUndefined();
+});
+
+test("the trimmed kinds are core Pods, Nodes and ConfigMaps, apps ReplicaSets and CRDs", () => {
+  const ref = (group: string, plural: string): ResourceRef => ({
+    ...pods,
+    group,
+    plural,
+  });
+  for (const [group, plural] of [
+    ["", "pods"],
+    ["", "nodes"],
+    ["", "configmaps"],
+    ["apps", "replicasets"],
+    ["apiextensions.k8s.io", "customresourcedefinitions"],
+  ]) {
+    expect(rowsAreTrimmed(ref(group, plural))).toBe(true);
+  }
+  for (const [group, plural] of [
+    ["", "events"],
+    ["events.k8s.io", "events"],
+    ["", "secrets"],
+    ["", "services"],
+    ["apps", "deployments"],
+    ["apps", "pods"],
+    ["metrics.k8s.io", "nodes"],
+    ["", "replicasets"],
+    ["example.com", "configmaps"],
+  ]) {
+    expect(rowsAreTrimmed(ref(group, plural))).toBe(false);
+  }
+});
+
+const nodes: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "nodes",
+  kind: "Node",
+  namespaced: false,
+};
+
+interface ObjectSub {
+  args: Record<string, unknown>;
+  send(event: WatchEvent): Promise<void>;
+}
+
+/** A backend with list watches in `subs` and single-object watches in `objectSubs`. */
+function setupObjects(refuseObject?: { code: string; message: string }) {
+  const subs: Sub[] = [];
+  const objectSubs: ObjectSub[] = [];
+  const deliver =
+    (onEvent: { onmessage: (e: WatchEvent) => void }) =>
+    async (event: WatchEvent) => {
+      await act(async () => {
+        onEvent.onmessage(event);
+        await flush();
+      });
+    };
+  const backend = mockBackend({
+    resources_subscribe: (args: {
+      clusterId: string;
+      resource: ResourceRef;
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      subs.push({
+        clusterId: args.clusterId,
+        resource: args.resource,
+        send: deliver(args.onEvent),
+      });
+      return `sub-${subs.length}`;
+    },
+    resources_subscribe_object: (
+      args: Record<string, unknown> & {
+        onEvent: { onmessage: (e: WatchEvent) => void };
+      },
+    ) => {
+      if (refuseObject) throw refuseObject;
+      const { onEvent, ...rest } = args;
+      objectSubs.push({ args: rest, send: deliver(onEvent) });
+      return `object-${objectSubs.length}`;
+    },
+    resources_unsubscribe: () => null,
+  });
+  return { subs, objectSubs, backend };
+}
+
+async function mountObject(
+  resource: ResourceRef | null,
+  namespace: string | null,
+  name: string | null,
+  clusterId = "a",
+) {
+  const hook = renderHook(
+    (props: { r: ResourceRef | null; ns: string | null; n: string | null }) =>
+      useObjectWatch(clusterId, props.r, props.ns, props.n),
+    { initialProps: { r: resource, ns: namespace, n: name } },
+  );
+  await act(flush);
+  return hook;
+}
+
+test("an object watch subscribes to the one object and holds it while it exists", async () => {
+  const { objectSubs, subs } = setupObjects();
+  const { result } = await mountObject(pods, "default", "web");
+  expect(subs).toHaveLength(0);
+  expect(objectSubs.map((s) => s.args)).toEqual([
+    { clusterId: "a", resource: pods, namespace: "default", name: "web" },
+  ]);
+  expect(result.current.loading).toBe(true);
+  await objectSubs[0].send(status("syncing"));
+  await objectSubs[0].send(snapshot(pod("web")));
+  await objectSubs[0].send(status("live"));
+  expect(result.current).toMatchObject({ loading: false, status: "live" });
+  expect(result.current.items).toEqual([pod("web")]);
+  await objectSubs[0].send({
+    type: "batch",
+    upserts: [],
+    deletes: [{ namespace: "default", name: "web" }],
+  });
+  expect(result.current.items).toEqual([]);
+});
+
+test("an object watch of a cluster-scoped kind sends no namespace", async () => {
+  const { objectSubs } = setupObjects();
+  await mountObject(nodes, "default", "node-1");
+  expect(objectSubs[0].args).toMatchObject({ namespace: null, name: "node-1" });
+});
+
+test("object watches are shared per object, and linger after the last unmount", async () => {
+  fakeClock();
+  const { objectSubs, backend } = setupObjects();
+  const first = await mountObject(pods, "default", "web");
+  const second = await mountObject(pods, "default", "web");
+  const other = await mountObject(pods, "default", "api");
+  expect(objectSubs).toHaveLength(2);
+  await objectSubs[0].send(snapshot(pod("web")));
+  expect(second.result.current.items).toEqual([pod("web")]);
+  first.unmount();
+  second.unmount();
+  other.unmount();
+  await act(flush);
+  // Opened again within the linger, it shows at once with no new subscription.
+  const again = await mountObject(pods, "default", "web");
+  expect(objectSubs).toHaveLength(2);
+  expect(again.result.current.items).toEqual([pod("web")]);
+  again.unmount();
+  await act(async () => {
+    vi.advanceTimersByTime(LINGER_MS);
+    await flush();
+  });
+  expect(
+    backend.callsTo("resources_unsubscribe").map((a) => a.subscriptionId),
+  ).toEqual(["object-2", "object-1"]);
+});
+
+test("a refused object watch is notServed with the backend's message", async () => {
+  setupObjects({ code: "InvalidInput", message: "namespace does not match" });
+  const { result } = await mountObject(pods, "default", "web");
+  await act(flush);
+  expect(result.current).toMatchObject({
+    status: "notServed",
+    message: "namespace does not match",
+    loading: false,
+  });
+});
+
+test("a forbidden object watch is final, and the next mount subscribes again", async () => {
+  const { objectSubs } = setupObjects();
+  const first = await mountObject(pods, "default", "web");
+  await objectSubs[0].send(status("forbidden", "watch is forbidden"));
+  expect(first.result.current).toMatchObject({
+    status: "forbidden",
+    message: "watch is forbidden",
+    loading: false,
+  });
+  first.unmount();
+  await mountObject(pods, "default", "web");
+  expect(objectSubs).toHaveLength(2);
+});
+
+test("a cluster disconnect ends its object watches", async () => {
+  fakeClock();
+  connectClusters({ id: "a", name: "a" });
+  const { objectSubs, backend } = setupObjects();
+  const first = await mountObject(pods, "default", "web");
+  await objectSubs[0].send(snapshot(pod("web")));
+  first.unmount();
+  await act(flush);
+  setClusterState("a", { status: "disconnected" });
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "object-1" },
+  ]);
+});
+
+test("a held list is read without holding it, and is null once dropped", async () => {
+  fakeClock();
+  const { subs, backend } = setupObjects();
+  const peek = renderHook(() => useHeldList("a", pods));
+  await act(flush);
+  expect(peek.result.current).toBeNull();
+  const list = await mount("a", pods);
+  expect(peek.result.current?.loading).toBe(true);
+  await subs[0].send(snapshot(pod("web")));
+  expect(peek.result.current?.items).toEqual([pod("web")]);
+  // The peek holds nothing: the list lingers, then goes.
+  list.unmount();
+  await act(flush);
+  expect(peek.result.current?.items).toEqual([pod("web")]);
+  await act(async () => {
+    vi.advanceTimersByTime(LINGER_MS);
+    await flush();
+  });
+  expect(backend.callsTo("resources_unsubscribe")).toEqual([
+    { subscriptionId: "sub-1" },
+  ]);
+  expect(peek.result.current).toBeNull();
+  // An object watch is no list.
+  await mountObject(pods, "default", "web");
+  expect(peek.result.current).toBeNull();
 });

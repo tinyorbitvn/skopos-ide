@@ -123,6 +123,14 @@ function fakeBackend(
       subs.set(a.resource.plural, a.onEvent.onmessage);
       return `sub-${a.resource.plural}`;
     },
+    // A linked object whose list nobody holds is read with a single-object watch.
+    resources_subscribe_object: (a: {
+      resource: ResourceRef;
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      subs.set(a.resource.plural, a.onEvent.onmessage);
+      return `object-${a.resource.plural}`;
+    },
     resources_unsubscribe: () => null,
     resource_events: () => [],
     resource_delete: (a: {
@@ -1390,13 +1398,14 @@ test("a drawer opened with a drawer tab in the router state starts on it; a row 
 });
 
 test("a drawer tab the object does not offer starts the drawer on Overview", async () => {
-  const CONFIGMAPS = info({ plural: "configmaps", kind: "ConfigMap" });
+  // Secrets have no map, and their rows are whole, so the drawer shows the row.
+  const SECRETS = info({ plural: "secrets", kind: "Secret" });
   await showAt(
     fakeBackend(),
     "?object=team-a%2Fsettings",
     { drawerTab: "map" },
     [pod("settings", "team-a")],
-    CONFIGMAPS,
+    SECRETS,
   );
   expect(
     screen.getByTestId("detail-tab-overview").getAttribute("aria-selected"),
