@@ -132,3 +132,40 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* A header cell holds the handle that resizes its column. */
+.resizable {
+  position: relative;
+}
+
+/* A 9px hit area on the cell's right edge, with a 2px line that shows on hover. */
+.resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizeLine {
+  flex: 0 0 2px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.resize:hover .resizeLine {
+  background: var(--border-strong-color);
+}
+
+.resize[data-active="true"] .resizeLine {
+  background: var(--border-accent);
+}
+
+.resize:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus-ring-color);
+}

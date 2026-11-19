@@ -4,6 +4,7 @@ import {
   createContext,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
   useContext,
   useEffect,
@@ -42,6 +43,14 @@ const CLOCK_TICK_MS = 30_000;
 /** A row younger than this has its age count every second. */
 const FRESH_MS = 60_000;
 const FRESH_TICK_MS = 1000;
+/** The narrowest and widest a column can be dragged to. */
+const MIN_COLUMN_PX = 48;
+const MAX_COLUMN_PX = 2000;
+/** One arrow press on a column's handle moves its edge this far; with Shift, four times. */
+const COLUMN_KEY_STEP = 16;
+
+/** Widths given to columns by their handles, in pixels, by column id. */
+export type ColumnWidths = Readonly<Record<string, number>>;
 
 let clockNow = Date.now();
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -105,6 +114,83 @@ function trackMinimum(width: number | string): number {
   return px ? Number(px[1]) : 0;
 }
 
+/**
+ * The handle on a header cell's right edge: drag it, or use Left and Right (Shift for
+ * bigger steps). A double-click gives the column back its own width. A drag or key press
+ * starts from the width given by a handle, else the column's own width in pixels, else,
+ * for a column that shares the spare room, the width its cell has on screen.
+ */
+function ColumnResizer(props: {
+  header: string;
+  width: number | undefined;
+  /** The column's own width, when it is in pixels. */
+  base: number | undefined;
+  onResize(width: number | null): void;
+  testId: string;
+}) {
+  const { width, base, onResize } = props;
+  const drag = useRef<{ fromX: number; from: number } | null>(null);
+  const [active, setActive] = useState(false);
+  const set = (next: number) =>
+    onResize(Math.round(Math.min(MAX_COLUMN_PX, Math.max(MIN_COLUMN_PX, next))));
+  const current = (handle: HTMLElement) =>
+    width ??
+    base ??
+    handle.parentElement?.getBoundingClientRect().width ??
+    MIN_COLUMN_PX;
+
+  function start(event: PointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    drag.current = { fromX: event.clientX, from: current(event.currentTarget) };
+    setActive(true);
+  }
+
+  function move(event: PointerEvent<HTMLDivElement>): void {
+    if (!drag.current) return;
+    set(drag.current.from + event.clientX - drag.current.fromX);
+  }
+
+  function stop(): void {
+    drag.current = null;
+    setActive(false);
+  }
+
+  function key(event: KeyboardEvent<HTMLDivElement>): void {
+    const step = event.shiftKey ? COLUMN_KEY_STEP * 4 : COLUMN_KEY_STEP;
+    if (event.key === "ArrowLeft") set(current(event.currentTarget) - step);
+    else if (event.key === "ArrowRight") set(current(event.currentTarget) + step);
+    else return;
+    event.preventDefault();
+  }
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: an hr cannot be dragged or focused.
+    <div
+      className={styles.resize}
+      role="separator"
+      aria-label={`Resize ${props.header}`}
+      aria-orientation="vertical"
+      aria-valuenow={width}
+      aria-valuemin={MIN_COLUMN_PX}
+      aria-valuemax={MAX_COLUMN_PX}
+      data-active={active}
+      title="Drag to resize, double-click to reset"
+      tabIndex={0}
+      onPointerDown={start}
+      onPointerMove={move}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onDoubleClick={() => onResize(null)}
+      onKeyDown={key}
+      data-testid={props.testId}
+    >
+      <span className={styles.resizeLine} />
+    </div>
+  );
+}
+
 /** True for a click or key press meant for a control inside the row, or a portal. */
 function belongsToControl(event: MouseEvent | KeyboardEvent): boolean {
   const target = event.target as Element;
@@ -120,6 +206,12 @@ export function VirtualTable<T>(props: {
   rowKey(row: T): string;
   /** Replaces what `defaultHidden` would hide. */
   hiddenColumns?: string[];
+  /**
+   * Widths given to columns by dragging their handles. Leave out for a table that keeps
+   * its own, which last until it unmounts.
+   */
+  columnWidths?: ColumnWidths;
+  onColumnWidthsChange?(widths: ColumnWidths): void;
   /** Leave out for a table that keeps its own sort. */
   sort?: TableSort | null;
   onSortChange?(s: TableSort | null): void;
@@ -149,6 +241,18 @@ export function VirtualTable<T>(props: {
 
   const [ownSort, setOwnSort] = useState<TableSort | null>(null);
   const sort = props.sort !== undefined ? props.sort : ownSort;
+
+  const [ownWidths, setOwnWidths] = useState<ColumnWidths>({});
+  const widths = props.columnWidths ?? ownWidths;
+  /** Null gives the column back the width its definition asks for. */
+  function resize(id: string, width: number | null): void {
+    const next = Object.fromEntries(
+      Object.entries(widths).filter(([column]) => column !== id),
+    );
+    if (width !== null) next[id] = width;
+    setOwnWidths(next);
+    props.onColumnWidthsChange?.(next);
+  }
 
   const columns = useMemo(() => {
     const hidden = props.hiddenColumns;
@@ -237,9 +341,10 @@ export function VirtualTable<T>(props: {
   }
 
   const selectable = onSelectedChange !== undefined;
-  const tracks = columns.map((c) => track(c.width));
+  const widthOf = (c: TableColumn<T>) => widths[c.id] ?? c.width;
+  const tracks = columns.map((c) => track(widthOf(c)));
   const minWidth = columns.reduce(
-    (sum, c) => sum + trackMinimum(c.width),
+    (sum, c) => sum + trackMinimum(widthOf(c)),
     selectable ? SELECT_TRACK_PX : 0,
   );
   const layout = {
@@ -285,8 +390,10 @@ export function VirtualTable<T>(props: {
                   className={
                     c.stickyEnd
                       ? `${styles.cell} ${styles.stickyEnd}`
-                      : styles.cell
+                      : `${styles.cell} ${styles.resizable}`
                   }
+                  // Named by its header alone: the handle inside it has a name of its own.
+                  aria-label={c.header}
                   aria-sort={
                     active
                       ? active.dir === "asc"
@@ -308,6 +415,15 @@ export function VirtualTable<T>(props: {
                     </button>
                   ) : (
                     c.header
+                  )}
+                  {c.stickyEnd ? null : (
+                    <ColumnResizer
+                      header={c.header}
+                      width={widths[c.id]}
+                      base={typeof c.width === "number" ? c.width : undefined}
+                      onResize={(width) => resize(c.id, width)}
+                      testId={`column-resize-${c.id}`}
+                    />
                   )}
                 </th>
               );

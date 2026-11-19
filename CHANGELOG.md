@@ -7,6 +7,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **Resize table columns:** drag the right edge of a column's header, or focus it and use Left and Right, to make the column wider or narrower; a double-click gives it back its own width. Each kind's list keeps the widths it was given, after a restart too.
 - **Remove a key with an icon:** each key of a Secret or ConfigMap has a trash icon instead of a Remove button, and a removed key shows an undo icon.
 
 ## [0.8.0] - 2026-11-18

@@ -520,6 +520,64 @@ describe("resource browsing on a real cluster", () => {
     await gone("detail-drawer");
   });
 
+  it("resizes a column by dragging its edge, keeps its width per kind, and resets it", async () => {
+    /** The header cell's width on screen and the width its handle reports. */
+    const age = () =>
+      browser.execute(() => {
+        const handle = document.querySelector('[data-testid="column-resize-age"]');
+        const now = handle?.getAttribute("aria-valuenow");
+        return {
+          cell: Math.round(handle?.parentElement?.getBoundingClientRect().width ?? 0),
+          given: now ? Number(now) : null,
+        };
+      });
+
+    await openResource(PODS, "Pod");
+    await shown("column-resize-age");
+    const before = await age();
+    expect(before.given).toBeNull();
+
+    // A real drag: press on the handle, move 60 px to the right in steps, release.
+    const handle = await byTestId("column-resize-age");
+    const at = await handle.getLocation();
+    const size = await handle.getSize();
+    const x = Math.round(at.x + size.width / 2);
+    const y = Math.round(at.y + size.height / 2);
+    await browser
+      .action("pointer", { parameters: { pointerType: "mouse" } })
+      .move({ x, y })
+      .down({ button: 0 })
+      .move({ x: x + 20, y, duration: 50 })
+      .move({ x: x + 40, y, duration: 50 })
+      .move({ x: x + 60, y, duration: 50 })
+      .up({ button: 0 })
+      .perform();
+    await browser.waitUntil(async () => (await age()).given === before.cell + 60, {
+      timeoutMsg: "the drag never made the Age column 60 px wider",
+    });
+    expect((await age()).cell).toBe(before.cell + 60);
+
+    // Another kind has its own widths; Pods come back with the width given.
+    await openResource(CONFIGMAPS, "ConfigMap");
+    await shown("column-resize-age");
+    expect((await age()).given).toBeNull();
+    await openResource(PODS, "Pod");
+    await browser.waitUntil(async () => (await age()).given === before.cell + 60, {
+      timeoutMsg: "the Pod list lost the Age column's width",
+    });
+
+    // WebKitWebDriver's doubleClick sends no dblclick event, so the test sends it itself.
+    await browser.execute(() => {
+      document
+        .querySelector('[data-testid="column-resize-age"]')
+        ?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 }));
+    });
+    await browser.waitUntil(async () => (await age()).given === null, {
+      timeoutMsg: "a double-click never reset the Age column",
+    });
+    expect((await age()).cell).toBe(before.cell);
+  });
+
   it("back and forward navigate between resource views", async () => {
     await openResource(PODS, "Pod");
     await openResource(CONFIGMAPS, "ConfigMap");

@@ -348,6 +348,33 @@ test("column visibility persists per kind", async () => {
   expect(screen.getByRole("columnheader", { name: /Age/ })).toBeTruthy();
 });
 
+test("column widths persist per kind", async () => {
+  const fake = fakeBackend();
+  const first = await show(fake, [pod("a")]);
+  const age = () => screen.getByTestId("column-resize-age");
+  fireEvent.keyDown(age(), { key: "ArrowRight" });
+  const width = Number(age().getAttribute("aria-valuenow"));
+  expect(width).toBeGreaterThan(0);
+  await waitFor(() =>
+    expect(fake.uiState["column-widths:/pods"]).toEqual({ age: width }),
+  );
+  first.unmount();
+  resetResourcesForTest();
+
+  // Same kind on another cluster: the same width.
+  const again = await show(fake, [pod("a")], PODS, "c2");
+  await waitFor(() =>
+    expect(age().getAttribute("aria-valuenow")).toBe(String(width)),
+  );
+  again.unmount();
+  resetResourcesForTest();
+
+  // Another kind: its own width.
+  await show(fake, [pod("a")], DEPLOYMENTS);
+  await act(flush);
+  expect(age().getAttribute("aria-valuenow")).toBeNull();
+});
+
 test("search filters rows", async () => {
   const fake = fakeBackend();
   await show(fake, [
