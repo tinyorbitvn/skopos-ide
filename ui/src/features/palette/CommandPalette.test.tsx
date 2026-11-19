@@ -21,6 +21,7 @@ import {
   resetWindowLayoutForTest,
   useWindowLayout,
 } from "../../stores/windowLayout";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { clusterEntry, emitEvent, mockBackend } from "../../test/ipc";
 import { CommandPalette, useDebouncedQuery } from "./CommandPalette";
 
@@ -616,4 +617,53 @@ test("useDebouncedQuery holds a large list's query back 100 ms, and a small one'
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("the palette is the design's: 72 px from the top, an inset search field, 34 px rows (spec Q §5)", () => {
+  const decl = (file: string, selector: string, prop: string) =>
+    cssRules(CSS_FILES[file])
+      .find((r) => r.selector === selector)
+      ?.decls.find(([p]) => p === prop)?.[1];
+  const shell = (selector: string, prop: string) =>
+    decl("/src/app/ShellDialog.module.css", selector, prop);
+  const palette = (selector: string, prop: string) =>
+    decl("/src/features/palette/CommandPalette.module.css", selector, prop);
+  expect([
+    shell(".palette", "top"),
+    shell(".palette", "width"),
+    shell(".palette", "max-height"),
+    shell(".palette", "border-radius"),
+    shell(".palette", "box-shadow"),
+  ]).toEqual([
+    "72px",
+    "min(560px, calc(100vw - 32px))",
+    "calc(100% - 104px)",
+    "var(--radius-lg)",
+    "var(--shadow-3)",
+  ]);
+  expect([
+    palette(".inputRow", "height"),
+    palette(".inputRow", "margin"),
+    palette(".inputRow", "border"),
+    palette(".inputRow", "border-radius"),
+    palette(".inputRow", "background"),
+    palette(".inputRow", "border-bottom"),
+    palette(".row", "min-height"),
+    palette(".row", "border-radius"),
+    palette('.row[aria-selected="true"]', "background"),
+    palette(".heading", "font"),
+    palette(".footer", "border-top"),
+  ]).toEqual([
+    "44px",
+    "var(--space-5)",
+    "1px solid var(--border-default)",
+    "var(--radius-sm)",
+    "var(--surface-card)",
+    undefined,
+    "34px",
+    "var(--radius-xs)",
+    "var(--surface-selected)",
+    "var(--type-overline)",
+    "1px solid var(--border-subtle)",
+  ]);
 });

@@ -9,21 +9,21 @@
   animation: scrim-in var(--dur-fast) var(--ease-out);
 }
 
-/* 64 px from the top, 32 px clear at the bottom (Plan decisions). */
+/* 72 px from the top, 32 px clear at the bottom (spec Q §5). */
 .palette {
   position: fixed;
-  top: 64px;
+  top: 72px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  width: min(640px, calc(100vw - var(--space-11)));
-  max-height: calc(100% - 96px);
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100% - 104px);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-4);
+  box-shadow: var(--shadow-3);
   z-index: 901;
 }
 

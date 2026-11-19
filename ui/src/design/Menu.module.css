@@ -1,5 +1,5 @@
 .content {
-  min-width: 180px;
+  min-width: 260px;
   padding: var(--space-3);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -28,6 +28,11 @@
   background: var(--surface-hover);
 }
 
+.item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .item[data-state="checked"] {
   background: var(--surface-selected);
 }
@@ -39,8 +44,8 @@
 
 .separator {
   height: 1px;
-  margin: var(--space-2) 0;
-  background: var(--border-subtle);
+  margin: var(--space-3) var(--space-4);
+  background: var(--divider);
 }
 
 .danger {
