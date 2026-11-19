@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
@@ -24,7 +25,7 @@ use crate::kubeconfig::ClusterId;
 use crate::resources::{invalid, is_path_segment, ResourceRef};
 use follow::{stream_container, ContainerEnd, StreamContext, StreamTarget};
 
-/// Lines wait this long at most before they are sent.
+/// A line waits this long at most, counted from when the batch it joins started.
 const FLUSH_EVERY: Duration = Duration::from_millis(100);
 /// One flush carries at most this many lines. Reading waits for the next flush once it
 /// is reached.
@@ -194,8 +195,10 @@ async fn run_batcher(
     token: CancellationToken,
 ) {
     let mut batch = Batch::default();
-    let mut tick = tokio::time::interval(FLUSH_EVERY);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // When the batch must go out: `FLUSH_EVERY` after it went from empty to non-empty.
+    // `Some` exactly when the batch holds a line, so an idle batcher has no timer armed
+    // and never wakes.
+    let mut deadline: Option<Instant> = None;
     let delivered = loop {
         // A stream may be waiting on `items`, so stopping has to end this wait or it could
         // never see the token, and the batcher ends only after the last stream.
@@ -205,18 +208,28 @@ async fn run_batcher(
         }
         tokio::select! {
             item = items.recv(), if batch.has_room() => match item {
-                Some(StreamItem::Line(line)) => batch.push(line),
+                Some(StreamItem::Line(line)) => {
+                    if batch.lines.is_empty() {
+                        deadline = Some(Instant::now() + FLUSH_EVERY);
+                    }
+                    batch.push(line);
+                }
                 Some(StreamItem::Marker { pod, container, marker, message }) => {
                     let event = LogEvent::Marker { pod, container, marker, message };
-                    if !flush(&mut batch, &events, &flow).await
-                        || events.send(event).await.is_err()
-                    {
+                    let flushed = flush(&mut batch, &events, &flow).await;
+                    deadline = None;
+                    if !flushed || events.send(event).await.is_err() {
                         break false;
                     }
                 }
                 None => break flush(&mut batch, &events, &flow).await,
             },
-            _ = tick.tick() => {
+            // The expression is evaluated even while the branch is disabled, so it must
+            // not panic on `None`.
+            () = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)),
+                if deadline.is_some() =>
+            {
+                deadline = None;
                 if !flush(&mut batch, &events, &flow).await {
                     break false;
                 }
@@ -417,6 +430,10 @@ mod tests {
     use super::*;
     use crate::error::ErrorCode;
     use crate::sessions::flow::PAUSE_AT;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
+    use std::time::Instant as StdInstant;
 
     const LIMIT: Duration = Duration::from_secs(30);
     /// Several flushes long, so a batcher that is still reading would send something.
@@ -719,6 +736,111 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&ended).unwrap(),
             serde_json::json!({ "type": "ended", "reason": "podGone" })
+        );
+    }
+
+    fn plain_line(text: &str) -> StreamItem {
+        StreamItem::Line(LogLine {
+            pod: "p".into(),
+            container: "c".into(),
+            timestamp: None,
+            text: text.into(),
+            truncated: false,
+        })
+    }
+
+    /// Counts how often the runtime wakes the task that polls it.
+    struct Wakes(AtomicUsize);
+
+    impl Wake for Wakes {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_idle_batcher_never_wakes() {
+        let (_items, items_rx) = mpsc::channel::<StreamItem>(ITEM_BACKLOG);
+        let (events, _events_rx) = mpsc::channel(4);
+        let wakes = Arc::new(Wakes(AtomicUsize::new(0)));
+        let waker = Waker::from(wakes.clone());
+        let mut context = Context::from_waker(&waker);
+        let mut batcher = Box::pin(run_batcher(
+            items_rx,
+            events,
+            Arc::new(FlowControl::new()),
+            CancellationToken::new(),
+        ));
+        assert!(matches!(batcher.as_mut().poll(&mut context), Poll::Pending));
+        let after_first_poll = wakes.0.load(Ordering::SeqCst);
+        // Three of the old 100 ms ticks. A timer that is still armed wakes the waker.
+        tokio::time::sleep(FLUSH_EVERY * 3 + Duration::from_millis(50)).await;
+        assert_eq!(wakes.0.load(Ordering::SeqCst), after_first_poll);
+    }
+
+    #[tokio::test]
+    async fn every_line_waits_one_interval_from_its_own_arrival() {
+        let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);
+        let (events, mut events_rx) = mpsc::channel(4);
+        let token = CancellationToken::new();
+        tokio::spawn(run_batcher(
+            items_rx,
+            events,
+            Arc::new(FlowControl::new()),
+            token.clone(),
+        ));
+        // Off the phase of a free-running 100 ms tick, which would flush this line early.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        for text in ["first", "second"] {
+            let sent = StdInstant::now();
+            items.send(plain_line(text)).await.unwrap();
+            let Some(LogEvent::Lines { lines, .. }) = events_rx.recv().await else {
+                panic!("no lines came");
+            };
+            assert_eq!(lines[0].text, text);
+            let waited = sent.elapsed();
+            assert!(waited >= FLUSH_EVERY, "{text} came after {waited:?}");
+            assert!(
+                waited < FLUSH_EVERY * 4,
+                "{text} came late, after {waited:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        token.cancel();
+    }
+
+    #[tokio::test]
+    async fn a_marker_still_flushes_the_batch_at_once() {
+        let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);
+        let (events, mut events_rx) = mpsc::channel(4);
+        tokio::spawn(run_batcher(
+            items_rx,
+            events,
+            Arc::new(FlowControl::new()),
+            CancellationToken::new(),
+        ));
+        let sent = StdInstant::now();
+        items.send(plain_line("before")).await.unwrap();
+        items
+            .send(StreamItem::Marker {
+                pod: "p".into(),
+                container: None,
+                marker: LogMarker::PodAdded,
+                message: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            events_rx.recv().await,
+            Some(LogEvent::Lines { .. })
+        ));
+        assert!(matches!(
+            events_rx.recv().await,
+            Some(LogEvent::Marker { .. })
+        ));
+        assert!(
+            sent.elapsed() < FLUSH_EVERY,
+            "the marker waited for the deadline"
         );
     }
 
