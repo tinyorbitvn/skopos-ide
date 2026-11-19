@@ -3,7 +3,7 @@
 use skopos_core::error::IpcError;
 use skopos_core::helm::{
     ChartSearch, ChartVersion, HelmInfo, HelmInstallRequest, HelmPreview, HelmReleaseDetail,
-    HelmReleaseList, HelmRepo, HelmRepoAdd, HelmRevision, HelmUpgradeRequest,
+    HelmReleaseList, HelmReleasesEvent, HelmRepo, HelmRepoAdd, HelmRevision, HelmUpgradeRequest,
 };
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::sessions::SessionEvent;
@@ -13,6 +13,9 @@ use tokio::sync::mpsc;
 
 use crate::commands::sessions::{forward_output, OUTPUT_BACKLOG};
 use crate::state::AppState;
+
+/// Events wait here while the webview catches up. A `changed` is never queued twice.
+const RELEASES_BACKLOG: usize = 8;
 
 #[tauri::command]
 pub async fn helm_version(state: State<'_, AppState>) -> Result<HelmInfo, IpcError> {
@@ -127,6 +130,39 @@ pub async fn helm_release_history(
         .core
         .helm_release_history(&cluster_id, &namespace, &name)
         .await
+}
+
+/// Sends `changed` to `on_event` when a release changes, and returns the subscription id.
+/// When the channel can no longer be written, as after a webview reload, the subscription
+/// is ended so its watch does not outlive the page.
+#[tauri::command]
+pub async fn helm_releases_subscribe(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    on_event: Channel<HelmReleasesEvent>,
+) -> Result<String, IpcError> {
+    let (tx, mut rx) = mpsc::channel(RELEASES_BACKLOG);
+    let id = state.core.helm_releases_subscribe(&cluster_id, tx)?;
+    let core = state.core.clone();
+    let subscription = id.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if on_event.send(event).is_err() {
+                core.helm_releases_unsubscribe(&subscription);
+                break;
+            }
+        }
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+pub async fn helm_releases_unsubscribe(
+    state: State<'_, AppState>,
+    subscription_id: String,
+) -> Result<(), IpcError> {
+    state.core.helm_releases_unsubscribe(&subscription_id);
+    Ok(())
 }
 
 #[tauri::command]

@@ -2018,7 +2018,8 @@ fn watch_response(
             if ev.rv <= w.last_rv
                 || ev.plural != w.plural
                 || w.ns.as_deref().is_some_and(|n| n != ev.namespace)
-                || !selected(&ev.object, &w.query)
+                // An ERROR event carries a Status, which a selector never matches.
+                || (ev.kind != "ERROR" && !selected(&ev.object, &w.query))
             {
                 continue;
             }
