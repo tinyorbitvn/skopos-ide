@@ -1,0 +1,24 @@
+/* A project's logo, in the variant of the theme: the file is never recoloured (spec Q). */
+.logo {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dark {
+  display: none;
+}
+
+:global([data-theme="dark"]) .light {
+  display: none;
+}
+
+:global([data-theme="dark"]) .dark {
+  display: block;
+}

@@ -1,10 +1,17 @@
 import { expect, test } from "vitest";
+import {
+  MAP_ICON,
+  OVERVIEW_ICON,
+  SECTION_ICONS,
+} from "../features/palette/icons";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import {
   customResourceGroups,
   GATEWAY_GROUPS,
   groupFromSegment,
   groupSegment,
+  NAV_GROUPS,
+  NAV_SCREENS,
   NAV_SECTIONS,
   navItemKey,
   pluralKind,
@@ -33,16 +40,18 @@ function info(
 }
 
 const EXPECTED: [string, string[]][] = [
-  ["nodes", ["/nodes"]],
   ["helm", ["route:helm/charts", "route:helm/releases"]],
   [
-    "argocd",
+    "argo",
     [
       "argoproj.io/applications",
       "argoproj.io/applicationsets",
       "argoproj.io/appprojects",
     ],
   ],
+  ["nodes", ["/nodes"]],
+  ["namespaces", ["/namespaces"]],
+  ["events", ["/events"]],
   [
     "workloads",
     [
@@ -101,17 +110,6 @@ const EXPECTED: [string, string[]][] = [
     ],
   ],
   [
-    "devices",
-    [
-      "resource.k8s.io/resourceclaims",
-      "resource.k8s.io/resourceclaimtemplates",
-      "resource.k8s.io/deviceclasses",
-      "resource.k8s.io/resourceslices",
-    ],
-  ],
-  ["namespaces", ["/namespaces"]],
-  ["events", ["/events"]],
-  [
     "access",
     [
       "/serviceaccounts",
@@ -119,6 +117,15 @@ const EXPECTED: [string, string[]][] = [
       "rbac.authorization.k8s.io/roles",
       "rbac.authorization.k8s.io/clusterrolebindings",
       "rbac.authorization.k8s.io/rolebindings",
+    ],
+  ],
+  [
+    "devices",
+    [
+      "resource.k8s.io/resourceclaims",
+      "resource.k8s.io/resourceclaimtemplates",
+      "resource.k8s.io/deviceclasses",
+      "resource.k8s.io/resourceslices",
     ],
   ],
   ["custom", ["apiextensions.k8s.io/customresourcedefinitions"]],
@@ -133,17 +140,17 @@ test("NAV_SECTIONS covers every F4 resource", () => {
   const actual = NAV_SECTIONS.map((s) => [s.id, s.items.map(navItemKey)]);
   expect(actual).toEqual(EXPECTED);
   expect(NAV_SECTIONS.map((s) => s.label)).toEqual([
-    "Nodes",
     "Helm",
-    "Argo CD",
+    "Argo",
+    "Nodes",
+    "Namespaces",
+    "Events",
     "Workloads",
     "Config",
     "Network",
     "Storage",
-    "Device Resources",
-    "Namespaces",
-    "Events",
     "Access Control",
+    "Device Resources",
     "Custom Resources",
   ]);
   expect(visibleSections(allServed())).toEqual(NAV_SECTIONS);
@@ -182,17 +189,98 @@ test("sections with no visible items disappear; routes need no listable resource
   expect(shape([])).toEqual([helm, ["network", ["route:port-forwards"]]]);
 });
 
-test("Helm and Argo CD sit right under Nodes, before Workloads", () => {
-  const ids = NAV_SECTIONS.map((s) => s.id);
-  expect(ids.slice(0, 4)).toEqual(["nodes", "helm", "argocd", "workloads"]);
+test("Helm is an Apps section of two routes, with its logo", () => {
   expect(NAV_SECTIONS.find((s) => s.id === "helm")).toEqual({
     id: "helm",
     label: "Helm",
+    group: "apps",
+    icon: "helm",
     items: [
       { type: "route", label: "Charts", path: "helm/charts" },
       { type: "route", label: "Releases", path: "helm/releases" },
     ],
   });
+});
+
+test("the sections sit in their groups, in the design's order (spec Q §2)", () => {
+  expect(NAV_GROUPS).toEqual([
+    { id: "top", label: null },
+    { id: "apps", label: "Apps" },
+    { id: "cluster", label: "Cluster" },
+    { id: "resources", label: "Resources" },
+  ]);
+  expect(NAV_SECTIONS.map((s) => [s.group, s.id])).toEqual([
+    ["apps", "helm"],
+    ["apps", "argo"],
+    ["cluster", "nodes"],
+    ["cluster", "namespaces"],
+    ["cluster", "events"],
+    ["resources", "workloads"],
+    ["resources", "config"],
+    ["resources", "network"],
+    ["resources", "storage"],
+    ["resources", "access"],
+    ["resources", "devices"],
+    ["resources", "custom"],
+  ]);
+});
+
+test("Overview and Resource map are the screens of the first group", () => {
+  expect(NAV_SCREENS.map((s) => [s.id, s.label, s.path, s.icon])).toEqual([
+    ["overview", "Overview", "", OVERVIEW_ICON],
+    ["map", "Resource map", "map", MAP_ICON],
+  ]);
+});
+
+test("Helm and Argo show their logos; every other section the palette's icon", () => {
+  for (const s of NAV_SECTIONS) {
+    if (s.id === "helm" || s.id === "argo") {
+      expect([s.id, s.icon]).toEqual([s.id, s.id]);
+    } else {
+      expect([s.id, SECTION_ICONS[s.id] !== undefined]).toEqual([s.id, true]);
+      expect([s.id, s.icon]).toEqual([s.id, SECTION_ICONS[s.id]]);
+    }
+  }
+});
+
+test("Nodes, Namespaces and Events are direct links to their only kind", () => {
+  expect(
+    NAV_SECTIONS.filter((s) => s.direct).map((s) => [
+      s.id,
+      s.items.map(navItemKey),
+    ]),
+  ).toEqual([
+    ["nodes", ["/nodes"]],
+    ["namespaces", ["/namespaces"]],
+    ["events", ["/events"]],
+  ]);
+});
+
+test("Argo holds one sub-branch, Argo CD, with its kinds; kinds not served leave it", () => {
+  const argo = NAV_SECTIONS.find((s) => s.id === "argo");
+  expect(argo?.label).toBe("Argo");
+  expect(
+    argo?.branches?.map((b) => [b.id, b.label, b.items.map(navItemKey)]),
+  ).toEqual([
+    [
+      "argocd",
+      "Argo CD",
+      [
+        "argoproj.io/applications",
+        "argoproj.io/applicationsets",
+        "argoproj.io/appprojects",
+      ],
+    ],
+  ]);
+  expect(
+    NAV_SECTIONS.filter((s) => s.branches !== undefined).map((s) => s.id),
+  ).toEqual(["argo"]);
+  const shown = visibleSections([info("argoproj.io", "applications")]).find(
+    (s) => s.id === "argo",
+  );
+  expect(shown?.branches?.map((b) => b.items.map(navItemKey))).toEqual([
+    ["argoproj.io/applications"],
+  ]);
 });
 
 test("the Network group ends with Port Forwarding, a route of the cluster screen", () => {
@@ -248,7 +336,7 @@ test("Workloads has an Overview entry and no other section does", () => {
 test("each Argo CD page shows only when its kind is served", () => {
   const argo = (resources: ApiResourceInfo[]) =>
     visibleSections(resources)
-      .find((s) => s.id === "argocd")
+      .find((s) => s.id === "argo")
       ?.items.map(navItemKey);
   expect(argo([info("", "pods")])).toBeUndefined();
   expect(

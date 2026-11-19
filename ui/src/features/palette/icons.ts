@@ -67,5 +67,8 @@ export const ROUTE_ICONS: Partial<Record<string, IconComponent>> = {
 };
 
 export const OVERVIEW_ICON: IconComponent = LayoutDashboard;
+
+/** The cluster's Resource map: the icon of the `resource-map` command. */
+export const MAP_ICON: IconComponent = Network;
 export const CUSTOM_ICON: IconComponent = Puzzle;
 export const FALLBACK_ICON: IconComponent = Box;
