@@ -5,11 +5,13 @@ import { crdTree } from "../../kinds/crdTree";
 import { NAV_SCREENS, NAV_SECTIONS, type NavSection } from "../../kinds/nav";
 import {
   clusterPath,
+  flyoutEntries,
   itemPath,
   itemTestId,
   kindTestId,
   looseItems,
   openTabPaths,
+  railItemTestId,
   screenTestId,
   sectionActive,
   sidebarGroups,
@@ -153,4 +155,83 @@ test("the open paths are each tab's shown entry, without query or hash", () => {
     "/cluster/c1/r/apps/deployments",
     "/cluster/c1/map",
   ]);
+});
+
+test("a flyout lists the section's items, Argo's branch under its caption, and the CRDs under their full group names", () => {
+  expect(
+    flyoutEntries("c1", section("workloads"), []).map((e) =>
+      e.type === "link" ? [e.label, e.path, e.testId] : [e.label],
+    ),
+  ).toEqual([
+    ["Overview", "/cluster/c1/workloads", "rail-item-overview-workloads"],
+    ["Pods", "/cluster/c1/r/core/pods", "rail-item-core-pods"],
+    [
+      "Deployments",
+      "/cluster/c1/r/apps/deployments",
+      "rail-item-apps-deployments",
+    ],
+    [
+      "DaemonSets",
+      "/cluster/c1/r/apps/daemonsets",
+      "rail-item-apps-daemonsets",
+    ],
+    [
+      "StatefulSets",
+      "/cluster/c1/r/apps/statefulsets",
+      "rail-item-apps-statefulsets",
+    ],
+    [
+      "ReplicaSets",
+      "/cluster/c1/r/apps/replicasets",
+      "rail-item-apps-replicasets",
+    ],
+    ["Jobs", "/cluster/c1/r/batch/jobs", "rail-item-batch-jobs"],
+    ["CronJobs", "/cluster/c1/r/batch/cronjobs", "rail-item-batch-cronjobs"],
+  ]);
+  const overview = flyoutEntries("c1", section("workloads"), [])[0];
+  expect(overview?.type === "link" && overview.end).toBe(true);
+  expect(
+    flyoutEntries("c1", section("argo"), []).map((e) => [e.type, e.label]),
+  ).toEqual([
+    ["caption", "Argo CD"],
+    ["link", "Applications"],
+    ["link", "ApplicationSets"],
+    ["link", "AppProjects"],
+  ]);
+  const crds = crdTree([
+    info("acme.io", "gadgets", "Gadget"),
+    info("pkg.crossplane.io", "providers", "Provider"),
+    info("acl.kafka.m.crossplane.io", "topics", "Topic"),
+    info("crossplane.io", "compositions", "Composition"),
+  ]);
+  expect(
+    flyoutEntries("c1", section("custom"), crds).map((e) => [e.type, e.label]),
+  ).toEqual([
+    ["link", "Definitions"],
+    ["caption", "acme.io"],
+    ["link", "Gadget"],
+    ["caption", "crossplane.io"],
+    ["link", "Composition"],
+    ["caption", "acl.kafka.m.crossplane.io"],
+    ["link", "Topic"],
+    ["caption", "pkg.crossplane.io"],
+    ["link", "Provider"],
+  ]);
+  const keys = flyoutEntries("c1", section("custom"), crds).map((e) => e.key);
+  expect(new Set(keys).size).toBe(keys.length);
+  expect(
+    railItemTestId({
+      type: "route",
+      label: "Port Forwarding",
+      path: "port-forwards",
+    }),
+  ).toBe("rail-item-port-forwards");
+  expect(
+    railItemTestId({
+      type: "resource",
+      label: "Pods",
+      group: "",
+      plural: "pods",
+    }),
+  ).toBe("rail-item-core-pods");
 });
