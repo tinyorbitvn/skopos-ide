@@ -1,10 +1,28 @@
+/* The cluster navigation, on the column's glass (spec Q §1, §2): the column draws the
+   background and the border. */
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: 14px;
   min-height: 0;
-  padding: var(--space-7) var(--space-5);
+  padding: var(--space-4) var(--space-6) var(--space-6);
   overflow-y: auto;
+}
+
+.group {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+/* A group's caption, not a button. The first group has none. */
+.groupLabel {
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-3);
+  color: var(--text-secondary);
+  font: var(--type-overline);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
 }
 
 .section {
@@ -12,133 +30,58 @@
   flex-direction: column;
 }
 
-.heading {
-  margin: 0;
-  font: var(--type-overline);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
-}
-
-.toggle {
+/* A section row: a direct link, or the toggle of an expandable section. */
+.row {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-6);
   width: 100%;
-  height: 28px;
+  height: 32px;
   padding: 0 var(--space-5);
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-secondary);
-  font: var(--type-overline);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
+  color: var(--text-primary);
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 
-.toggle:hover {
-  color: var(--text-primary);
-}
-
-.toggle:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.chevron {
-  display: flex;
-  flex: none;
-  width: 12px;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.list[hidden] {
-  display: none;
-}
-
-/* flex: none keeps the top Overview link, a direct item of the scrolling sidebar, from
-   shrinking to nothing now that overflow: hidden lets its minimum height drop to 0. */
-.link {
-  display: block;
-  flex: none;
-  height: 28px;
-  padding: 0 var(--space-7);
-  overflow: hidden;
-  border-radius: var(--radius-xs);
-  color: var(--text-primary);
-  line-height: 28px;
-  text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.link:hover {
+.row:hover {
   background: var(--surface-hover);
 }
 
-.link:focus-visible {
+.row:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-.groupToggle.depth2 {
-  padding-left: calc(var(--space-7) + 18px);
-}
-
-.link.indent1 {
-  padding-left: calc(var(--space-7) + 18px);
-}
-
-.link.indent2 {
-  padding-left: calc(var(--space-7) + 36px);
-}
-
-.active {
-  background: var(--surface-selected);
-  color: var(--text-accent);
-  font-weight: var(--weight-semibold);
-}
-
-.groupToggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  width: 100%;
-  min-width: 0;
-  padding: var(--space-3) var(--space-7);
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: none;
-  color: var(--text-secondary);
-  font: var(--type-caption);
-  text-align: left;
-  cursor: pointer;
-}
-
-.groupToggle:hover {
+/* The expandable section that holds the current page. */
+.row[data-active="true"] {
   color: var(--text-primary);
-}
-
-.groupToggle:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.groupToggle[data-active="true"] {
-  color: var(--text-accent);
   font-weight: var(--weight-semibold);
 }
 
-.groupName {
+/* A direct link to the current page. */
+.row[aria-current="page"] {
+  background: var(--side-selected);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.rowIcon {
+  flex: none;
+}
+
+.rowChevron {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -146,10 +89,136 @@
   white-space: nowrap;
 }
 
-.groupCount {
-  flex: none;
+/* The kinds under an open section hang on tree lines. */
+.tree {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 var(--space-3) var(--space-8);
+  padding: 0 0 0 var(--space-7);
+  list-style: none;
+}
+
+.tree[hidden] {
+  display: none;
+}
+
+/* A sub-branch's kinds, one level in, on their own tree lines. */
+.subTree {
+  margin: 0 0 var(--space-2) var(--space-6);
+}
+
+.leaf {
+  position: relative;
+}
+
+/* The elbow: from the leaf's top down to the middle of its 32 px row, then 10 px right. */
+.leaf::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--space-7));
+  width: 10px;
+  height: 16px;
+  border-left: 1px solid var(--tree-line);
+  border-bottom: 1px solid var(--tree-line);
+  border-bottom-left-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+/* The vertical line runs on to the next leaf. */
+.leaf:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--space-7));
+  border-left: 1px solid var(--tree-line);
+  pointer-events: none;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: 30px;
+  margin: var(--space-1) 0;
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-full);
   color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.pill:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* The current page. */
+.pill[aria-current="page"] {
+  background: var(--side-selected);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+/* A sub-branch row: Argo CD, a Custom Resources domain or API group. */
+.branchRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  margin: var(--space-1) 0;
+  padding: 0 var(--space-6) 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.branchRow:hover {
+  background: var(--surface-hover);
+}
+
+.branchRow:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.branchRow[data-active="true"] {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.branchChevron {
+  display: flex;
+  flex: none;
+  width: 12px;
+}
+
+.count {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font: var(--type-caption);
   font-variant-numeric: tabular-nums;
+}
+
+/* A kind open in a tab of this window (spec Q §2). */
+.openDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--text-tertiary);
 }
 
 .state {
