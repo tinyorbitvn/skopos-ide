@@ -115,6 +115,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   resetSessionsForTest();
   resetDockForTest();
   resetCatalogForTest();
@@ -237,18 +238,80 @@ test("a tab waits for its cluster to connect, then starts", () => {
   expect(starts.map((s) => s.cmd)).toEqual(["terminal_start"]);
 });
 
-test("output is written, and acknowledged once xterm has taken it in", async () => {
+test("output is written, and acknowledged 50 ms after xterm has taken it in", async () => {
   open(TERMINAL);
   await answer(startAt(0), "t1");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   startAt(0).data("hello\r\n");
   expect(viewAt(0).written).toEqual(["hello\r\n"]);
   expect(calls("session_ack")).toEqual([]);
 
   viewAt(0).finishWrites();
+  expect(calls("session_ack")).toEqual([]);
+  vi.advanceTimersByTime(50);
   expect(calls("session_ack")).toEqual([{ sessionId: "t1", bytes: 7 }]);
 });
 
-test("output before the id is acknowledged as one sum when the id comes, then chunk by chunk", async () => {
+test("acknowledgements batch: one call per 50 ms, or at once at 64 KiB", async () => {
+  open(TERMINAL);
+  await answer(startAt(0), "t1");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  startAt(0).data("abc");
+  viewAt(0).finishWrites();
+  vi.advanceTimersByTime(30);
+  startAt(0).data("de");
+  viewAt(0).finishWrites();
+  vi.advanceTimersByTime(19);
+  expect(calls("session_ack")).toEqual([]);
+  vi.advanceTimersByTime(1);
+  expect(calls("session_ack")).toEqual([{ sessionId: "t1", bytes: 5 }]);
+  vi.advanceTimersByTime(500);
+  expect(calls("session_ack")).toHaveLength(1);
+
+  startAt(0).data("x".repeat(40 * 1024));
+  viewAt(0).finishWrites();
+  expect(calls("session_ack")).toHaveLength(1);
+  startAt(0).data("y".repeat(30 * 1024));
+  viewAt(0).finishWrites();
+  expect(calls("session_ack")).toEqual([
+    { sessionId: "t1", bytes: 5 },
+    { sessionId: "t1", bytes: 70 * 1024 },
+  ]);
+  vi.advanceTimersByTime(500);
+  expect(calls("session_ack")).toHaveLength(2);
+});
+
+test("pending acknowledgements are dropped on reconnect", async () => {
+  const { start, view } = await running();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  start.data("old");
+  view.finishWrites();
+  reconnect(TERMINAL);
+  vi.advanceTimersByTime(500);
+  expect(calls("session_ack")).toEqual([]);
+});
+
+test("pending acknowledgements are dropped when the session exits", async () => {
+  const { start, view } = await running();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  start.data("last");
+  view.finishWrites();
+  start.send({ type: "exited", code: 0 });
+  vi.advanceTimersByTime(500);
+  expect(calls("session_ack")).toEqual([]);
+});
+
+test("pending acknowledgements are dropped when the tab closes", async () => {
+  const { start, view } = await running();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  start.data("bye");
+  view.finishWrites();
+  useDock.getState().close(TERMINAL.id);
+  vi.advanceTimersByTime(500);
+  expect(calls("session_ack")).toEqual([]);
+});
+
+test("output before the id is acknowledged as one sum when the id comes, then batched", async () => {
   open(TERMINAL);
   startAt(0).data("abc");
   startAt(0).data("de");
@@ -257,10 +320,12 @@ test("output before the id is acknowledged as one sum when the id comes, then ch
   expect(calls("session_ack")).toEqual([]);
 
   await answer(startAt(0), "t1");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   expect(calls("session_ack")).toEqual([{ sessionId: "t1", bytes: 5 }]);
 
   startAt(0).data("f");
   viewAt(0).finishWrites();
+  vi.advanceTimersByTime(50);
   expect(calls("session_ack")).toEqual([
     { sessionId: "t1", bytes: 5 },
     { sessionId: "t1", bytes: 1 },
@@ -567,12 +632,14 @@ test("a Node shell stopped by Disconnect waits for Reconnect once the cluster is
 
 test("a session keeps running while its view is unmounted, and the view comes back at the new size", async () => {
   const { start, view } = await running();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   unmountView(TERMINAL.id);
   expect(view.host.isConnected).toBe(false);
   expect(observers.watched()).toBe(0);
 
   start.data("while away");
   view.finishWrites();
+  vi.advanceTimersByTime(50);
   expect(calls("session_ack")).toEqual([{ sessionId: "t1", bytes: 10 }]);
   expect(calls("session_stop")).toEqual([]);
 
