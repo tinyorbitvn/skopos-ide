@@ -1,4 +1,4 @@
-import { useClusterResources } from "./ClusterLayout";
+import { useClusterResources } from "../../stores/discovery";
 import { Sidebar } from "./Sidebar";
 
 /** The navigation of a connected cluster, with its custom resources kept current (spec P23). */

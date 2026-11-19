@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
+import { resetDiscoveryForTest } from "../../stores/discovery";
 import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
 import { ResourceRoute } from "../resources/ResourceScreen";
@@ -30,6 +31,7 @@ const CRD: ApiResourceInfo = {
 
 afterEach(() => {
   vi.useRealTimers();
+  resetDiscoveryForTest();
   resetResourcesForTest();
 });
 
@@ -218,4 +220,56 @@ test("a change in the set of CRDs re-discovers the resources", async () => {
   });
   // A cluster tab has no sidebar of its own: the window's shell has it (P1).
   expect(screen.queryByTestId("cluster-sidebar")).toBeNull();
+});
+
+test("the sidebar and a tab of the same cluster share one discovery", async () => {
+  let send: (e: WatchEvent) => void = () => {};
+  const backend = mockBackend({
+    ui_state_get: () => null,
+    resources_discover: () => [CRD],
+    resources_subscribe: (a: {
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      send = a.onEvent.onmessage;
+      return "sub-1";
+    },
+    resources_unsubscribe: () => null,
+  });
+  render(
+    <MemoryRouter initialEntries={["/cluster/c1/r/core/pods"]}>
+      <Routes>
+        <Route
+          path="/cluster/:id"
+          element={
+            <>
+              <ClusterNav clusterId="c1" />
+              <ClusterLayout clusterId="c1" />
+            </>
+          }
+        >
+          <Route path="r/:group/:plural" element={<ResourceRoute />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+  await act(flush);
+  await waitFor(() =>
+    expect(backend.callsTo("resources_subscribe")).toHaveLength(1),
+  );
+  expect(backend.callsTo("resources_discover")).toHaveLength(1);
+
+  const item = (name: string) => ({ metadata: { name, resourceVersion: "1" } });
+  await act(async () => {
+    send({ type: "snapshot", items: [item("a.io")] } as WatchEvent);
+    await flush();
+  });
+  await act(async () => {
+    send({
+      type: "snapshot",
+      items: [item("a.io"), item("b.io")],
+    } as WatchEvent);
+    await flush();
+  });
+  await act(flush);
+  expect(backend.callsTo("resources_discover")).toHaveLength(2);
 });
