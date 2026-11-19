@@ -30,7 +30,7 @@ const helm = () => useHelm.getState();
 const KEY = runKey("c1", "shop", "web");
 const LIST = releaseList([release({ name: "web" })]);
 
-test("watching loads at once, every 15 s while visible, and stops with the last watcher", async () => {
+test("watching loads at once, every 60 s while visible, and stops with the last watcher", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   const backend = mockBackend({ helm_release_list: () => LIST });
   const stopA = helm().watchReleases("c1", null);
@@ -344,4 +344,34 @@ test.each([
       }
     : undefined;
   expect(releaseIsBusy({ status }, run)).toBe(busy);
+});
+
+test("a hidden window refreshes on becoming visible after more than 60 s, not before", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  const backend = mockBackend({ helm_release_list: () => LIST });
+  const stop = helm().watchReleases("c1", null);
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(1);
+
+  const hidden = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("hidden");
+  vi.setSystemTime(Date.now() + 30_000);
+  hidden.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(1);
+
+  hidden.mockReturnValue("hidden");
+  vi.setSystemTime(Date.now() + 40_000);
+  hidden.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+  stop();
+  document.dispatchEvent(new Event("visibilitychange"));
+  vi.setSystemTime(Date.now() + 120_000);
+  document.dispatchEvent(new Event("visibilitychange"));
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
 });
