@@ -102,6 +102,20 @@ test("the overview shows the facts, the notes and the resources with their links
   expect(screen.getByTestId("helm-release-drawer-status").textContent).toBe(
     "deployed",
   );
+  // The frame and the icon actions of every other drawer.
+  const drawer = screen.getByTestId("helm-release-drawer");
+  expect(drawer.hasAttribute("data-drawer")).toBe(true);
+  expect(within(drawer).getByTestId("drawer-resize")).toBeTruthy();
+  const actions = within(drawer).getByRole("group", { name: "Actions" });
+  expect(
+    within(actions)
+      .getAllByRole("button")
+      .map((b) => [b.getAttribute("aria-label"), b.textContent]),
+  ).toEqual([
+    ["Upgrade", ""],
+    ["Roll back", ""],
+    ["Uninstall", ""],
+  ]);
   const facts = screen.getByTestId("helm-release-facts").textContent;
   expect(facts).toContain("nginx 1.2.3");
   expect(facts).toContain("First deployed2026-11-09 08:00:00 UTC · 28h ago");

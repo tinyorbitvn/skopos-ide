@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   Badge,
-  Button,
   type Column,
   DataTable,
   ErrorNotice,
+  IconButton,
   Spinner,
   Tabs,
   useNow,
@@ -363,41 +363,36 @@ export function HelmReleaseDrawer(props: {
         ) : null
       }
       actions={
-        <>
-          {actions.upgrade ? (
-            <Button
-              size="sm"
-              onClick={() => {
-                void navigate(upgradePath(clusterId, namespace, name));
-              }}
-              data-testid="helm-release-upgrade"
-            >
-              <CircleArrowUp size={14} aria-hidden="true" />
-              Upgrade
-            </Button>
-          ) : null}
-          {actions.rollback ? (
-            <Button
-              size="sm"
-              onClick={() => setDialog({ kind: "rollback" })}
-              data-testid="helm-release-rollback"
-            >
-              <History size={14} aria-hidden="true" />
-              Roll back
-            </Button>
-          ) : null}
-          {actions.uninstall ? (
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={() => setDialog({ kind: "uninstall" })}
-              data-testid="helm-release-uninstall"
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              Uninstall
-            </Button>
-          ) : null}
-        </>
+        actions.upgrade || actions.rollback || actions.uninstall ? (
+          <>
+            {actions.upgrade ? (
+              <IconButton
+                label="Upgrade"
+                icon={<CircleArrowUp size={16} aria-hidden="true" />}
+                onClick={() => {
+                  void navigate(upgradePath(clusterId, namespace, name));
+                }}
+                data-testid="helm-release-upgrade"
+              />
+            ) : null}
+            {actions.rollback ? (
+              <IconButton
+                label="Roll back"
+                icon={<History size={16} aria-hidden="true" />}
+                onClick={() => setDialog({ kind: "rollback" })}
+                data-testid="helm-release-rollback"
+              />
+            ) : null}
+            {actions.uninstall ? (
+              <IconButton
+                label="Uninstall"
+                icon={<Trash2 size={16} aria-hidden="true" />}
+                onClick={() => setDialog({ kind: "uninstall" })}
+                data-testid="helm-release-uninstall"
+              />
+            ) : null}
+          </>
+        ) : null
       }
     >
       <Tabs

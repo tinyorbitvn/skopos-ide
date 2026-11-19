@@ -1,16 +1,15 @@
 import { type ReactElement, type ReactNode, useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import { IconButton, type TableColumn } from "../../design";
-import { ChevronLeft, Minimize2, X } from "../../design/icons";
+import { ChevronLeft, Minimize2 } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { KubeObject } from "../../kinds/objects";
 import { detailsTab, useDock } from "../../stores/dock";
-import { DRAWER_PANE, usePaneSize } from "../../stores/paneSize";
 import { DrawerObjectActions } from "../resources/DrawerObjectActions";
 import styles from "./DetailDrawer.module.css";
 import { DetailsContent, useDetailsEntry } from "./DetailsContent";
-import { DrawerResize } from "./DrawerResize";
+import { DrawerShell } from "./DrawerShell";
 import type { DrawerHistoryApi } from "./useDrawerHistory";
 
 export interface DetailDrawerProps {
@@ -52,7 +51,6 @@ export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
   const { clusterId, resource, history, onClose } = props;
   const resources = props.resources ?? [];
   const drawerRef = useRef<HTMLElement>(null);
-  const [drawerWidth, setDrawerWidth] = usePaneSize(DRAWER_PANE);
   const entry = useDetailsEntry({
     clusterId,
     history,
@@ -132,76 +130,47 @@ export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
   }
 
   return (
-    <>
-      <div className={styles.dim} aria-hidden="true" data-testid="detail-dim" />
-      <aside
-        ref={drawerRef}
-        tabIndex={-1}
-        className={styles.overlay}
-        aria-label={`${kind} details`}
-        data-testid="detail-drawer"
-        data-drawer=""
-        style={{ width: drawerWidth }}
-      >
-        <DrawerResize
-          className={styles.handle}
-          width={drawerWidth}
-          onChange={setDrawerWidth}
-        />
-        <div className={styles.frame}>
-          <header className={styles.band}>
-            <div className={styles.bandRow}>
-              {history.previous ? (
-                <IconButton
-                  className={styles.back}
-                  label={`Back to ${history.previous.target.name}`}
-                  icon={<ChevronLeft size={16} aria-hidden="true" />}
-                  onClick={history.back}
-                  data-testid="detail-back"
-                />
-              ) : null}
-              <span className={styles.bandKind} data-testid="detail-kind">
-                {kind}
-              </span>
-              <div className={styles.grow} />
-              {actions ? (
-                <>
-                  {actions}
-                  <span className={styles.divider} aria-hidden="true" />
-                </>
-              ) : null}
-              {canMinimize ? (
-                <IconButton
-                  label="Minimize to the dock"
-                  icon={<Minimize2 size={16} aria-hidden="true" />}
-                  onClick={minimize}
-                  data-testid="detail-minimize"
-                />
-              ) : null}
-              <IconButton
-                label="Close details"
-                icon={<X size={14} aria-hidden="true" />}
-                onClick={onClose}
-                data-testid="detail-close"
-              />
-            </div>
-            <h3
-              className={styles.bandTitle}
-              data-testid="detail-title"
-              title={name}
-            >
-              {name}
-            </h3>
-          </header>
-          <DetailsContent
-            clusterId={clusterId}
-            entry={entry}
-            resources={resources}
-            onOpen={history.open}
-            onTabChange={history.setTab}
+    <DrawerShell
+      ref={drawerRef}
+      label={`${kind} details`}
+      testId="detail-drawer"
+      dimTestId="detail-dim"
+      kind={kind}
+      kindTestId="detail-kind"
+      title={name}
+      titleTestId="detail-title"
+      closeTestId="detail-close"
+      onClose={onClose}
+      back={
+        history.previous ? (
+          <IconButton
+            className={styles.back}
+            label={`Back to ${history.previous.target.name}`}
+            icon={<ChevronLeft size={16} aria-hidden="true" />}
+            onClick={history.back}
+            data-testid="detail-back"
           />
-        </div>
-      </aside>
-    </>
+        ) : null
+      }
+      actions={actions}
+      tools={
+        canMinimize ? (
+          <IconButton
+            label="Minimize to the dock"
+            icon={<Minimize2 size={16} aria-hidden="true" />}
+            onClick={minimize}
+            data-testid="detail-minimize"
+          />
+        ) : null
+      }
+    >
+      <DetailsContent
+        clusterId={clusterId}
+        entry={entry}
+        resources={resources}
+        onOpen={history.open}
+        onTabChange={history.setTab}
+      />
+    </DrawerShell>
   );
 }
