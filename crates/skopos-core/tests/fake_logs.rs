@@ -210,6 +210,26 @@ async fn follow_delivers_new_lines_within_the_flush_time() {
 }
 
 #[tokio::test]
+async fn a_single_followed_line_arrives_within_the_flush_time() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    pod_with_containers(&fake, json!({}));
+    let (session, mut rx) = start(&core, &id, pod_target(Some("main")), follow());
+    wait_for_open_stream(&fake).await;
+    let added = std::time::Instant::now();
+    add_line(&fake, "main", ONE, "alone");
+    wait_until(&mut rx, |event| has_text(event, "alone")).await;
+    // 100 ms of batching, plus the fake server's own delay. A free-running tick could
+    // never beat this bound either, so it guards against a deadline that never fires.
+    assert!(
+        added.elapsed() < Duration::from_millis(1500),
+        "took {:?}",
+        added.elapsed()
+    );
+    core.logs_stop(&session);
+    wait_until(&mut rx, is_last).await;
+}
+
+#[tokio::test]
 async fn stopping_all_ends_the_stream_at_the_api_server() {
     let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
     pod_with_containers(&fake, json!({}));
