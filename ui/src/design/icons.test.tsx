@@ -1,24 +1,12 @@
-import { act, fireEvent, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import biomeConfig from "../../../biome.json?raw";
-import { Button } from "./Button";
 import * as iconModule from "./icons";
 import { type IconComponent, Pen, SVG_ART, Trash2 } from "./icons";
 
 const ICONS = Object.entries(iconModule).filter(
   (entry): entry is [string, IconComponent] => typeof entry[1] === "function",
 );
-
-/** The drawings `@animateicons/react` 0.13 lacks, which stay Lucide's still icons. */
-const STILL = [
-  "container",
-  "file-cog",
-  "image-up",
-  "library",
-  "pen",
-  "split",
-  "unplug",
-];
 
 /** Exports whose name is not Lucide's current name of the drawing. */
 const RENAMED: Record<string, string> = {
@@ -35,21 +23,6 @@ const kebab = (name: string) =>
 
 afterEach(() => vi.restoreAllMocks());
 
-async function packageHas(name: string): Promise<boolean> {
-  const fsModule = "node:fs";
-  const urlModule = "node:url";
-  const { existsSync } = (await import(/* @vite-ignore */ fsModule)) as {
-    existsSync(path: string): boolean;
-  };
-  const { fileURLToPath } = (await import(/* @vite-ignore */ urlModule)) as {
-    fileURLToPath(url: string): string;
-  };
-  // A variable, not a literal: Vite rewrites new URL("literal", import.meta.url) to an asset.
-  const relative = `../../node_modules/@animateicons/react/dist/icons/lucide/${name}-icon.js`;
-  // fileURLToPath, not the URL's pathname, which on Windows is /D:/... and names no file.
-  return existsSync(fileURLToPath(new URL(relative, import.meta.url).href));
-}
-
 test("the module exports the icons, SVG_ART, and nothing else", () => {
   expect(ICONS.length).toBeGreaterThan(100);
   const others = Object.keys(iconModule).filter(
@@ -62,17 +35,6 @@ test("each icon names its drawing, Lucide's kebab-case name of its export", () =
   for (const [name, Icon] of ICONS) {
     expect(Icon.iconName, name).toBe(kebab(name));
   }
-});
-
-test("an icon is animated exactly when the package has its own file for it", async () => {
-  for (const [name, Icon] of ICONS) {
-    expect(Icon.animated, name).toBe(await packageHas(Icon.iconName));
-  }
-  expect(
-    ICONS.filter(([, Icon]) => !Icon.animated)
-      .map(([, Icon]) => Icon.iconName)
-      .sort(),
-  ).toEqual(STILL);
 });
 
 test.each(ICONS)(
@@ -93,11 +55,18 @@ test.each(ICONS)(
   },
 );
 
-test("a still icon is Lucide's own drawing; an animated one is the package's", () => {
-  const still = render(<Pen size={16} />).container.querySelector("svg");
-  expect(still?.getAttribute("class")).toContain("lucide-pen");
-  const animated = render(<Trash2 size={16} />).container.querySelector("svg");
-  expect(animated?.getAttribute("class") ?? "").not.toContain("lucide");
+test("every icon is Lucide's still drawing, the svg straight inside its box", () => {
+  for (const [name, Icon] of ICONS) {
+    const { container, unmount } = render(<Icon size={16} />);
+    const box = container.firstElementChild as HTMLElement;
+    const svg = box.firstElementChild as SVGSVGElement;
+    expect(box.children, name).toHaveLength(1);
+    expect(svg.tagName.toLowerCase(), name).toBe("svg");
+    expect(svg.getAttribute("class") ?? "", name).toMatch(/\blucide\b/);
+    unmount();
+  }
+  const pen = render(<Pen size={16} />).container.querySelector("svg");
+  expect(pen?.getAttribute("class")).toContain("lucide-pen");
 });
 
 test("an icon is 24 px when no size is given", () => {
@@ -133,8 +102,6 @@ test("the box is an inline flex box, and the stroke is the app's 1.75", () => {
   const { container } = render(<Trash2 size={16} />);
   const box = container.firstElementChild as HTMLElement;
   expect(getComputedStyle(box).display).toBe("inline-flex");
-  const wrapper = box.firstElementChild as HTMLElement;
-  expect(getComputedStyle(wrapper).display).toBe("contents");
   const svg = container.querySelector("svg") as SVGSVGElement;
   expect(getComputedStyle(svg).strokeWidth).toBe("1.75");
 });
@@ -167,24 +134,6 @@ test("React logs no warning while rendering them with the props the app passes",
   expect(warn).not.toHaveBeenCalled();
 });
 
-test("hovering a button plays the package's animation of its icon, and leaving puts it back", async () => {
-  const { container } = render(
-    <Button>
-      <Trash2 size={16} aria-hidden="true" />
-      Delete
-    </Button>,
-  );
-  const lid = () =>
-    (container.querySelector("svg g") as SVGGElement).style.transform;
-  expect(lid()).toBe("none");
-  fireEvent.mouseEnter(container.querySelector("button") as HTMLElement);
-  await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
-  expect(lid()).toMatch(/rotate\(-\d/);
-  fireEvent.mouseLeave(container.querySelector("button") as HTMLElement);
-  await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
-  expect(lid()).toBe("none");
-});
-
 test("SVG_ART draws Lucide's svg itself, to sit inside another svg", () => {
   for (const [name, Art] of Object.entries(SVG_ART)) {
     const { container, unmount } = render(
@@ -202,7 +151,7 @@ test("SVG_ART draws Lucide's svg itself, to sit inside another svg", () => {
   }
 });
 
-test("Biome lets only this module import lucide-react and @animateicons/react", () => {
+test("Biome lets only this module import lucide-react", () => {
   const config = JSON.parse(biomeConfig) as {
     linter: { rules: { style: Record<string, unknown> } };
     overrides: { includes: string[]; linter: unknown }[];
@@ -212,12 +161,7 @@ test("Biome lets only this module import lucide-react and @animateicons/react", 
     options: {
       patterns: [
         {
-          group: [
-            "lucide-react",
-            "lucide-react/**",
-            "@animateicons/react",
-            "@animateicons/react/**",
-          ],
+          group: ["lucide-react", "lucide-react/**"],
           message:
             "Import icons from design/icons, the one module that maps them.",
         },

@@ -5,12 +5,7 @@
   justify-content: center;
 }
 
-/* The animated set wraps its svg in a div of its own; the svg stays the icon's only box. */
-.motion {
-  display: contents;
-}
-
-/* Lucide's stroke in this app, as global.css draws svg.lucide; the animated set draws 2. */
+/* Lucide's stroke in this app, as global.css draws svg.lucide. */
 .icon svg {
   stroke-width: 1.75;
 }
