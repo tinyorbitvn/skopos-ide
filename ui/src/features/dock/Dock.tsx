@@ -19,7 +19,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { ConfirmDialog, IconButton, Menu } from "../../design";
+import { Button, ConfirmDialog, IconButton, Menu } from "../../design";
 import {
   ChevronDown,
   ChevronUp,
@@ -338,24 +338,36 @@ export function Dock(props: {
           </SortableContext>
         </DndContext>
         <Menu
+          side="top"
+          align="start"
+          sideOffset={6}
+          avoidCollisions={false}
+          className={styles.createMenu}
           trigger={
-            <IconButton
-              label="New tab"
-              icon={<Plus size={16} aria-hidden="true" />}
-              tooltip={false}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={styles.create}
               data-testid="dock-new"
-            />
+            >
+              <Plus size={14} aria-hidden="true" />
+              Create
+            </Button>
           }
           items={[
             {
               id: "create",
               label: "Create resource",
+              icon: <FilePlus size={14} aria-hidden="true" />,
+              hint: "YAML draft in the dock",
               testId: "create-resource",
               onSelect: () => useDock.getState().open(newCreateTab(clusterId)),
             },
             {
               id: "terminal",
-              label: "Terminal Session",
+              label: "Terminal session",
+              icon: <SquareTerminal size={14} aria-hidden="true" />,
+              hint: "Shell in the dock",
               testId: "dock-terminal",
               onSelect: () => newTerminal(clusterId),
             },

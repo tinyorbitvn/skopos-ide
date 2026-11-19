@@ -53,9 +53,27 @@
   flex: none;
   display: flex;
   align-items: center;
-  max-width: 240px;
+  max-width: 260px;
   height: 26px;
   border-radius: var(--radius-control);
+}
+
+/* The quiet Create button and its menu, which opens upward (spec Q §4). */
+.bar .create {
+  height: 26px;
+  padding: 0 var(--space-6) 0 var(--space-5);
+}
+
+.bar .create[aria-expanded="true"] {
+  background: var(--surface-hover);
+}
+
+.createMenu[role="menu"] {
+  min-width: 220px;
+}
+
+.createMenu [role="menuitem"] {
+  height: 32px;
 }
 
 .tab[data-active="true"] {

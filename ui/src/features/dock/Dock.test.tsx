@@ -24,6 +24,7 @@ import {
   useDock,
 } from "../../stores/dock";
 import { resetResourcesForTest } from "../../stores/resources";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, flush, mockBackend } from "../../test/ipc";
 import {
   captureResizeObservers,
@@ -447,14 +448,60 @@ function tabIds(): string[] {
   return useDock.getState().tabs.map((t) => t.id);
 }
 
-test("the + menu offers Create resource, then Terminal Session", async () => {
+test("the Create button opens an upward menu: Create resource, then Terminal session (spec Q §4)", async () => {
   await show();
-  const plus = screen.getByRole("button", { name: "New tab" });
-  expect(plus.getAttribute("data-testid")).toBe("dock-new");
-  fireEvent.keyDown(plus, { key: "Enter" });
+  const create = screen.getByRole("button", { name: "Create" });
+  expect([
+    create.getAttribute("data-testid"),
+    create.textContent,
+    create.querySelector("[data-icon]")?.getAttribute("data-icon"),
+    create.classList.contains("create"),
+  ]).toEqual(["dock-new", "Create", "plus", true]);
+  fireEvent.keyDown(create, { key: "Enter" });
+  const menu = screen.getByRole("menu");
+  expect([
+    menu.getAttribute("data-side"),
+    menu.getAttribute("data-align"),
+    menu.classList.contains("createMenu"),
+  ]).toEqual(["top", "start", true]);
   expect(
-    screen.getAllByRole("menuitem").map((item) => item.textContent),
-  ).toEqual(["Create resource", "Terminal Session"]);
+    screen
+      .getAllByRole("menuitem")
+      .map((item) => [
+        item.getAttribute("data-testid"),
+        item.textContent,
+        item.querySelector("[data-icon]")?.getAttribute("data-icon"),
+      ]),
+  ).toEqual([
+    [
+      "create-resource",
+      "Create resourceYAML draft in the dock",
+      FilePlus.iconName,
+    ],
+    [
+      "dock-terminal",
+      "Terminal sessionShell in the dock",
+      SquareTerminal.iconName,
+    ],
+  ]);
+  const rules = cssRules(CSS_FILES["/src/features/dock/Dock.module.css"]);
+  const decl = (selector: string, prop: string) =>
+    rules
+      .find((r) => r.selector === selector)
+      ?.decls.find(([p]) => p === prop)?.[1];
+  expect([
+    decl(".bar .create", "height"),
+    decl(".bar .create", "padding"),
+    decl('.createMenu[role="menu"]', "min-width"),
+    decl('.createMenu [role="menuitem"]', "height"),
+    decl(".tab", "max-width"),
+  ]).toEqual([
+    "26px",
+    "0 var(--space-6) 0 var(--space-5)",
+    "220px",
+    "32px",
+    "260px",
+  ]);
 });
 
 test("each Terminal Session is a new terminal, numbered after the first", async () => {

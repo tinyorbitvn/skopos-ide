@@ -68,12 +68,31 @@ function MenuItems(props: { items: MenuItem[] }) {
   ));
 }
 
-export function Menu(props: { trigger: ReactNode; items: MenuItem[] }) {
+export function Menu(props: {
+  trigger: ReactNode;
+  items: MenuItem[];
+  /** Where it opens: below by default. */
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  sideOffset?: number;
+  /** False keeps it on `side` even where it would not fit. */
+  avoidCollisions?: boolean;
+  /** Added to the menu's own class. */
+  className?: string;
+}) {
   return (
     <RM.Root>
       <RM.Trigger asChild>{props.trigger}</RM.Trigger>
       <RM.Portal>
-        <RM.Content className={styles.content} align="end" sideOffset={4}>
+        <RM.Content
+          className={[styles.content, props.className]
+            .filter(Boolean)
+            .join(" ")}
+          side={props.side}
+          align={props.align ?? "end"}
+          sideOffset={props.sideOffset ?? 4}
+          avoidCollisions={props.avoidCollisions}
+        >
           <MenuItems items={props.items} />
         </RM.Content>
       </RM.Portal>
