@@ -204,6 +204,7 @@ function VolumeEntry(props: {
   return (
     <Item
       testId={`detail-volume-${item.name}`}
+      copy={{ what: "volume name", value: item.name }}
       head={
         <>
           <span className={partStyles.mono}>{item.name}</span>

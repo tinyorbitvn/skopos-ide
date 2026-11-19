@@ -11,7 +11,7 @@ pub(crate) use detect::Metrics;
 pub use detect::MetricsLimits;
 mod usage;
 pub use disk::{NodeDisk, NodeDiskSnapshot};
-pub(crate) use usage::METRICS_API;
+pub(crate) use usage::{parse_quantity, METRICS_API};
 pub use usage::{UsageItem, UsageOf, UsageSnapshot};
 
 use std::collections::BTreeMap;

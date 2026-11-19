@@ -330,7 +330,8 @@ export function DetailsContent(props: DetailsContentProps): ReactElement {
         <DrawerLinkContext.Provider value={links}>
           <DrawerKindContext.Provider value={kindKey}>
             <Tabs value={tab} onChange={onTabChange} tabs={tabs} />
-            <div ref={contentRef} className={styles.content}>
+            {/* The body is text to select and copy; its controls stay chrome. */}
+            <div ref={contentRef} className={styles.content} data-selectable="">
               <Body
                 key={shownKey}
                 clusterId={clusterId}

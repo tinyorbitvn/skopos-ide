@@ -20,6 +20,7 @@ import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { useUiState } from "../../stores/uiState";
 import { DrawerLinkContext, objectTarget, targetKey } from "./links";
 import styles from "./parts.module.css";
+import { endsSelection } from "./selection";
 
 /** What a value shows that is not part of the value: controls and decoration. */
 const NOT_COPIED =
@@ -135,8 +136,10 @@ function Card(props: PartProps & { collapsed: boolean; onToggle(): void }) {
   const Icon = props.icon ?? FileText;
   const head = `${id}head`;
   const body = `${id}body`;
+  const card = useRef<HTMLElement>(null);
   return (
     <section
+      ref={card}
       className={styles.card}
       data-testid={props.testId}
       aria-labelledby={head}
@@ -149,7 +152,9 @@ function Card(props: PartProps & { collapsed: boolean; onToggle(): void }) {
           aria-expanded={!props.collapsed}
           aria-controls={body}
           data-testid={`detail-section-toggle-${sectionSlug(props.title)}`}
-          onClick={props.onToggle}
+          onClick={() => {
+            if (!endsSelection(card.current)) props.onToggle();
+          }}
         >
           <span aria-hidden="true" className={styles.chevron}>
             {props.collapsed ? (
@@ -232,27 +237,38 @@ export function ExpandRow(props: {
 }): ReactElement {
   const [open, setOpen] = useState(false);
   const body = useId();
+  const row = useRef<HTMLDivElement>(null);
   return (
-    <div className={styles.expand} data-testid={props.testId}>
-      <button
-        type="button"
-        className={styles.expandToggle}
-        aria-expanded={open}
-        aria-controls={body}
-        data-testid={`detail-expand-${sectionSlug(props.label)}`}
-        onClick={() => setOpen(!open)}
-      >
-        <span className={styles.expandKey}>
-          <span aria-hidden="true" className={styles.chevron}>
-            {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+    <div ref={row} className={styles.expand} data-testid={props.testId}>
+      <div className={`${styles.expandHead} ${styles.copyHost}`}>
+        <button
+          type="button"
+          className={styles.expandToggle}
+          aria-expanded={open}
+          aria-controls={body}
+          data-testid={`detail-expand-${sectionSlug(props.label)}`}
+          onClick={() => {
+            if (!endsSelection(row.current)) setOpen(!open);
+          }}
+        >
+          <span className={styles.expandKey}>
+            <span aria-hidden="true" className={styles.chevron}>
+              {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </span>
+            {props.label}
           </span>
-          {props.label}
-        </span>
-        <span className={styles.expandCount}>{props.count}</span>
-        <span className={styles.expandSummary} title={props.summary}>
-          {props.summary}
-        </span>
-      </button>
+          <span className={styles.expandCount}>{props.count}</span>
+          <span className={styles.expandSummary} title={props.summary}>
+            {props.summary}
+          </span>
+        </button>
+        <CopyButton
+          className={styles.copy}
+          what={props.label}
+          value={() => props.summary}
+          testId={`copy-field-${sectionSlug(props.label)}`}
+        />
+      </div>
       <div id={body} className={styles.expandBody} hidden={!open}>
         {props.children}
       </div>
@@ -306,12 +322,16 @@ export function StatGrid(props: { stats: readonly StatItem[] }): ReactElement {
       {props.stats.map((s) => (
         <div
           key={s.id}
-          className={styles.stat}
+          className={`${styles.stat} ${styles.copyHost}`}
           data-testid={`detail-stat-${s.id}`}
           title={s.title}
         >
           <dt className={styles.statKey}>{s.label}</dt>
-          <dd className={styles.statValue}>{s.value}</dd>
+          <dd className={styles.statValue}>
+            <CopyCell label={s.label} className={styles.copyFill}>
+              {s.value}
+            </CopyCell>
+          </dd>
         </div>
       ))}
     </dl>
@@ -326,11 +346,30 @@ export function ItemList(props: { children: ReactNode }): ReactElement {
 export function Item(props: {
   testId?: string;
   head: ReactNode;
+  /** What the head's copy button copies, such as the container's name; no button without it. */
+  copy?: { what: string; value: string };
   children?: ReactNode;
 }): ReactElement {
+  const { copy } = props;
   return (
     <li className={styles.item} data-testid={props.testId}>
-      <div className={styles.itemHead}>{props.head}</div>
+      <div
+        className={
+          copy ? `${styles.itemHead} ${styles.copyHost}` : styles.itemHead
+        }
+      >
+        {props.head}
+        {copy ? (
+          <span className={styles.itemCopy}>
+            <CopyButton
+              className={styles.copy}
+              what={copy.what}
+              value={() => copy.value}
+              testId={`copy-item-${sectionSlug(copy.value)}`}
+            />
+          </span>
+        ) : null}
+      </div>
       {props.children}
     </li>
   );
@@ -359,9 +398,18 @@ export function Chips(props: { values: string[] }) {
   return (
     <ul className={styles.chips}>
       {props.values.map((value, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: values may repeat
-        <li key={`${index}:${value}`} className={styles.chip}>
-          {value}
+        <li
+          // biome-ignore lint/suspicious/noArrayIndexKey: values may repeat
+          key={`${index}:${value}`}
+          className={`${styles.chip} ${styles.copyHost}`}
+        >
+          <span className={styles.chipText}>{value}</span>
+          <CopyButton
+            className={`${styles.copy} ${styles.chipCopy}`}
+            what={value}
+            value={() => value}
+            testId="copy-chip"
+          />
         </li>
       ))}
     </ul>

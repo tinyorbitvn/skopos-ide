@@ -904,7 +904,7 @@ test("a collapsed annotation copies its whole value", async () => {
   expect(await copyFrom("copy-annotation-big")).toBe(long);
 });
 
-test("the summary is a stat grid of the kind's columns, with no copy buttons", async () => {
+test("the summary is a stat grid of the kind's columns, each value with a copy button", async () => {
   const f = fake();
   const column = (id: string, header: string): TableColumn<KubeObject> => ({
     id,
@@ -935,7 +935,28 @@ test("the summary is a stat grid of the kind's columns, with no copy buttons", a
   );
   expect(within(summary).queryByTestId("detail-stat-name")).toBeNull();
   expect(within(summary).queryByTestId("detail-stat-age")).toBeNull();
-  expect(screen.queryByTestId("copy-status")).toBeNull();
+  expect(await copyFrom("copy-field-status")).toBe("Status cell");
+});
+
+test("the drawer's body is text to select, and its controls are not", async () => {
+  const f = fake();
+  render(drawer());
+  await act(flush);
+  await f.snapshot([pod()]);
+  const labels = screen.getByTestId("detail-expand-labels");
+  const body = labels.closest("[data-selectable]");
+  expect(body?.contains(screen.getByTestId("copy-name"))).toBe(true);
+  // The tabs above the body are chrome, as is every control inside it.
+  expect(body?.contains(screen.getAllByRole("tab")[0])).toBe(false);
+  const rules = cssRules(CSS_FILES["/src/design/global.css"]);
+  const rule = (selector: string) =>
+    rules.find((r) => r.selector.replace(/\s+/g, " ") === selector)?.decls;
+  expect(
+    rule('[data-selectable] :is(button, [role="tab"], [role="button"], svg)'),
+  ).toEqual([["user-select", "none"]]);
+  expect(rule("input, textarea, pre, code, [data-selectable], td")).toEqual([
+    ["user-select", "text"],
+  ]);
 });
 
 test("a row's copy button is transparent at rest and shows on hover and focus, without opacity", () => {
