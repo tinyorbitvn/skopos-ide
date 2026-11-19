@@ -340,11 +340,28 @@ export function MapCanvas({
   const shape = useMemo(() => shapeOf(model, ids), [model, ids]);
   const latest = useRef({ model, ids });
   latest.current = { model, ids };
+  const lastBase = useRef<{
+    options: typeof options;
+    key: string;
+    base: Positions;
+  } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new shape is what lays the drawing out again; the model and ids are read from `latest`.
-  const base = useMemo(
-    () => arrange(latest.current.model, latest.current.ids, options),
-    [shape, options],
-  );
+  const base = useMemo(() => {
+    // Force starts from the last drawing of the same view; any other options start cold.
+    const prev =
+      lastBase.current?.options === options &&
+      lastBase.current.key === memoryKey
+        ? lastBase.current.base
+        : undefined;
+    const out = arrange(
+      latest.current.model,
+      latest.current.ids,
+      options,
+      prev,
+    );
+    lastBase.current = { options, key: memoryKey, base: out };
+    return out;
+  }, [shape, options, memoryKey]);
   const [, setVersion] = useState(0);
   const moved = MOVED.get(memoryKey);
   const pos = useMemo<Positions>(() => {

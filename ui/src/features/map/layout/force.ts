@@ -21,9 +21,10 @@ export function simulate(
   steps: number,
   spring: number,
   pull: (q: Particle) => [number, number],
+  heat = 1,
 ): void {
   for (let step = 0; step < steps; step++) {
-    const cool = 1 - step / steps;
+    const cool = heat * (1 - step / steps);
     for (let i = 0; i < p.length; i++) {
       let [fx, fy] = pull(p[i]);
       for (let j = 0; j < p.length; j++) {
@@ -102,13 +103,90 @@ function start(id: string, count: number): Particle {
   };
 }
 
+/** The share of the full run a warm start keeps at least, and how fast new nodes add to it. */
+const WARM_BASE = 0.15;
+const WARM_GAIN = 2;
+/** How hot a warm start begins: old nodes are nudged, not thrown around. */
+const WARM_HEAT = 0.15;
+
+/** The steps for a namespace of `count` nodes of which `warm` have a previous position. */
+export function stepsFor(count: number, warm: number): number {
+  if (warm === 0 || count === 0) return FORCE_STEPS;
+  const fresh = (count - warm) / count;
+  return Math.min(
+    FORCE_STEPS,
+    Math.ceil(FORCE_STEPS * (WARM_BASE + WARM_GAIN * fresh)),
+  );
+}
+
+/**
+ * Start particles for `own`: nodes with a position in `prev` keep it (re-centred on their
+ * mean, as a block's output is shifted by its packing), new nodes start beside a placed
+ * neighbour, and the rest by the id seed.
+ */
+function warmStart(
+  model: MapModel,
+  own: readonly string[],
+  prev: Positions,
+): { p: Particle[]; warm: number } {
+  const at = new Map<string, [number, number]>();
+  let mx = 0;
+  let my = 0;
+  for (const id of own) {
+    const q = prev[id];
+    if (!q) continue;
+    at.set(id, [q.x, q.y]);
+    mx += q.x;
+    my += q.y;
+  }
+  const warm = at.size;
+  if (warm === 0) return { p: own.map((id) => start(id, own.length)), warm };
+  for (const q of at.values()) {
+    q[0] -= mx / warm;
+    q[1] -= my / warm;
+  }
+  const near = new Map<string, string[]>();
+  for (const e of model.edges) {
+    for (const [a, b] of [
+      [e.from, e.to],
+      [e.to, e.from],
+    ]) {
+      const list = near.get(a);
+      if (list) list.push(b);
+      else near.set(a, [b]);
+    }
+  }
+  const missing = own.filter((id) => !at.has(id));
+  for (let pass = 0; pass < 3 && missing.length; pass++) {
+    for (let i = 0; i < missing.length; i++) {
+      const id = missing[i];
+      const anchor = near.get(id)?.find((n) => at.has(n));
+      if (anchor === undefined) continue;
+      const [ax, ay] = at.get(anchor) as [number, number];
+      const angle = ((hashId(id) % 3600) / 3600) * 2 * Math.PI;
+      at.set(id, [ax + Math.cos(angle) * 40, ay + Math.sin(angle) * 40]);
+      missing.splice(i--, 1);
+    }
+  }
+  const p = own.map((id) => {
+    const q = at.get(id);
+    if (!q) return start(id, own.length);
+    return { x: q[0], y: q[1], vx: 0, vy: 0, fx: 0, fy: 0 };
+  });
+  return { p, warm };
+}
+
 /**
  * The cluster map's Force layout: one simulation per namespace, the cluster-scoped nodes
- * first, packed in rows into a roughly square block.
+ * first, packed in rows into a roughly square block. With `prev` (an earlier result for
+ * the same view) the nodes already there start where they were, and a namespace runs
+ * fewer steps the fewer new nodes it has; `onSteps` sees each run's step count.
  */
 export function layoutCluster(
   model: MapModel,
   ids: readonly string[],
+  prev?: Positions,
+  onSteps?: (steps: number) => void,
 ): Positions {
   const out: Positions = {};
   const namespaces = [...new Set(ids.map((id) => nodeOf(model, id).namespace))]
@@ -117,11 +195,19 @@ export function layoutCluster(
   const blocks = ["", ...namespaces].flatMap((ns) => {
     const own = ids.filter((id) => nodeOf(model, id).namespace === ns);
     if (!own.length) return [];
-    const p = own.map((id) => start(id, own.length));
-    simulate(p, springsFor(model, own), FORCE_STEPS, 128, (q) => [
-      -0.008 * q.x,
-      -0.008 * q.y,
-    ]);
+    const { p, warm } = prev
+      ? warmStart(model, own, prev)
+      : { p: own.map((id) => start(id, own.length)), warm: 0 };
+    const steps = stepsFor(own.length, warm);
+    onSteps?.(steps);
+    simulate(
+      p,
+      springsFor(model, own),
+      steps,
+      128,
+      (q) => [-0.008 * q.x, -0.008 * q.y],
+      warm === 0 ? 1 : WARM_HEAT,
+    );
     let x0 = Number.POSITIVE_INFINITY;
     let y0 = Number.POSITIVE_INFINITY;
     let x1 = Number.NEGATIVE_INFINITY;
