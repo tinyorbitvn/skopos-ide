@@ -543,7 +543,8 @@ spec:
     await browser.waitUntil(async () => (await valueOf("nav-resize")) === nav + 32, {
       timeoutMsg: "the navigation never grew by two steps",
     });
-    expect(Math.round(await widthOf("cluster-sidebar"))).toBe(nav + 32);
+    // The pane width is the glass column's, border included (spec Q §1).
+    expect(Math.round(await widthOf("sidebar-column"))).toBe(nav + 32);
 
     const tableWidth = await widthOf("resource-table");
     await byTestId(row).click();
