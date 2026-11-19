@@ -13,6 +13,7 @@ import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../ipc/generated/WatchEvent";
 import type { WatchStatus } from "../ipc/generated/WatchStatus";
 import { type KubeObject, objectKey } from "../kinds/objects";
+import { useCatalog } from "./catalog";
 
 /**
  * Whether the watch sends this resource's rows with only some of their fields. Core
@@ -45,15 +46,37 @@ const IDLE: ResourceListState = {
 
 const LOADING: ResourceListState = { ...IDLE, loading: true };
 
+/**
+ * How long a list is kept after the last component using it goes away. Opening it
+ * again within that time shows its rows at once, with no new subscription, so the
+ * backend does not send the whole list again.
+ */
+export const LINGER_MS = 20_000;
+
 /** One backend subscription, shared by every component showing the same list. */
 interface Entry {
+  key: string;
+  clusterId: string;
+  /** Always up to date. `state.items` lags behind it while the window is hidden. */
   rows: Map<string, KubeObject>;
+  /** Set when `rows` changed after `state.items` was built from them. */
+  changed: boolean;
+  /** Set when a batch added a key at the end of `rows`, out of the listed order. */
+  unsorted: boolean;
   state: ResourceListState;
   listeners: Set<() => void>;
   refs: number;
   /** Set once the backend answered; `closed` entries unsubscribe on arrival. */
   subscriptionId: string | null;
   closed: boolean;
+  /**
+   * Set once the backend sends nothing more: after a final status, a refused
+   * subscribe or a disconnect of the cluster. Such an entry is dropped at its last
+   * release, so the next component subscribes again.
+   */
+  ended: boolean;
+  /** Drops the entry once it has had no reference for `LINGER_MS`. */
+  linger: ReturnType<typeof setTimeout> | null;
 }
 
 const entries = new Map<string, Entry>();
@@ -64,6 +87,10 @@ function entryKey(clusterId: string, r: ResourceRef): string {
 
 function notify(entry: Entry): void {
   for (const listener of [...entry.listeners]) listener();
+}
+
+function windowHidden(): boolean {
+  return document.visibilityState === "hidden";
 }
 
 function keyOf(key: ObjectKey): string {
@@ -85,62 +112,127 @@ function compareListed(a: KubeObject, b: KubeObject): number {
   return x === y ? 0 : x < y ? -1 : 1;
 }
 
-/** Applies one event and publishes a single new state for it. */
+/**
+ * Builds `state.items` from `rows` if they changed, and tells the components. The
+ * rows are sorted here, so batches that arrive while the window is hidden sort once.
+ */
+function publish(entry: Entry): void {
+  if (entry.unsorted) {
+    entry.rows = new Map(
+      [...entry.rows].sort(([, a], [, b]) => compareListed(a, b)),
+    );
+    entry.unsorted = false;
+  }
+  if (entry.changed) {
+    entry.state = { ...entry.state, items: [...entry.rows.values()] };
+    entry.changed = false;
+  }
+  notify(entry);
+}
+
+/**
+ * Applies one event and publishes a single new state for it. While the window is
+ * hidden, a batch only changes the rows, and they are published when the window
+ * shows. A snapshot or a status is published at once: either is rare, a snapshot
+ * ends the loading that other code waits for, and a status may report an error.
+ */
 function apply(entry: Entry, event: WatchEvent): void {
-  const { state } = entry;
   switch (event.type) {
     case "snapshot": {
       entry.rows = new Map(
         (event.items as unknown as KubeObject[]).map((o) => [objectKey(o), o]),
       );
-      entry.state = {
-        ...state,
-        items: [...entry.rows.values()],
-        loading: false,
-      };
+      entry.changed = true;
+      entry.unsorted = false;
+      entry.state = { ...entry.state, loading: false };
       break;
     }
     case "batch": {
       for (const key of event.deletes) entry.rows.delete(keyOf(key));
       // An update keeps its place. A Map adds a new key at the end, and the core sends
       // a batch in no order, so new objects are put in the snapshot's order.
-      let added = false;
       for (const o of event.upserts as unknown as KubeObject[]) {
         const key = objectKey(o);
-        added ||= !entry.rows.has(key);
+        if (!entry.rows.has(key)) entry.unsorted = true;
         entry.rows.set(key, o);
       }
-      if (added) {
-        entry.rows = new Map(
-          [...entry.rows].sort(([, a], [, b]) => compareListed(a, b)),
-        );
-      }
-      entry.state = { ...state, items: [...entry.rows.values()] };
+      entry.changed = true;
+      if (windowHidden()) return;
       break;
     }
     case "status": {
       const final =
         event.status === "notServed" || event.status === "forbidden";
       entry.state = {
-        ...state,
+        ...entry.state,
         status: event.status,
         message: event.message,
-        loading: final ? false : state.loading,
+        loading: final ? false : entry.state.loading,
       };
-      break;
+      publish(entry);
+      // The backend ends a subscription after its final status.
+      if (final) end(entry);
+      return;
     }
   }
-  notify(entry);
+  publish(entry);
 }
 
-function open(clusterId: string, resource: ResourceRef): Entry {
+/** Publishes the rows that batches changed while the window was hidden. */
+function onVisibility(): void {
+  if (windowHidden()) return;
+  for (const entry of entries.values()) {
+    if (entry.changed) publish(entry);
+  }
+}
+
+function statusesOf(): Map<string, string> {
+  return new Map(
+    useCatalog.getState().clusters.map((c) => [c.id, c.state.status] as const),
+  );
+}
+
+let listening = false;
+
+/**
+ * Starts with the first list and lasts for the store's whole life. A disconnect
+ * ends every subscription of the cluster without an event, so its entries are
+ * marked ended here, and the next list after a reconnect subscribes again.
+ */
+function listen(): void {
+  if (listening) return;
+  listening = true;
+  document.addEventListener("visibilitychange", onVisibility);
+  let statuses = statusesOf();
+  useCatalog.subscribe(() => {
+    const before = statuses;
+    statuses = statusesOf();
+    for (const [clusterId, status] of before) {
+      if (status !== "connected" || statuses.get(clusterId) === "connected") {
+        continue;
+      }
+      for (const entry of [...entries.values()]) {
+        if (entry.clusterId === clusterId) end(entry);
+      }
+    }
+  });
+}
+
+function open(key: string, clusterId: string, resource: ResourceRef): Entry {
+  listen();
   const entry: Entry = {
+    key,
+    clusterId,
     rows: new Map(),
+    changed: false,
+    unsorted: false,
     state: LOADING,
     listeners: new Set(),
     refs: 0,
     subscriptionId: null,
     closed: false,
+    ended: false,
+    linger: null,
   };
   api
     .resourcesSubscribe(clusterId, resource, (event) => {
@@ -162,35 +254,64 @@ function open(clusterId: string, resource: ResourceRef): Entry {
           message: failureMessage(error),
           loading: false,
         };
-        notify(entry);
+        publish(entry);
+        end(entry);
       },
     );
   return entry;
 }
 
-function acquire(key: string, clusterId: string, resource: ResourceRef): Entry {
-  let entry = entries.get(key);
-  if (!entry) {
-    entry = open(clusterId, resource);
-    entries.set(key, entry);
-  }
-  entry.refs += 1;
-  return entry;
-}
-
-function release(key: string, entry: Entry): void {
-  entry.refs -= 1;
-  if (entry.refs > 0) return;
+/** Unsubscribes and forgets the entry. */
+function drop(entry: Entry): void {
+  if (entry.linger !== null) clearTimeout(entry.linger);
+  entry.linger = null;
   entry.closed = true;
-  if (entries.get(key) === entry) entries.delete(key);
+  if (entries.get(entry.key) === entry) entries.delete(entry.key);
   if (entry.subscriptionId !== null) {
     void api.resourcesUnsubscribe(entry.subscriptionId).catch(() => {});
   }
 }
 
+/** Marks the entry ended, and drops it now if nothing uses it. */
+function end(entry: Entry): void {
+  entry.ended = true;
+  if (entry.refs === 0 && !entry.closed) drop(entry);
+}
+
+function acquire(key: string, clusterId: string, resource: ResourceRef): Entry {
+  let entry = entries.get(key);
+  if (!entry) {
+    entry = open(key, clusterId, resource);
+    entries.set(key, entry);
+  }
+  if (entry.linger !== null) {
+    clearTimeout(entry.linger);
+    entry.linger = null;
+  }
+  entry.refs += 1;
+  return entry;
+}
+
+/**
+ * At the last release, keeps a live entry for `LINGER_MS`. An ended entry, or one a
+ * test reset closed, is dropped at once.
+ */
+function release(entry: Entry): void {
+  entry.refs -= 1;
+  if (entry.refs > 0) return;
+  if (entry.ended || entry.closed) {
+    drop(entry);
+    return;
+  }
+  entry.linger = setTimeout(() => {
+    entry.linger = null;
+    drop(entry);
+  }, LINGER_MS);
+}
+
 /**
  * The live objects of a resource. One subscription is kept per cluster, group and
- * plural, and ended when the last component using it goes away.
+ * plural, and ended `LINGER_MS` after the last component using it goes away.
  */
 export function useResourceList(
   clusterId: string,
@@ -210,7 +331,7 @@ export function useResourceList(
     }
     const acquired = acquire(key, cluster, wanted);
     setEntry(acquired);
-    return () => release(key, acquired);
+    return () => release(acquired);
   }, [key]);
 
   const subscribe = useCallback(
@@ -230,61 +351,6 @@ export function useResourceList(
   return current === entry ? shown : (current?.state ?? LOADING);
 }
 
-export function useApiResources(clusterId: string): {
-  resources: ApiResourceInfo[];
-  loading: boolean;
-  error: string | null;
-  refresh(): Promise<void>;
-} {
-  const [state, setState] = useState<{
-    clusterId: string;
-    resources: ApiResourceInfo[];
-    loading: boolean;
-    error: string | null;
-  }>({ clusterId, resources: [], loading: true, error: null });
-
-  const load = useCallback(
-    async (refresh: boolean, isCurrent: () => boolean) => {
-      setState((s) => ({ ...s, clusterId, loading: true, error: null }));
-      try {
-        const resources = await api.resourcesDiscover(clusterId, refresh);
-        if (isCurrent()) {
-          setState({ clusterId, resources, loading: false, error: null });
-        }
-      } catch (error) {
-        if (isCurrent()) {
-          // A failed refresh keeps what the last answer showed; only a load with
-          // nothing to show leaves the list empty.
-          setState((s) => ({
-            clusterId,
-            resources: s.clusterId === clusterId ? s.resources : [],
-            loading: false,
-            error: failureMessage(error),
-          }));
-        }
-      }
-    },
-    [clusterId],
-  );
-
-  useEffect(() => {
-    let current = true;
-    void load(false, () => current);
-    return () => {
-      current = false;
-    };
-  }, [load]);
-
-  const refresh = useCallback(() => load(true, () => true), [load]);
-  const own = state.clusterId === clusterId;
-  return {
-    resources: own ? state.resources : [],
-    loading: own ? state.loading : true,
-    error: own ? state.error : null,
-    refresh,
-  };
-}
-
 export function findResource(
   resources: ApiResourceInfo[],
   group: string,
@@ -297,6 +363,8 @@ export function findResource(
 
 export function resetResourcesForTest(): void {
   for (const entry of entries.values()) {
+    if (entry.linger !== null) clearTimeout(entry.linger);
+    entry.linger = null;
     entry.closed = true;
     entry.listeners.clear();
   }
