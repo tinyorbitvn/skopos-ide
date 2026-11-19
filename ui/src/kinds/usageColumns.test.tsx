@@ -6,7 +6,12 @@ import { usageItem } from "../test/metrics";
 import "./index";
 import { type KubeObject, objectKey } from "./objects";
 import { kindSpec } from "./registry";
-import { NOT_SERVED_TIP, type UsageView, usageColumns } from "./usageColumns";
+import {
+  NOT_SERVED_TIP,
+  nodeUsageColumns,
+  type UsageView,
+  usageColumns,
+} from "./usageColumns";
 
 const WEB: KubeObject = { metadata: { name: "web", namespace: "shop" } };
 const IDLE: KubeObject = { metadata: { name: "idle", namespace: "shop" } };
@@ -150,4 +155,75 @@ test("Pods and Nodes show CPU and Memory where spec §11 puts them", () => {
     "Taints",
     "Age",
   ]);
+});
+
+const NODE: KubeObject = {
+  metadata: { name: "node-1" },
+  status: { allocatable: { cpu: "4", memory: "16Gi" } },
+};
+
+function nodeView(items: UsageItem[], notServed = false): UsageView {
+  return { items: new Map(items.map((i) => [i.name, i])), notServed };
+}
+
+test("a node's CPU and Memory are bars of its allocatable, with the share and both amounts", () => {
+  const [cpu, memory] = nodeUsageColumns(
+    nodeView([
+      usageItem({
+        namespace: null,
+        name: "node-1",
+        cpuCores: 0.5,
+        memoryBytes: 14 * 2 ** 30,
+      }),
+    ]),
+  );
+  render(
+    <>
+      {cpu.render(NODE)}
+      {memory.render(NODE)}
+    </>,
+  );
+  const cpuCell = screen.getByTestId("usage-cpu");
+  expect(cpuCell.getAttribute("title")).toBe("500m of 4 cores");
+  expect(cpuCell.textContent).toBe("13%");
+  const cpuBar = within(cpuCell).getByRole("meter", { name: "CPU used" });
+  expect(cpuBar.getAttribute("aria-valuenow")).toBe("13");
+  expect(cpuBar.getAttribute("data-level")).toBe("ok");
+  const memoryCell = screen.getByTestId("usage-memory");
+  expect(memoryCell.getAttribute("title")).toBe("14 GiB of 16 GiB");
+  expect(memoryCell.textContent).toBe("88%");
+  expect(within(memoryCell).getByRole("meter").getAttribute("data-level")).toBe(
+    "warn",
+  );
+  expect(cpu.sortValue?.(NODE)).toBe(13);
+});
+
+test("a node with no allocatable reads the amount, and one with no sample reads —", () => {
+  const [cpu] = nodeUsageColumns(
+    nodeView([usageItem({ namespace: null, name: "node-1", cpuCores: 0.25 })]),
+  );
+  const bare: KubeObject = { metadata: { name: "node-1" } };
+  const other: KubeObject = { metadata: { name: "node-2" } };
+  render(
+    <>
+      {cpu.render(bare)}
+      {cpu.render(other)}
+    </>,
+  );
+  const [amount, none] = screen.getAllByTestId("usage-cpu");
+  expect(amount.textContent).toBe("250m");
+  expect(none.textContent).toBe("—");
+  expect(screen.queryByRole("meter")).toBeNull();
+  expect(cpu.sortValue?.(other)).toBeNull();
+});
+
+test("a full node's bar turns critical, and it never draws past the end", () => {
+  const [cpu] = nodeUsageColumns(
+    nodeView([usageItem({ namespace: null, name: "node-1", cpuCores: 4.4 })]),
+  );
+  render(<>{cpu.render(NODE)}</>);
+  const bar = screen.getByRole("meter");
+  expect(bar.getAttribute("data-level")).toBe("critical");
+  expect(bar.getAttribute("aria-valuenow")).toBe("100");
+  expect(screen.getByTestId("usage-cpu").textContent).toBe("110%");
 });
