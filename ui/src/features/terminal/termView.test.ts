@@ -1,6 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import { afterEach, expect, test, vi } from "vitest";
 import { PALETTE } from "../../design/palette";
+import { flush, mockBackend } from "../../test/ipc";
 import { FakeTermView } from "../../test/terminal";
 import { createTermView, setTermViewFactory, xtermTheme } from "./termView";
 
@@ -82,5 +83,22 @@ test("a paste on a child of the host is stopped before it can bubble to xterm's 
   child.dispatchEvent(event);
   expect(bubbled).not.toHaveBeenCalled();
   expect(event.defaultPrevented).toBe(true);
+  view.dispose();
+});
+
+test("xterm hands an activated hyperlink to the app's opener", async () => {
+  const backend = mockBackend({ open_external: () => null });
+  const view = createTermView();
+  // The view keeps its terminal to itself; the handler is read the way xterm reads it.
+  const { term } = view as unknown as { term: Terminal };
+  term.options.linkHandler?.activate(
+    new MouseEvent("click"),
+    "https://example.com/docs",
+    { start: { x: 1, y: 1 }, end: { x: 2, y: 1 } },
+  );
+  await flush();
+  expect(backend.callsTo("open_external")).toEqual([
+    { url: "https://example.com/docs" },
+  ]);
   view.dispose();
 });
