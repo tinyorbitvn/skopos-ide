@@ -13,7 +13,7 @@ import {
 } from "../../kinds/nav";
 import { connectCluster } from "../../stores/clusters";
 import { clusterPath, type FolderTree } from "../catalog/folderTree";
-import { isBlank, matchEntry } from "./fuzzy";
+import { isBlank, lowerChars, matchPrepared, prepareNeedle } from "./fuzzy";
 import {
   CUSTOM_ICON,
   FALLBACK_ICON,
@@ -202,6 +202,26 @@ function idle(entries: PaletteEntry[], cap: number): PaletteRow[] {
   return entries.slice(0, cap).map((e) => ({ ...e, score: 0, ranges: [] }));
 }
 
+interface Lowered {
+  label: string[];
+  hint: string[] | null;
+}
+
+/** Lowercased label and hint of each entry, made once per entry object. */
+const lowered = new WeakMap<PaletteEntry, Lowered>();
+
+function loweredOf(e: PaletteEntry): Lowered {
+  let found = lowered.get(e);
+  if (found === undefined) {
+    found = {
+      label: lowerChars(e.label),
+      hint: e.hint === null ? null : lowerChars(e.hint),
+    };
+    lowered.set(e, found);
+  }
+  return found;
+}
+
 function ranked(
   entries: PaletteEntry[],
   query: string,
@@ -209,8 +229,16 @@ function ranked(
   cap: number,
 ): PaletteRow[] {
   const rows: PaletteRow[] = [];
+  const needle = prepareNeedle(query);
   for (const e of entries) {
-    const match = matchEntry(query, e.label, withHint ? e.hint : null);
+    const low = loweredOf(e);
+    const match = matchPrepared(
+      needle,
+      e.label,
+      low.label,
+      withHint ? e.hint : null,
+      withHint ? low.hint : null,
+    );
     if (match !== null)
       rows.push({ ...e, score: match.score, ranges: match.ranges });
   }

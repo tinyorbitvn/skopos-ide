@@ -49,12 +49,29 @@ function toRanges(positions: number[]): [number, number][] {
  * short label up to 2.
  */
 export function fuzzyMatch(query: string, label: string): Match | null {
-  const needle = query
+  return fuzzyMatchPrepared(prepareNeedle(query), label, lowerChars(label));
+}
+
+/** The query's characters, spaces dropped and lowercased. Build it once per query. */
+export function prepareNeedle(query: string): string[] {
+  return query
     .split("")
     .filter((c) => c.trim() !== "")
     .map((c) => c.toLowerCase());
+}
+
+/** A label's characters, lowercased. Build it once per label. */
+export function lowerChars(text: string): string[] {
+  return text.split("").map((c) => c.toLowerCase());
+}
+
+/** `fuzzyMatch` with the needle and the lowercased label made ahead of time. */
+export function fuzzyMatchPrepared(
+  needle: string[],
+  label: string,
+  hay: string[],
+): Match | null {
   if (needle.length === 0) return null;
-  const hay = label.split("").map((c) => c.toLowerCase());
 
   // Forward: where the whole query has matched for the first time.
   let next = 0;
@@ -106,8 +123,25 @@ export function matchEntry(
   label: string,
   hint: string | null,
 ): Match | null {
-  const own = fuzzyMatch(query, label);
-  if (own !== null || hint === null) return own;
-  const other = fuzzyMatch(query, hint);
+  return matchPrepared(
+    prepareNeedle(query),
+    label,
+    lowerChars(label),
+    hint,
+    hint === null ? null : lowerChars(hint),
+  );
+}
+
+/** `matchEntry` with the needle and both lowercased texts made ahead of time. */
+export function matchPrepared(
+  needle: string[],
+  label: string,
+  labelHay: string[],
+  hint: string | null,
+  hintHay: string[] | null,
+): Match | null {
+  const own = fuzzyMatchPrepared(needle, label, labelHay);
+  if (own !== null || hint === null || hintHay === null) return own;
+  const other = fuzzyMatchPrepared(needle, hint, hintHay);
   return other === null ? null : { score: other.score / 2, ranges: [] };
 }

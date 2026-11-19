@@ -1,5 +1,13 @@
 import { expect, test } from "vitest";
-import { fuzzyMatch, isBlank, matchEntry } from "./fuzzy";
+import {
+  fuzzyMatch,
+  fuzzyMatchPrepared,
+  isBlank,
+  lowerChars,
+  matchEntry,
+  matchPrepared,
+  prepareNeedle,
+} from "./fuzzy";
 
 function score(query: string, label: string): number {
   return fuzzyMatch(query, label)?.score ?? -1;
@@ -77,4 +85,101 @@ test("a query of spaces is no query", () => {
     false,
   ]);
   expect(fuzzyMatch("   ", "anything")).toBeNull();
+});
+
+// The unprepared implementation as it was before the needle and labels were cached.
+function reference(query: string, label: string) {
+  const needle = query
+    .split("")
+    .filter((c) => c.trim() !== "")
+    .map((c) => c.toLowerCase());
+  const hay = label.split("").map((c) => c.toLowerCase());
+  return { needle, hay };
+}
+
+const LABELS = [
+  "ConfigMaps",
+  "my-service",
+  "myxservice",
+  "kube-system/coredns-5d78c9869d-abcde",
+  "Deployments",
+  "İstanbul",
+  "prod.cluster",
+  "",
+  "a",
+  "StatefulSets",
+];
+
+test("prepared matching ranks exactly as fuzzyMatch over a mix of labels", () => {
+  for (const query of [
+    "cfg",
+    "ser",
+    "ist",
+    "co re",
+    "x",
+    "  ",
+    "dep",
+    "zzz",
+    "p.c",
+  ]) {
+    const prepared = prepareNeedle(query);
+    expect(prepared).toEqual(reference(query, "").needle);
+    for (const label of LABELS) {
+      expect(lowerChars(label)).toEqual(reference(query, label).hay);
+      expect(fuzzyMatchPrepared(prepared, label, lowerChars(label))).toEqual(
+        fuzzyMatch(query, label),
+      );
+      expect(
+        matchPrepared(
+          prepared,
+          label,
+          lowerChars(label),
+          "Page",
+          lowerChars("Page"),
+        ),
+      ).toEqual(matchEntry(query, label, "Page"));
+    }
+  }
+});
+
+test("fuzzyMatch scores and ranges stay as they were over a mix of labels", () => {
+  const run = (query: string) =>
+    LABELS.map((l) => {
+      const m = fuzzyMatch(query, l);
+      return m && [m.score, m.ranges];
+    });
+  expect(run("ser")).toEqual([
+    null,
+    [26.3, [[3, 6]]],
+    [18.3, [[3, 6]]],
+    [
+      5.78,
+      [
+        [7, 8],
+        [9, 10],
+        [14, 15],
+      ],
+    ],
+    null,
+    null,
+    [
+      10.76,
+      [
+        [8, 9],
+        [10, 12],
+      ],
+    ],
+    null,
+    null,
+    null,
+  ]);
+  expect(run("co re")[3]).toEqual([28.28, [[12, 16]]]);
+  expect(run("p.c")[6]).toEqual([
+    30.76,
+    [
+      [0, 1],
+      [4, 6],
+    ],
+  ]);
+  expect(run("ist").every((m) => m === null)).toBe(true);
 });
