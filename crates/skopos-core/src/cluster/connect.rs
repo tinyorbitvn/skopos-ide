@@ -237,7 +237,16 @@ pub(crate) async fn establish(
     // One allowance for both, because `kube` runs an exec plugin while building the client.
     let deadline = Instant::now() + limit;
 
-    let client = build_client(kubeconfig, entry, settings, &classifier, deadline, limit).await?;
+    let client = build_client(
+        handle,
+        kubeconfig,
+        entry,
+        settings,
+        &classifier,
+        deadline,
+        limit,
+    )
+    .await?;
 
     handle.log(LogLevel::Info, "checking version");
     let version = timeout_at(deadline, client.apiserver_version())
@@ -284,6 +293,7 @@ pub(crate) async fn establish(
 }
 
 async fn build_client(
+    handle: &ClusterHandle,
     kubeconfig: Kubeconfig,
     entry: &ContextEntry,
     settings: &ClusterSettings,
@@ -298,6 +308,14 @@ async fn build_client(
     let mut config = Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
         .map_err(|e| config_failure(&entry.source_path, &e))?;
+    if config.accept_invalid_certs {
+        // Nothing else says so, and whoever answers at the address gets the credentials.
+        handle.log(
+            LogLevel::Warn,
+            "the kubeconfig turns off TLS verification for this cluster \
+             (insecure-skip-tls-verify), so the server's identity is not checked",
+        );
+    }
     let proxy_url = settings.proxy_url.as_deref().map(str::trim);
     if let Some(url) = proxy_url.filter(|url| !url.is_empty()) {
         // The error text does not quote the URL, which can hold a password.

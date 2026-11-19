@@ -20,6 +20,7 @@ use super::state::{ConnectionState, FailureKind};
 use crate::app_core::CoreEvent;
 use crate::error::{sanitize_text, CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::{ClusterId, ContextEntry};
+use crate::paths::create_private_dir;
 use crate::prefs::ClusterSettings;
 use crate::resources::{ApiResourceInfo, ObjectNames, NAMES_TTL};
 
@@ -81,16 +82,6 @@ fn reset_runtime_dir(dir: &Path) {
     if let Err(e) = create_private_dir(dir) {
         tracing::warn!("cannot create {}: {e}", dir.display());
     }
-}
-
-fn create_private_dir(dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
 }
 
 struct Live {

@@ -19,7 +19,7 @@ use kube::api::{Api, PostParams};
 use kube::Client;
 
 use super::types::{ApiResourceInfo, ResourceRef};
-use crate::error::sanitize_text;
+use crate::error::{error_chain, sanitize_text};
 
 const VERBS: [&str; 6] = ["list", "watch", "create", "update", "patch", "delete"];
 const MAX_IN_FLIGHT: usize = 10;
@@ -100,7 +100,7 @@ async fn ask(client: &Client, attributes: ResourceAttributes) -> Answer {
                 Answer::Denied
             }
         }
-        Ok(Err(e)) => Answer::Failed(e.to_string()),
+        Ok(Err(e)) => Answer::Failed(failure_text(&e)),
         Err(_) => Answer::Failed(format!("timed out after {REVIEW_LIMIT:?}")),
     }
 }
@@ -193,6 +193,12 @@ fn grants(rule: &ResourceRule, resource: &ResourceRef, verb: &str) -> bool {
         && names(rule.resources.as_ref(), &resource.plural)
 }
 
+/// What a failed review may say, in the log and to the caller: the error and its causes,
+/// without what the server or a plugin sent, which the error's own text can quote.
+fn failure_text(err: &kube::Error) -> String {
+    error_chain(err)
+}
+
 async fn rules_review(client: &Client, namespace: &str) -> Result<NamespaceRules, String> {
     let review = SelfSubjectRulesReview {
         spec: SelfSubjectRulesReviewSpec {
@@ -213,7 +219,7 @@ async fn rules_review(client: &Client, namespace: &str) -> Result<NamespaceRules
                 complete,
             })
         }
-        Ok(Err(e)) => Err(e.to_string()),
+        Ok(Err(e)) => Err(failure_text(&e)),
         Err(_) => Err(format!("timed out after {REVIEW_LIMIT:?}")),
     }
 }
@@ -353,6 +359,16 @@ mod tests {
     fn check_access_is_send<'a>(client: &'a Client, scope: &'a Scope<'a>) {
         fn send<T: Send>(_: &T) {}
         send(&check_access(client, Vec::new(), scope));
+    }
+
+    #[test]
+    fn a_failed_review_quotes_nothing_the_server_sent() {
+        let source = serde_json::from_str::<u32>("\"hunter2\"").unwrap_err();
+        assert!(source.to_string().contains("hunter2"));
+
+        let text = failure_text(&kube::Error::SerdeError(source));
+
+        assert!(!text.contains("hunter2"), "{text}");
     }
 
     fn kind(group: &str, plural: &str) -> ResourceRef {
