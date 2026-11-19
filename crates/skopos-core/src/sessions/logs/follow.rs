@@ -1,6 +1,7 @@
 //! Keeps one container's log stream going: it reconnects with backoff, resumes where it
 //! stopped, drops the lines a resume sends twice, and says what happened with markers.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::AsyncReadExt;
@@ -34,6 +35,8 @@ pub(super) struct StreamContext {
     /// Whether a new pod under the same name carries on this stream. A workload's watch
     /// starts its own stream for such a pod, so there it ends this one.
     pub(super) follow_replacements: bool,
+    /// How many of the session's container streams may run at once.
+    pub(super) max_streams: usize,
 }
 
 impl StreamContext {
@@ -58,6 +61,9 @@ impl StreamContext {
 pub(super) struct StreamTarget {
     pub(super) pod: String,
     pub(super) container: String,
+    /// The Pod as the caller last saw it, in the shape `read_pod` returns. A followed stream
+    /// starts from it instead of reading the Pod again.
+    pub(super) initial: Option<Arc<Value>>,
 }
 
 #[derive(Debug)]
@@ -352,9 +358,12 @@ pub(super) async fn stream_container(context: StreamContext, target: StreamTarge
     let follow = context.options.follow && !context.options.previous;
     let mut progress = Progress::default();
     let mut seen = if follow {
-        read_pod(&context.client, &context.namespace, &target.pod)
-            .await
-            .map_or_else(|_| Seen::default(), |pod| Seen::of(&pod, &target.container))
+        match target.initial.as_deref() {
+            Some(pod) => Seen::of(pod, &target.container),
+            None => read_pod(&context.client, &context.namespace, &target.pod)
+                .await
+                .map_or_else(|_| Seen::default(), |pod| Seen::of(&pod, &target.container)),
+        }
     } else {
         Seen::default()
     };

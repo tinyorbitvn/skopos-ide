@@ -51,6 +51,10 @@ export function paintLine(
 export function markerText(entry: LogMarkerEntry): string {
   const { pod, container, message } = entry;
   const detail = message ? `: ${message}` : "";
+  if (typeof entry.marker === "object") {
+    const { streaming, total } = entry.marker;
+    return `Following ${streaming} of ${total} containers; the others start as streams end`;
+  }
   switch (entry.marker) {
     case "restarted":
       return container ? `${pod}/${container} restarted` : `${pod} restarted`;

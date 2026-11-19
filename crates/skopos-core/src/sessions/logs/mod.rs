@@ -4,16 +4,17 @@
 mod download;
 mod follow;
 mod parse;
+mod streams;
 mod workload;
 pub(crate) use workload::workload_selector;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
@@ -23,7 +24,8 @@ use crate::app_core::AppCore;
 use crate::error::{CoreResult, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::resources::{invalid, is_path_segment, ResourceRef};
-use follow::{stream_container, ContainerEnd, StreamContext, StreamTarget};
+use follow::{ContainerEnd, StreamContext, StreamTarget};
+use streams::StreamSet;
 
 /// A line waits this long at most, counted from when the batch it joins started.
 const FLUSH_EVERY: Duration = Duration::from_millis(100);
@@ -35,6 +37,9 @@ const FLUSH_LINES: usize = 5_000;
 const FLUSH_BYTES: u64 = 1024 * 1024;
 /// Lines on their way to the batcher, across all of a session's streams.
 const ITEM_BACKLOG: usize = 256;
+/// A session reads at most this many container streams at once. A workload with more
+/// containers queues the rest, which `LogMarker::Limited` reports.
+pub(crate) const MAX_STREAMS: usize = 20;
 
 /// Which logs a session reads.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -82,9 +87,13 @@ pub struct LogLine {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[ts(export)]
-#[serde(rename_all = "camelCase")]
+/// What a marker row says. The plain ones are names on the wire; `Limited` carries numbers,
+/// so it is an object with a `type`, as the interface's marker union declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TS)]
+#[ts(
+    export,
+    type = r#""restarted" | "reconnecting" | "reconnected" | "podAdded" | "podRemoved" | "failed" | { type: "limited", streaming: number, total: number }"#
+)]
 pub enum LogMarker {
     Restarted,
     Reconnecting,
@@ -92,6 +101,33 @@ pub enum LogMarker {
     PodAdded,
     PodRemoved,
     Failed,
+    /// More containers than the session reads at once: `streaming` run now, `total` exist.
+    /// The last one sent has `streaming == total`, which says nothing waits any more.
+    Limited {
+        streaming: u32,
+        total: u32,
+    },
+}
+
+impl Serialize for LogMarker {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let name = match self {
+            Self::Restarted => "restarted",
+            Self::Reconnecting => "reconnecting",
+            Self::Reconnected => "reconnected",
+            Self::PodAdded => "podAdded",
+            Self::PodRemoved => "podRemoved",
+            Self::Failed => "failed",
+            Self::Limited { streaming, total } => {
+                let mut object = serializer.serialize_struct("LogMarker", 3)?;
+                object.serialize_field("type", "limited")?;
+                object.serialize_field("streaming", streaming)?;
+                object.serialize_field("total", total)?;
+                return object.end();
+            }
+        };
+        serializer.serialize_str(name)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -306,19 +342,17 @@ fn pod_session_end(ends: Vec<ContainerEnd>, stopped: bool) -> LogEvent {
     }
 }
 
-/// Runs one stream per target until all have ended, and returns the session's last event.
-async fn run_streams(context: StreamContext, targets: Vec<StreamTarget>) -> LogEvent {
+/// Runs one stream per target until all have ended, at most `context.max_streams` at a time,
+/// and returns the session's last event. `label` names the session in `Limited` markers.
+async fn run_streams(context: StreamContext, targets: Vec<StreamTarget>, label: &str) -> LogEvent {
     let several = targets.len() > 1;
-    let mut streams = JoinSet::new();
+    let mut streams = StreamSet::new(context.items.clone(), label.to_owned(), context.max_streams);
     for target in targets {
-        let context = context.clone();
-        streams.spawn(async move { (target.clone(), stream_container(context, target).await) });
+        streams.add(context.clone(), target);
     }
+    streams.announce().await;
     let mut ends = Vec::new();
-    while let Some(joined) = streams.join_next().await {
-        let Ok((target, end)) = joined else {
-            continue;
-        };
+    while let Some((target, end)) = streams.next().await {
         // Alone, a failure ends the session, and its last event says so.
         if let (true, ContainerEnd::Failed(error)) = (several, &end) {
             context
@@ -326,6 +360,7 @@ async fn run_streams(context: StreamContext, targets: Vec<StreamTarget>) -> LogE
                 .await;
         }
         ends.push(end);
+        streams.announce().await;
     }
     pod_session_end(ends, context.token.is_cancelled())
 }
@@ -345,14 +380,16 @@ async fn run_pod_target(
         }
     };
     let containers = container.map_or_else(|| pod_container_names(&object), |name| vec![name]);
+    let initial = Arc::new(object);
     let targets = containers
         .into_iter()
         .map(|container| StreamTarget {
             pod: pod.to_owned(),
             container,
+            initial: Some(initial.clone()),
         })
         .collect();
-    run_streams(context, targets).await
+    run_streams(context, targets, pod).await
 }
 
 async fn run_target(context: StreamContext, target: LogTarget) -> LogEvent {
@@ -391,6 +428,7 @@ impl AppCore {
             .sessions()
             .register_log(token.clone(), flow.clone(), owner);
         let session = guard.id().to_owned();
+        let max_streams = self.sessions().log_stream_cap();
         tokio::spawn(async move {
             let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);
             let batcher = tokio::spawn(run_batcher(items_rx, events.clone(), flow, token.clone()));
@@ -401,6 +439,7 @@ impl AppCore {
                 items,
                 token,
                 follow_replacements: true,
+                max_streams,
             };
             // Each stream holds a clone of `items`, so the batcher ends after the last one.
             let last = run_target(context, target).await;
@@ -416,6 +455,12 @@ impl AppCore {
     /// Stops a log session. An id that is not running is ignored.
     pub fn logs_stop(&self, session: &str) {
         self.session_stop(session);
+    }
+
+    /// Sets the cap on concurrent container streams for log sessions and downloads that
+    /// start later. `0` restores the real cap.
+    pub fn set_log_stream_cap_for_test(&self, cap: usize) {
+        self.sessions().set_log_stream_cap(cap);
     }
 }
 
@@ -736,6 +781,39 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&ended).unwrap(),
             serde_json::json!({ "type": "ended", "reason": "podGone" })
+        );
+    }
+
+    #[test]
+    fn markers_are_names_and_the_limited_marker_is_an_object() {
+        assert_eq!(
+            serde_json::to_value(LogMarker::PodRemoved).unwrap(),
+            serde_json::json!("podRemoved")
+        );
+        assert_eq!(
+            serde_json::to_value(LogMarker::Limited {
+                streaming: 20,
+                total: 31
+            })
+            .unwrap(),
+            serde_json::json!({ "type": "limited", "streaming": 20, "total": 31 })
+        );
+        let event = LogEvent::Marker {
+            pod: "web".into(),
+            container: None,
+            marker: LogMarker::Limited {
+                streaming: 2,
+                total: 3,
+            },
+            message: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({
+                "type": "marker", "pod": "web", "container": null,
+                "marker": { "type": "limited", "streaming": 2, "total": 3 },
+                "message": null,
+            })
         );
     }
 

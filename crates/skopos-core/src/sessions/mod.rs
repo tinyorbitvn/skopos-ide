@@ -9,7 +9,7 @@ mod node_shell;
 mod pty;
 
 use std::hash::{BuildHasher, Hasher, RandomState};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -91,6 +91,8 @@ pub(crate) struct SessionRegistry {
     ended: Notify,
     /// Milliseconds, set by tests. Zero means the real limit.
     node_shell_limit_ms: AtomicU64,
+    /// Set by tests. Zero means the real cap.
+    log_stream_cap: AtomicUsize,
 }
 
 impl SessionRegistry {
@@ -145,6 +147,17 @@ impl SessionRegistry {
     pub(crate) fn set_node_shell_limit(&self, limit: Duration) {
         let millis = u64::try_from(limit.as_millis()).unwrap_or(u64::MAX);
         self.node_shell_limit_ms.store(millis, Ordering::Relaxed);
+    }
+
+    pub(crate) fn log_stream_cap(&self) -> usize {
+        match self.log_stream_cap.load(Ordering::Relaxed) {
+            0 => logs::MAX_STREAMS,
+            cap => cap,
+        }
+    }
+
+    pub(crate) fn set_log_stream_cap(&self, cap: usize) {
+        self.log_stream_cap.store(cap, Ordering::Relaxed);
     }
 
     fn stop(&self, id: &str) {

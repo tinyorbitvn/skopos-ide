@@ -806,6 +806,151 @@ async fn one_failed_stream_of_a_workload_leaves_the_others_running() {
     core.logs_stop(&session);
 }
 
+/// `(streaming, total)` of a `Limited` marker.
+fn limited(event: &LogEvent) -> Option<(u32, u32)> {
+    match event {
+        LogEvent::Marker {
+            marker: LogMarker::Limited { streaming, total },
+            ..
+        } => Some((*streaming, *total)),
+        _ => None,
+    }
+}
+
+fn limits(events: &[LogEvent]) -> Vec<(u32, u32)> {
+    events.iter().filter_map(limited).collect()
+}
+
+/// The pods that sent a line, in order of arrival.
+fn pods_with_lines(events: &[LogEvent]) -> Vec<String> {
+    let mut pods: Vec<String> = Vec::new();
+    for line in lines(events) {
+        if !pods.contains(&line.pod) {
+            pods.push(line.pod);
+        }
+    }
+    pods
+}
+
+fn add_numbered_web_pods(fake: &FakeKube, count: usize) -> Vec<String> {
+    (1..=count)
+        .map(|number| {
+            let name = format!("web-{number}");
+            add_web_pod(fake, &name, "web");
+            // The same second, the digit tells them apart.
+            let stamp = format!("2026-01-01T00:00:01.00000000{number}Z");
+            add_pod_line(fake, &name, &stamp, &format!("from {name}"));
+            name
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_followed_workload_runs_at_most_the_cap_and_queues_the_rest() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    core.set_log_stream_cap_for_test(2);
+    add_deployment(&fake);
+    add_numbered_web_pods(&fake, 4);
+    let (session, mut rx) = start(&core, &id, deployment_target(), follow());
+
+    let mut events = wait_until(&mut rx, |event| limited(event) == Some((2, 4))).await;
+    events.extend(until_silent(&mut rx).await);
+    let running = pods_with_lines(&events);
+    assert_eq!(running.len(), 2, "{events:?}");
+    assert_eq!(fake.open_log_count(), 2, "never above the cap");
+    assert_eq!(limits(&events).last(), Some(&(2, 4)));
+
+    // A pod that goes away frees its slot for the first one in the queue.
+    fake.delete_pod("default", &running[0]);
+    let mut after = wait_until(&mut rx, |event| {
+        matches!(event, LogEvent::Lines { lines, .. }
+            if lines.iter().any(|line| !running.contains(&line.pod)))
+    })
+    .await;
+    after.extend(until_silent(&mut rx).await);
+    assert!(
+        after
+            .iter()
+            .any(|event| has_marker(event, LogMarker::PodRemoved)),
+        "{after:?}"
+    );
+    assert!(limits(&after).contains(&(2, 3)), "{after:?}");
+    let promoted: Vec<String> = pods_with_lines(&after)
+        .into_iter()
+        .filter(|pod| !running.contains(pod))
+        .collect();
+    assert_eq!(promoted.len(), 1, "{after:?}");
+
+    // The last one in the queue starts too, and the session says it is no longer limited.
+    fake.delete_pod("default", &running[1]);
+    wait_until(&mut rx, |event| limited(event) == Some((2, 2))).await;
+    let quiet = until_silent(&mut rx).await;
+    assert!(limits(&quiet).is_empty(), "no more changes: {quiet:?}");
+    assert_eq!(fake.open_log_count(), 2);
+
+    core.logs_stop(&session);
+    wait_until(&mut rx, is_last).await;
+    assert!(core.sessions_wait_idle(LIMIT).await);
+}
+
+#[tokio::test]
+async fn reading_a_workload_once_starts_a_queued_stream_when_one_ends() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    core.set_log_stream_cap_for_test(1);
+    add_deployment(&fake);
+    add_numbered_web_pods(&fake, 3);
+    let (_session, mut rx) = start(&core, &id, deployment_target(), once());
+    let events = wait_until(&mut rx, is_last).await;
+
+    let mut seen = texts(&events);
+    seen.sort();
+    assert_eq!(seen, ["from web-1", "from web-2", "from web-3"]);
+    // One at a time: three waiting, then two, then none, which says it is no longer limited.
+    assert_eq!(limits(&events), [(1, 3), (1, 2), (1, 1)]);
+    assert!(matches!(
+        events.last(),
+        Some(LogEvent::Ended {
+            reason: LogEndReason::Completed
+        })
+    ));
+}
+
+#[tokio::test]
+async fn a_session_under_the_cap_never_says_it_is_limited() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    add_deployment(&fake);
+    add_numbered_web_pods(&fake, 3);
+    let (_session, mut rx) = start(&core, &id, deployment_target(), once());
+    let events = wait_until(&mut rx, is_last).await;
+    assert!(limits(&events).is_empty(), "{events:?}");
+}
+
+#[tokio::test]
+async fn a_pod_target_reads_its_pod_once_before_the_first_stream() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    pod_with_containers(&fake, json!({}));
+    let (session, mut rx) = start(&core, &id, pod_target(Some("main")), follow());
+    wait_for_open_stream(&fake).await;
+    assert_eq!(fake.request_count("/api/v1/namespaces/default/pods/p"), 1);
+    core.logs_stop(&session);
+    wait_until(&mut rx, is_last).await;
+}
+
+#[tokio::test]
+async fn a_followed_workload_does_not_read_a_pod_the_watch_already_gave() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    add_deployment(&fake);
+    add_web_pod(&fake, "web-1", "web");
+    let (session, mut rx) = start(&core, &id, deployment_target(), follow());
+    wait_for_open_stream(&fake).await;
+    assert_eq!(
+        fake.request_count("/api/v1/namespaces/default/pods/web-1"),
+        0
+    );
+    core.logs_stop(&session);
+    wait_until(&mut rx, is_last).await;
+}
+
 #[tokio::test]
 async fn a_forbidden_pod_watch_ends_the_session() {
     let (core, fake, id, _root) = connected_fake(FakeKubeConfig {
