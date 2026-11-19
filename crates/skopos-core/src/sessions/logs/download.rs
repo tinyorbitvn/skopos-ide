@@ -134,6 +134,7 @@ impl AppCore {
             items,
             token,
             follow_replacements: true,
+            max_streams: self.sessions().log_stream_cap(),
         };
         let last = run_target(context, target).await;
         let bytes = writer

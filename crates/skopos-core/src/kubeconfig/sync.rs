@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use notify_debouncer_full::file_id::{get_file_id, FileId};
 use notify_debouncer_full::notify::event::{AccessKind, AccessMode};
@@ -19,6 +19,9 @@ use crate::error::sanitize_text;
 const DEBOUNCE: Duration = Duration::from_millis(500);
 pub(crate) const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const KUBECONFIG_MARKERS: [&str; 3] = ["clusters:", "contexts:", "kind: Config"];
+/// A file whose mtime is nearer than this to the scan is read again next time: a write in
+/// the same timestamp tick would leave the stamp as it was.
+const MTIME_TRUST: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +104,8 @@ struct Worker {
     target_dirs: BTreeSet<PathBuf>,
     /// The entries last accepted for each file, kept when a later read fails.
     accepted: HashMap<PathBuf, Vec<ContextEntry>>,
+    /// The last successful parse of each file, so an unchanged file is not read again.
+    cache: ParseCache,
 }
 
 impl Worker {
@@ -131,6 +136,7 @@ impl Worker {
             failed_watches: HashSet::new(),
             target_dirs: BTreeSet::new(),
             accepted: HashMap::new(),
+            cache: ParseCache::default(),
         }
     }
 
@@ -206,17 +212,29 @@ impl Worker {
     }
 
     fn scan(&mut self) -> SyncSnapshot {
+        self.scan_at(SystemTime::now())
+    }
+
+    /// `scanned_at` is when this scan began, which decides which file times can be trusted.
+    fn scan_at(&mut self, scanned_at: SystemTime) -> SyncSnapshot {
         let mut warnings = Vec::new();
         let candidates = collect_candidates(&self.sources, &self.accepted, &mut warnings);
         let mut accepted = HashMap::new();
         let mut entries = Vec::new();
         for candidate in &candidates {
             let previous = self.accepted.remove(&candidate.path).unwrap_or_default();
-            let kept = read_candidate(candidate, previous, &mut warnings);
+            let kept = read_candidate(
+                candidate,
+                previous,
+                &mut self.cache,
+                scanned_at,
+                &mut warnings,
+            );
             entries.extend(kept.iter().cloned());
             accepted.insert(candidate.path.clone(), kept);
         }
         self.accepted = accepted;
+        self.cache.keep_only(&candidates);
         self.target_dirs = candidates
             .iter()
             .filter(|c| is_symlink(&c.path))
@@ -265,6 +283,91 @@ fn is_skipped_name(name: &str) -> bool {
         || name.ends_with(".lock")
         || name.ends_with(".bak")
         || name.ends_with('~')
+}
+
+/// What identifies one version of a file without reading it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileStamp {
+    explicit: bool,
+    modified: SystemTime,
+    len: u64,
+    /// A `chmod` changes neither the time nor the size, and can make the file unreadable.
+    permissions: std::fs::Permissions,
+    /// The device and inode where the platform has them, so a file replaced by another of the
+    /// same size and time is noticed.
+    identity: Option<(u64, u64)>,
+}
+
+#[cfg(unix)]
+fn file_identity(metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_identity(_metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// The stamp of the file `path` leads to, links followed. `None` when it cannot be examined
+/// or is not a regular file, and then nothing is cached.
+fn stamp_of(path: &Path, explicit: bool) -> Option<FileStamp> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    Some(FileStamp {
+        explicit,
+        modified: metadata.modified().ok()?,
+        len: metadata.len(),
+        permissions: metadata.permissions(),
+        identity: file_identity(&metadata),
+    })
+}
+
+/// The entries of each file's last successful parse, with the stamp they were read under.
+#[derive(Debug, Default)]
+struct ParseCache {
+    entries: HashMap<PathBuf, (FileStamp, Vec<ContextEntry>)>,
+    /// How many files were parsed, for tests.
+    #[cfg(test)]
+    parses: usize,
+}
+
+impl ParseCache {
+    fn hit(&self, path: &Path, stamp: &FileStamp) -> Option<Vec<ContextEntry>> {
+        let (cached, entries) = self.entries.get(path)?;
+        (cached == stamp).then(|| entries.clone())
+    }
+
+    /// Keeps the result under `stamp`, unless the file is too new to tell its versions apart.
+    fn store(
+        &mut self,
+        path: &Path,
+        stamp: Option<FileStamp>,
+        scanned_at: SystemTime,
+        entries: Vec<ContextEntry>,
+    ) {
+        let settled = stamp.filter(|stamp| {
+            scanned_at
+                .duration_since(stamp.modified)
+                .is_ok_and(|age| age >= MTIME_TRUST)
+        });
+        match settled {
+            Some(stamp) => {
+                self.entries.insert(path.to_path_buf(), (stamp, entries));
+            }
+            None => {
+                self.entries.remove(path);
+            }
+        }
+    }
+
+    /// Forgets the files that are not candidates any more.
+    fn keep_only(&mut self, candidates: &[Candidate]) {
+        let kept: HashSet<&Path> = candidates.iter().map(|c| c.path.as_path()).collect();
+        self.entries.retain(|path, _| kept.contains(path.as_path()));
+    }
 }
 
 struct Candidate {
@@ -358,13 +461,21 @@ fn may_be_file(path: &Path) -> bool {
 }
 
 /// Returns the entries to keep for this file, adding a warning when they are
-/// the previous ones because the current content could not be used.
+/// the previous ones because the current content could not be used. A file whose stamp is
+/// the one of its last successful parse is not read.
 fn read_candidate(
     candidate: &Candidate,
     previous: Vec<ContextEntry>,
+    cache: &mut ParseCache,
+    scanned_at: SystemTime,
     warnings: &mut Vec<SyncWarning>,
 ) -> Vec<ContextEntry> {
     let path = candidate.path.as_path();
+    // Before the read: a write that lands after this makes the next stamp differ.
+    let stamp = stamp_of(path, candidate.explicit);
+    if let Some(entries) = stamp.as_ref().and_then(|stamp| cache.hit(path, stamp)) {
+        return entries;
+    }
     let bytes = match read_limited(path) {
         Ok(Some(bytes)) => bytes,
         Ok(None) => return Vec::new(),
@@ -373,9 +484,19 @@ fn read_candidate(
             return previous;
         }
     };
+    #[cfg(test)]
+    {
+        cache.parses += 1;
+    }
     match parse_file(path, &bytes) {
-        Ok(parsed) if candidate.explicit || parsed.is_kubeconfig => parsed.entries,
-        Ok(_) if previous.is_empty() => Vec::new(),
+        Ok(parsed) if candidate.explicit || parsed.is_kubeconfig => {
+            cache.store(path, stamp, scanned_at, parsed.entries.clone());
+            parsed.entries
+        }
+        Ok(_) if previous.is_empty() => {
+            cache.store(path, stamp, scanned_at, Vec::new());
+            Vec::new()
+        }
         Ok(_) => {
             warnings.push(warning(
                 path,
@@ -482,5 +603,216 @@ mod tests {
         for name in ["config", "dev.yaml", "lock", "bak"] {
             assert!(!is_skipped_name(name), "{name}");
         }
+    }
+
+    use std::fs::OpenOptions;
+    use std::time::SystemTime;
+
+    /// A valid kubeconfig with one context. Names of the same length give files of the
+    /// same size.
+    fn config_named(context: &str) -> String {
+        format!(
+            "apiVersion: v1\nkind: Config\n\
+             clusters:\n- {{ name: c1, cluster: {{ server: \"https://x\" }} }}\n\
+             users:\n- {{ name: u1, user: {{ token: t }} }}\n\
+             contexts:\n- {{ name: {context}, context: {{ cluster: c1, user: u1 }} }}\n"
+        )
+    }
+
+    fn worker_for(sources: Vec<SyncSource>) -> Worker {
+        let (publish, _snapshots) = watch::channel(SyncSnapshot::default());
+        let (events, _inbox) = mpsc::channel();
+        Worker::new(sources, publish, events)
+    }
+
+    fn file_worker(path: &Path) -> Worker {
+        worker_for(vec![SyncSource::File(path.display().to_string())])
+    }
+
+    /// Sets a file's modification time to `ago` before now, as a file left alone for that long.
+    fn age(path: &Path, ago: Duration) {
+        OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::now() - ago)
+            .unwrap();
+    }
+
+    fn context_names(snapshot: &SyncSnapshot) -> Vec<&str> {
+        snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.context_name.as_str())
+            .collect()
+    }
+
+    const HOUR: Duration = Duration::from_secs(3600);
+
+    #[test]
+    fn an_unchanged_old_file_is_parsed_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        std::fs::write(&path, config_named("aaa")).unwrap();
+        age(&path, HOUR);
+        let mut worker = file_worker(&path);
+
+        let first = worker.scan();
+        let second = worker.scan();
+        let third = worker.scan();
+
+        assert_eq!(context_names(&first), ["aaa"]);
+        assert_eq!(second, first);
+        assert_eq!(third, first);
+        assert_eq!(worker.cache.parses, 1);
+    }
+
+    #[test]
+    fn a_file_written_just_now_is_parsed_on_every_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        std::fs::write(&path, config_named("aaa")).unwrap();
+        let mut worker = file_worker(&path);
+
+        worker.scan();
+        worker.scan();
+
+        // Its mtime is within 2 s of the scan, so a second write in the same timestamp tick
+        // could not be told apart.
+        assert_eq!(worker.cache.parses, 2);
+    }
+
+    #[test]
+    fn a_rewrite_of_the_same_size_with_a_later_mtime_is_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        std::fs::write(&path, config_named("aaa")).unwrap();
+        age(&path, HOUR);
+        let mut worker = file_worker(&path);
+        assert_eq!(context_names(&worker.scan()), ["aaa"]);
+
+        let before = std::fs::metadata(&path).unwrap().len();
+        std::fs::write(&path, config_named("bbb")).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), before);
+        // Later than the first write, and old enough to be cached too.
+        age(&path, HOUR / 2);
+
+        assert_eq!(context_names(&worker.scan()), ["bbb"]);
+        assert_eq!(worker.cache.parses, 2);
+        assert_eq!(context_names(&worker.scan()), ["bbb"]);
+        assert_eq!(worker.cache.parses, 2, "the new file is cached in turn");
+    }
+
+    #[test]
+    fn the_flag_that_makes_a_source_explicit_is_part_of_the_key() {
+        let dir = tempfile::tempdir().unwrap();
+        // Not named like a kubeconfig, and with no kubeconfig content: only an explicit
+        // source accepts it.
+        let path = dir.path().join("notes");
+        std::fs::write(&path, "just: notes\n").unwrap();
+        age(&path, HOUR);
+        let as_file = SyncSource::File(path.display().to_string());
+        let as_dir = SyncSource::Dir(dir.path().display().to_string());
+        let mut worker = worker_for(vec![as_dir]);
+        worker.scan();
+        worker.scan();
+        assert_eq!(worker.cache.parses, 1);
+
+        worker.sources = vec![as_file];
+        worker.scan();
+        assert_eq!(worker.cache.parses, 2, "the same bytes, read another way");
+    }
+
+    #[test]
+    fn a_deleted_file_loses_its_entries_and_its_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, context) in [("a", "aaa"), ("b", "bbb")] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, config_named(context)).unwrap();
+            age(&path, HOUR);
+        }
+        let mut worker = worker_for(vec![SyncSource::Dir(dir.path().display().to_string())]);
+        assert_eq!(context_names(&worker.scan()), ["aaa", "bbb"]);
+        assert_eq!(worker.cache.entries.len(), 2);
+
+        std::fs::remove_file(dir.path().join("a")).unwrap();
+
+        assert_eq!(context_names(&worker.scan()), ["bbb"]);
+        assert_eq!(worker.cache.entries.len(), 1);
+        assert!(!worker.cache.entries.contains_key(&dir.path().join("a")));
+    }
+
+    #[test]
+    fn a_failure_is_not_cached_and_keeps_the_previous_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        std::fs::write(&path, config_named("aaa")).unwrap();
+        age(&path, HOUR);
+        let mut worker = file_worker(&path);
+        assert_eq!(context_names(&worker.scan()), ["aaa"]);
+
+        std::fs::write(&path, "kind: Config\nclusters: [unclosed\n").unwrap();
+        age(&path, HOUR / 2);
+        let broken = worker.scan();
+        assert_eq!(
+            context_names(&broken),
+            ["aaa"],
+            "the last good entries stay"
+        );
+        assert_eq!(broken.warnings.len(), 1);
+        let parses = worker.cache.parses;
+
+        let again = worker.scan();
+        assert_eq!(again.warnings.len(), 1, "it warns on every scan");
+        assert_eq!(worker.cache.parses, parses + 1, "and is read again");
+    }
+
+    // Unix only: it needs `chmod`, and a root user could read the file anyway.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_file_keeps_its_previous_entries_with_a_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        std::fs::write(&path, config_named("aaa")).unwrap();
+        age(&path, HOUR);
+        let mut worker = file_worker(&path);
+        assert_eq!(context_names(&worker.scan()), ["aaa"]);
+        assert_eq!(worker.cache.parses, 1, "it is cached now");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&path).is_ok() {
+            return;
+        }
+        let snapshot = worker.scan();
+
+        assert_eq!(context_names(&snapshot), ["aaa"]);
+        assert_eq!(snapshot.warnings.len(), 1, "{snapshot:?}");
+        assert!(
+            snapshot.warnings[0]
+                .message
+                .contains("could not read the file"),
+            "{snapshot:?}"
+        );
+    }
+
+    #[test]
+    fn the_cache_does_not_trust_a_time_in_the_future() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        std::fs::write(&path, config_named("aaa")).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() + HOUR)
+            .unwrap();
+        let mut worker = file_worker(&path);
+
+        worker.scan();
+        worker.scan();
+
+        assert_eq!(worker.cache.parses, 2);
     }
 }

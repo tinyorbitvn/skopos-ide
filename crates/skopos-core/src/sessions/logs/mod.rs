@@ -4,16 +4,18 @@
 mod download;
 mod follow;
 mod parse;
+mod streams;
 mod workload;
 pub(crate) use workload::workload_selector;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
@@ -22,9 +24,10 @@ use crate::app_core::AppCore;
 use crate::error::{CoreResult, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::resources::{invalid, is_path_segment, ResourceRef};
-use follow::{stream_container, ContainerEnd, StreamContext, StreamTarget};
+use follow::{ContainerEnd, StreamContext, StreamTarget};
+use streams::StreamSet;
 
-/// Lines wait this long at most before they are sent.
+/// A line waits this long at most, counted from when the batch it joins started.
 const FLUSH_EVERY: Duration = Duration::from_millis(100);
 /// One flush carries at most this many lines. Reading waits for the next flush once it
 /// is reached.
@@ -34,6 +37,9 @@ const FLUSH_LINES: usize = 5_000;
 const FLUSH_BYTES: u64 = 1024 * 1024;
 /// Lines on their way to the batcher, across all of a session's streams.
 const ITEM_BACKLOG: usize = 256;
+/// A session reads at most this many container streams at once. A workload with more
+/// containers queues the rest, which `LogMarker::Limited` reports.
+pub(crate) const MAX_STREAMS: usize = 20;
 
 /// Which logs a session reads.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -81,9 +87,13 @@ pub struct LogLine {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[ts(export)]
-#[serde(rename_all = "camelCase")]
+/// What a marker row says. The plain ones are names on the wire; `Limited` carries numbers,
+/// so it is an object with a `type`, as the interface's marker union declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, TS)]
+#[ts(
+    export,
+    type = r#""restarted" | "reconnecting" | "reconnected" | "podAdded" | "podRemoved" | "failed" | { type: "limited", streaming: number, total: number }"#
+)]
 pub enum LogMarker {
     Restarted,
     Reconnecting,
@@ -91,6 +101,33 @@ pub enum LogMarker {
     PodAdded,
     PodRemoved,
     Failed,
+    /// More containers than the session reads at once: `streaming` run now, `total` exist.
+    /// The last one sent has `streaming == total`, which says nothing waits any more.
+    Limited {
+        streaming: u32,
+        total: u32,
+    },
+}
+
+impl Serialize for LogMarker {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let name = match self {
+            Self::Restarted => "restarted",
+            Self::Reconnecting => "reconnecting",
+            Self::Reconnected => "reconnected",
+            Self::PodAdded => "podAdded",
+            Self::PodRemoved => "podRemoved",
+            Self::Failed => "failed",
+            Self::Limited { streaming, total } => {
+                let mut object = serializer.serialize_struct("LogMarker", 3)?;
+                object.serialize_field("type", "limited")?;
+                object.serialize_field("streaming", streaming)?;
+                object.serialize_field("total", total)?;
+                return object.end();
+            }
+        };
+        serializer.serialize_str(name)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -194,8 +231,10 @@ async fn run_batcher(
     token: CancellationToken,
 ) {
     let mut batch = Batch::default();
-    let mut tick = tokio::time::interval(FLUSH_EVERY);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // When the batch must go out: `FLUSH_EVERY` after it went from empty to non-empty.
+    // `Some` exactly when the batch holds a line, so an idle batcher has no timer armed
+    // and never wakes.
+    let mut deadline: Option<Instant> = None;
     let delivered = loop {
         // A stream may be waiting on `items`, so stopping has to end this wait or it could
         // never see the token, and the batcher ends only after the last stream.
@@ -205,18 +244,28 @@ async fn run_batcher(
         }
         tokio::select! {
             item = items.recv(), if batch.has_room() => match item {
-                Some(StreamItem::Line(line)) => batch.push(line),
+                Some(StreamItem::Line(line)) => {
+                    if batch.lines.is_empty() {
+                        deadline = Some(Instant::now() + FLUSH_EVERY);
+                    }
+                    batch.push(line);
+                }
                 Some(StreamItem::Marker { pod, container, marker, message }) => {
                     let event = LogEvent::Marker { pod, container, marker, message };
-                    if !flush(&mut batch, &events, &flow).await
-                        || events.send(event).await.is_err()
-                    {
+                    let flushed = flush(&mut batch, &events, &flow).await;
+                    deadline = None;
+                    if !flushed || events.send(event).await.is_err() {
                         break false;
                     }
                 }
                 None => break flush(&mut batch, &events, &flow).await,
             },
-            _ = tick.tick() => {
+            // The expression is evaluated even while the branch is disabled, so it must
+            // not panic on `None`.
+            () = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)),
+                if deadline.is_some() =>
+            {
+                deadline = None;
                 if !flush(&mut batch, &events, &flow).await {
                     break false;
                 }
@@ -293,19 +342,17 @@ fn pod_session_end(ends: Vec<ContainerEnd>, stopped: bool) -> LogEvent {
     }
 }
 
-/// Runs one stream per target until all have ended, and returns the session's last event.
-async fn run_streams(context: StreamContext, targets: Vec<StreamTarget>) -> LogEvent {
+/// Runs one stream per target until all have ended, at most `context.max_streams` at a time,
+/// and returns the session's last event. `label` names the session in `Limited` markers.
+async fn run_streams(context: StreamContext, targets: Vec<StreamTarget>, label: &str) -> LogEvent {
     let several = targets.len() > 1;
-    let mut streams = JoinSet::new();
+    let mut streams = StreamSet::new(context.items.clone(), label.to_owned(), context.max_streams);
     for target in targets {
-        let context = context.clone();
-        streams.spawn(async move { (target.clone(), stream_container(context, target).await) });
+        streams.add(context.clone(), target);
     }
+    streams.announce().await;
     let mut ends = Vec::new();
-    while let Some(joined) = streams.join_next().await {
-        let Ok((target, end)) = joined else {
-            continue;
-        };
+    while let Some((target, end)) = streams.next().await {
         // Alone, a failure ends the session, and its last event says so.
         if let (true, ContainerEnd::Failed(error)) = (several, &end) {
             context
@@ -313,6 +360,7 @@ async fn run_streams(context: StreamContext, targets: Vec<StreamTarget>) -> LogE
                 .await;
         }
         ends.push(end);
+        streams.announce().await;
     }
     pod_session_end(ends, context.token.is_cancelled())
 }
@@ -332,14 +380,16 @@ async fn run_pod_target(
         }
     };
     let containers = container.map_or_else(|| pod_container_names(&object), |name| vec![name]);
+    let initial = Arc::new(object);
     let targets = containers
         .into_iter()
         .map(|container| StreamTarget {
             pod: pod.to_owned(),
             container,
+            initial: Some(initial.clone()),
         })
         .collect();
-    run_streams(context, targets).await
+    run_streams(context, targets, pod).await
 }
 
 async fn run_target(context: StreamContext, target: LogTarget) -> LogEvent {
@@ -378,6 +428,7 @@ impl AppCore {
             .sessions()
             .register_log(token.clone(), flow.clone(), owner);
         let session = guard.id().to_owned();
+        let max_streams = self.sessions().log_stream_cap();
         tokio::spawn(async move {
             let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);
             let batcher = tokio::spawn(run_batcher(items_rx, events.clone(), flow, token.clone()));
@@ -388,6 +439,7 @@ impl AppCore {
                 items,
                 token,
                 follow_replacements: true,
+                max_streams,
             };
             // Each stream holds a clone of `items`, so the batcher ends after the last one.
             let last = run_target(context, target).await;
@@ -404,6 +456,12 @@ impl AppCore {
     pub fn logs_stop(&self, session: &str) {
         self.session_stop(session);
     }
+
+    /// Sets the cap on concurrent container streams for log sessions and downloads that
+    /// start later. `0` restores the real cap.
+    pub fn set_log_stream_cap_for_test(&self, cap: usize) {
+        self.sessions().set_log_stream_cap(cap);
+    }
 }
 
 fn target_namespace(target: &LogTarget) -> &str {
@@ -417,6 +475,10 @@ mod tests {
     use super::*;
     use crate::error::ErrorCode;
     use crate::sessions::flow::PAUSE_AT;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll, Wake, Waker};
+    use std::time::Instant as StdInstant;
 
     const LIMIT: Duration = Duration::from_secs(30);
     /// Several flushes long, so a batcher that is still reading would send something.
@@ -719,6 +781,144 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&ended).unwrap(),
             serde_json::json!({ "type": "ended", "reason": "podGone" })
+        );
+    }
+
+    #[test]
+    fn markers_are_names_and_the_limited_marker_is_an_object() {
+        assert_eq!(
+            serde_json::to_value(LogMarker::PodRemoved).unwrap(),
+            serde_json::json!("podRemoved")
+        );
+        assert_eq!(
+            serde_json::to_value(LogMarker::Limited {
+                streaming: 20,
+                total: 31
+            })
+            .unwrap(),
+            serde_json::json!({ "type": "limited", "streaming": 20, "total": 31 })
+        );
+        let event = LogEvent::Marker {
+            pod: "web".into(),
+            container: None,
+            marker: LogMarker::Limited {
+                streaming: 2,
+                total: 3,
+            },
+            message: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({
+                "type": "marker", "pod": "web", "container": null,
+                "marker": { "type": "limited", "streaming": 2, "total": 3 },
+                "message": null,
+            })
+        );
+    }
+
+    fn plain_line(text: &str) -> StreamItem {
+        StreamItem::Line(LogLine {
+            pod: "p".into(),
+            container: "c".into(),
+            timestamp: None,
+            text: text.into(),
+            truncated: false,
+        })
+    }
+
+    /// Counts how often the runtime wakes the task that polls it.
+    struct Wakes(AtomicUsize);
+
+    impl Wake for Wakes {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_idle_batcher_never_wakes() {
+        let (_items, items_rx) = mpsc::channel::<StreamItem>(ITEM_BACKLOG);
+        let (events, _events_rx) = mpsc::channel(4);
+        let wakes = Arc::new(Wakes(AtomicUsize::new(0)));
+        let waker = Waker::from(wakes.clone());
+        let mut context = Context::from_waker(&waker);
+        let mut batcher = Box::pin(run_batcher(
+            items_rx,
+            events,
+            Arc::new(FlowControl::new()),
+            CancellationToken::new(),
+        ));
+        assert!(matches!(batcher.as_mut().poll(&mut context), Poll::Pending));
+        let after_first_poll = wakes.0.load(Ordering::SeqCst);
+        // Three of the old 100 ms ticks. A timer that is still armed wakes the waker.
+        tokio::time::sleep(FLUSH_EVERY * 3 + Duration::from_millis(50)).await;
+        assert_eq!(wakes.0.load(Ordering::SeqCst), after_first_poll);
+    }
+
+    #[tokio::test]
+    async fn every_line_waits_one_interval_from_its_own_arrival() {
+        let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);
+        let (events, mut events_rx) = mpsc::channel(4);
+        let token = CancellationToken::new();
+        tokio::spawn(run_batcher(
+            items_rx,
+            events,
+            Arc::new(FlowControl::new()),
+            token.clone(),
+        ));
+        // Off the phase of a free-running 100 ms tick, which would flush this line early.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        for text in ["first", "second"] {
+            let sent = StdInstant::now();
+            items.send(plain_line(text)).await.unwrap();
+            let Some(LogEvent::Lines { lines, .. }) = events_rx.recv().await else {
+                panic!("no lines came");
+            };
+            assert_eq!(lines[0].text, text);
+            let waited = sent.elapsed();
+            assert!(waited >= FLUSH_EVERY, "{text} came after {waited:?}");
+            assert!(
+                waited < FLUSH_EVERY * 4,
+                "{text} came late, after {waited:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        token.cancel();
+    }
+
+    #[tokio::test]
+    async fn a_marker_still_flushes_the_batch_at_once() {
+        let (items, items_rx) = mpsc::channel(ITEM_BACKLOG);
+        let (events, mut events_rx) = mpsc::channel(4);
+        tokio::spawn(run_batcher(
+            items_rx,
+            events,
+            Arc::new(FlowControl::new()),
+            CancellationToken::new(),
+        ));
+        let sent = StdInstant::now();
+        items.send(plain_line("before")).await.unwrap();
+        items
+            .send(StreamItem::Marker {
+                pod: "p".into(),
+                container: None,
+                marker: LogMarker::PodAdded,
+                message: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            events_rx.recv().await,
+            Some(LogEvent::Lines { .. })
+        ));
+        assert!(matches!(
+            events_rx.recv().await,
+            Some(LogEvent::Marker { .. })
+        ));
+        assert!(
+            sent.elapsed() < FLUSH_EVERY,
+            "the marker waited for the deadline"
         );
     }
 

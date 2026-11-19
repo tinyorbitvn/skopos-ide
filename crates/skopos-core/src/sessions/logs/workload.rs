@@ -2,6 +2,7 @@
 //! once, and a watch when following, so new pods join the stream.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -11,11 +12,11 @@ use kube::core::{GroupVersionKind, Selector};
 use kube::runtime::watcher::{self, watcher, Event};
 use kube::Api;
 use serde_json::Value;
-use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::super::pod_container_names;
-use super::follow::{stream_container, ContainerEnd, StreamContext, StreamTarget};
+use super::follow::{ContainerEnd, StreamContext, StreamTarget};
+use super::streams::StreamSet;
 use super::{run_streams, LogEndReason, LogEvent, LogMarker, StreamItem};
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::resources::{invalid, ResourceRef};
@@ -84,6 +85,7 @@ fn targets_of(pod: &DynamicObject, container: Option<&str>) -> Vec<StreamTarget>
         .map(|container| StreamTarget {
             pod: name.to_owned(),
             container,
+            initial: None,
         })
         .collect()
 }
@@ -92,6 +94,7 @@ async fn read_once(
     context: StreamContext,
     selector: Selector,
     container: Option<&str>,
+    workload: &str,
 ) -> LogEvent {
     let params = ListParams::default().labels_from(&selector);
     let pods = pod_api(&context);
@@ -108,7 +111,7 @@ async fn read_once(
                 .iter()
                 .flat_map(|pod| targets_of(pod, container))
                 .collect();
-            run_streams(context, targets).await
+            run_streams(context, targets, workload).await
         }
         Err(error) => LogEvent::Failed {
             error: error.into(),
@@ -126,7 +129,7 @@ struct Followed {
     context: StreamContext,
     container: Option<String>,
     pods: HashMap<String, FollowedPod>,
-    streams: JoinSet<(StreamTarget, ContainerEnd)>,
+    streams: StreamSet,
 }
 
 impl Followed {
@@ -160,12 +163,19 @@ impl Followed {
             self.pod_marker(&name, LogMarker::PodAdded).await;
         }
         let token = self.context.token.child_token();
-        for target in targets_of(pod, self.container.as_deref()) {
+        // A list or watch item has its metadata beside the rest, so it is joined into the
+        // plain JSON `read_pod` would have returned. Shared by all the Pod's containers.
+        let initial = serde_json::to_value(pod).ok().map(Arc::new);
+        for mut target in targets_of(pod, self.container.as_deref()) {
+            target.initial.clone_from(&initial);
             let mut context = self.context.clone();
             context.token = token.clone();
             context.follow_replacements = false;
-            self.streams
-                .spawn(async move { (target.clone(), stream_container(context, target).await) });
+            self.streams.add(context, target);
+        }
+        // The first listing announces once, at `InitDone`, not once per pod.
+        if announce {
+            self.streams.announce().await;
         }
         let uid = pod.metadata.uid.clone();
         self.pods.insert(name, FollowedPod { uid, token });
@@ -174,7 +184,9 @@ impl Followed {
     async fn remove(&mut self, name: &str) {
         if let Some(pod) = self.pods.remove(name) {
             pod.token.cancel();
+            self.streams.forget_waiting(name);
             self.pod_marker(name, LogMarker::PodRemoved).await;
+            self.streams.announce().await;
         }
     }
 
@@ -235,10 +247,14 @@ async fn follow_pods(
     let config = watcher::Config::default().labels_from(&selector);
     let mut watch = watcher(pod_api(&context), config).boxed();
     let mut followed = Followed {
+        streams: StreamSet::new(
+            context.items.clone(),
+            workload.to_owned(),
+            context.max_streams,
+        ),
         context,
         container,
         pods: HashMap::new(),
-        streams: JoinSet::new(),
     };
     let mut listing = HashSet::new();
     let mut listed = false;
@@ -247,10 +263,9 @@ async fn follow_pods(
     loop {
         tokio::select! {
             () = token.cancelled() => break,
-            Some(joined) = followed.streams.join_next() => {
-                if let Ok((target, end)) = joined {
-                    followed.report(&target, end).await;
-                }
+            Some((target, end)) = followed.streams.next() => {
+                followed.report(&target, end).await;
+                followed.streams.announce().await;
             }
             event = watch.next() => {
                 if matches!(event, Some(Ok(_))) && std::mem::take(&mut reconnecting) {
@@ -267,6 +282,7 @@ async fn follow_pods(
                 }
                 Some(Ok(Event::InitDone)) => {
                     followed.keep_only(&listing).await;
+                    followed.streams.announce().await;
                     listed = true;
                     backoff = MIN_BACKOFF;
                 }
@@ -298,10 +314,8 @@ async fn follow_pods(
             },
         }
     }
-    while let Some(joined) = followed.streams.join_next().await {
-        if let Ok((target, end)) = joined {
-            followed.report(&target, end).await;
-        }
+    while let Some((target, end)) = followed.streams.next().await {
+        followed.report(&target, end).await;
     }
     LogEvent::Ended {
         reason: LogEndReason::Stopped,
@@ -321,7 +335,7 @@ pub(super) async fn run_workload_target(
     if context.options.follow && !context.options.previous {
         follow_pods(context, selector, container, &name).await
     } else {
-        read_once(context, selector, container.as_deref()).await
+        read_once(context, selector, container.as_deref(), &name).await
     }
 }
 

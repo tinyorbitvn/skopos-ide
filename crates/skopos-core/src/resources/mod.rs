@@ -8,9 +8,11 @@ mod discovery;
 mod drain;
 mod hub;
 mod names;
+mod object_watch;
 mod ops;
 mod sanitize;
 mod service_account;
+mod single_flight;
 mod trim;
 mod types;
 
@@ -30,4 +32,5 @@ pub(crate) use ops::{invalid, is_path_segment};
 pub use ops::{InvolvedRef, Propagation};
 pub use sanitize::strip_for_list;
 pub use service_account::SavedKubeconfig;
+pub(crate) use single_flight::SingleFlight;
 pub use types::{ApiResourceInfo, ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};

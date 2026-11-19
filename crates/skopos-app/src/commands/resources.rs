@@ -1,4 +1,6 @@
 use serde_json::Value;
+use skopos_core::app_core::AppCore;
+use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::openapi::KindSchema;
@@ -42,13 +44,42 @@ pub async fn resources_subscribe(
     resource: ResourceRef,
     on_event: Channel<WatchEvent>,
 ) -> Result<String, IpcError> {
-    let (tx, mut rx) = mpsc::channel(FORWARD_BACKLOG);
+    let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
         .resources_subscribe(&cluster_id, resource, tx)
         .await?;
-    let core = state.core.clone();
-    let subscription = id.clone();
+    forward(state.core.clone(), id.clone(), rx, on_event);
+    Ok(id)
+}
+
+/// Streams one object to `on_event` and returns the subscription id, which
+/// `resources_unsubscribe` ends. The rows are whole objects.
+#[tauri::command]
+pub async fn resources_subscribe_object(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    resource: ResourceRef,
+    namespace: Option<String>,
+    name: String,
+    on_event: Channel<WatchEvent>,
+) -> Result<String, IpcError> {
+    let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
+    let id = state
+        .core
+        .resources_subscribe_object(&cluster_id, resource, namespace, name, tx)
+        .await?;
+    forward(state.core.clone(), id.clone(), rx, on_event);
+    Ok(id)
+}
+
+/// Sends what the subscription delivers to the webview, and ends it when the webview is gone.
+fn forward(
+    core: AppCore,
+    subscription: String,
+    mut rx: mpsc::Receiver<WatchEvent>,
+    on_event: Channel<WatchEvent>,
+) {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if on_event.send(event).is_err() {
@@ -57,7 +88,6 @@ pub async fn resources_subscribe(
             }
         }
     });
-    Ok(id)
 }
 
 #[tauri::command]
@@ -212,7 +242,8 @@ pub async fn ui_state_set(
     key: String,
     value: Value,
 ) -> Result<(), IpcError> {
-    state.core.ui_state_set(&key, value)
+    let core = state.core.clone();
+    blocking(move || core.ui_state_set(&key, value)).await
 }
 
 #[cfg(test)]

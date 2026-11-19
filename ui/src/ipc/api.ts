@@ -23,6 +23,7 @@ import type { HelmInstallRequest } from "./generated/HelmInstallRequest";
 import type { HelmPreview } from "./generated/HelmPreview";
 import type { HelmReleaseDetail } from "./generated/HelmReleaseDetail";
 import type { HelmReleaseList } from "./generated/HelmReleaseList";
+import type { HelmReleasesEvent } from "./generated/HelmReleasesEvent";
 import type { HelmRepo } from "./generated/HelmRepo";
 import type { HelmRepoAdd } from "./generated/HelmRepoAdd";
 import type { HelmRevision } from "./generated/HelmRevision";
@@ -121,6 +122,25 @@ export const api = {
     }),
   resourcesUnsubscribe: (subscriptionId: string) =>
     call<void>("resources_unsubscribe", { subscriptionId }),
+  /**
+   * Returns the subscription id of a watch of one whole object: a snapshot of 0 or 1 rows,
+   * then batches, and `status` events as a table's watch sends them. `namespace` is null
+   * for a cluster-scoped resource. End it with `resourcesUnsubscribe`.
+   */
+  resourcesSubscribeObject: (
+    clusterId: string,
+    resource: ResourceRef,
+    namespace: string | null,
+    name: string,
+    onEvent: (event: WatchEvent) => void,
+  ) =>
+    call<string>("resources_subscribe_object", {
+      clusterId,
+      resource,
+      namespace,
+      name,
+      onEvent: new Channel<WatchEvent>(onEvent),
+    }),
   /**
    * Returns the subscription id. Graph snapshots of `namespaces` (null: every
    * namespace) go to `onEvent` until unsubscribed or until a `failure` ends it.
@@ -516,6 +536,21 @@ export const api = {
       namespace,
       name,
     }),
+  /**
+   * Returns the subscription id. `onEvent` gets `changed` when a release changes (the
+   * list again once), or one `forbidden` or `failed` that ends the subscription. Nothing
+   * is sent at start. After `forbidden`, poll instead.
+   */
+  helmReleasesSubscribe: (
+    clusterId: string,
+    onEvent: (event: HelmReleasesEvent) => void,
+  ) =>
+    call<string>("helm_releases_subscribe", {
+      clusterId,
+      onEvent: new Channel<HelmReleasesEvent>(onEvent),
+    }),
+  helmReleasesUnsubscribe: (subscriptionId: string) =>
+    call<void>("helm_releases_unsubscribe", { subscriptionId }),
   /** A server-side dry run; it creates nothing. */
   helmInstallPreview: (clusterId: string, request: HelmInstallRequest) =>
     call<HelmPreview>("helm_install_preview", { clusterId, request }),
