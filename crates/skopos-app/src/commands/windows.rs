@@ -1,6 +1,7 @@
 //! Window layouts and moves between windows (spec P31 to P39). The calling window's
 //! label comes from Tauri, never from the UI.
 
+use skopos_core::blocking::blocking;
 use skopos_core::error::{ErrorCode, IpcError};
 use skopos_core::windows::{MoveOutcome, MoveTarget, WindowLayout};
 use tauri::{Manager, State, WebviewWindow};
@@ -42,7 +43,8 @@ pub async fn window_layout_set(
     layout: WindowLayout,
 ) -> Result<(), IpcError> {
     own_layout(window.label(), &layout)?;
-    state.core.window_layout_set(layout)?;
+    let core = state.core.clone();
+    blocking(move || core.window_layout_set(layout)).await?;
     windows::close_if_empty(&window, &state.core);
     Ok(())
 }
@@ -61,15 +63,18 @@ pub async fn windows_list(state: State<'_, AppState>) -> Result<Vec<WindowLayout
 }
 
 /// Moves a tab and settles the windows: a new window opens, an emptied one closes.
-fn move_tab(
+async fn move_tab(
     state: &AppState,
     window: &WebviewWindow,
     tab_id: &str,
     target: MoveTarget,
 ) -> Result<MoveOutcome, IpcError> {
-    let from = window.label();
-    let outcome = state.core.window_tab_move(from, tab_id, target)?;
-    windows::settle_move(window.app_handle(), &state.core, from, tab_id, &outcome)?;
+    let from = window.label().to_owned();
+    let outcome = {
+        let (core, from, tab) = (state.core.clone(), from.clone(), tab_id.to_owned());
+        blocking(move || core.window_tab_move(&from, &tab, target)).await?
+    };
+    windows::settle_move(window.app_handle(), &state.core, &from, tab_id, &outcome)?;
     Ok(outcome)
 }
 
@@ -81,7 +86,7 @@ pub async fn window_tab_move(
     tab_id: String,
     target: MoveTarget,
 ) -> Result<MoveOutcome, IpcError> {
-    move_tab(&state, &window, &tab_id, target)
+    move_tab(&state, &window, &tab_id, target).await
 }
 
 /// A tab let go outside the calling window at `screen_x`, `screen_y` (that window's
@@ -102,7 +107,7 @@ pub async fn window_tab_drop(
         Some(label) => MoveTarget::Window { label },
         None => MoveTarget::NewWindow { x, y },
     };
-    move_tab(&state, &window, &tab_id, target)
+    move_tab(&state, &window, &tab_id, target).await
 }
 
 #[cfg(test)]

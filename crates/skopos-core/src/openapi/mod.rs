@@ -13,6 +13,7 @@ pub(crate) use cache::ApiDocs;
 pub use types::{KindSchema, SchemaField};
 
 use crate::app_core::AppCore;
+use crate::blocking::blocking;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::resources::invalid;
@@ -130,7 +131,7 @@ impl AppCore {
             Some(index) => index,
             None => {
                 let (status, body) = fetch::get(client, fetch::INDEX_PATH).await?;
-                let index = fetch::index_answer(status, &body, &target.api_version)?;
+                let index = fetch::read_index(status, body, target.api_version.clone()).await?;
                 docs.store_index(id, epoch, index)
             }
         };
@@ -144,13 +145,17 @@ impl AppCore {
             Some(document) => document,
             None => {
                 let (status, body) = fetch::get(client, &url).await?;
-                match fetch::document_answer(status, &body, &target.api_version)? {
+                match fetch::read_document(status, body, target.api_version.clone()).await? {
                     Some(document) => docs.store_document(id, epoch, &url, document),
                     None => return Ok(Lookup::NoDocument),
                 }
             }
         };
-        Ok(match tree::kind_schema(&document, target) {
+        let schema = {
+            let (document, target) = (std::sync::Arc::clone(&document), target.clone());
+            blocking(move || Ok(tree::kind_schema(&document, &target))).await?
+        };
+        Ok(match schema {
             Some(schema) => Lookup::Found(docs.store_schema(id, epoch, &url, &target.kind, schema)),
             None => Lookup::NoKind,
         })
