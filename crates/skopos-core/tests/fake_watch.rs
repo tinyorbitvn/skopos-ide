@@ -402,7 +402,7 @@ fn object_with_server_fields(name: &str) -> Value {
 #[tokio::test]
 async fn managed_fields_are_stripped() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
-    // Not Pods: their rows cut annotation values, and this checks that others keep them whole.
+    // A ConfigMap row cuts annotation values to 256 characters, which "keep" and "me" are under.
     fake.upsert("configmaps", object_with_server_fields("listed"));
 
     let configmaps = resource("", "ConfigMap", "configmaps", true);
@@ -977,4 +977,162 @@ async fn a_watched_pod_row_is_trimmed_and_a_get_returns_the_whole_pod() {
         whole["spec"]["containers"][0]["image"],
         "registry.k8s.io/pause:3.10"
     );
+}
+
+#[tokio::test]
+async fn a_watched_config_map_row_blanks_its_values_and_a_get_returns_them() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    let config_map = |name: &str| {
+        json!({
+            "metadata": { "name": name, "namespace": "default", "annotations": { "note": "n".repeat(300) } },
+            "immutable": true,
+            "data": { "mode": "fast", "empty": "" },
+            "binaryData": { "blob": "AAEC" },
+        })
+    };
+    fake.upsert("configmaps", config_map("listed"));
+    let configmaps = resource("", "ConfigMap", "configmaps", true);
+    let mut table = Consumer::subscribe(&core, &id, configmaps.clone()).await;
+    table.until("the snapshot", |c| c.snapshots() == 1).await;
+    fake.upsert("configmaps", config_map("watched"));
+    table
+        .until("the watched object", |c| c.has("default", "watched"))
+        .await;
+
+    for row in table.rows.values() {
+        assert_eq!(row["data"], json!({ "mode": "", "empty": "" }));
+        assert_eq!(row["binaryData"], json!({ "blob": "" }));
+        assert!(row.get("immutable").is_none());
+        assert_eq!(row["kind"], "ConfigMap");
+        assert_eq!(row["metadata"]["annotations"]["note"], "n".repeat(256));
+    }
+    let whole = core
+        .resource_get(&id, &configmaps, Some("default"), "listed")
+        .await
+        .unwrap();
+    assert_eq!(whole["data"], json!({ "mode": "fast", "empty": "" }));
+    assert_eq!(whole["binaryData"], json!({ "blob": "AAEC" }));
+    assert_eq!(whole["immutable"], true);
+}
+
+#[tokio::test]
+async fn watched_node_crd_and_replica_set_rows_are_trimmed_and_a_get_returns_them_whole() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.serve_resource(FakeResource::new(
+        "apps",
+        "v1",
+        "ReplicaSet",
+        "replicasets",
+        true,
+    ));
+    fake.upsert(
+        "nodes",
+        json!({
+            "metadata": { "name": "worker-1" },
+            "spec": { "unschedulable": true, "podCIDR": "10.0.0.0/24" },
+            "status": {
+                "allocatable": { "cpu": "4" },
+                "capacity": { "cpu": "8" },
+                "images": [{ "names": ["registry.example.com/app:1"], "sizeBytes": 1 }],
+                "nodeInfo": { "kubeletVersion": "v1.31.2", "machineID": "abc" },
+            },
+        }),
+    );
+    fake.upsert(
+        "customresourcedefinitions",
+        json!({
+            "metadata": { "name": "widgets.example.com" },
+            "spec": {
+                "group": "example.com",
+                "scope": "Namespaced",
+                "names": { "plural": "widgets", "kind": "Widget" },
+                "versions": [{
+                    "name": "v1", "served": true, "storage": true,
+                    "schema": { "openAPIV3Schema": { "type": "object" } },
+                    "additionalPrinterColumns": [{ "name": "Size", "type": "integer", "jsonPath": ".spec.size" }],
+                }],
+            },
+            "status": { "conditions": [{ "type": "Established", "status": "True", "message": "ok" }] },
+        }),
+    );
+    fake.upsert(
+        "replicasets",
+        json!({
+            "metadata": { "name": "web-1", "namespace": "default" },
+            "spec": {
+                "replicas": 2,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": { "spec": { "containers": [{ "name": "app", "image": "registry.example.com/app:1" }] } },
+            },
+            "status": { "replicas": 2, "availableReplicas": 2, "observedGeneration": 3 },
+        }),
+    );
+    let nodes = resource("", "Node", "nodes", false);
+    let crds = resource(
+        "apiextensions.k8s.io",
+        "CustomResourceDefinition",
+        "customresourcedefinitions",
+        false,
+    );
+    let replica_sets = resource("apps", "ReplicaSet", "replicasets", true);
+
+    let mut node_table = Consumer::subscribe(&core, &id, nodes.clone()).await;
+    let mut crd_table = Consumer::subscribe(&core, &id, crds.clone()).await;
+    let mut rs_table = Consumer::subscribe(&core, &id, replica_sets.clone()).await;
+    node_table.until("the node", |c| c.snapshots() == 1).await;
+    crd_table.until("the crd", |c| c.snapshots() == 1).await;
+    rs_table
+        .until("the replica set", |c| c.snapshots() == 1)
+        .await;
+
+    let node = node_table.rows.values().next().unwrap();
+    assert_eq!(node["spec"], json!({ "unschedulable": true }));
+    assert_eq!(node["status"]["allocatable"], json!({ "cpu": "4" }));
+    assert_eq!(
+        node["status"]["nodeInfo"],
+        json!({ "kubeletVersion": "v1.31.2" })
+    );
+    assert!(node["status"].get("images").is_none());
+    assert!(node["status"].get("capacity").is_none());
+
+    let crd = crd_table.rows.values().next().unwrap();
+    assert!(crd["spec"]["versions"][0].get("schema").is_none());
+    assert_eq!(
+        crd["spec"]["versions"][0]["additionalPrinterColumns"][0]["jsonPath"],
+        ".spec.size"
+    );
+    assert_eq!(
+        crd["status"]["conditions"],
+        json!([{ "type": "Established", "status": "True" }])
+    );
+
+    let rs = rs_table.rows.values().next().unwrap();
+    assert_eq!(
+        rs["spec"]["selector"],
+        json!({ "matchLabels": { "app": "web" } })
+    );
+    assert_eq!(
+        rs["spec"]["template"]["spec"]["containers"],
+        json!([{ "name": "app" }])
+    );
+    assert!(rs["status"].get("observedGeneration").is_none());
+
+    let whole = core
+        .resource_get(&id, &nodes, None, "worker-1")
+        .await
+        .unwrap();
+    assert_eq!(whole["status"]["images"][0]["sizeBytes"], 1);
+    let whole = core
+        .resource_get(&id, &crds, None, "widgets.example.com")
+        .await
+        .unwrap();
+    assert_eq!(
+        whole["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["type"],
+        "object"
+    );
+    let whole = core
+        .resource_get(&id, &replica_sets, Some("default"), "web-1")
+        .await
+        .unwrap();
+    assert_eq!(whole["status"]["observedGeneration"], 3);
 }

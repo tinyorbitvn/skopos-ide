@@ -1,8 +1,11 @@
 //! What a watched row keeps of its object. A table holds every row of a resource, and the
-//! webview's memory grows with what each row carries. So a core Pod row keeps only what the
-//! UI reads outside the detail drawer, which fetches the whole object with `resource_get`.
-//! Its annotations stay for the list's filter, each value cut short (spec M24), and so does its
-//! status message for the workload Status card, cut the same way (spec N20).
+//! webview's memory grows with what each row carries. So a row of a core Pod, Node or
+//! ConfigMap, of an apps ReplicaSet or of a CustomResourceDefinition keeps only what the UI
+//! reads outside the detail drawer, which fetches the whole object with `resource_get`.
+//! Annotations stay for the list's filter, each value cut short (spec M24), and so does a
+//! Pod's status message for the workload Status card, cut the same way (spec N20). The
+//! resource graph reads these same rows for every kind but Pods, so each rule keeps what the
+//! graph's extractors read too.
 
 use serde_json::Value;
 
@@ -22,9 +25,12 @@ enum Keep {
     /// A string cut to its first this many characters on a `char` boundary. A value that is
     /// not a string is dropped from its object.
     Text(usize),
+    /// An object's keys, each value replaced by an empty string. A value that is not an
+    /// object is kept as it is.
+    Blank,
 }
 
-use Keep::{All, Each, Fields, Strings, Text};
+use Keep::{All, Blank, Each, Fields, Strings, Text};
 
 impl Keep {
     /// Whether an object keeps `value` under this rule at all.
@@ -160,6 +166,21 @@ const POD_GRAPH: Keep = Fields(&[
     ("status", POD_STATUS),
 ]);
 
+/// What every trimmed row keeps of its metadata: what an action or a fetch names the object
+/// by, what the list sorts and shows, and what the graph and the owned-Pods lists follow. The
+/// filter matches annotations, so they stay, cut.
+const ROW_METADATA: Keep = Fields(&[
+    ("name", All),
+    ("namespace", All),
+    ("uid", All),
+    ("resourceVersion", All),
+    ("creationTimestamp", All),
+    ("deletionTimestamp", All),
+    ("labels", All),
+    ("annotations", Strings(ANNOTATION_CHARS)),
+    ("ownerReferences", All),
+]);
+
 /// The Pods table, its filter and sort, the pod lists of the Node, Job and Rollout
 /// drawers and the Pods row-menu Port forward action (which reads the container ports) read
 /// these. `uid` and `resourceVersion` let an action or a fetch name the object. The filter
@@ -167,20 +188,7 @@ const POD_GRAPH: Keep = Fields(&[
 const POD_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
-    (
-        "metadata",
-        Fields(&[
-            ("name", All),
-            ("namespace", All),
-            ("uid", All),
-            ("resourceVersion", All),
-            ("creationTimestamp", All),
-            ("deletionTimestamp", All),
-            ("labels", All),
-            ("annotations", Strings(ANNOTATION_CHARS)),
-            ("ownerReferences", All),
-        ]),
-    ),
+    ("metadata", ROW_METADATA),
     (
         "spec",
         Fields(&[
@@ -206,6 +214,117 @@ const POD_ROW: Keep = Fields(&[
         ]),
     ),
     ("status", POD_ROW_STATUS),
+]);
+
+/// The CRDs table, every custom resource's printer columns and `useRefreshOnCrdChange`
+/// (Established) read these. The schemas, the conversion webhook and its `caBundle` stay out.
+const CRD_ROW: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    (
+        "spec",
+        Fields(&[
+            ("group", All),
+            ("names", All),
+            ("scope", All),
+            (
+                "versions",
+                Each(&Fields(&[
+                    ("name", All),
+                    ("served", All),
+                    ("storage", All),
+                    ("deprecated", All),
+                    ("additionalPrinterColumns", All),
+                ])),
+            ),
+        ]),
+    ),
+    (
+        "status",
+        Fields(&[(
+            "conditions",
+            Each(&Fields(&[("type", All), ("status", All)])),
+        )]),
+    ),
+]);
+
+/// The ReplicaSets table, the log sources (selector, container names), the owned-Pods lists
+/// (`uid`, owner references) and the graph (`spec.replicas`, the ready and available counts,
+/// the revision annotation, the controller owner) read these.
+const REPLICA_SET_ROW: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    (
+        "spec",
+        Fields(&[
+            ("replicas", All),
+            ("selector", All),
+            (
+                "template",
+                Fields(&[(
+                    "spec",
+                    Fields(&[
+                        ("containers", Each(&NAME_ONLY)),
+                        ("initContainers", Each(&NAME_ONLY)),
+                    ]),
+                )]),
+            ),
+        ]),
+    ),
+    (
+        "status",
+        Fields(&[
+            ("replicas", All),
+            ("readyReplicas", All),
+            ("availableReplicas", All),
+        ]),
+    ),
+]);
+
+/// The Nodes table, the cordon and node-shell actions and the Overview gauges
+/// (`status.allocatable`) read these. The images, the capacity and the volumes stay out.
+const NODE_ROW: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    ("spec", Fields(&[("unschedulable", All), ("taints", All)])),
+    (
+        "status",
+        Fields(&[
+            (
+                "conditions",
+                Each(&Fields(&[
+                    ("type", All),
+                    ("status", All),
+                    ("reason", All),
+                    ("message", All),
+                    ("lastTransitionTime", All),
+                ])),
+            ),
+            ("addresses", All),
+            ("allocatable", All),
+            (
+                "nodeInfo",
+                Fields(&[
+                    ("kubeletVersion", All),
+                    ("operatingSystem", All),
+                    ("architecture", All),
+                ]),
+            ),
+        ]),
+    ),
+]);
+
+/// The ConfigMaps table's Keys column and the graph's Keys fact count the keys, so the keys
+/// stay and each value becomes `""`. The UI counts string values, so they stay strings.
+const CONFIG_MAP_ROW: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    ("data", Blank),
+    ("binaryData", Blank),
 ]);
 
 /// A value of another shape than the rule expects is kept as it is.
@@ -249,6 +368,13 @@ fn keep(value: &mut Value, rule: &Keep) {
                 cut_chars(text, *max);
             }
         }
+        Blank => {
+            if let Some(object) = value.as_object_mut() {
+                for child in object.values_mut() {
+                    *child = Value::String(String::new());
+                }
+            }
+        }
     }
 }
 
@@ -259,15 +385,27 @@ fn cut_chars(text: &mut String, max: usize) {
     }
 }
 
-/// Core `v1` Pods are the only rows trimmed, and the only ones with a graph shape of their own.
+/// Core `v1` Pods are the only rows with a graph shape of their own.
 pub(super) fn is_core_pods(resource: &ResourceRef) -> bool {
     resource.group.is_empty() && resource.plural == "pods"
 }
 
-/// Trims a row after `strip_for_list`. Only core `v1` Pods are trimmed.
+/// The rule a (group, plural) is trimmed by, for a table row or the Pod table's shape.
+fn row_rule(resource: &ResourceRef) -> Option<&'static Keep> {
+    match (resource.group.as_str(), resource.plural.as_str()) {
+        ("", "pods") => Some(&POD_ROW),
+        ("", "nodes") => Some(&NODE_ROW),
+        ("", "configmaps") => Some(&CONFIG_MAP_ROW),
+        ("apps", "replicasets") => Some(&REPLICA_SET_ROW),
+        ("apiextensions.k8s.io", "customresourcedefinitions") => Some(&CRD_ROW),
+        _ => None,
+    }
+}
+
+/// Trims a row after `strip_for_list`. Only the kinds with a rule above are trimmed.
 pub(super) fn trim_for_watch(resource: &ResourceRef, row: &mut Value) {
-    if is_core_pods(resource) {
-        keep(row, &POD_ROW);
+    if let Some(rule) = row_rule(resource) {
+        keep(row, rule);
     }
 }
 
@@ -440,7 +578,10 @@ mod tests {
         // PodMetrics are served as `pods` too, and their containers carry the usage.
         for resource in [
             resource("metrics.k8s.io", "pods", "PodMetrics"),
-            resource("", "configmaps", "ConfigMap"),
+            resource("example.com", "configmaps", "ConfigMap"),
+            resource("", "secrets", "Secret"),
+            resource("metrics.k8s.io", "nodes", "NodeMetrics"),
+            resource("", "replicasets", "ReplicaSet"),
         ] {
             let mut row = full_pod();
             trim_for_watch(&resource, &mut row);
@@ -548,7 +689,7 @@ mod tests {
     fn other_kinds_keep_long_annotation_values_whole() {
         let long = "a".repeat(10_000);
         for resource in [
-            resource("", "configmaps", "ConfigMap"),
+            resource("", "secrets", "Secret"),
             resource("apps", "deployments", "Deployment"),
             resource("metrics.k8s.io", "pods", "PodMetrics"),
         ] {
@@ -634,5 +775,355 @@ mod tests {
         let before = row.clone();
         trim_for_graph(&resource("apps", "deployments", "Deployment"), &mut row);
         assert_eq!(row, before);
+    }
+
+    fn long_annotations() -> Value {
+        json!({
+            "short": "kept",
+            "long": "é".repeat(300),
+            "number": 5,
+        })
+    }
+
+    fn row_metadata(name: &str, namespace: Option<&str>) -> Value {
+        let mut metadata = json!({
+            "name": name,
+            "uid": format!("{name}-uid"),
+            "resourceVersion": "42",
+            "generation": 7,
+            "creationTimestamp": "2026-11-01T08:00:00Z",
+            "deletionTimestamp": "2026-11-01T09:00:00Z",
+            "generateName": format!("{name}-"),
+            "labels": { "app": "web" },
+            "annotations": long_annotations(),
+            "ownerReferences": [{ "apiVersion": "apps/v1", "kind": "Deployment", "name": "web", "uid": "u-d", "controller": true }],
+            "finalizers": ["example.com/hold"],
+        });
+        if let Some(namespace) = namespace {
+            metadata["namespace"] = namespace.into();
+        }
+        metadata
+    }
+
+    /// What `row_metadata` becomes in a trimmed row.
+    fn kept_metadata(name: &str, namespace: Option<&str>) -> Value {
+        let mut metadata = json!({
+            "name": name,
+            "uid": format!("{name}-uid"),
+            "resourceVersion": "42",
+            "creationTimestamp": "2026-11-01T08:00:00Z",
+            "deletionTimestamp": "2026-11-01T09:00:00Z",
+            "labels": { "app": "web" },
+            "annotations": { "short": "kept", "long": "é".repeat(256) },
+            "ownerReferences": [{ "apiVersion": "apps/v1", "kind": "Deployment", "name": "web", "uid": "u-d", "controller": true }],
+        });
+        if let Some(namespace) = namespace {
+            metadata["namespace"] = namespace.into();
+        }
+        metadata
+    }
+
+    fn full_crd() -> Value {
+        json!({
+            "apiVersion": "apiextensions.k8s.io/v1",
+            "kind": "CustomResourceDefinition",
+            "metadata": row_metadata("widgets.example.com", None),
+            "spec": {
+                "group": "example.com",
+                "scope": "Namespaced",
+                "names": { "plural": "widgets", "singular": "widget", "kind": "Widget", "shortNames": ["wg"] },
+                "preserveUnknownFields": false,
+                "conversion": {
+                    "strategy": "Webhook",
+                    "webhook": { "clientConfig": { "caBundle": "Q0EtQlVORExF" }, "conversionReviewVersions": ["v1"] },
+                },
+                "versions": [{
+                    "name": "v1",
+                    "served": true,
+                    "storage": true,
+                    "deprecated": false,
+                    "deprecationWarning": "use v2",
+                    "schema": { "openAPIV3Schema": { "type": "object", "properties": { "spec": { "type": "object" } } } },
+                    "subresources": { "status": {} },
+                    "selectableFields": [{ "jsonPath": ".spec.size" }],
+                    "additionalPrinterColumns": [{ "name": "Size", "type": "integer", "jsonPath": ".spec.size", "description": "the size" }],
+                }],
+            },
+            "status": {
+                "acceptedNames": { "plural": "widgets", "kind": "Widget" },
+                "storedVersions": ["v1"],
+                "conditions": [{
+                    "type": "Established",
+                    "status": "True",
+                    "reason": "InitialNamesAccepted",
+                    "message": "the initial names have been accepted",
+                    "lastTransitionTime": "2026-11-01T08:00:01Z",
+                }],
+            },
+        })
+    }
+
+    fn trimmed_crd() -> Value {
+        json!({
+            "apiVersion": "apiextensions.k8s.io/v1",
+            "kind": "CustomResourceDefinition",
+            "metadata": kept_metadata("widgets.example.com", None),
+            "spec": {
+                "group": "example.com",
+                "scope": "Namespaced",
+                "names": { "plural": "widgets", "singular": "widget", "kind": "Widget", "shortNames": ["wg"] },
+                "versions": [{
+                    "name": "v1",
+                    "served": true,
+                    "storage": true,
+                    "deprecated": false,
+                    "additionalPrinterColumns": [{ "name": "Size", "type": "integer", "jsonPath": ".spec.size", "description": "the size" }],
+                }],
+            },
+            "status": { "conditions": [{ "type": "Established", "status": "True" }] },
+        })
+    }
+
+    fn full_replica_set() -> Value {
+        json!({
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": row_metadata("web-1", Some("default")),
+            "spec": {
+                "replicas": 3,
+                "minReadySeconds": 5,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": {
+                    "metadata": { "labels": { "app": "web" } },
+                    "spec": {
+                        "serviceAccountName": "web",
+                        "initContainers": [{ "name": "setup", "image": "registry.example.com/setup:1" }],
+                        "containers": [{
+                            "name": "app",
+                            "image": "registry.example.com/app:1",
+                            "env": [{ "name": "A", "value": "hidden-value" }],
+                        }],
+                    },
+                },
+            },
+            "status": {
+                "replicas": 3,
+                "readyReplicas": 2,
+                "availableReplicas": 2,
+                "fullyLabeledReplicas": 3,
+                "observedGeneration": 7,
+                "conditions": [{ "type": "ReplicaFailure", "status": "False" }],
+            },
+        })
+    }
+
+    fn trimmed_replica_set() -> Value {
+        json!({
+            "apiVersion": "apps/v1",
+            "kind": "ReplicaSet",
+            "metadata": kept_metadata("web-1", Some("default")),
+            "spec": {
+                "replicas": 3,
+                "selector": { "matchLabels": { "app": "web" } },
+                "template": { "spec": {
+                    "initContainers": [{ "name": "setup" }],
+                    "containers": [{ "name": "app" }],
+                } },
+            },
+            "status": { "replicas": 3, "readyReplicas": 2, "availableReplicas": 2 },
+        })
+    }
+
+    fn full_node() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "Node",
+            "metadata": row_metadata("worker-1", None),
+            "spec": {
+                "podCIDR": "10.244.1.0/24",
+                "providerID": "kind://docker/worker-1",
+                "unschedulable": true,
+                "taints": [{ "key": "dedicated", "value": "db", "effect": "NoSchedule", "timeAdded": "2026-11-01T08:00:00Z" }],
+            },
+            "status": {
+                "capacity": { "cpu": "8", "memory": "16Gi" },
+                "allocatable": { "cpu": "7800m", "memory": "15Gi", "pods": "110" },
+                "addresses": [{ "type": "InternalIP", "address": "172.18.0.3" }, { "type": "Hostname", "address": "worker-1" }],
+                "conditions": [{
+                    "type": "Ready",
+                    "status": "True",
+                    "reason": "KubeletReady",
+                    "message": "kubelet is posting ready status",
+                    "lastHeartbeatTime": "2026-11-01T08:10:00Z",
+                    "lastTransitionTime": "2026-11-01T08:00:06Z",
+                }],
+                "daemonEndpoints": { "kubeletEndpoint": { "Port": 10250 } },
+                "images": [{ "names": ["registry.example.com/app:1"], "sizeBytes": 1234567 }],
+                "volumesInUse": ["kubernetes.io/csi/x^1"],
+                "volumesAttached": [{ "name": "kubernetes.io/csi/x^1", "devicePath": "" }],
+                "nodeInfo": {
+                    "kubeletVersion": "v1.31.2",
+                    "operatingSystem": "linux",
+                    "architecture": "arm64",
+                    "machineID": "abc",
+                    "systemUUID": "def",
+                    "bootID": "ghi",
+                    "kernelVersion": "6.8.0",
+                    "osImage": "Debian GNU/Linux 12",
+                    "containerRuntimeVersion": "containerd://1.7.1",
+                    "kubeProxyVersion": "v1.31.2",
+                },
+            },
+        })
+    }
+
+    fn trimmed_node() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "Node",
+            "metadata": kept_metadata("worker-1", None),
+            "spec": {
+                "unschedulable": true,
+                "taints": [{ "key": "dedicated", "value": "db", "effect": "NoSchedule", "timeAdded": "2026-11-01T08:00:00Z" }],
+            },
+            "status": {
+                "allocatable": { "cpu": "7800m", "memory": "15Gi", "pods": "110" },
+                "addresses": [{ "type": "InternalIP", "address": "172.18.0.3" }, { "type": "Hostname", "address": "worker-1" }],
+                "conditions": [{
+                    "type": "Ready",
+                    "status": "True",
+                    "reason": "KubeletReady",
+                    "message": "kubelet is posting ready status",
+                    "lastTransitionTime": "2026-11-01T08:00:06Z",
+                }],
+                "nodeInfo": { "kubeletVersion": "v1.31.2", "operatingSystem": "linux", "architecture": "arm64" },
+            },
+        })
+    }
+
+    fn full_config_map() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": row_metadata("web-config", Some("default")),
+            "immutable": true,
+            "data": { "mode": "fast", "empty": "", "big": "x".repeat(10_000) },
+            "binaryData": { "blob": "AAEC" },
+        })
+    }
+
+    fn trimmed_config_map() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": kept_metadata("web-config", Some("default")),
+            "data": { "mode": "", "empty": "", "big": "" },
+            "binaryData": { "blob": "" },
+        })
+    }
+
+    /// Each trimmed kind: its resource, a whole object and what its row keeps.
+    fn trimmed_kinds() -> Vec<(ResourceRef, Value, Value)> {
+        vec![
+            (
+                resource(
+                    "apiextensions.k8s.io",
+                    "customresourcedefinitions",
+                    "CustomResourceDefinition",
+                ),
+                full_crd(),
+                trimmed_crd(),
+            ),
+            (
+                resource("apps", "replicasets", "ReplicaSet"),
+                full_replica_set(),
+                trimmed_replica_set(),
+            ),
+            (resource("", "nodes", "Node"), full_node(), trimmed_node()),
+            (
+                resource("", "configmaps", "ConfigMap"),
+                full_config_map(),
+                trimmed_config_map(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_crd_row_keeps_the_printer_columns_and_the_versions_flags() {
+        let mut row = full_crd();
+        trim_for_watch(
+            &resource(
+                "apiextensions.k8s.io",
+                "customresourcedefinitions",
+                "CustomResourceDefinition",
+            ),
+            &mut row,
+        );
+        assert_eq!(row, trimmed_crd());
+        assert!(
+            !row.to_string().contains("Q0EtQlVORExF"),
+            "the caBundle is gone"
+        );
+    }
+
+    #[test]
+    fn a_replica_set_row_keeps_the_selector_container_names_and_replica_counts() {
+        let mut row = full_replica_set();
+        trim_for_watch(&resource("apps", "replicasets", "ReplicaSet"), &mut row);
+        assert_eq!(row, trimmed_replica_set());
+        assert!(!row.to_string().contains("hidden-value"));
+    }
+
+    #[test]
+    fn a_node_row_keeps_what_the_table_the_actions_and_the_gauges_read() {
+        let mut row = full_node();
+        trim_for_watch(&resource("", "nodes", "Node"), &mut row);
+        assert_eq!(row, trimmed_node());
+    }
+
+    #[test]
+    fn a_config_map_row_keeps_its_keys_with_empty_string_values() {
+        let mut row = full_config_map();
+        trim_for_watch(&resource("", "configmaps", "ConfigMap"), &mut row);
+        assert_eq!(row, trimmed_config_map());
+        assert!(!row.to_string().contains("xxxx"));
+    }
+
+    #[test]
+    fn every_trimmed_kind_cuts_annotation_values_and_drops_non_strings() {
+        for (resource, mut row, _) in trimmed_kinds() {
+            trim_for_watch(&resource, &mut row);
+            assert_eq!(
+                row["metadata"]["annotations"],
+                json!({ "short": "kept", "long": "é".repeat(256) }),
+                "{}",
+                resource.plural
+            );
+        }
+    }
+
+    #[test]
+    fn strip_for_list_leaves_the_trimmed_kinds_whole() {
+        // `resource_get` and `resource_events` use `strip_for_list`, and need whole objects.
+        for (resource, full, _) in trimmed_kinds() {
+            let mut stripped = full.clone();
+            super::super::sanitize::strip_for_list(&mut stripped);
+            assert_eq!(stripped, full, "{}", resource.plural);
+        }
+    }
+
+    #[test]
+    fn a_trimmed_kind_shaped_oddly_is_kept_as_far_as_it_goes() {
+        for (resource, _, _) in trimmed_kinds() {
+            for odd in [
+                json!({}),
+                json!({ "metadata": "x", "spec": null, "status": [], "data": "text", "binaryData": null }),
+                json!({ "spec": { "versions": "no", "taints": 3, "template": [] }, "status": { "conditions": [1, "two"], "nodeInfo": 4 } }),
+            ] {
+                let mut row = odd.clone();
+                trim_for_watch(&resource, &mut row);
+                assert!(row.is_object(), "{}", resource.plural);
+            }
+        }
     }
 }
