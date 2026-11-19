@@ -155,7 +155,12 @@ let chartsSeq = 0;
 const downloading = new Set<ToolName>();
 const releaseSeq = new Map<string, number>();
 const releaseLoads = new Map<string, { asked: string; read: Promise<void> }>();
-const watchers = new Map<string, { count: number; timer: number }>();
+const watchers = new Map<
+  string,
+  { count: number; timer: number; onVisible: () => void }
+>();
+/** When each cluster's release list was last asked for, in `Date.now()` ms. */
+const releaseAskedAt = new Map<string, number>();
 const openPages = new Map<string, number>();
 const stopWanted = new Set<number>();
 let runSeq = 0;
@@ -389,6 +394,15 @@ export const useHelm = create<HelmState>((set, get) => {
       watchCatalog();
       let watch = watchers.get(clusterId);
       if (!watch) {
+        // Every refresh path, a backend change event included, calls loadReleases.
+        const onVisible = () => {
+          if (document.visibilityState !== "visible") return;
+          const asked = releaseAskedAt.get(clusterId) ?? 0;
+          if (Date.now() - asked > RELEASES_POLL_MS) {
+            void get().loadReleases(clusterId);
+          }
+        };
+        document.addEventListener("visibilitychange", onVisible);
         watch = {
           count: 0,
           timer: window.setInterval(() => {
@@ -396,6 +410,7 @@ export const useHelm = create<HelmState>((set, get) => {
               void get().loadReleases(clusterId);
             }
           }, RELEASES_POLL_MS),
+          onVisible,
         };
         watchers.set(clusterId, watch);
       }
@@ -409,6 +424,7 @@ export const useHelm = create<HelmState>((set, get) => {
         mine.count -= 1;
         if (mine.count === 0) {
           window.clearInterval(mine.timer);
+          document.removeEventListener("visibilitychange", mine.onVisible);
           watchers.delete(clusterId);
         }
       };
@@ -425,6 +441,7 @@ export const useHelm = create<HelmState>((set, get) => {
         current !== undefined && JSON.stringify(current.namespaces) === asked;
       const mine = (releaseSeq.get(clusterId) ?? 0) + 1;
       releaseSeq.set(clusterId, mine);
+      releaseAskedAt.set(clusterId, Date.now());
       const patch = (change: Partial<ReleasesSlice>) =>
         set((s) => {
           const slice = s.releases[clusterId];
@@ -691,8 +708,12 @@ export function resetHelmForTest(): void {
   downloading.clear();
   releaseSeq.clear();
   releaseLoads.clear();
-  for (const watch of watchers.values()) window.clearInterval(watch.timer);
+  for (const watch of watchers.values()) {
+    window.clearInterval(watch.timer);
+    document.removeEventListener("visibilitychange", watch.onVisible);
+  }
   watchers.clear();
+  releaseAskedAt.clear();
   openPages.clear();
   stopWanted.clear();
   runSeq = 0;
@@ -701,7 +722,7 @@ export function resetHelmForTest(): void {
   useHelm.setState(FIRST);
 }
 
-export const RELEASES_POLL_MS = 15_000;
+export const RELEASES_POLL_MS = 60_000;
 
 export interface ReleasesSlice {
   list: HelmReleaseList | null;
