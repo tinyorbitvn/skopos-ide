@@ -1,4 +1,4 @@
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { Badge, Button, Segmented, Spinner } from "../../design";
 import { CircleAlert, Info } from "../../design/icons";
@@ -14,6 +14,7 @@ import {
   askUsage,
   type MetricsView,
   queryKey,
+  readUsageHistory,
   refreshProvider,
   useMetrics,
 } from "../../stores/metrics";
@@ -393,6 +394,17 @@ function ServerMetrics(
     usage !== null,
   );
   const seconds = useSecondsUntil(slice?.nextAt ?? null);
+  // The store records history only for what a panel reads; `keys` may be a new array per render.
+  const readKeys = usage?.keys ? JSON.stringify(usage.keys) : null;
+  const reading = usage !== null;
+  const usageOf = usage?.of ?? "nodes";
+  const usageNs = usage?.namespace ?? null;
+  useEffect(() => {
+    if (!reading) return;
+    const keys: string[] | null =
+      readKeys === null ? null : JSON.parse(readKeys);
+    return readUsageHistory(clusterId, usageOf, usageNs, keys);
+  }, [reading, clusterId, usageOf, usageNs, readKeys]);
   if (usage === null) return <Note text={serverNote(target)} />;
 
   const error = slice?.error ?? null;

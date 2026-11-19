@@ -19,6 +19,7 @@ import {
   forgetProvider,
   HISTORY_LIMIT,
   HISTORY_SECONDS,
+  readUsageHistory,
   resetMetricsForTest,
   USAGE_POLL_MS,
   usageKey,
@@ -103,6 +104,7 @@ test("usage asks follow the window's visibility like queries", async () => {
 
 test("each snapshot is kept and appended per item; a repeated timestamp is not appended", async () => {
   let at = T0;
+  readUsageHistory("c1", "pods", null, null);
   mockBackend({ metrics_usage: () => usageSnapshot([WEB, DB], at) });
   await askUsage("c1", "pods", null);
   await askUsage("c1", "pods", null);
@@ -126,6 +128,7 @@ test("each snapshot is kept and appended per item; a repeated timestamp is not a
 });
 
 test("node samples are keyed by the node name", async () => {
+  readUsageHistory("c1", "nodes", null, null);
   mockBackend({
     metrics_usage: () =>
       usageSnapshot([
@@ -141,6 +144,7 @@ test("node samples are keyed by the node name", async () => {
 test("the history keeps 240 samples per item and one hour; an item that left keeps its samples until they age out", async () => {
   let at = T0;
   let items = [WEB, DB];
+  readUsageHistory("c1", "pods", null, null);
   mockBackend({ metrics_usage: () => usageSnapshot(items, at) });
   for (let i = 0; i < 300; i += 1) {
     at = T0 + i;
@@ -262,4 +266,64 @@ test("under Prometheus, noMetricsServer marks usage not served without reading t
   await flush();
   expect(metrics().usageNotServed.c1).toBe(true);
   expect(backend.callsTo("metrics_provider")).toHaveLength(1);
+});
+
+test("no history is kept without a reader; the snapshot stays for the table", async () => {
+  mockBackend({ metrics_usage: () => usageSnapshot([WEB, DB], T0) });
+  await askUsage("c1", "pods", null);
+  const slice = metrics().usage[PODS];
+  expect(slice?.history).toEqual({});
+  expect(slice?.value).toEqual(usageSnapshot([WEB, DB], T0));
+});
+
+test("a reader of one object records only that object, and its history goes with the last reader", async () => {
+  let at = T0;
+  mockBackend({ metrics_usage: () => usageSnapshot([WEB, DB], at) });
+  const first = readUsageHistory("c1", "pods", null, ["shop/web-1"]);
+  const second = readUsageHistory("c1", "pods", null, ["shop/web-1"]);
+  await askUsage("c1", "pods", null);
+  at = T0 + 15;
+  await askUsage("c1", "pods", null);
+  expect(Object.keys(metrics().usage[PODS]?.history ?? {})).toEqual([
+    "shop/web-1",
+  ]);
+  expect(metrics().usage[PODS]?.history["shop/web-1"]).toHaveLength(2);
+  first();
+  first();
+  expect(metrics().usage[PODS]?.history["shop/web-1"]).toHaveLength(2);
+  second();
+  expect(metrics().usage[PODS]?.history).toEqual({});
+});
+
+test("the history is dropped when the poller stops", async () => {
+  pollTimers();
+  mockBackend({ metrics_usage: servedNow(() => [WEB]) });
+  readUsageHistory("c1", "pods", null, null);
+  const stop = watchUsage("c1", "pods", null);
+  await flush();
+  expect(metrics().usage[PODS]?.history["shop/web-1"]).toHaveLength(1);
+  stop();
+  expect(metrics().usage[PODS]?.history).toEqual({});
+  expect(metrics().usage[PODS]?.nextAt).toBeNull();
+});
+
+test("appending is in place: the window stays bounded and no array is copied", async () => {
+  let at = T0;
+  readUsageHistory("c1", "pods", null, null);
+  mockBackend({ metrics_usage: () => usageSnapshot([WEB, DB], at) });
+  await askUsage("c1", "pods", null);
+  const history = metrics().usage[PODS]?.history;
+  const web = history?.["shop/web-1"];
+  const db = history?.["data/db-0"];
+  const version = metrics().usage[PODS]?.historyVersion ?? 0;
+  for (let i = 1; i < 300; i += 1) {
+    at = T0 + i;
+    await askUsage("c1", "pods", null);
+  }
+  const after = metrics().usage[PODS];
+  expect(after?.history).toBe(history);
+  expect(after?.history["shop/web-1"]).toBe(web);
+  expect(after?.history["data/db-0"]).toBe(db);
+  expect(web).toHaveLength(HISTORY_LIMIT);
+  expect(after?.historyVersion).toBeGreaterThan(version);
 });

@@ -28,8 +28,14 @@ export interface Sample {
 }
 
 export interface UsageSlice extends Slice<UsageSnapshot> {
-  /** Rolling samples per item: `namespace/name` for Pods, the name for nodes. */
+  /**
+   * Rolling samples per item: `namespace/name` for Pods, the name for nodes. Only items
+   * a reader asked for (`readUsageHistory`) are recorded, and the arrays are appended in
+   * place: read `historyVersion` to know it changed.
+   */
   history: Record<string, Sample[]>;
+  /** Counts the polls that changed `history`. */
+  historyVersion: number;
   /** When the next ask is due, in ms since the epoch; null while no poller runs. */
   nextAt: number | null;
 }
@@ -81,7 +87,13 @@ export const useMetrics: UseBoundStore<StoreApi<MetricsState>> =
   }));
 
 const IDLE = { value: null, error: null, loading: false } as const;
-const IDLE_USAGE: UsageSlice = { ...IDLE, history: {}, nextAt: null };
+// A function: the history object is mutated in place, so no two slices may share one.
+const idleUsage = (): UsageSlice => ({
+  ...IDLE,
+  history: {},
+  historyVersion: 0,
+  nextAt: null,
+});
 
 interface Poller {
   key: string;
@@ -101,6 +113,9 @@ const pollers = new Map<string, Poller>();
 const seqs = new Map<string, number>();
 const providerSeq = new Map<string, number>();
 const providerLoads = new Map<string, Promise<void>>();
+// By usage key: how many readers want each item's history, ALL_ITEMS for every item.
+const historyReaders = new Map<string, Map<string, number>>();
+const ALL_ITEMS = "\0all";
 // Clusters whose provider was read again after a noMetricsServer answer, until forgetProvider.
 const notServedRefreshed = new Set<string>();
 let unwatchCatalog: (() => void) | null = null;
@@ -249,7 +264,10 @@ function watch(
     if (mine.count > 0) return;
     window.clearInterval(mine.timer);
     pollers.delete(key);
-    if (mine.usage) patchUsage(key, { nextAt: null });
+    if (mine.usage) {
+      // Nothing polls this key any more: its history would only age in memory.
+      patchUsage(key, { nextAt: null, history: {}, historyVersion: 0 });
+    }
     if (pollers.size === 0) stopListening();
   };
 }
@@ -279,7 +297,7 @@ function patchUsage(key: string, change: Partial<UsageSlice>): void {
   useMetrics.setState((s) => ({
     usage: {
       ...s.usage,
-      [key]: { ...(s.usage[key] ?? IDLE_USAGE), ...change },
+      [key]: { ...(s.usage[key] ?? idleUsage()), ...change },
     },
   }));
 }
@@ -438,36 +456,124 @@ function itemKey(of: UsageOf, item: UsageItem): string {
 }
 
 /**
- * Appends a snapshot to the rolling history: one sample per item, only when it is
- * newer than the item's last one. Samples an hour older than the snapshot go, also
- * for items that left it, and each item keeps its newest `HISTORY_LIMIT`.
+ * Says that something reads the history of `keys` (every item when null) under one usage
+ * key, until the returned function is called. Without a reader nothing is recorded;
+ * when the last reader of an item goes, its history is dropped.
+ */
+export function readUsageHistory(
+  clusterId: string,
+  of: UsageOf,
+  namespace: string | null,
+  keys: string[] | null,
+): () => void {
+  const key = usageKey(clusterId, of, namespace);
+  const wanted = keys === null ? [ALL_ITEMS] : [...new Set(keys)];
+  let readers = historyReaders.get(key);
+  if (!readers) {
+    readers = new Map();
+    historyReaders.set(key, readers);
+  }
+  for (const item of wanted) readers.set(item, (readers.get(item) ?? 0) + 1);
+  // The snapshot already read is the first sample: its items may have come before the reader.
+  const held = useMetrics.getState().usage[key];
+  if (held?.value && appendHistory(held.history, held.value, of, readers)) {
+    useMetrics.setState((s) => {
+      const current = s.usage[key];
+      if (!current) return s;
+      return {
+        usage: {
+          ...s.usage,
+          [key]: { ...current, historyVersion: current.historyVersion + 1 },
+        },
+      };
+    });
+  }
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const current = historyReaders.get(key);
+    if (!current) return;
+    for (const item of wanted) {
+      const left = (current.get(item) ?? 0) - 1;
+      if (left > 0) current.set(item, left);
+      else current.delete(item);
+    }
+    if (current.size === 0) historyReaders.delete(key);
+    dropUnreadHistory(key);
+  };
+}
+
+function isRead(readers: Map<string, number> | undefined, item: string) {
+  return readers !== undefined && (readers.has(ALL_ITEMS) || readers.has(item));
+}
+
+/** Drops the history of every item of `key` that no reader wants. */
+function dropUnreadHistory(key: string): void {
+  const slice = useMetrics.getState().usage[key];
+  if (!slice) return;
+  const readers = historyReaders.get(key);
+  let changed = false;
+  for (const item of Object.keys(slice.history)) {
+    if (isRead(readers, item)) continue;
+    delete slice.history[item];
+    changed = true;
+  }
+  if (!changed) return;
+  useMetrics.setState((s) => {
+    const current = s.usage[key];
+    if (!current) return s;
+    return {
+      usage: {
+        ...s.usage,
+        [key]: { ...current, historyVersion: current.historyVersion + 1 },
+      },
+    };
+  });
+}
+
+/**
+ * Appends a snapshot to the rolling history, in place: one sample per wanted item, only
+ * when it is newer than the item's last one. Samples an hour older than the snapshot go,
+ * also for items that left it, and each item keeps its newest `HISTORY_LIMIT`.
+ * Returns whether anything changed.
  */
 function appendHistory(
   history: Record<string, Sample[]>,
   snapshot: UsageSnapshot,
   of: UsageOf,
-): Record<string, Sample[]> {
+  readers: Map<string, number> | undefined,
+): boolean {
   const t = Date.parse(snapshot.timestamp) / 1000;
-  if (!Number.isFinite(t)) return history;
-  const next: Record<string, Sample[]> = { ...history };
+  if (!Number.isFinite(t)) return false;
+  let changed = false;
   for (const item of snapshot.items) {
     const key = itemKey(of, item);
-    const samples = next[key] ?? [];
+    if (!isRead(readers, key)) continue;
+    let samples = history[key];
+    if (!samples) {
+      samples = [];
+      history[key] = samples;
+    }
     const last = samples[samples.length - 1];
     if (last && last.t >= t) continue;
-    next[key] = [
-      ...samples,
-      { t, cpu: item.cpuCores, memory: item.memoryBytes },
-    ];
+    samples.push({ t, cpu: item.cpuCores, memory: item.memoryBytes });
+    changed = true;
   }
-  for (const [key, samples] of Object.entries(next)) {
-    const kept = samples
-      .filter((sample) => sample.t > t - HISTORY_SECONDS)
-      .slice(-HISTORY_LIMIT);
-    if (kept.length === 0) delete next[key];
-    else next[key] = kept;
+  const cutoff = t - HISTORY_SECONDS;
+  for (const key of Object.keys(history)) {
+    const samples = history[key];
+    if (!samples) continue;
+    let old = 0;
+    while (old < samples.length && (samples[old]?.t ?? 0) <= cutoff) old += 1;
+    old = Math.max(old, samples.length - HISTORY_LIMIT);
+    if (old > 0) {
+      samples.splice(0, old);
+      changed = true;
+    }
+    if (samples.length === 0) delete history[key];
   }
-  return next;
+  return changed;
 }
 
 /** metrics.k8s.io is not served: the cluster's usage pollers pause until the provider is read again. */
@@ -498,7 +604,13 @@ export async function askUsage(
     const snapshot = await api.metricsUsage(clusterId, of, namespace);
     if (seqs.get(key) !== mine) return;
     useMetrics.setState((s) => {
-      const slice = s.usage[key] ?? IDLE_USAGE;
+      const slice = s.usage[key] ?? idleUsage();
+      const changed = appendHistory(
+        slice.history,
+        snapshot,
+        of,
+        historyReaders.get(key),
+      );
       return {
         usage: {
           ...s.usage,
@@ -507,7 +619,7 @@ export async function askUsage(
             value: snapshot,
             error: null,
             loading: false,
-            history: appendHistory(slice.history, snapshot, of),
+            historyVersion: slice.historyVersion + (changed ? 1 : 0),
           },
         },
       };
@@ -556,6 +668,7 @@ export function resetMetricsForTest(): void {
   seqs.clear();
   providerSeq.clear();
   providerLoads.clear();
+  historyReaders.clear();
   notServedRefreshed.clear();
   stopListening();
   unwatchCatalog?.();
