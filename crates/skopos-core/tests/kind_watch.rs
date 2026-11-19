@@ -193,21 +193,29 @@ async fn configmap_changes_arrive_within_a_second() {
         assert!(row["metadata"].get("managedFields").is_none());
         assert_eq!(row["kind"], "ConfigMap");
 
-        maps.patch(
-            "watched",
-            &PatchParams::default(),
-            &Patch::Merge(json!({ "data": { "key": "second" } })),
-        )
-        .await
-        .unwrap();
+        // Watched ConfigMap rows keep their keys with blank values, so the change shows as the
+        // patched object's resourceVersion.
+        let version = maps
+            .patch(
+                "watched",
+                &PatchParams::default(),
+                &Patch::Merge(json!({ "data": { "key": "second" } })),
+            )
+            .await
+            .unwrap()
+            .metadata
+            .resource_version
+            .unwrap();
         let patched = Instant::now();
         table
             .until("the change", Duration::from_secs(1), |t| {
-                t.row(NAMESPACE, "watched")
-                    .is_some_and(|row| row["data"]["key"] == "second")
+                t.row(NAMESPACE, "watched").is_some_and(|row| {
+                    row["metadata"]["resourceVersion"].as_str() == Some(version.as_str())
+                })
             })
             .await;
         assert!(patched.elapsed() < Duration::from_secs(1));
+        assert_eq!(table.row(NAMESPACE, "watched").unwrap()["data"]["key"], "");
 
         maps.delete("watched", &DeleteParams::default())
             .await
