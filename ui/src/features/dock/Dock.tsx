@@ -19,7 +19,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { Button, ConfirmDialog, IconButton } from "../../design";
+import { ConfirmDialog, IconButton, Menu } from "../../design";
 import {
   ChevronDown,
   ChevronUp,
@@ -54,7 +54,7 @@ import { isTerminalShortcut } from "../terminal/terminalKeys";
 import { DetailsTab } from "./DetailsTab";
 import styles from "./Dock.module.css";
 import { useOpenAsDrawer } from "./openAsDrawer";
-import { openTerminal } from "./openTerminal";
+import { newTerminal, openTerminal } from "./openTerminal";
 import { shownDetailsEntry } from "./useDetailsHistory";
 
 const KEYBOARD_RESIZE_STEP = 24;
@@ -337,24 +337,30 @@ export function Dock(props: {
             </div>
           </SortableContext>
         </DndContext>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => openTerminal(clusterId)}
-          data-testid="dock-terminal"
-        >
-          <SquareTerminal size={14} aria-hidden="true" />
-          Terminal
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => useDock.getState().open(newCreateTab(clusterId))}
-          data-testid="create-resource"
-        >
-          <Plus size={14} aria-hidden="true" />
-          Create
-        </Button>
+        <Menu
+          trigger={
+            <IconButton
+              label="New tab"
+              icon={<Plus size={16} aria-hidden="true" />}
+              tooltip={false}
+              data-testid="dock-new"
+            />
+          }
+          items={[
+            {
+              id: "create",
+              label: "Create resource",
+              testId: "create-resource",
+              onSelect: () => useDock.getState().open(newCreateTab(clusterId)),
+            },
+            {
+              id: "terminal",
+              label: "Terminal Session",
+              testId: "dock-terminal",
+              onSelect: () => newTerminal(clusterId),
+            },
+          ]}
+        />
         {tabs.length > 0 ? (
           <IconButton
             label={minimized ? "Restore dock" : "Minimize dock"}

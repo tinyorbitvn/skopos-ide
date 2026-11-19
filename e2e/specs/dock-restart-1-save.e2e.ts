@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createTestNamespace, kubectl } from "../helpers/kube";
 import {
-  byTestId, clickWhenShown, dockTabTitles, gone, openCluster, openResource, pointerClick, rowId,
-  searchResources, shown,
+  byTestId, clickWhenShown, dockTabTitles, gone, newInDock, openCluster, openResource, pointerClick,
+  rowId, searchResources, shown,
 } from "../helpers/ui";
 
 const KIND = "kind-skopos-e2e";
@@ -57,7 +57,7 @@ describe("the dock layout across a restart: before", () => {
     await shown("detail-drawer");
     await clickWhenShown("detail-action-logs");
     await shown("logs-tab");
-    await clickWhenShown("create-resource");
+    await newInDock("create-resource");
     await expectTitles(["Logs · keeper", "Create"], "the dock never held the two tabs");
 
     await browser.execute(() =>

@@ -68,6 +68,8 @@ export type DockTab =
       id: string;
       kind: "terminal";
       clusterId: string;
+      /** 1 for the cluster's first terminal, then 2, 3 and so on. */
+      number: number;
       title: string;
       dirty: false;
     }
@@ -316,9 +318,11 @@ export const useDock: UseBoundStore<StoreApi<DockState>> = create<DockState>(
         const tabs = state.tabs.map((t) => {
           if (t.kind !== "terminal") return t;
           const name = names.get(t.clusterId);
-          if (name === undefined || terminalTitle(name) === t.title) return t;
+          const title =
+            name === undefined ? t.title : terminalTitle(name, t.number);
+          if (title === t.title) return t;
           changed = true;
-          return { ...t, title: terminalTitle(name) };
+          return { ...t, title };
         });
         return changed ? { tabs } : state;
       }),
@@ -467,27 +471,48 @@ export function defaultContainer(pod: KubeObject): string | null {
   return running ?? names[0] ?? null;
 }
 
-export function terminalTabId(clusterId: string): string {
-  return `terminal:${clusterId}`;
+/** The id of the cluster's `number`th local terminal; the first keeps the id it always had. */
+export function terminalTabId(clusterId: string, number = 1): string {
+  return number === 1
+    ? `terminal:${clusterId}`
+    : `terminal:${clusterId}:${number}`;
 }
 
-/** "Terminal" until the catalog has given the cluster's name. */
-export function terminalTitle(clusterName: string | null): string {
-  return clusterName === null ? "Terminal" : `Terminal · ${clusterName}`;
+/** "Terminal", then "Terminal 2" and so on, with the cluster's name once the catalog has it. */
+export function terminalTitle(clusterName: string | null, number = 1): string {
+  const title = number === 1 ? "Terminal" : `Terminal ${number}`;
+  return clusterName === null ? title : `${title} · ${clusterName}`;
 }
 
-/** The cluster's one local terminal. */
+/** One of the cluster's local terminals. */
 export function terminalTab(
   clusterId: string,
   clusterName: string | null,
+  number = 1,
 ): TerminalDockTab {
   return {
-    id: terminalTabId(clusterId),
+    id: terminalTabId(clusterId, number),
     kind: "terminal",
     clusterId,
-    title: terminalTitle(clusterName),
+    number,
+    title: terminalTitle(clusterName, number),
     dirty: false,
   };
+}
+
+/** The number of a new terminal of the cluster: the lowest none of its open terminals has. */
+export function nextTerminalNumber(
+  tabs: readonly DockTab[],
+  clusterId: string,
+): number {
+  const taken = new Set(
+    tabs.flatMap((t) =>
+      t.kind === "terminal" && t.clusterId === clusterId ? [t.number] : [],
+    ),
+  );
+  let number = 1;
+  while (taken.has(number)) number += 1;
+  return number;
 }
 
 export function podSessionTab(

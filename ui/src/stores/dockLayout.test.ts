@@ -432,7 +432,12 @@ const SHELL = podSessionTab("shell", "c1", "shop", "web-1", "app");
 const ATTACH = podSessionTab("attach", "c2", "shop", "web-1", null);
 const NODE_SHELL = nodeShellTabFor("c1", "worker-1");
 
-const SAVED_TERMINAL = { id: "terminal:c1", kind: "terminal", clusterId: "c1" };
+const SAVED_TERMINAL = {
+  id: "terminal:c1",
+  kind: "terminal",
+  clusterId: "c1",
+  number: 1,
+};
 const SAVED_SHELL = {
   id: "shell:c1:shop/web-1",
   kind: "shell",
@@ -476,6 +481,36 @@ test("the session kinds save their fields and come back with their titles", () =
     ATTACH,
     NODE_SHELL,
   ]);
+});
+
+test("a second terminal comes back numbered, and one saved before numbers is the first", () => {
+  const second = terminalTab("c1", null, 2);
+  const written = JSON.parse(
+    JSON.stringify(
+      serializeLayout({
+        ...useDock.getState(),
+        tabs: [second],
+        activeId: null,
+      }),
+    ),
+  );
+  expect(written.tabs).toEqual([
+    { id: "terminal:c1:2", kind: "terminal", clusterId: "c1", number: 2 },
+  ]);
+  expect(parseLayout(written).tabs).toEqual([second]);
+  const { number: _, ...older } = SAVED_TERMINAL;
+  expect(parseLayout(saved([older])).tabs).toEqual([TERMINAL]);
+  // A number that does not match the id, or is not a whole number from 1, is dropped.
+  expect(
+    parseLayout(
+      saved([
+        { ...SAVED_TERMINAL, number: 2 },
+        { ...SAVED_TERMINAL, id: "terminal:c1:0", number: 0 },
+        { ...SAVED_TERMINAL, id: "terminal:c1:1.5", number: 1.5 },
+        { ...SAVED_TERMINAL, number: "1" },
+      ]),
+    ).tabs,
+  ).toEqual([]);
 });
 
 test("a malformed session tab is dropped alone", () => {

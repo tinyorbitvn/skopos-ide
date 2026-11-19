@@ -122,10 +122,16 @@ test("with no tabs the dock offers Create and no content", async () => {
   expect(screen.queryByTestId("yaml-editor")).toBeNull();
 });
 
-test("Create opens a create tab for this cluster", async () => {
+/** Opens the dock's + menu and picks `item`. */
+function pick(item: "create-resource" | "dock-terminal"): void {
+  fireEvent.keyDown(screen.getByTestId("dock-new"), { key: "Enter" });
+  fireEvent.click(screen.getByTestId(item));
+}
+
+test("Create resource opens a create tab for this cluster", async () => {
   await show();
 
-  fireEvent.click(screen.getByTestId("create-resource"));
+  pick("create-resource");
   await act(flush);
 
   const { tabs, activeId } = useDock.getState();
@@ -448,46 +454,67 @@ function tabIds(): string[] {
   return useDock.getState().tabs.map((t) => t.id);
 }
 
-test("the Terminal button sits right before Create and opens the cluster's terminal", async () => {
+test("the + menu offers Create resource, then Terminal Session", async () => {
+  await show();
+  const plus = screen.getByRole("button", { name: "New tab" });
+  expect(plus.getAttribute("data-testid")).toBe("dock-new");
+  fireEvent.keyDown(plus, { key: "Enter" });
+  expect(
+    screen.getAllByRole("menuitem").map((item) => item.textContent),
+  ).toEqual(["Create resource", "Terminal Session"]);
+});
+
+test("each Terminal Session is a new terminal, numbered after the first", async () => {
   connectClusters({ id: "c1", name: "kind-dev" });
   await show();
 
-  const button = screen.getByTestId("dock-terminal");
-  expect(button.textContent).toBe("Terminal");
-  expect(button.querySelector("svg")?.innerHTML).toBe(
-    iconMarkup(SquareTerminal),
-  );
-  const order = [...(button.parentElement?.children ?? [])].map((el) =>
-    el.getAttribute("data-testid"),
-  );
-  expect(order.indexOf("create-resource")).toBe(
-    order.indexOf("dock-terminal") + 1,
-  );
-
-  fireEvent.click(button);
+  pick("dock-terminal");
   await act(flush);
   expect(useDock.getState().tabs).toEqual([terminalTab("c1", "kind-dev")]);
   expect(screen.getByTestId("dock-tab-terminal:c1").textContent).toBe(
     "Terminal · kind-dev",
   );
   expect(within(panel("terminal:c1")).getByTestId("terminal-tab")).toBeTruthy();
+
+  pick("dock-terminal");
+  await act(flush);
+  expect(tabIds()).toEqual(["terminal:c1", "terminal:c1:2"]);
+  expect(useDock.getState().activeId).toBe("terminal:c1:2");
+  expect(screen.getByTestId("dock-tab-terminal:c1:2").textContent).toBe(
+    "Terminal 2 · kind-dev",
+  );
+  // Each tab runs its own session.
   expect(backend.callsTo("terminal_start")).toMatchObject([
     { clusterId: "c1" },
+    { clusterId: "c1" },
   ]);
+
+  // A number comes free when its terminal closes.
+  act(() => useDock.getState().close("terminal:c1"));
+  pick("dock-terminal");
+  await act(flush);
+  expect(tabIds()).toEqual(["terminal:c1:2", "terminal:c1"]);
 });
 
-test("the Terminal button brings the open terminal forward and shows the dock", async () => {
+test("Ctrl+` brings an open terminal forward, the active one first, and shows the dock", async () => {
   connectClusters({ id: "c1", name: "kind-dev" });
   useDock.getState().open(terminalTab("c1", "kind-dev"));
+  useDock.getState().open(terminalTab("c1", "kind-dev", 2));
   useDock.getState().open(WEB);
   useDock.getState().setMinimized(true);
   await show();
 
-  fireEvent.click(screen.getByTestId("dock-terminal"));
+  fireEvent.keyDown(window, { ...backquote, ctrlKey: true });
   await act(flush);
-  expect(tabIds()).toEqual(["terminal:c1", WEB.id]);
+  expect(tabIds()).toEqual(["terminal:c1", "terminal:c1:2", WEB.id]);
   expect(useDock.getState().activeId).toBe("terminal:c1");
   expect(useDock.getState().minimized).toBe(false);
+
+  act(() => useDock.getState().activate("terminal:c1:2"));
+  fireEvent.keyDown(window, { ...backquote, ctrlKey: true });
+  await act(flush);
+  expect(useDock.getState().activeId).toBe("terminal:c1:2");
+  expect(tabIds()).toHaveLength(3);
 });
 
 test("Ctrl+` opens the terminal, also from inside a terminal, and other modifiers do nothing", async () => {

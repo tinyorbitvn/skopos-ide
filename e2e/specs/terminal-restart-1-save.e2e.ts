@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  clickWhenShown, dialogButton, dockTabTitles, expectTerminalLine, expectTerminalStatus,
+  dialogButton, dockTabTitles, expectTerminalLine, expectTerminalStatus, newInDock,
   openCluster, requestNodeShell, terminalStatus, typeInTerminal,
 } from "../helpers/ui";
 
@@ -33,7 +33,7 @@ describe("terminal tabs across a restart: before", () => {
 
   it("leaves a used Terminal tab and an ended Node shell tab, the node shell active", async function () {
     this.timeout(420000);
-    await clickWhenShown("dock-terminal");
+    await newInDock("dock-terminal");
     await expectTerminalStatus("Local shell");
     await typeInTerminal("echo before-restart-$((2+3))");
     await expectTerminalLine("before-restart-5");
