@@ -12,6 +12,7 @@ import {
   editorText,
   gone,
   inDockPanel,
+  newInDock,
   openCluster,
   openResource,
   pointerClick,
@@ -155,7 +156,7 @@ async function expectApiDocs(kind: string, apiVersion: string): Promise<void> {
 
 /** Opens a create tab, fills it from the template `id` and waits for `part` in the editor. */
 async function createFromTemplate(id: string, part: string): Promise<string> {
-  await clickWhenShown("create-resource");
+  await newInDock("create-resource");
   await shown("create-apply");
   await until(
     async () => (await editorText()) !== null,
@@ -250,7 +251,7 @@ describe("YAML editor", () => {
   });
 
   it("creates multiple documents and reports each", async () => {
-    await clickWhenShown("create-resource");
+    await newInDock("create-resource");
     await shown("create-apply");
     await browser.waitUntil(async () => (await editorText()) !== null, {
       timeout: 15000,

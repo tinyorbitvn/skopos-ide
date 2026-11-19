@@ -1,7 +1,7 @@
 import { createTestNamespace, deleteTestNamespace, kubectl } from "../helpers/kube";
 import {
   byTestId, clickWhenShown, closeDockTabs, dialogButton, dockTabTitles, expectTerminalLine,
-  expectTerminalStatus, gone, inDockPanel, openCluster, openResource, pointerClick,
+  expectTerminalStatus, gone, inDockPanel, newInDock, openCluster, openResource, pointerClick,
   requestNodeShell, resourceRowMenu, rowId, searchResources, shown, terminalRows, typeInTerminal,
 } from "../helpers/ui";
 
@@ -89,7 +89,7 @@ describe("terminal tabs on the kind cluster", () => {
   });
 
   it("opens the local terminal from the dock bar, and the shell answers", async () => {
-    await clickWhenShown("dock-terminal");
+    await newInDock("dock-terminal");
     await expectTab(`Terminal · ${KIND}`);
     await expectTerminalStatus("Local shell");
     expect(await inDockPanel("terminal-tab").getText()).toContain(
@@ -114,6 +114,26 @@ describe("terminal tabs on the kind cluster", () => {
     await expectTerminalLine("flood-25", 180000);
     await typeInTerminal("echo after-flood-$((2*4))");
     await expectTerminalLine("after-flood-8");
+  });
+
+  it("opens a second terminal beside the first, each with its own shell", async () => {
+    await newInDock("dock-terminal");
+    await expectTab(`Terminal 2 · ${KIND}`);
+    await expectTerminalStatus("Local shell");
+    await typeInTerminal("echo second-$((3*3))");
+    await expectTerminalLine("second-9");
+    // The first terminal still has its own output, and not the second one's.
+    await browser.execute((title) => {
+      const tabs = document.querySelectorAll<HTMLElement>('[data-testid="dock"] [role="tab"]');
+      Array.from(tabs).find((tab) => tab.textContent === title)?.click();
+    }, `Terminal · ${KIND}`);
+    await expectTerminalLine("after-flood-8");
+    expect((await terminalRows()).some((row) => row.includes("second-9"))).toBe(false);
+    await browser.$(`[aria-label="Close Terminal 2 · ${KIND}"]`).click();
+    await until(
+      async () => !(await dockTabTitles()).includes(`Terminal 2 · ${KIND}`),
+      "the second terminal never closed",
+    );
   });
 
   it("opens Shell on a Pod in its first running container", async () => {

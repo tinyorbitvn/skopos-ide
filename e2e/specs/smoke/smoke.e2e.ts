@@ -4,6 +4,7 @@ import {
   expectConnected,
   expectTerminalLine,
   expectTerminalStatus,
+  newInDock,
   openResource,
   rowId,
   shown,
@@ -34,7 +35,7 @@ describe("smoke", () => {
   });
 
   it("opens the local terminal and echoes", async () => {
-    await clickWhenShown("dock-terminal");
+    await newInDock("dock-terminal");
     await expectTerminalStatus("Local shell");
     await typeInTerminal("echo skopos-smoke-ok");
     await expectTerminalLine("skopos-smoke-ok");

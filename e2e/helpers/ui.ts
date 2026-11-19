@@ -187,6 +187,12 @@ export async function resourceRowMenu(
   await gone(`menu-item-${item}`);
 }
 
+/** Picks an item of the dock's + menu: Create resource or Terminal Session. */
+export async function newInDock(item: "create-resource" | "dock-terminal"): Promise<void> {
+  await pointerClick(await shown("dock-new"));
+  await clickWhenShown(item);
+}
+
 /** Toggles entries of a menu of checkboxes, then closes it. */
 export async function toggleInCheckMenu(
   trigger: string,

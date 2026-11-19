@@ -52,7 +52,7 @@ export type SavedTab =
       name: string;
       options: LogTabOptions;
     }
-  | { id: string; kind: "terminal"; clusterId: string }
+  | { id: string; kind: "terminal"; clusterId: string; number: number }
   | {
       id: string;
       kind: "shell" | "attach";
@@ -172,10 +172,15 @@ function parseTab(v: JsonValue | undefined): DockTab | null {
         dirty: false,
       };
     }
-    case "terminal":
-      return id === terminalTabId(clusterId)
-        ? terminalTab(clusterId, null)
+    case "terminal": {
+      // Layouts saved before a cluster could have several terminals have no number.
+      const number = v.number ?? 1;
+      if (typeof number !== "number" || !Number.isInteger(number) || number < 1)
+        return null;
+      return id === terminalTabId(clusterId, number)
+        ? terminalTab(clusterId, null, number)
         : null;
+    }
     case "shell":
     case "attach": {
       const { pod, container } = v;
@@ -259,7 +264,12 @@ function savedTab(tab: DockTab): SavedTab {
         options: tab.options,
       };
     case "terminal":
-      return { id: tab.id, kind: "terminal", clusterId: tab.clusterId };
+      return {
+        id: tab.id,
+        kind: "terminal",
+        clusterId: tab.clusterId,
+        number: tab.number,
+      };
     case "shell":
     case "attach":
       return {

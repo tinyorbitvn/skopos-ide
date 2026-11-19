@@ -14,6 +14,7 @@ import {
   type LogsDockTab,
   logsTab,
   newCreateTab,
+  nextTerminalNumber,
   nodeShellTab,
   nodeShellTabFor,
   podSessionTab,
@@ -328,10 +329,18 @@ test("each session kind has its fixed id and its title", () => {
     id: "terminal:c1",
     kind: "terminal",
     clusterId: "c1",
+    number: 1,
     title: "Terminal · kind-dev",
     dirty: false,
   });
   expect(terminalTab("c1", null).title).toBe("Terminal");
+  // The first terminal keeps the id it always had; the next ones are numbered.
+  expect(terminalTab("c1", "kind-dev", 2)).toMatchObject({
+    id: "terminal:c1:2",
+    number: 2,
+    title: "Terminal 2 · kind-dev",
+  });
+  expect(terminalTab("c1", null, 3).title).toBe("Terminal 3");
   expect(shellTab("c1", WEB_1)).toEqual({
     id: "shell:c1:shop/web-1",
     kind: "shell",
@@ -543,4 +552,30 @@ test("the same object in two clusters gets a details tab in each, and keepCluste
   dock().keepClusters(["c1"]);
   expect(ids(dock().tabs)).toEqual([one.id]);
   expect(readDraft(two.id)).toBeUndefined();
+});
+
+test("a new terminal takes the lowest number none of its cluster's terminals has", () => {
+  expect(nextTerminalNumber([], "c1")).toBe(1);
+  const tabs = [
+    terminalTab("c1", null, 1),
+    terminalTab("c1", null, 3),
+    terminalTab("c2", null, 2),
+  ];
+  expect(nextTerminalNumber(tabs, "c1")).toBe(2);
+  expect(nextTerminalNumber(tabs, "c2")).toBe(1);
+  expect(nextTerminalNumber([...tabs, terminalTab("c1", null, 2)], "c1")).toBe(
+    4,
+  );
+});
+
+test("renaming terminals keeps their numbers", () => {
+  useDock.setState({
+    tabs: [terminalTab("c1", null), terminalTab("c1", null, 2)],
+    activeId: null,
+  });
+  useDock.getState().renameTerminals([{ id: "c1", name: "kind-dev" }]);
+  expect(useDock.getState().tabs.map((t) => t.title)).toEqual([
+    "Terminal · kind-dev",
+    "Terminal 2 · kind-dev",
+  ]);
 });
