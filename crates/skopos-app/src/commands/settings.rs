@@ -1,3 +1,4 @@
+use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::prefs::{ClusterSettings, Prefs};
@@ -19,7 +20,8 @@ pub async fn cluster_settings_set(
     id: ClusterId,
     settings: ClusterSettings,
 ) -> Result<(), IpcError> {
-    state.core.cluster_settings_set(&id, settings)
+    let core = state.core.clone();
+    blocking(move || core.cluster_settings_set(&id, settings)).await
 }
 
 #[tauri::command]
@@ -29,7 +31,8 @@ pub async fn hotbar_get(state: State<'_, AppState>) -> Result<Vec<ClusterId>, Ip
 
 #[tauri::command]
 pub async fn hotbar_set(state: State<'_, AppState>, ids: Vec<ClusterId>) -> Result<(), IpcError> {
-    state.core.hotbar_set(ids)
+    let core = state.core.clone();
+    blocking(move || core.hotbar_set(ids)).await
 }
 
 #[tauri::command]
@@ -39,5 +42,6 @@ pub async fn prefs_get(state: State<'_, AppState>) -> Result<Prefs, IpcError> {
 
 #[tauri::command]
 pub async fn prefs_set(state: State<'_, AppState>, prefs: Prefs) -> Result<(), IpcError> {
-    state.core.prefs_set(prefs)
+    let core = state.core.clone();
+    blocking(move || core.prefs_set(prefs)).await
 }

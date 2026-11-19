@@ -8,6 +8,7 @@ use kube::core::Status;
 use kube::Client;
 use serde_json::Value;
 
+use crate::blocking::blocking;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 
 /// Where the API server lists its OpenAPI v3 documents (spec L3).
@@ -95,6 +96,24 @@ pub(crate) fn document_answer(
     Ok(Some(document))
 }
 
+/// `index_answer` on a blocking thread: the answer can be megabytes of JSON.
+pub(crate) async fn read_index(
+    status: StatusCode,
+    body: Vec<u8>,
+    api_version: String,
+) -> CoreResult<Index> {
+    blocking(move || index_answer(status, &body, &api_version)).await
+}
+
+/// `document_answer` on a blocking thread: a group version's document can be megabytes.
+pub(crate) async fn read_document(
+    status: StatusCode,
+    body: Vec<u8>,
+    api_version: String,
+) -> CoreResult<Option<Value>> {
+    blocking(move || document_answer(status, &body, &api_version)).await
+}
+
 /// Any other refusal: 403 in the spec's words, the rest as every API error maps, 401 to
 /// `Unauthorized` included (spec L13).
 fn refused(status: StatusCode, body: &[u8]) -> IpcError {
@@ -131,6 +150,44 @@ mod tests {
 
     fn bytes(value: Value) -> Vec<u8> {
         serde_json::to_vec(&value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_readers_answer_as_the_plain_functions_do() {
+        let index = bytes(json!({ "paths": {
+            "api/v1": { "serverRelativeURL": "/openapi/v3/api/v1?hash=AB" },
+        } }));
+        let read = read_index(StatusCode::OK, index.clone(), "v1".to_owned())
+            .await
+            .unwrap();
+        assert_eq!(read, index_answer(StatusCode::OK, &index, "v1").unwrap());
+
+        let document = json!({ "components": { "schemas": { "a": {} } } });
+        assert_eq!(
+            read_document(StatusCode::OK, bytes(document.clone()), "v1".to_owned())
+                .await
+                .unwrap(),
+            Some(document)
+        );
+        assert_eq!(
+            read_document(StatusCode::NOT_FOUND, Vec::new(), "v1".to_owned())
+                .await
+                .unwrap(),
+            None
+        );
+
+        let error = read_document(StatusCode::OK, b"[".to_vec(), "apps/v1".to_owned())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::Internal);
+        assert_eq!(
+            error.message,
+            "The cluster's API docs for apps/v1 could not be read."
+        );
+        let forbidden = read_index(StatusCode::FORBIDDEN, Vec::new(), "v1".to_owned())
+            .await
+            .unwrap_err();
+        assert_eq!(forbidden.code, ErrorCode::Forbidden);
     }
 
     fn status_body(code: u16, reason: &str, message: &str) -> Vec<u8> {

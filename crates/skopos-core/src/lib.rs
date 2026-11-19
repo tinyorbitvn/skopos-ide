@@ -1,5 +1,6 @@
 pub mod app_core;
 pub mod app_info;
+pub mod blocking;
 pub mod catalog;
 pub mod cluster;
 pub mod error;

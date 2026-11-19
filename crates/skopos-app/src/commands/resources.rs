@@ -1,5 +1,6 @@
 use serde_json::Value;
 use skopos_core::app_core::AppCore;
+use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::openapi::KindSchema;
@@ -241,7 +242,8 @@ pub async fn ui_state_set(
     key: String,
     value: Value,
 ) -> Result<(), IpcError> {
-    state.core.ui_state_set(&key, value)
+    let core = state.core.clone();
+    blocking(move || core.ui_state_set(&key, value)).await
 }
 
 #[cfg(test)]

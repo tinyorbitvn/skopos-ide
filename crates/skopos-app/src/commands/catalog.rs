@@ -1,3 +1,4 @@
+use skopos_core::blocking::blocking;
 use skopos_core::catalog::folders::{CatalogFolder, CatalogFolders};
 use skopos_core::catalog::ClusterEntry;
 use skopos_core::error::IpcError;
@@ -44,7 +45,8 @@ pub async fn catalog_folder_create(
     parent: Option<String>,
     name: String,
 ) -> Result<CatalogFolder, IpcError> {
-    state.core.catalog_folder_create(parent.as_deref(), &name)
+    let core = state.core.clone();
+    blocking(move || core.catalog_folder_create(parent.as_deref(), &name)).await
 }
 
 #[tauri::command]
@@ -53,7 +55,8 @@ pub async fn catalog_folder_rename(
     id: String,
     name: String,
 ) -> Result<(), IpcError> {
-    state.core.catalog_folder_rename(&id, &name)
+    let core = state.core.clone();
+    blocking(move || core.catalog_folder_rename(&id, &name)).await
 }
 
 /// `parent` `None`: to the top level.
@@ -63,13 +66,15 @@ pub async fn catalog_folder_move(
     id: String,
     parent: Option<String>,
 ) -> Result<(), IpcError> {
-    state.core.catalog_folder_move(&id, parent.as_deref())
+    let core = state.core.clone();
+    blocking(move || core.catalog_folder_move(&id, parent.as_deref())).await
 }
 
 /// Its clusters and subfolders move to its parent.
 #[tauri::command]
 pub async fn catalog_folder_delete(state: State<'_, AppState>, id: String) -> Result<(), IpcError> {
-    state.core.catalog_folder_delete(&id)
+    let core = state.core.clone();
+    blocking(move || core.catalog_folder_delete(&id)).await
 }
 
 /// `folder` `None`: to the top level.
@@ -79,7 +84,6 @@ pub async fn catalog_cluster_place(
     cluster: ClusterId,
     folder: Option<String>,
 ) -> Result<(), IpcError> {
-    state
-        .core
-        .catalog_cluster_place(&cluster, folder.as_deref())
+    let core = state.core.clone();
+    blocking(move || core.catalog_cluster_place(&cluster, folder.as_deref())).await
 }

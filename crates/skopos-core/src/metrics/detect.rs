@@ -23,6 +23,9 @@ use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::secrets::Secret;
 
+/// Candidates probed at once. Their answers are still judged in preference order.
+const PROBE_CONCURRENCY: usize = 4;
+
 /// The waits of F16. Tests shorten them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MetricsLimits {
@@ -240,8 +243,9 @@ fn from_setting(setting: &MetricsProviderSetting) -> CoreResult<Option<Chosen>> 
     Ok(Some(chosen))
 }
 
-/// The first candidate that answers the probe; else the first one refused with 403 (so queries
-/// report `Forbidden`); else metrics-server, else none.
+/// The first candidate, in preference order, that answers the probe (up to four are probed
+/// at once); else the first one refused with 403 (so queries report `Forbidden`); else
+/// metrics-server, else none.
 async fn detect(
     client: &Client,
     namespaces: &[String],
@@ -249,12 +253,22 @@ async fn detect(
 ) -> CoreResult<Chosen> {
     let services = list_services(client, namespaces).await?;
     let mut refused: Option<Candidate> = None;
-    for candidate in candidates(&services) {
-        let transport = Transport::ServiceProxy {
-            client,
-            endpoint: &candidate.endpoint,
-        };
-        match transport.probe(limits.probe).await {
+    // `buffered` starts up to four probes and hands their answers back in preference
+    // order, so the first answer that is good is the best of those that answered.
+    // Returning drops the probes still running.
+    let mut probes = std::pin::pin!(stream::iter(candidates(&services))
+        .map(|candidate| async move {
+            let result = Transport::ServiceProxy {
+                client,
+                endpoint: &candidate.endpoint,
+            }
+            .probe(limits.probe)
+            .await;
+            (candidate, result)
+        })
+        .buffered(PROBE_CONCURRENCY));
+    while let Some((candidate, result)) = probes.next().await {
+        match result {
             Ok(()) => return Ok(prometheus_chosen(candidate)),
             // Remember the first refusal: if nothing answers, the user must see
             // `Forbidden` naming the permission, not "no Prometheus".
