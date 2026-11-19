@@ -28,7 +28,7 @@ use crate::openapi::ApiDocs;
 use crate::paths::AppPaths;
 use crate::portforward::{PortForward, PortForwards};
 use crate::prefs::{ClusterSettings, Prefs};
-use crate::resources::{RunningDrain, WatchHub};
+use crate::resources::{ApiResourceInfo, RunningDrain, SingleFlight, WatchHub};
 use crate::secrets::{MemorySecretStore, SecretStore, Secrets};
 use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
@@ -99,6 +99,8 @@ struct Inner {
     graphs: Arc<GraphHub>,
     drains: DashMap<(ClusterId, String), RunningDrain>,
     next_drain: AtomicU64,
+    /// The discovery run of each cluster, shared by its `refresh` callers.
+    discoveries: DashMap<ClusterId, Arc<SingleFlight<Vec<ApiResourceInfo>>>>,
     sessions: Arc<SessionRegistry>,
     home: PathBuf,
     portforwards: Arc<PortForwards>,
@@ -282,6 +284,7 @@ impl AppCore {
                 graphs: Arc::new(GraphHub::default()),
                 drains: DashMap::new(),
                 next_drain: AtomicU64::new(1),
+                discoveries: DashMap::new(),
                 sessions: Arc::new(SessionRegistry::default()),
                 home: paths.home.clone(),
                 portforwards: Arc::new(PortForwards::new(portforward_definitions, events.clone())),
@@ -550,6 +553,20 @@ impl AppCore {
 
     pub(crate) fn helm(&self) -> &Helm {
         &self.inner.helm
+    }
+
+    /// Where `resources_discover(refresh)` calls of this cluster share their runs.
+    pub(crate) fn discovery_flight(
+        &self,
+        id: &ClusterId,
+    ) -> Arc<SingleFlight<Vec<ApiResourceInfo>>> {
+        Arc::clone(
+            self.inner
+                .discoveries
+                .entry(id.clone())
+                .or_insert_with(|| Arc::new(SingleFlight::new()))
+                .value(),
+        )
     }
 
     pub(crate) fn metrics(&self) -> &Metrics {

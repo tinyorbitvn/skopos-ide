@@ -97,6 +97,8 @@ struct State_ {
     access_reviews: Vec<AccessReview>,
     fail: BTreeMap<String, u16>,
     fail_discovery: Option<u16>,
+    /// How long `/apis` holds its answer before it sends it.
+    discovery_delay: Duration,
     /// (namespace, name) of a pod -> scripted eviction failure and the answers left.
     eviction_failures: BTreeMap<(String, String), (u16, Option<usize>)>,
     /// Whether an accepted eviction leaves the pod in place.
@@ -398,6 +400,7 @@ impl FakeKube {
                 access_reviews: Vec::new(),
                 fail: BTreeMap::new(),
                 fail_discovery: None,
+                discovery_delay: Duration::ZERO,
                 eviction_failures: BTreeMap::new(),
                 hold_evicted_pods: false,
                 writes: BTreeMap::new(),
@@ -512,6 +515,12 @@ impl FakeKube {
     /// answer with this HTTP status until cleared with `None`.
     pub fn fail_discovery_with(&self, http_status: Option<u16>) {
         self.inner.lock().fail_discovery = http_status;
+    }
+
+    /// Makes `/apis` hold each answer for `delay` after it has been built, so a change
+    /// made meanwhile is not in it. `Duration::ZERO` clears it.
+    pub fn delay_discovery(&self, delay: Duration) {
+        self.inner.lock().discovery_delay = delay;
     }
 
     /// Makes evicting the pod fail with `http_status`, `times` times or, for
@@ -1276,11 +1285,20 @@ async fn api(State(s): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 async fn apis(State(s): State<Shared>, headers: HeaderMap) -> Response {
-    if let Some(failure) = discovery_failure(&s) {
+    let answer = apis_answer(&s, &headers);
+    let delay = s.lock().discovery_delay;
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
+    }
+    answer
+}
+
+fn apis_answer(s: &Shared, headers: &HeaderMap) -> Response {
+    if let Some(failure) = discovery_failure(s) {
         return failure;
     }
-    let rs = served(&s);
-    if !s.cfg.no_aggregated_discovery && wants_aggregated(&headers) {
+    let rs = served(s);
+    if !s.cfg.no_aggregated_discovery && wants_aggregated(headers) {
         aggregated(discovery::aggregated_apis(&rs))
     } else {
         json_ok(discovery::legacy_api_group_list(&rs))
