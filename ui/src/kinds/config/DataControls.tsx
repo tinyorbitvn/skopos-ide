@@ -1,5 +1,11 @@
 import { type ReactNode, useId, useState } from "react";
-import { Button, ErrorNotice, IconButton, Input, Segmented } from "../../design";
+import {
+  Button,
+  ErrorNotice,
+  IconButton,
+  Input,
+  Segmented,
+} from "../../design";
 import { RotateCcw, Trash2 } from "../../design/icons";
 import styles from "./config.module.css";
 import {

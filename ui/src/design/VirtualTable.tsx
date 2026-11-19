@@ -132,7 +132,9 @@ function ColumnResizer(props: {
   const drag = useRef<{ fromX: number; from: number } | null>(null);
   const [active, setActive] = useState(false);
   const set = (next: number) =>
-    onResize(Math.round(Math.min(MAX_COLUMN_PX, Math.max(MIN_COLUMN_PX, next))));
+    onResize(
+      Math.round(Math.min(MAX_COLUMN_PX, Math.max(MIN_COLUMN_PX, next))),
+    );
   const current = (handle: HTMLElement) =>
     width ??
     base ??
@@ -160,7 +162,8 @@ function ColumnResizer(props: {
   function key(event: KeyboardEvent<HTMLDivElement>): void {
     const step = event.shiftKey ? COLUMN_KEY_STEP * 4 : COLUMN_KEY_STEP;
     if (event.key === "ArrowLeft") set(current(event.currentTarget) - step);
-    else if (event.key === "ArrowRight") set(current(event.currentTarget) + step);
+    else if (event.key === "ArrowRight")
+      set(current(event.currentTarget) + step);
     else return;
     event.preventDefault();
   }

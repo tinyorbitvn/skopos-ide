@@ -485,7 +485,13 @@ const resizer = (id: string) => screen.getByTestId(`column-resize-${id}`);
 test("a column's handle resizes it from the keyboard; a double-click resets it", () => {
   const withActions: TableColumn<Row>[] = [
     ...columns,
-    { id: "actions", header: "Actions", width: 40, stickyEnd: true, render: () => "" },
+    {
+      id: "actions",
+      header: "Actions",
+      width: 40,
+      stickyEnd: true,
+      render: () => "",
+    },
   ];
   render(
     <VirtualTable
@@ -518,12 +524,18 @@ test("a column's handle resizes it from the keyboard; a double-click resets it",
 
 test("dragging a column that shares the spare room starts from its width on screen", () => {
   render(
-    <VirtualTable rows={[row("a")]} columns={columns} rowKey={rowKey} testId="table" />,
+    <VirtualTable
+      rows={[row("a")]}
+      columns={columns}
+      rowKey={rowKey}
+      testId="table"
+    />,
   );
   const handle = resizer("name");
-  vi.spyOn(handle.parentElement as HTMLElement, "getBoundingClientRect").mockReturnValue(
-    { width: 300 } as DOMRect,
-  );
+  vi.spyOn(
+    handle.parentElement as HTMLElement,
+    "getBoundingClientRect",
+  ).mockReturnValue({ width: 300 } as DOMRect);
   fireEvent.pointerDown(handle, { button: 0, clientX: 100, pointerId: 1 });
   fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1 });
   expect(tracks()).toBe("360px 80px 80px");
@@ -553,7 +565,10 @@ test("a table given its widths shows them and reports each change", () => {
   expect(tracks()).toBe("1fr 120px 80px");
   fireEvent.keyDown(resizer("size"), { key: "ArrowLeft" });
   fireEvent.doubleClick(resizer("note"));
-  expect(changes).toEqual([{ size: 104, gone: 300 }, { size: 120, gone: 300 }]);
+  expect(changes).toEqual([
+    { size: 104, gone: 300 },
+    { size: 120, gone: 300 },
+  ]);
   // What it shows is what it is given.
   expect(tracks()).toBe("1fr 120px 80px");
 });

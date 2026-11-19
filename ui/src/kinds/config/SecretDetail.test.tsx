@@ -393,9 +393,9 @@ test("removing a key can be undone, and does not reveal it", async () => {
   fireEvent.click(remove);
   expect(screen.queryByTestId("secret-value-b")).toBeNull();
   expect(saveDisabled()).toBe(false);
-  expect(
-    screen.getByTestId("data-remove-b").getAttribute("aria-label"),
-  ).toBe("Undo remove b");
+  expect(screen.getByTestId("data-remove-b").getAttribute("aria-label")).toBe(
+    "Undo remove b",
+  );
   fireEvent.click(screen.getByTestId("data-remove-b"));
   expect(screen.getByTestId("secret-value-b").textContent).toBe("••••••");
   expect(saveDisabled()).toBe(true);

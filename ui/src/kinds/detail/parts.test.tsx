@@ -39,7 +39,12 @@ async function copyField(label: string): Promise<string> {
 test("every fact and container row copies the value it shows", async () => {
   render(
     <>
-      <Facts items={[["Node", "worker-1"], ["Empty", ""]]} />
+      <Facts
+        items={[
+          ["Node", "worker-1"],
+          ["Empty", ""],
+        ]}
+      />
       <FactList>
         <FactRow label="Service account">default</FactRow>
         <FactRow label="Labels" copy={false}>
