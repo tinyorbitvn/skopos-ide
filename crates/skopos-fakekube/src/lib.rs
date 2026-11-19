@@ -125,6 +125,14 @@ struct State_ {
     /// OpenAPI v3 documents by index key (`api/v1`, `apis/apps/v1`). While it is empty,
     /// `/openapi/v3` answers 404.
     openapi: BTreeMap<String, OpenApiDocument>,
+    /// The status `/livez` answers.
+    livez_status: u16,
+    /// The status `/readyz` answers.
+    readyz_status: u16,
+    /// The checks `/readyz?verbose` lists, in order, as (name, passed).
+    readyz_checks: Vec<(String, bool)>,
+    /// Node name -> what the kubelet behind `/api/v1/nodes/{name}/proxy/...` answers.
+    node_proxies: BTreeMap<String, ProxyHandler>,
 }
 
 /// A served OpenAPI v3 document and the hash its URL carries.
@@ -403,6 +411,13 @@ impl FakeKube {
                 proxy_requests: BTreeMap::new(),
                 metrics_api: None,
                 openapi: BTreeMap::new(),
+                livez_status: 200,
+                readyz_status: 200,
+                readyz_checks: ["ping", "log", "etcd", "informer-sync"]
+                    .into_iter()
+                    .map(|name| (name.to_owned(), true))
+                    .collect(),
+                node_proxies: BTreeMap::new(),
             }),
             events,
             stop_watches,
@@ -703,6 +718,37 @@ impl FakeKube {
         );
     }
 
+    /// Serves `handler` behind `/api/v1/nodes/{node}/proxy/...`, the kubelet's API. A node
+    /// with no handler answers 404.
+    pub fn serve_node_proxy(
+        &self,
+        node: &str,
+        handler: impl Fn(&ProxyRequest) -> ProxyReply + Send + Sync + 'static,
+    ) {
+        self.inner
+            .lock()
+            .node_proxies
+            .insert(node.to_owned(), Arc::new(handler));
+    }
+
+    /// The status `/livez` answers (200 by default).
+    pub fn set_livez_status(&self, code: u16) {
+        self.inner.lock().livez_status = code;
+    }
+
+    /// The status `/readyz` answers, verbose or not (200 by default).
+    pub fn set_readyz_status(&self, code: u16) {
+        self.inner.lock().readyz_status = code;
+    }
+
+    /// The checks `/readyz?verbose` lists, in order, as (name, passed).
+    pub fn set_readyz_checks(&self, checks: &[(&str, bool)]) {
+        self.inner.lock().readyz_checks = checks
+            .iter()
+            .map(|(name, passed)| ((*name).to_owned(), *passed))
+            .collect();
+    }
+
     /// Serves metrics.k8s.io `v1beta1` with these NodeMetrics and PodMetrics objects.
     pub fn serve_metrics_api(&self, nodes: Vec<Value>, pods: Vec<Value>) {
         let mut st = self.inner.lock();
@@ -871,6 +917,9 @@ fn router(inner: Shared) -> Router {
             "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods",
             get(namespaced_pod_metrics),
         )
+        .route("/livez", get(livez))
+        .route("/readyz", get(readyz))
+        .route("/api/v1/nodes/{name}/proxy/{*rest}", get(node_proxy))
         .route("/openapi/v3", get(openapi_index))
         .route("/openapi/v3/{*key}", get(openapi_document))
         .fallback(generic)
@@ -1061,6 +1110,97 @@ async fn service_proxy(
             "NotFound",
             &format!("services \"{}\" not found", key.1),
         );
+    };
+    let reply = handler(&request);
+    if !reply.delay.is_zero() {
+        tokio::time::sleep(reply.delay).await;
+    }
+    (
+        StatusCode::from_u16(reply.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        [(header::CONTENT_TYPE, "application/json")],
+        reply.body,
+    )
+        .into_response()
+}
+
+async fn livez(State(s): State<Shared>) -> Response {
+    let code = s.lock().livez_status;
+    health_answer(code, "ok".to_owned())
+}
+
+/// `/readyz`: "ok", or with `?verbose` one line per check and a verdict, as a real server.
+async fn readyz(State(s): State<Shared>, Query(q): Query<BTreeMap<String, String>>) -> Response {
+    let st = s.lock();
+    let body = if q.contains_key("verbose") {
+        let mut lines: Vec<String> = st
+            .readyz_checks
+            .iter()
+            .map(|(name, passed)| {
+                if *passed {
+                    format!("[+]{name} ok")
+                } else {
+                    format!("[-]{name} failed: reason withheld")
+                }
+            })
+            .collect();
+        let all_passed = st.readyz_checks.iter().all(|(_, passed)| *passed);
+        lines.push(
+            if all_passed {
+                "readyz check passed"
+            } else {
+                "readyz check failed"
+            }
+            .to_owned(),
+        );
+        lines.join("\n") + "\n"
+    } else {
+        "ok".to_owned()
+    };
+    health_answer(st.readyz_status, body)
+}
+
+fn health_answer(code: u16, body: String) -> Response {
+    (
+        StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        body,
+    )
+        .into_response()
+}
+
+/// The API server's node proxy: `get` on `nodes/proxy`.
+async fn node_proxy(
+    State(s): State<Shared>,
+    UrlPath(path): UrlPath<BTreeMap<String, String>>,
+    headers: HeaderMap,
+    Query(params): Query<BTreeMap<String, String>>,
+) -> Response {
+    let node = path.get("name").cloned().unwrap_or_default();
+    if s.denied("get", "nodes/proxy", None) {
+        return status(
+            403,
+            "Forbidden",
+            &format!(
+                "nodes \"{node}\" is forbidden: cannot get resource \"nodes/proxy\" in API group \"\" at the cluster scope"
+            ),
+        );
+    }
+    let request = ProxyRequest {
+        method: "GET".to_owned(),
+        path: path
+            .get("rest")
+            .map(|rest| format!("/{rest}"))
+            .unwrap_or_default(),
+        params,
+        content_type: headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        tenant: None,
+    };
+    let handler = s.lock().node_proxies.get(&node).cloned();
+    let Some(handler) = handler else {
+        return status(404, "NotFound", &format!("nodes \"{node}\" not found"));
     };
     let reply = handler(&request);
     if !reply.delay.is_zero() {

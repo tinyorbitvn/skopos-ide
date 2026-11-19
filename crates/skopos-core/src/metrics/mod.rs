@@ -2,6 +2,7 @@
 //! per cluster, and the queries the interface repeats on its own timer (spec §5.4).
 
 mod detect;
+mod disk;
 pub(crate) mod prometheus;
 mod query;
 mod remote;
@@ -9,6 +10,7 @@ pub(crate) mod templates;
 pub(crate) use detect::Metrics;
 pub use detect::MetricsLimits;
 mod usage;
+pub use disk::{NodeDisk, NodeDiskSnapshot};
 pub(crate) use usage::METRICS_API;
 pub use usage::{UsageItem, UsageOf, UsageSnapshot};
 
