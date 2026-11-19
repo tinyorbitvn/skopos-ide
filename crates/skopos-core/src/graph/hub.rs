@@ -5,7 +5,7 @@
 //! task, which sends its view of a new build when that view changed.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use dashmap::mapref::entry::Entry;
@@ -36,8 +36,24 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// What the builder last published.
 #[derive(Debug, Clone)]
 enum Published {
-    Graph(Arc<Built>),
+    Graph(Arc<Shared>),
     Failure(String),
+}
+
+/// One published build, and the event that shows all of it, made the first time a
+/// subscription without a namespace filter asks for it. They all send that one event.
+#[derive(Debug)]
+struct Shared {
+    built: Built,
+    whole: OnceLock<Arc<GraphEvent>>,
+}
+
+impl Shared {
+    fn whole(&self) -> Arc<GraphEvent> {
+        self.whole
+            .get_or_init(|| Arc::new(view(&self.built, None)))
+            .clone()
+    }
 }
 
 struct GraphState {
@@ -116,15 +132,21 @@ impl Graph {
         });
     }
 
-    /// Publishes a build that differs from the last one.
-    fn publish(&self, built: Built) {
+    /// Publishes a build that differs from the last one, as the next generation.
+    fn publish(&self, mut built: Built) {
         self.published.send_if_modified(|current| {
+            let mut generation = 1;
             if let Some(Published::Graph(last)) = current {
-                if **last == built {
+                if last.built == built {
                     return false;
                 }
+                generation = last.built.generation + 1;
             }
-            *current = Some(Published::Graph(Arc::new(built)));
+            built.generation = generation;
+            *current = Some(Published::Graph(Arc::new(Shared {
+                built,
+                whole: OnceLock::new(),
+            })));
             true
         });
     }
@@ -210,7 +232,7 @@ impl GraphHub {
         core: &AppCore,
         id: &ClusterId,
         namespaces: Option<Vec<String>>,
-        tx: mpsc::Sender<GraphEvent>,
+        tx: mpsc::Sender<Arc<GraphEvent>>,
         cluster: &CancellationToken,
     ) -> CoreResult<String> {
         let graph = self.join(core, id, cluster)?;
@@ -316,41 +338,63 @@ async fn build_loop(
 }
 
 /// Sends one subscription its view of each new build, until it leaves, the graph stops or
-/// fails, or the receiver closes.
+/// fails, or the receiver closes. Without a namespace filter the view is the graph itself:
+/// one shared event per generation, so a build that nobody changed is not compared at all.
 async fn serve(
     hub: Arc<GraphHub>,
     graph: Arc<Graph>,
     subscription: String,
     namespaces: Option<Vec<String>>,
-    tx: mpsc::Sender<GraphEvent>,
+    tx: mpsc::Sender<Arc<GraphEvent>>,
     stop: CancellationToken,
     linger: Duration,
 ) {
     let mut published = graph.published.subscribe();
-    let mut last: Option<GraphEvent> = None;
+    // What was last sent: the generation of the whole graph, or a namespace view.
+    let mut last_generation: Option<u64> = None;
+    let mut last_view: Option<GraphEvent> = None;
     loop {
         let current = published.borrow_and_update().clone();
-        let event = match current {
+        let event: Option<Arc<GraphEvent>> = match current {
             None => None,
             Some(Published::Failure(message)) => {
+                let failure = Arc::new(GraphEvent::Failure { message });
                 tokio::select! {
                     () = stop.cancelled() => {}
-                    _ = tx.send(GraphEvent::Failure { message }) => {}
+                    _ = tx.send(failure) => {}
                 }
                 break;
             }
-            Some(Published::Graph(built)) => Some(view(&built, namespaces.as_deref())),
+            Some(Published::Graph(shared)) => match namespaces.as_deref() {
+                None => {
+                    let generation = shared.built.generation;
+                    if last_generation == Some(generation) {
+                        None
+                    } else {
+                        last_generation = Some(generation);
+                        Some(shared.whole())
+                    }
+                }
+                Some(namespaces) => {
+                    let event = view(&shared.built, Some(namespaces));
+                    if last_view.as_ref() == Some(&event) {
+                        None
+                    } else {
+                        last_view = Some(event.clone());
+                        Some(Arc::new(event))
+                    }
+                }
+            },
         };
-        if let Some(event) = event.filter(|event| last.as_ref() != Some(event)) {
+        if let Some(event) = event {
             tokio::select! {
                 () = stop.cancelled() => break,
-                sent = tx.send(event.clone()) => {
+                sent = tx.send(event) => {
                     if sent.is_err() {
                         break;
                     }
                 }
             }
-            last = Some(event);
         }
         tokio::select! {
             // A failure published as the graph stops still goes out first.
@@ -376,7 +420,7 @@ impl AppCore {
         &self,
         id: &ClusterId,
         namespaces: Option<Vec<String>>,
-        tx: mpsc::Sender<GraphEvent>,
+        tx: mpsc::Sender<Arc<GraphEvent>>,
     ) -> CoreResult<String> {
         let state = self.cluster_state(id);
         if !matches!(state, ConnectionState::Connected { .. }) {
@@ -442,6 +486,7 @@ mod tests {
             counts: Vec::new(),
             missing: Vec::new(),
             gateway_api: false,
+            generation: 0,
         }
     }
 
@@ -451,7 +496,7 @@ mod tests {
         namespaces: Option<Vec<String>>,
     ) -> (
         Arc<GraphHub>,
-        mpsc::Receiver<GraphEvent>,
+        mpsc::Receiver<Arc<GraphEvent>>,
         tokio::task::JoinHandle<()>,
     ) {
         let hub = Arc::new(GraphHub::default());
@@ -471,15 +516,17 @@ mod tests {
         (hub, rx, task)
     }
 
-    async fn quiet(rx: &mut mpsc::Receiver<GraphEvent>) {
+    async fn quiet(rx: &mut mpsc::Receiver<Arc<GraphEvent>>) {
         if let Ok(event) = tokio::time::timeout(QUIET, rx.recv()).await {
             panic!("expected nothing, got {event:?}");
         }
     }
 
-    fn node_ids(event: Option<GraphEvent>) -> Vec<String> {
-        match event {
-            Some(GraphEvent::Snapshot { nodes, .. }) => nodes.into_iter().map(|n| n.id).collect(),
+    fn node_ids(event: Option<Arc<GraphEvent>>) -> Vec<String> {
+        match event.as_deref() {
+            Some(GraphEvent::Snapshot { nodes, .. }) => {
+                nodes.iter().map(|n| n.id.clone()).collect()
+            }
             other => panic!("expected a snapshot, got {other:?}"),
         }
     }
@@ -495,6 +542,44 @@ mod tests {
         assert!(!seen.has_changed().unwrap());
         graph.publish(built(vec![deployment("a", "api")]));
         assert!(seen.has_changed().unwrap());
+    }
+
+    fn generation_of(seen: &watch::Receiver<Option<Published>>) -> u64 {
+        match &*seen.borrow() {
+            Some(Published::Graph(shared)) => shared.built.generation,
+            other => panic!("expected a graph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn each_published_build_is_the_next_generation_and_a_repeat_is_not_one() {
+        let graph = Graph::new(CancellationToken::new());
+        let seen = graph.published.subscribe();
+        graph.publish(built(vec![deployment("a", "web")]));
+        assert_eq!(generation_of(&seen), 1);
+        graph.publish(built(vec![deployment("a", "web")]));
+        assert_eq!(generation_of(&seen), 1, "the same graph is not a new one");
+        graph.publish(built(vec![deployment("a", "api")]));
+        assert_eq!(generation_of(&seen), 2);
+    }
+
+    #[tokio::test]
+    async fn an_unfiltered_subscription_is_sent_one_event_per_generation() {
+        let graph = Arc::new(Graph::new(CancellationToken::new()));
+        let (_hub, mut rx, _task) = served(&graph, None);
+        graph.publish(built(vec![deployment("a", "web")]));
+        let first = rx.recv().await.unwrap();
+
+        graph.publish(built(vec![deployment("a", "web")]));
+        quiet(&mut rx).await;
+
+        graph.publish(built(vec![deployment("a", "web"), deployment("b", "api")]));
+        let second = rx.recv().await.unwrap();
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            node_ids(Some(second)),
+            ["Deployment/a/web", "Deployment/b/api"]
+        );
     }
 
     #[tokio::test]
@@ -531,14 +616,17 @@ mod tests {
         let graph = Arc::new(Graph::new(CancellationToken::new()));
         let (hub, mut rx, task) = served(&graph, None);
         graph.publish(built(Vec::new()));
-        assert!(matches!(rx.recv().await, Some(GraphEvent::Snapshot { .. })));
+        assert!(matches!(
+            rx.recv().await.as_deref(),
+            Some(GraphEvent::Snapshot { .. })
+        ));
 
         graph.fail("discovery failed".to_owned());
         assert_eq!(
             rx.recv().await,
-            Some(GraphEvent::Failure {
+            Some(Arc::new(GraphEvent::Failure {
                 message: "discovery failed".to_owned()
-            })
+            }))
         );
         assert_eq!(rx.recv().await, None);
         task.await.unwrap();
