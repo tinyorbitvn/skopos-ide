@@ -3,7 +3,6 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   FilePlus,
-  type IconComponent,
   PanelBottom,
   Pen,
   Plug,
@@ -304,14 +303,6 @@ test("unsaved edits come back with their cluster", async () => {
   expect(screen.getByTestId(`dock-tab-${WEB.id}`).dataset.dirty).toBe("true");
 });
 
-/** What an icon draws, to compare a tab's icon with the one it should be. */
-function iconMarkup(Icon: IconComponent): string {
-  const { container, unmount } = render(<Icon size={14} aria-hidden="true" />);
-  const markup = container.querySelector("svg")?.innerHTML ?? "";
-  unmount();
-  return markup;
-}
-
 test("each tab shows its kind's 14 px icon before its title", async () => {
   const create = newCreateTab("c1");
   const logs = logsTab("c1", PODS, {
@@ -350,7 +341,9 @@ test("each tab shows its kind's 14 px icon before its title", async () => {
     const button = screen.getByTestId(`dock-tab-${tab.id}`);
     const svg = button.querySelector("svg");
     expect(svg?.getAttribute("width")).toBe("14");
-    expect(svg?.innerHTML).toBe(iconMarkup(Icon));
+    expect(svg?.closest("[data-icon]")?.getAttribute("data-icon")).toBe(
+      Icon.iconName,
+    );
     expect(button.firstElementChild).toBe(svg?.closest("[data-icon]"));
     expect(button.textContent).toBe(tab.title);
   }

@@ -4,8 +4,3 @@
   align-items: center;
   justify-content: center;
 }
-
-/* Lucide's stroke in this app, as global.css draws svg.lucide. */
-.icon svg {
-  stroke-width: 1.75;
-}
