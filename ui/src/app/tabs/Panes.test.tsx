@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { Ellipsis } from "../../design/icons";
 import type { TabState } from "../../ipc/generated/TabState";
 import type { WindowLayout } from "../../ipc/generated/WindowLayout";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
@@ -14,6 +15,7 @@ import {
   resetWindowLayoutForTest,
   useWindowLayout,
 } from "../../stores/windowLayout";
+import { CSS_FILES, cssRules } from "../../test/css";
 import { clusterEntry, mockBackend } from "../../test/ipc";
 import { focusedTab, tabPath } from "./layout";
 import { Panes } from "./Panes";
@@ -546,4 +548,88 @@ test("Left, Right, Home and End move the focus along the strip, wrapping; Enter 
   });
   expect(back).toBe(true);
   expect(focused()).toBe(tabElementId("t2"));
+});
+
+test("the selected tab of each pane has a Tab actions button that opens the tab menu (spec Q §5)", async () => {
+  render(<Panes />);
+  // Pane 1's selected tab is pinned: it keeps its pin, and has no Close.
+  expect(
+    screen.queryAllByTestId(/^tab-actions-/).map((b) => b.dataset.testid),
+  ).toEqual(["tab-actions-t1", "tab-actions-t3"]);
+  expect(screen.queryByTestId("tab-close-t1")).toBeNull();
+  const actions = screen.getByTestId("tab-actions-t3");
+  expect([
+    actions.getAttribute("aria-label"),
+    actions.getAttribute("title"),
+    actions.getAttribute("aria-haspopup"),
+    actions.tabIndex,
+    actions.querySelector("[data-icon]")?.getAttribute("data-icon"),
+  ]).toEqual(["Tab actions", "Tab actions", "menu", -1, Ellipsis.iconName]);
+  fireEvent.click(actions);
+  expect(
+    await screen.findByRole("menu", {
+      name: "Actions for Resource map · prod",
+    }),
+  ).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  // Selecting another tab moves the button to it.
+  fireEvent.click(screen.getByTestId("tab-t4"));
+  expect(screen.queryByTestId("tab-actions-t3")).toBeNull();
+  expect(screen.getByTestId("tab-actions-t4")).toBeTruthy();
+});
+
+test("the splitter is active while it is dragged, and only then (spec Q §5)", () => {
+  render(<Panes />);
+  const splitter = screen.getByTestId("pane-resize-0");
+  vi.spyOn(
+    splitter.parentElement as HTMLElement,
+    "getBoundingClientRect",
+  ).mockReturnValue(new DOMRect(0, 0, 1000, 600));
+  expect(splitter.dataset.active).toBe("false");
+  fireEvent.pointerDown(splitter, { button: 0, pointerId: 1, clientX: 500 });
+  expect(splitter.dataset.active).toBe("true");
+  fireEvent.pointerMove(splitter, { pointerId: 1, clientX: 600 });
+  expect(layout().panes[0].width).toBeCloseTo(0.6);
+  fireEvent.pointerUp(splitter, { pointerId: 1, clientX: 600 });
+  expect(splitter.dataset.active).toBe("false");
+  fireEvent.pointerDown(splitter, { button: 0, pointerId: 2, clientX: 600 });
+  fireEvent.pointerCancel(splitter, { pointerId: 2 });
+  expect(splitter.dataset.active).toBe("false");
+});
+
+test("tab buttons, drop zones, the deny state and the active splitter follow the design (spec Q §5)", () => {
+  const rules = cssRules(CSS_FILES["/src/app/tabs/Panes.module.css"]);
+  const decls = (s: string) =>
+    Object.fromEntries(rules.find((r) => r.selector === s)?.decls ?? []);
+  expect(rules.some((r) => r.selector.startsWith(".close"))).toBe(false);
+  expect(decls(".tabControl")).toMatchObject({ width: "20px", height: "20px" });
+  expect(decls(".tabControl:focus-visible")).toEqual({
+    outline: "none",
+    "box-shadow": "var(--focus-ring)",
+  });
+  expect(decls(".zones")).toMatchObject({
+    gap: "var(--space-5)",
+    padding: "var(--space-5)",
+  });
+  expect(decls(".zone")).toMatchObject({
+    border: "2px dashed var(--border-strong-color)",
+    background: "var(--surface-raised)",
+    opacity: "0.94",
+  });
+  expect(decls('.zone[data-over="true"]')).toMatchObject({
+    "border-style": "solid",
+    "border-color": "var(--border-accent)",
+    background: "var(--surface-accent-soft)",
+  });
+  expect(decls('.dragLabel[data-refused="true"]')).toEqual({
+    "border-color": "var(--status-critical)",
+  });
+  expect(decls('.dragLabel[data-refused="true"] .dragHint')).toEqual({
+    color: "var(--status-critical)",
+  });
+  expect(decls('.splitter[data-active="true"]::before')).toEqual({
+    width: "2px",
+    background: "var(--border-accent)",
+  });
 });
