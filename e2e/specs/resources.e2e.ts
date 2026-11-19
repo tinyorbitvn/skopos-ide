@@ -806,6 +806,28 @@ spec:
     await expectResourceTitle("ConfigMap");
   });
 
+  it("draws each node's Disk as a share of its root filesystem", async () => {
+    await openResource("nav-item-core-nodes", "Node");
+    await expectRows("the kind nodes", (ids) => ids.length > 0);
+    expect(await tableHeaders()).toContain("Disk");
+    const rows = await rowIds();
+    const disk = (row: string) => byTestId(row).$('[data-testid="usage-disk"]');
+    await browser.waitUntil(
+      async () => {
+        for (const row of rows) {
+          if (!/^\d+%$/.test(await disk(row).getText())) return false;
+        }
+        return true;
+      },
+      { timeout: 30000, interval: 500, timeoutMsg: "a node's Disk cell never showed a share" },
+    );
+    for (const row of rows) {
+      expect(await disk(row).getAttribute("title")).toMatch(/^\S+ \S+ of \S+ \S+$/);
+      const meter = disk(row).$('[role="meter"]');
+      expect(Number(await meter.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    }
+  });
+
   it("keeps the Actions cell opaque in a narrow list scrolled sideways", async () => {
     await openResource("nav-item-core-nodes", "Node");
     await expectRows("the kind node", (ids) => ids.length > 0);

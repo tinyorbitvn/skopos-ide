@@ -49,6 +49,26 @@ describe("cluster connection", () => {
     expect(await byTestId("cluster-info-version").getText()).not.toBe("");
   });
 
+  it("shows the kind control plane on the Overview, every part healthy", async () => {
+    await shown("control-plane", 30000);
+    const parts = ["api-server", "etcd", "scheduler", "controller-manager", "dns", "proxy"];
+    await browser.waitUntil(
+      async () => {
+        for (const part of parts) {
+          const state = byTestId(`control-plane-${part}-state`);
+          if (!(await state.isExisting()) || (await state.getText()) !== "Healthy") return false;
+        }
+        return true;
+      },
+      { timeout: 45000, interval: 500, timeoutMsg: "a control plane part never showed Healthy" },
+    );
+    expect(await byTestId("control-plane-api-server-detail").getText()).toMatch(
+      /^v\d+\.\d+\.\d+.* · https:\/\/.+ · all \d+ readyz checks pass$/,
+    );
+    expect(await byTestId("control-plane-etcd-detail").getText()).toContain("readyz check ok");
+    expect(await byTestId("control-plane-scheduler-detail").getText()).toMatch(/leader \S+, renewed/);
+  });
+
   it("shows a failure for an unreachable cluster with reason and log", async () => {
     await openFromCatalog("dead");
     const heading = await browser.$("h3=Cannot reach the cluster");
