@@ -122,6 +122,25 @@ export const api = {
   resourcesUnsubscribe: (subscriptionId: string) =>
     call<void>("resources_unsubscribe", { subscriptionId }),
   /**
+   * Returns the subscription id of a watch of one whole object: a snapshot of 0 or 1 rows,
+   * then batches, and `status` events as a table's watch sends them. `namespace` is null
+   * for a cluster-scoped resource. End it with `resourcesUnsubscribe`.
+   */
+  resourcesSubscribeObject: (
+    clusterId: string,
+    resource: ResourceRef,
+    namespace: string | null,
+    name: string,
+    onEvent: (event: WatchEvent) => void,
+  ) =>
+    call<string>("resources_subscribe_object", {
+      clusterId,
+      resource,
+      namespace,
+      name,
+      onEvent: new Channel<WatchEvent>(onEvent),
+    }),
+  /**
    * Returns the subscription id. Graph snapshots of `namespaces` (null: every
    * namespace) go to `onEvent` until unsubscribed or until a `failure` ends it.
    */
