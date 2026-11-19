@@ -8,6 +8,7 @@ mod discovery;
 mod drain;
 mod hub;
 mod names;
+mod object_watch;
 mod ops;
 mod sanitize;
 mod service_account;

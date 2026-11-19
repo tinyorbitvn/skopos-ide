@@ -15,6 +15,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use kube::api::{ApiResource, DynamicObject};
 use kube::runtime::watcher;
 use kube::{Api, Client};
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -31,8 +32,8 @@ use crate::kubeconfig::ClusterId;
 const DEFAULT_BATCH: Duration = Duration::from_millis(150);
 const DEFAULT_LINGER: Duration = Duration::from_secs(30);
 const PAGE_SIZE: u32 = 500;
-const MIN_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
+pub(super) const MIN_BACKOFF: Duration = Duration::from_secs(1);
+pub(super) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Pending changes may reach this many, or the number of objects if larger,
 /// before a fresh snapshot replaces them. Otherwise names that come and go while
 /// a subscriber is stalled would pile up as deletes.
@@ -400,10 +401,10 @@ impl Default for WatchHub {
 }
 
 /// What a new watcher needs from the connection.
-struct Connection {
-    client: Client,
-    token: CancellationToken,
-    namespaces: Vec<String>,
+pub(super) struct Connection {
+    pub(super) client: Client,
+    pub(super) token: CancellationToken,
+    pub(super) namespaces: Vec<String>,
 }
 
 impl WatchHub {
@@ -416,6 +417,24 @@ impl WatchHub {
         self.timing().linger
     }
 
+    /// The next id, `watch-N`. Hub subscribers and object watches draw from one counter.
+    fn new_subscription(&self) -> String {
+        let number = self.next_subscription.fetch_add(1, Ordering::Relaxed);
+        format!("watch-{number}")
+    }
+
+    /// Makes `stop` what `unsubscribe` cancels for a new id, for a watch that has no group.
+    pub(super) fn register(&self, stop: CancellationToken) -> String {
+        let subscription = self.new_subscription();
+        self.subscriptions.insert(subscription.clone(), stop);
+        subscription
+    }
+
+    /// Forgets an id whose watch has ended.
+    pub(super) fn deregister(&self, subscription: &str) {
+        self.subscriptions.remove(subscription);
+    }
+
     fn subscribe(
         self: &Arc<Self>,
         id: &ClusterId,
@@ -425,8 +444,7 @@ impl WatchHub {
         connection: &Connection,
     ) -> CoreResult<String> {
         let shape = shape.of(&resource);
-        let number = self.next_subscription.fetch_add(1, Ordering::Relaxed);
-        let subscription = format!("watch-{number}");
+        let subscription = self.new_subscription();
         let group = loop {
             // A disconnect that just happened would leave every new group closed.
             if connection.token.is_cancelled() {
@@ -587,13 +605,13 @@ async fn run_partitions(group: &Group, client: &Client, namespaces: &[String]) -
     PartitionEnd::Forbidden(denied)
 }
 
-struct Failure {
-    code: Option<u16>,
+pub(super) struct Failure {
+    pub(super) code: Option<u16>,
     /// Sanitized, since the status reaches the webview.
-    message: String,
+    pub(super) message: String,
 }
 
-fn describe(err: watcher::Error) -> Failure {
+pub(super) fn describe(err: watcher::Error) -> Failure {
     let source = match err {
         watcher::Error::InitialListFailed(source)
         | watcher::Error::WatchStartFailed(source)
@@ -618,7 +636,7 @@ fn describe(err: watcher::Error) -> Failure {
 
 /// Asks the API server, not the discovery result kept since connecting. When it
 /// cannot tell, the resource counts as served, so that the watcher keeps trying.
-async fn still_served(client: &Client, resource: &ResourceRef) -> bool {
+pub(super) async fn still_served(client: &Client, resource: &ResourceRef) -> bool {
     let list = if resource.group.is_empty() {
         client.list_core_api_resources(&resource.version).await
     } else {
@@ -651,26 +669,36 @@ pub(super) fn api_version(resource: &ResourceRef) -> String {
     }
 }
 
-fn object_key(object: &DynamicObject) -> Option<ObjectKey> {
+pub(super) fn object_key(object: &DynamicObject) -> Option<ObjectKey> {
     Some(ObjectKey {
         namespace: object.metadata.namespace.clone(),
         name: object.metadata.name.clone()?,
     })
 }
 
-/// The row for a subscriber. List items come without `kind` and `apiVersion`, so
-/// these are set from the resource before stripping, which depends on them.
-fn to_row(
+/// The object as the JSON value a row is built from, before any trim. List items come
+/// without `kind` and `apiVersion`, so these are set from the resource before stripping,
+/// which depends on them.
+pub(super) fn stripped_object(
     object: &DynamicObject,
     resource: &ResourceRef,
-    shape: RowShape,
-) -> Option<(ObjectKey, Row)> {
+) -> Option<(ObjectKey, Value)> {
     let key = object_key(object)?;
     let mut value = serde_json::to_value(object).ok()?;
     let fields = value.as_object_mut()?;
     fields.insert("apiVersion".to_owned(), api_version(resource).into());
     fields.insert("kind".to_owned(), stamped_kind(resource).into());
     strip_for_list(&mut value);
+    Some((key, value))
+}
+
+/// The row for a subscriber.
+fn to_row(
+    object: &DynamicObject,
+    resource: &ResourceRef,
+    shape: RowShape,
+) -> Option<(ObjectKey, Row)> {
+    let (key, mut value) = stripped_object(object, resource)?;
     match shape {
         RowShape::Table => trim_for_watch(resource, &mut value),
         RowShape::Graph => trim_for_graph(resource, &mut value),
@@ -679,7 +707,7 @@ fn to_row(
 }
 
 /// Sleeps unless cancelled first, and lengthens the next pause.
-async fn pause(backoff: &mut Duration, token: &CancellationToken) -> bool {
+pub(super) async fn pause(backoff: &mut Duration, token: &CancellationToken) -> bool {
     let delay = *backoff;
     *backoff = (delay * 2).min(MAX_BACKOFF);
     tokio::select! {
@@ -826,6 +854,13 @@ impl AppCore {
         shape: RowShape,
         tx: mpsc::Sender<WatchEvent>,
     ) -> CoreResult<String> {
+        let connection = self.connection_of(id)?;
+        self.watches()
+            .subscribe(id, resource, shape, tx, &connection)
+    }
+
+    /// The client, token and namespaces of a connected cluster.
+    pub(super) fn connection_of(&self, id: &ClusterId) -> CoreResult<Connection> {
         let info = match self.cluster_state(id) {
             ConnectionState::Connected { info } => info,
             other => {
@@ -835,13 +870,11 @@ impl AppCore {
                 ))
             }
         };
-        let connection = Connection {
+        Ok(Connection {
             client: self.cluster_client(id)?,
             token: self.cluster_cancel_token(id)?,
             namespaces: info.namespaces,
-        };
-        self.watches()
-            .subscribe(id, resource, shape, tx, &connection)
+        })
     }
 
     /// An id that is unknown or already ended is ignored.
@@ -978,5 +1011,49 @@ mod tests {
             RowShape::Table
         );
         assert_eq!(RowShape::Table.of(&resource("", "pods")), RowShape::Table);
+    }
+
+    #[test]
+    fn registered_subscriptions_share_the_counter_and_unsubscribe_cancels_them() {
+        let hub = WatchHub::default();
+        let first = hub.register(CancellationToken::new());
+        assert_eq!(first, "watch-1");
+        assert_eq!(hub.new_subscription(), "watch-2");
+
+        let stop = CancellationToken::new();
+        let third = hub.register(stop.clone());
+        assert_eq!(third, "watch-3");
+        hub.unsubscribe(&third);
+        assert!(stop.is_cancelled());
+
+        let kept = CancellationToken::new();
+        let fourth = hub.register(kept.clone());
+        hub.deregister(&fourth);
+        hub.unsubscribe(&fourth);
+        assert!(!kept.is_cancelled(), "a released id is no longer known");
+    }
+
+    #[test]
+    fn a_stripped_object_is_stamped_and_has_secret_values_blanked() {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "metadata": { "name": "s", "namespace": "a", "managedFields": [{ "manager": "m" }] },
+            "data": { "password": "czNjcjN0" },
+        }))
+        .unwrap();
+        let secrets = ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            plural: "secrets".into(),
+            kind: "ConfigMap".into(),
+            namespaced: true,
+        };
+
+        let (key, value) = stripped_object(&object, &secrets).unwrap();
+
+        assert_eq!(key.name, "s");
+        assert_eq!(value["kind"], "Secret");
+        assert_eq!(value["apiVersion"], "v1");
+        assert_eq!(value["data"]["password"], "");
+        assert!(value["metadata"].get("managedFields").is_none());
     }
 }
