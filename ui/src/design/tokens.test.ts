@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { CSS_FILES, declaredNames, varNames } from "../test/css";
+import { CSS_FILES, declaredNames, themeTokens, varNames } from "../test/css";
 
 // Names from the token file this restyle replaced (spec §4.3).
 const OLD = new Set([
@@ -70,3 +70,28 @@ test.each(Object.entries(CSS_FILES))(
     expect(flat).not.toMatch(/gradient\(/);
   },
 );
+
+test("the glass tokens hold the design's values in both themes (spec Q §1)", () => {
+  const expected = {
+    light: {
+      "--side-selected": "rgba(11, 14, 18, 0.08)",
+      "--glass-field": "rgba(255, 255, 255, 0.55)",
+      "--tree-line": "#b4bdc8",
+    },
+    dark: {
+      "--side-selected": "rgba(255, 255, 255, 0.13)",
+      "--glass-field": "rgba(255, 255, 255, 0.06)",
+      "--tree-line": "rgba(255, 255, 255, 0.22)",
+    },
+  } as const;
+  for (const theme of ["light", "dark"] as const) {
+    const tokens = themeTokens(theme);
+    expect([theme, tokens.get("--glass-tint")]).toEqual([
+      theme,
+      `color-mix(in srgb, ${tokens.get("--surface-sunken")} 84%, ${tokens.get("--surface-page")})`,
+    ]);
+    for (const [name, value] of Object.entries(expected[theme])) {
+      expect([theme, name, tokens.get(name)]).toEqual([theme, name, value]);
+    }
+  }
+});

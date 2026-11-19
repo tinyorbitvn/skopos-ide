@@ -454,3 +454,22 @@
   --press-scale: 0.97; /* @kind other */
   --press-scale-lg: 0.985; /* @kind other */
 }
+
+/* SkoposIDE additions (spec Q §1), not from the design system: keep this block when
+   the file is rebuilt. The left column's glass, as one solid colour. */
+:root,
+[data-theme="light"] {
+  /* biome-ignore format: the token test compares the value on one line */
+  --glass-tint: color-mix(in srgb, var(--surface-sunken) 84%, var(--surface-page));
+  --side-selected: rgba(11, 14, 18, 0.08);
+  --glass-field: rgba(255, 255, 255, 0.55);
+  --tree-line: #b4bdc8;
+}
+
+[data-theme="dark"] {
+  /* biome-ignore format: the token test compares the value on one line */
+  --glass-tint: color-mix(in srgb, var(--surface-sunken) 84%, var(--surface-page));
+  --side-selected: rgba(255, 255, 255, 0.13);
+  --glass-field: rgba(255, 255, 255, 0.06);
+  --tree-line: rgba(255, 255, 255, 0.22);
+}

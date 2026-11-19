@@ -1,25 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, EmptyState, PaneHandle, Spinner, StatusDot } from "../design";
+import { Button, EmptyState, Spinner } from "../design";
 import { AboutDialog } from "../features/about/AboutDialog";
-import { ClusterNav } from "../features/cluster/ClusterNav";
 import { Dock } from "../features/dock/Dock";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { ShortcutsDialog } from "../features/shortcuts/ShortcutsDialog";
 import { events } from "../ipc/events";
 import { useCatalog } from "../stores/catalog";
-import { useClusterState, useConnect } from "../stores/clusters";
+import { useClusterState } from "../stores/clusters";
 import { useDiscovery } from "../stores/discovery";
 import { useFolders } from "../stores/folders";
-import { NAV_PANE, usePaneSize } from "../stores/paneSize";
 import { useShell } from "../stores/shell";
 import { startWindowLayout, useWindowLayout } from "../stores/windowLayout";
 import { AppHeader } from "./AppHeader";
-import { ClusterSwitcher, useSidebarCluster } from "./ClusterSwitcher";
-import { clusterStatus } from "./clusterStatus";
 import { runCommand, runMenuCommand, useCommandContext } from "./commands";
 import { Hotbar } from "./Hotbar";
 import { installHistoryShortcuts } from "./history";
 import styles from "./Shell.module.css";
+import { SidebarColumn } from "./SidebarColumn";
 import { StatusBar } from "./StatusBar";
 import { installShellKeys } from "./shellKeys";
 import { IS_MAC } from "./shortcuts";
@@ -38,82 +35,6 @@ import { installTabKeys } from "./tabs/tabKeys";
 function useFocusedCluster(): string | null {
   const path = useFocusedPath();
   return path === null ? null : tabCluster(path);
-}
-
-/** The sidebar of a cluster that is not connected: its name, state and Connect. */
-function SidebarWaiting(props: { clusterId: string }) {
-  const { clusterId } = props;
-  const state = useClusterState(clusterId);
-  const name = useCatalog(
-    (s) => s.clusters.find((c) => c.id === clusterId)?.name ?? "Cluster",
-  );
-  const { connect, busy } = useConnect(clusterId);
-  const status = clusterStatus(state);
-  return (
-    <div className={styles.navNote} data-testid="sidebar-waiting">
-      <p className={styles.navName}>
-        <StatusDot tone={status.tone} label={status.label} />
-        {name}
-      </p>
-      <p className={styles.navText}>{`${status.label}.`}</p>
-      {state.status === "connecting" ? null : (
-        <Button
-          data-testid="sidebar-connect"
-          disabled={busy}
-          onClick={() => void connect()}
-        >
-          Connect
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function SidebarCluster(props: { clusterId: string }) {
-  const connected = useClusterState(props.clusterId).status === "connected";
-  return connected ? (
-    <ClusterNav clusterId={props.clusterId} />
-  ) : (
-    <SidebarWaiting clusterId={props.clusterId} />
-  );
-}
-
-/**
- * The sidebar column, between the rail and the panes, with its resize handle: the
- * cluster switcher on top of the shown cluster's navigation (P1, P23 to P25).
- */
-function SidebarColumn() {
-  const { clusterId, focused, pick, follow } = useSidebarCluster();
-  const [navWidth, setNavWidth] = usePaneSize(NAV_PANE);
-  return (
-    <div className={styles.nav} style={{ width: navWidth }}>
-      <ClusterSwitcher
-        clusterId={clusterId}
-        focused={focused}
-        onPick={pick}
-        onFollow={follow}
-      />
-      {clusterId === null ? (
-        <div className={styles.navNote} data-testid="sidebar-empty">
-          <p className={styles.navText}>
-            Pick a cluster above, or open one, to see its navigation here.
-          </p>
-        </div>
-      ) : (
-        <SidebarCluster key={clusterId} clusterId={clusterId} />
-      )}
-      <PaneHandle
-        label="Resize navigation"
-        edge="right"
-        value={navWidth}
-        min={NAV_PANE.min}
-        max={NAV_PANE.max}
-        initial={NAV_PANE.initial}
-        onChange={setNavWidth}
-        testId="nav-resize"
-      />
-    </div>
-  );
 }
 
 function ConnectedDock(props: { clusterId: string }) {

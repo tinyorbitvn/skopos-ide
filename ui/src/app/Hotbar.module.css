@@ -5,7 +5,7 @@
   gap: var(--space-5);
   min-height: 0;
   padding: var(--space-5) 0;
-  background: var(--surface-sunken);
+  background: var(--glass-tint);
   border-right: 1px solid var(--border-subtle);
   overflow-y: auto;
 }
@@ -65,7 +65,7 @@
   display: flex;
   padding: 2px;
   border-radius: 50%;
-  background: var(--surface-sunken);
+  background: var(--surface-card);
 }
 
 .tipName {
