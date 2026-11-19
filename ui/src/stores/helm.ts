@@ -7,6 +7,7 @@ import type { ChartSearch } from "../ipc/generated/ChartSearch";
 import type { HelmInstallRequest } from "../ipc/generated/HelmInstallRequest";
 import type { HelmRelease } from "../ipc/generated/HelmRelease";
 import type { HelmReleaseList } from "../ipc/generated/HelmReleaseList";
+import type { HelmReleasesEvent } from "../ipc/generated/HelmReleasesEvent";
 import type { HelmRepo } from "../ipc/generated/HelmRepo";
 import type { HelmRepoAdd } from "../ipc/generated/HelmRepoAdd";
 import type { HelmUpgradeRequest } from "../ipc/generated/HelmUpgradeRequest";
@@ -95,8 +96,8 @@ export interface HelmState {
   /** Per `runKey`; a run stays until another starts on the key or its cluster disconnects. */
   runs: Record<string, HelmRun>;
   /**
-   * Loads the cluster's releases now and every 15 s while the document is visible,
-   * until every watcher has called the returned function.
+   * Loads the cluster's releases now, then on each backend change (a subscription), or
+   * every 60 s while visible when it cannot subscribe, until every watcher has left.
    */
   watchReleases(clusterId: string, namespaces: string[] | null): () => void;
   /** Leaving out `namespaces` asks for the ones of the last read. */
@@ -155,10 +156,21 @@ let chartsSeq = 0;
 const downloading = new Set<ToolName>();
 const releaseSeq = new Map<string, number>();
 const releaseLoads = new Map<string, { asked: string; read: Promise<void> }>();
-const watchers = new Map<
-  string,
-  { count: number; timer: number; onVisible: () => void }
->();
+interface ReleaseWatch {
+  count: number;
+  /** The 60 s poll; set only while no subscription is live. */
+  timer: number | null;
+  onVisible: () => void;
+  /** A subscribe call is in flight, or its id is held. */
+  subscribing: boolean;
+  subscriptionId: string | null;
+  /** `forbidden` ends subscribing for this watch; `failed` allows another try. */
+  forbidden: boolean;
+  /** A `changed` arrived while the window was hidden. */
+  stale: boolean;
+  closed: boolean;
+}
+const watchers = new Map<string, ReleaseWatch>();
 /** When each cluster's release list was last asked for, in `Date.now()` ms. */
 const releaseAskedAt = new Map<string, number>();
 const openPages = new Map<string, number>();
@@ -394,39 +406,51 @@ export const useHelm = create<HelmState>((set, get) => {
       watchCatalog();
       let watch = watchers.get(clusterId);
       if (!watch) {
+        const created: ReleaseWatch = {
+          count: 0,
+          timer: null,
+          onVisible: () => {},
+          subscribing: false,
+          subscriptionId: null,
+          forbidden: false,
+          stale: false,
+          closed: false,
+        };
         // Every refresh path, a backend change event included, calls loadReleases.
-        const onVisible = () => {
+        created.onVisible = () => {
           if (document.visibilityState !== "visible") return;
+          if (!created.subscribing && !created.forbidden) {
+            subscribeReleases(clusterId, created);
+          }
+          if (created.subscriptionId !== null) {
+            if (created.stale) {
+              created.stale = false;
+              void get().loadReleases(clusterId);
+            }
+            return;
+          }
           const asked = releaseAskedAt.get(clusterId) ?? 0;
           if (Date.now() - asked > RELEASES_POLL_MS) {
             void get().loadReleases(clusterId);
           }
         };
-        document.addEventListener("visibilitychange", onVisible);
-        watch = {
-          count: 0,
-          timer: window.setInterval(() => {
-            if (document.visibilityState === "visible") {
-              void get().loadReleases(clusterId);
-            }
-          }, RELEASES_POLL_MS),
-          onVisible,
-        };
+        document.addEventListener("visibilitychange", created.onVisible);
+        watch = created;
         watchers.set(clusterId, watch);
+        startPolling(clusterId, watch);
       }
       watch.count += 1;
       void get().loadReleases(clusterId, namespaces);
+      if (!watch.subscribing && !watch.forbidden) {
+        subscribeReleases(clusterId, watch);
+      }
       const mine = watch;
       let done = false;
       return () => {
         if (done) return;
         done = true;
         mine.count -= 1;
-        if (mine.count === 0) {
-          window.clearInterval(mine.timer);
-          document.removeEventListener("visibilitychange", mine.onVisible);
-          watchers.delete(clusterId);
-        }
+        if (mine.count === 0) closeWatch(clusterId, mine);
       };
     },
 
@@ -697,6 +721,86 @@ export const useHelm = create<HelmState>((set, get) => {
   }
 });
 
+function stopPolling(watch: ReleaseWatch): void {
+  if (watch.timer !== null) window.clearInterval(watch.timer);
+  watch.timer = null;
+}
+
+function startPolling(clusterId: string, watch: ReleaseWatch): void {
+  if (watch.timer !== null || watch.closed) return;
+  watch.timer = window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      void useHelm.getState().loadReleases(clusterId);
+    }
+  }, RELEASES_POLL_MS);
+}
+
+function dropSubscription(watch: ReleaseWatch): void {
+  const id = watch.subscriptionId;
+  watch.subscriptionId = null;
+  watch.subscribing = false;
+  if (id !== null) void api.helmReleasesUnsubscribe(id).catch(() => {});
+}
+
+function closeWatch(clusterId: string, watch: ReleaseWatch): void {
+  watch.closed = true;
+  stopPolling(watch);
+  document.removeEventListener("visibilitychange", watch.onVisible);
+  if (watchers.get(clusterId) === watch) watchers.delete(clusterId);
+  dropSubscription(watch);
+}
+
+/**
+ * Subscribes to release changes: each `changed` reloads, and no poll runs while it is
+ * live. If subscribing fails or the subscription ends, the 60 s poll takes over.
+ */
+function subscribeReleases(clusterId: string, watch: ReleaseWatch): void {
+  watch.subscribing = true;
+  const ended = (forbidden: boolean) => {
+    if (watch.closed || watch.subscriptionId === null) return;
+    if (forbidden) watch.forbidden = true;
+    // The backend already ended it; there is nothing to unsubscribe.
+    watch.subscriptionId = null;
+    watch.subscribing = false;
+    watch.stale = false;
+    startPolling(clusterId, watch);
+  };
+  const failedToStart = () => {
+    if (watch.closed) return;
+    watch.subscribing = false;
+    startPolling(clusterId, watch);
+  };
+  let id: string | null = null;
+  const pending: HelmReleasesEvent[] = [];
+  const handle = (event: HelmReleasesEvent) => {
+    if (watch.closed) return;
+    if (event.type === "changed") {
+      if (document.visibilityState === "visible") {
+        void useHelm.getState().loadReleases(clusterId);
+      } else {
+        watch.stale = true;
+      }
+    } else {
+      ended(event.type === "forbidden");
+    }
+  };
+  api
+    .helmReleasesSubscribe(clusterId, (event) => {
+      if (id === null) pending.push(event);
+      else handle(event);
+    })
+    .then((subscriptionId) => {
+      if (watch.closed) {
+        void api.helmReleasesUnsubscribe(subscriptionId).catch(() => {});
+        return;
+      }
+      id = subscriptionId;
+      watch.subscriptionId = subscriptionId;
+      stopPolling(watch);
+      for (const event of pending.splice(0)) handle(event);
+    }, failedToStart);
+}
+
 export function resetHelmForTest(): void {
   subscribed = null;
   toolsLoading = null;
@@ -708,10 +812,7 @@ export function resetHelmForTest(): void {
   downloading.clear();
   releaseSeq.clear();
   releaseLoads.clear();
-  for (const watch of watchers.values()) {
-    window.clearInterval(watch.timer);
-    document.removeEventListener("visibilitychange", watch.onVisible);
-  }
+  for (const [clusterId, watch] of [...watchers]) closeWatch(clusterId, watch);
   watchers.clear();
   releaseAskedAt.clear();
   openPages.clear();

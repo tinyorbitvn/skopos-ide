@@ -1,7 +1,9 @@
 import type { Channel } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
+import { api } from "../ipc/api";
 import type { HelmReleaseList } from "../ipc/generated/HelmReleaseList";
+import type { HelmReleasesEvent } from "../ipc/generated/HelmReleasesEvent";
 import type { SessionEvent } from "../ipc/generated/SessionEvent";
 import { release, releaseList, runHandlers } from "../test/helm";
 import { flush, mockBackend } from "../test/ipc";
@@ -374,4 +376,153 @@ test("a hidden window refreshes on becoming visible after more than 60 s, not be
   document.dispatchEvent(new Event("visibilitychange"));
   await flush();
   expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+});
+
+// A fake subscription: `send` pushes an event to the latest subscriber.
+function fakeSubscription() {
+  let nextId = 0;
+  const handlers: ((e: HelmReleasesEvent) => void)[] = [];
+  const subscribe = vi
+    .spyOn(api, "helmReleasesSubscribe")
+    .mockImplementation(async (_cluster, onEvent) => {
+      handlers.push(onEvent);
+      nextId += 1;
+      return `sub-${nextId}`;
+    });
+  const unsubscribe = vi
+    .spyOn(api, "helmReleasesUnsubscribe")
+    .mockResolvedValue(undefined);
+  return {
+    subscribe,
+    unsubscribe,
+    send: (e: HelmReleasesEvent) => handlers[handlers.length - 1]?.(e),
+  };
+}
+
+const FAKE_TIMERS = {
+  toFake: ["setInterval", "clearInterval", "Date"],
+} satisfies Parameters<typeof vi.useFakeTimers>[0];
+
+test("a subscription is made on acquire, each changed reloads once, and nothing polls", async () => {
+  vi.useFakeTimers(FAKE_TIMERS);
+  const backend = mockBackend({ helm_release_list: () => LIST });
+  const sub = fakeSubscription();
+  const stop = helm().watchReleases("c1", null);
+  await flush();
+  expect(sub.subscribe).toHaveBeenCalledTimes(1);
+  expect(sub.subscribe.mock.calls[0]?.[0]).toBe("c1");
+  expect(backend.callsTo("helm_release_list")).toHaveLength(1);
+
+  sub.send({ type: "changed" });
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+
+  vi.advanceTimersByTime(RELEASES_POLL_MS * 3);
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+  stop();
+});
+
+test("forbidden falls back to the 60 s poll and never resubscribes", async () => {
+  vi.useFakeTimers(FAKE_TIMERS);
+  const backend = mockBackend({ helm_release_list: () => LIST });
+  const sub = fakeSubscription();
+  const stop = helm().watchReleases("c1", null);
+  await flush();
+  sub.send({ type: "forbidden", message: "no" });
+  await flush();
+  vi.advanceTimersByTime(RELEASES_POLL_MS);
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(sub.subscribe).toHaveBeenCalledTimes(1);
+  stop();
+});
+
+test("a subscribe that rejects falls back to polling", async () => {
+  vi.useFakeTimers(FAKE_TIMERS);
+  const backend = mockBackend({ helm_release_list: () => LIST });
+  vi.spyOn(api, "helmReleasesSubscribe").mockRejectedValue(new Error("x"));
+  const stop = helm().watchReleases("c1", null);
+  await flush();
+  vi.advanceTimersByTime(RELEASES_POLL_MS);
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+  stop();
+});
+
+test("failed polls, then a return to the window subscribes again and stops the poll", async () => {
+  vi.useFakeTimers(FAKE_TIMERS);
+  const backend = mockBackend({ helm_release_list: () => LIST });
+  const sub = fakeSubscription();
+  const stop = helm().watchReleases("c1", null);
+  await flush();
+  sub.send({ type: "failed", message: "blip" });
+  await flush();
+  vi.advanceTimersByTime(RELEASES_POLL_MS);
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+  expect(sub.unsubscribe).not.toHaveBeenCalled();
+
+  document.dispatchEvent(new Event("visibilitychange"));
+  await flush();
+  expect(sub.subscribe).toHaveBeenCalledTimes(2);
+
+  const before = backend.callsTo("helm_release_list").length;
+  vi.advanceTimersByTime(RELEASES_POLL_MS * 2);
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(before);
+  sub.send({ type: "changed" });
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(before + 1);
+  stop();
+});
+
+test("the last release unsubscribes, and a late id is unsubscribed at once", async () => {
+  mockBackend({ helm_release_list: () => LIST });
+  const sub = fakeSubscription();
+  const stopA = helm().watchReleases("c1", null);
+  const stopB = helm().watchReleases("c1", null);
+  await flush();
+  expect(sub.subscribe).toHaveBeenCalledTimes(1);
+  stopA();
+  expect(sub.unsubscribe).not.toHaveBeenCalled();
+  stopB();
+  expect(sub.unsubscribe).toHaveBeenCalledWith("sub-1");
+
+  let resolve: (id: string) => void = () => {};
+  sub.subscribe.mockImplementationOnce(
+    () => new Promise<string>((r) => (resolve = r)),
+  );
+  const stop = helm().watchReleases("c1", null);
+  stop();
+  expect(sub.unsubscribe).toHaveBeenCalledTimes(1);
+  resolve("late");
+  await flush();
+  expect(sub.unsubscribe).toHaveBeenLastCalledWith("late");
+});
+
+test("a changed while the window is hidden is ignored, and one refresh follows on show", async () => {
+  vi.useFakeTimers(FAKE_TIMERS);
+  const backend = mockBackend({ helm_release_list: () => LIST });
+  const sub = fakeSubscription();
+  const stop = helm().watchReleases("c1", null);
+  await flush();
+  const hidden = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("hidden");
+  sub.send({ type: "changed" });
+  sub.send({ type: "changed" });
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(1);
+
+  hidden.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+  document.dispatchEvent(new Event("visibilitychange"));
+  await flush();
+  expect(backend.callsTo("helm_release_list")).toHaveLength(2);
+  stop();
 });
