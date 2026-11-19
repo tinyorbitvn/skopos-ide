@@ -386,9 +386,16 @@ test("an answer that arrives after a change on the server is dropped", async () 
 
 test("removing a key can be undone, and does not reveal it", async () => {
   const { backend } = show();
-  fireEvent.click(screen.getByTestId("data-remove-b"));
+  // An icon button: its name is in its label, not in text beside the key.
+  const remove = screen.getByTestId("data-remove-b");
+  expect(remove.getAttribute("aria-label")).toBe("Remove b");
+  expect(remove.textContent).toBe("");
+  fireEvent.click(remove);
   expect(screen.queryByTestId("secret-value-b")).toBeNull();
   expect(saveDisabled()).toBe(false);
+  expect(
+    screen.getByTestId("data-remove-b").getAttribute("aria-label"),
+  ).toBe("Undo remove b");
   fireEvent.click(screen.getByTestId("data-remove-b"));
   expect(screen.getByTestId("secret-value-b").textContent).toBe("••••••");
   expect(saveDisabled()).toBe(true);
