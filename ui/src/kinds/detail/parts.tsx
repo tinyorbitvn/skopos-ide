@@ -123,7 +123,7 @@ export function titleKey(title: string): string {
 interface PartProps {
   title: string;
   testId?: string;
-  /** A lucide icon, 14 px, before the title. Defaults to FileText. */
+  /** An icon, 14 px, before the title. Defaults to FileText. */
   icon?: IconComponent;
   /** A count pill after the title. */
   count?: number;

@@ -1,133 +1,140 @@
 /*
  * Every icon of the interface, in one place. Components import icons from here and never
- * from `lucide-react` (biome.json enforces it).
+ * from `@thesvg/ui-react` or `lucide-react` (biome.json enforces it).
  *
- * An icon is Lucide's still drawing, from `lucide-react`. Each export keeps its lucide-react
- * name, so `Trash2` here is Lucide's trash-2.
+ * An icon is theSVG UI's fill drawing, from `@thesvg/ui-react`, in the text colour. Each
+ * export keeps the name the app has always used. Where theSVG has no drawing of that name,
+ * the export draws the closest one, so `Trash2` draws theSVG's trash; `drawing` names it.
+ *
+ * SVG_ART stays Lucide's: the resource map draws it inside the Kubernetes icons' frame.
  */
 
+import { ActivityFillIcon } from "@thesvg/ui-react/activity";
+import { AppWindowFillIcon } from "@thesvg/ui-react/app-window";
+import { ArrowLeftFillIcon } from "@thesvg/ui-react/arrow-left";
+import { ArrowLeftRightFillIcon } from "@thesvg/ui-react/arrow-left-right";
+import { ArrowRightFillIcon } from "@thesvg/ui-react/arrow-right";
+import { ArrowUpFillIcon } from "@thesvg/ui-react/arrow-up";
+import { ArrowUpDownFillIcon } from "@thesvg/ui-react/arrow-up-down";
+import { BatchJobFillIcon } from "@thesvg/ui-react/batch-job";
+import { BlockStorageFillIcon } from "@thesvg/ui-react/block-storage";
+import { BlocksFillIcon } from "@thesvg/ui-react/blocks";
+import { BookOpenFillIcon } from "@thesvg/ui-react/book-open";
+import { BoxFillIcon } from "@thesvg/ui-react/box";
+import { BoxesFillIcon } from "@thesvg/ui-react/boxes";
+import { CalendarClockFillIcon } from "@thesvg/ui-react/calendar-clock";
+import { CheckFillIcon } from "@thesvg/ui-react/check";
+import { ChevronDownFillIcon } from "@thesvg/ui-react/chevron-down";
+import { ChevronLeftFillIcon } from "@thesvg/ui-react/chevron-left";
+import { ChevronRightFillIcon } from "@thesvg/ui-react/chevron-right";
+import { ChevronUpFillIcon } from "@thesvg/ui-react/chevron-up";
+import { ChevronsUpDownFillIcon } from "@thesvg/ui-react/chevrons-up-down";
+import { CircleAlertFillIcon } from "@thesvg/ui-react/circle-alert";
+import { CircleDashedFillIcon } from "@thesvg/ui-react/circle-dashed";
+import { CirclePauseFillIcon } from "@thesvg/ui-react/circle-pause";
+import { CirclePlayFillIcon } from "@thesvg/ui-react/circle-play";
+import { CirclePlusFillIcon } from "@thesvg/ui-react/circle-plus";
+import { CircleQuestionMarkFillIcon } from "@thesvg/ui-react/circle-question-mark";
+import { CircleStopFillIcon } from "@thesvg/ui-react/circle-stop";
+import { CircleXFillIcon } from "@thesvg/ui-react/circle-x";
+import { Columns2FillIcon } from "@thesvg/ui-react/columns-2";
+import { CommandFillIcon } from "@thesvg/ui-react/command";
+import { ConfigFileFillIcon } from "@thesvg/ui-react/config-file";
+import { ContainerFillIcon } from "@thesvg/ui-react/container";
+import { CopyFillIcon } from "@thesvg/ui-react/copy";
+import { CpuFillIcon } from "@thesvg/ui-react/cpu";
+import { CronJobFillIcon } from "@thesvg/ui-react/cron-job";
+import { DatabaseFillIcon } from "@thesvg/ui-react/database";
+import { DependencyGraphFillIcon } from "@thesvg/ui-react/dependency-graph";
+import { DeployFillIcon } from "@thesvg/ui-react/deploy";
+import { DockFillIcon } from "@thesvg/ui-react/dock";
+import { DownloadFillIcon } from "@thesvg/ui-react/download";
+import { DrawerFillIcon } from "@thesvg/ui-react/drawer";
+import { EllipsisFillIcon } from "@thesvg/ui-react/ellipsis";
+import { EventStreamFillIcon } from "@thesvg/ui-react/event-stream";
+import { ExternalLinkFillIcon } from "@thesvg/ui-react/external-link";
+import { EyeFillIcon } from "@thesvg/ui-react/eye";
+import { EyeOffFillIcon } from "@thesvg/ui-react/eye-off";
+import { FileSearchFillIcon } from "@thesvg/ui-react/file-search";
+import { FileTextFillIcon } from "@thesvg/ui-react/file-text";
+import { FolderFillIcon } from "@thesvg/ui-react/folder";
+import { FolderPlusFillIcon } from "@thesvg/ui-react/folder-plus";
+import { FolderTreeFillIcon } from "@thesvg/ui-react/folder-tree";
+import { FunnelFillIcon } from "@thesvg/ui-react/funnel";
+import { GpuFillIcon } from "@thesvg/ui-react/gpu";
+import { HelmChartFillIcon } from "@thesvg/ui-react/helm-chart";
+import { ImageFillIcon } from "@thesvg/ui-react/image";
+import { InfoFillIcon } from "@thesvg/ui-react/info";
+import { IngressFillIcon } from "@thesvg/ui-react/ingress";
+import { KeyFillIcon } from "@thesvg/ui-react/key";
+import { KeyboardFillIcon } from "@thesvg/ui-react/keyboard";
+import { LayersFillIcon } from "@thesvg/ui-react/layers";
+import { LayoutDashboardFillIcon } from "@thesvg/ui-react/layout-dashboard";
+import { LayoutGridFillIcon } from "@thesvg/ui-react/layout-grid";
+import { LinkFillIcon } from "@thesvg/ui-react/link";
+import { ListFillIcon } from "@thesvg/ui-react/list";
+import { LoadBalancerFillIcon } from "@thesvg/ui-react/load-balancer";
+import { LogOutFillIcon } from "@thesvg/ui-react/log-out";
+import { Maximize2FillIcon } from "@thesvg/ui-react/maximize-2";
+import { Minimize2FillIcon } from "@thesvg/ui-react/minimize-2";
+import { MinusFillIcon } from "@thesvg/ui-react/minus";
+import { MonitorFillIcon } from "@thesvg/ui-react/monitor";
+import { MoonFillIcon } from "@thesvg/ui-react/moon";
+import { NamespaceFillIcon } from "@thesvg/ui-react/namespace";
+import { NetworkFillIcon } from "@thesvg/ui-react/network";
+import { PackageFillIcon } from "@thesvg/ui-react/package";
+import { PenFillIcon } from "@thesvg/ui-react/pen";
+import { PermissionGroupFillIcon } from "@thesvg/ui-react/permission-group";
+import { PinFillIcon } from "@thesvg/ui-react/pin";
+import { PlayFillIcon } from "@thesvg/ui-react/play";
+import { PlugFillIcon } from "@thesvg/ui-react/plug";
+import { PlusFillIcon } from "@thesvg/ui-react/plus";
+import { PodFillIcon } from "@thesvg/ui-react/pod";
+import { PowerFillIcon } from "@thesvg/ui-react/power";
+import { PuzzleFillIcon } from "@thesvg/ui-react/puzzle";
+import { RefreshCwFillIcon } from "@thesvg/ui-react/refresh-cw";
+import { RegistryFillIcon } from "@thesvg/ui-react/registry";
+import { ReplicaFillIcon } from "@thesvg/ui-react/replica";
+import { RollbackFillIcon } from "@thesvg/ui-react/rollback";
+import { RotateCcwFillIcon } from "@thesvg/ui-react/rotate-ccw";
+import { RotateCwFillIcon } from "@thesvg/ui-react/rotate-cw";
+import { ScanFillIcon } from "@thesvg/ui-react/scan";
+import { ScrollTextFillIcon } from "@thesvg/ui-react/scroll-text";
+import { SearchFillIcon } from "@thesvg/ui-react/search";
+import { SecretFillIcon } from "@thesvg/ui-react/secret";
+import { ServerFillIcon } from "@thesvg/ui-react/server";
+import { SettingsFillIcon } from "@thesvg/ui-react/settings";
+import { ShieldCheckFillIcon } from "@thesvg/ui-react/shield-check";
+import { ShieldOffFillIcon } from "@thesvg/ui-react/shield-off";
+import { SlidersHorizontalFillIcon } from "@thesvg/ui-react/sliders-horizontal";
+import { SplitFillIcon } from "@thesvg/ui-react/split";
+import { SquareFillIcon } from "@thesvg/ui-react/square";
+import { StarFillIcon } from "@thesvg/ui-react/star";
+import { SunFillIcon } from "@thesvg/ui-react/sun";
+import { TagsFillIcon } from "@thesvg/ui-react/tags";
+import { TerminalFillIcon } from "@thesvg/ui-react/terminal";
+import { TerminalPromptFillIcon } from "@thesvg/ui-react/terminal-prompt";
+import { TrashFillIcon } from "@thesvg/ui-react/trash";
+import { TriangleAlertFillIcon } from "@thesvg/ui-react/triangle-alert";
+import { UnplugFillIcon } from "@thesvg/ui-react/unplug";
+import { UploadFillIcon } from "@thesvg/ui-react/upload";
+import { XFillIcon } from "@thesvg/ui-react/x";
+import { ZapFillIcon } from "@thesvg/ui-react/zap";
 import {
-  Activity as LucideActivity,
-  AppWindow as LucideAppWindow,
-  ArrowDownToLine as LucideArrowDownToLine,
-  ArrowLeft as LucideArrowLeft,
-  ArrowRight as LucideArrowRight,
-  ArrowRightLeft as LucideArrowRightLeft,
-  Bell as LucideBell,
-  Blocks as LucideBlocks,
-  BookOpen as LucideBookOpen,
-  Box as LucideBox,
-  Boxes as LucideBoxes,
-  CalendarClock as LucideCalendarClock,
-  Check as LucideCheck,
-  ChevronDown as LucideChevronDown,
-  ChevronLeft as LucideChevronLeft,
-  ChevronRight as LucideChevronRight,
-  ChevronsUpDown as LucideChevronsUpDown,
-  ChevronUp as LucideChevronUp,
-  CircleAlert as LucideCircleAlert,
-  CircleArrowUp as LucideCircleArrowUp,
-  CirclePause as LucideCirclePause,
-  CirclePlay as LucideCirclePlay,
-  CircleQuestionMark as LucideCircleQuestionMark,
-  CircleStop as LucideCircleStop,
-  CircleX as LucideCircleX,
-  Columns2 as LucideColumns2,
-  Columns3 as LucideColumns3,
-  Command as LucideCommand,
-  Container as LucideContainer,
-  Copy as LucideCopy,
-  CornerLeftUp as LucideCornerLeftUp,
-  Cpu as LucideCpu,
-  Database as LucideDatabase,
   DoorOpen as LucideDoorOpen,
-  Download as LucideDownload,
-  Ellipsis as LucideEllipsis,
-  ExternalLink as LucideExternalLink,
-  Eye as LucideEye,
-  EyeOff as LucideEyeOff,
-  FileCog as LucideFileCog,
-  FilePlus as LucideFilePlus,
-  FileSearch as LucideFileSearch,
-  FileText as LucideFileText,
-  Folder as LucideFolder,
-  FolderPlus as LucideFolderPlus,
-  Folders as LucideFolders,
-  FolderTree as LucideFolderTree,
-  FunnelX as LucideFunnelX,
-  Globe as LucideGlobe,
-  HardDrive as LucideHardDrive,
-  History as LucideHistory,
   type LucideIcon,
-  Image as LucideImage,
-  ImageUp as LucideImageUp,
-  Info as LucideInfo,
-  Keyboard as LucideKeyboard,
-  KeyRound as LucideKeyRound,
   Layers as LucideLayers,
-  LayoutDashboard as LucideLayoutDashboard,
-  LayoutGrid as LucideLayoutGrid,
-  Library as LucideLibrary,
-  Link as LucideLink,
-  List as LucideList,
-  ListTree as LucideListTree,
-  LogOut as LucideLogOut,
-  Maximize2 as LucideMaximize2,
-  Microchip as LucideMicrochip,
-  Minimize2 as LucideMinimize2,
-  Monitor as LucideMonitor,
-  Moon as LucideMoon,
-  MoveVertical as LucideMoveVertical,
-  Network as LucideNetwork,
-  Package as LucidePackage,
-  PackageCheck as LucidePackageCheck,
-  PackagePlus as LucidePackagePlus,
-  PackageSearch as LucidePackageSearch,
-  PanelBottom as LucidePanelBottom,
-  PanelRightOpen as LucidePanelRightOpen,
-  Pen as LucidePen,
-  Pin as LucidePin,
-  Play as LucidePlay,
-  Plug as LucidePlug,
-  Plus as LucidePlus,
-  Power as LucidePower,
-  Puzzle as LucidePuzzle,
-  RefreshCw as LucideRefreshCw,
-  Rocket as LucideRocket,
-  RotateCcw as LucideRotateCcw,
-  RotateCw as LucideRotateCw,
   Route as LucideRoute,
-  Scan as LucideScan,
-  ScrollText as LucideScrollText,
-  Search as LucideSearch,
-  Server as LucideServer,
-  Settings as LucideSettings,
-  ShieldCheck as LucideShieldCheck,
-  ShieldOff as LucideShieldOff,
-  SlidersHorizontal as LucideSlidersHorizontal,
   Split as LucideSplit,
-  Square as LucideSquare,
-  SquareDashed as LucideSquareDashed,
-  SquareTerminal as LucideSquareTerminal,
-  Star as LucideStar,
-  Sun as LucideSun,
-  Tags as LucideTags,
-  Terminal as LucideTerminal,
-  Trash2 as LucideTrash2,
-  TriangleAlert as LucideTriangleAlert,
-  Unplug as LucideUnplug,
-  Waypoints as LucideWaypoints,
-  Workflow as LucideWorkflow,
-  X as LucideX,
-  Zap as LucideZap,
-  ZoomIn as LucideZoomIn,
-  ZoomOut as LucideZoomOut,
 } from "lucide-react";
-import type { CSSProperties, ReactElement } from "react";
+import type { ComponentType, CSSProperties, ReactElement } from "react";
 import styles from "./icons.module.css";
 
+/** One of theSVG UI's drawings, as `@thesvg/ui-react` exports it. */
+type Drawing = ComponentType<{ size?: number; "aria-hidden"?: "true" }>;
+
 export interface IconProps {
-  /** Width and height in pixels; 24 when left out, as in Lucide. */
+  /** Width and height in pixels; 24 when left out. */
   size?: number;
   /** Classes for the icon's box, a span around its svg. */
   className?: string;
@@ -139,12 +146,14 @@ export interface IconProps {
   "data-testid"?: string;
 }
 
-/** An icon of this module: a component, with the name of the drawing it shows. */
+/** An icon of this module: a component, with its name and the drawing it shows. */
 export interface IconComponent {
   (props: IconProps): ReactElement;
   displayName?: string;
-  /** Lucide's kebab-case name of the drawing, such as `trash-2`. */
+  /** The icon's kebab-case name, its export's, such as `trash-2`. */
   readonly iconName: string;
+  /** theSVG UI's name of the drawing it shows, such as `trash`. */
+  readonly drawing: string;
 }
 
 function boxProps(
@@ -160,8 +169,11 @@ function boxProps(
   };
 }
 
-/** Lucide's drawing `name`, in a box that carries the caller's class, style and label. */
-function icon(name: string, Drawing: LucideIcon): IconComponent {
+/**
+ * theSVG's drawing `drawing`, in a box named `name` that carries the caller's class, style
+ * and label. Each copy of the drawing gets its own mask ids.
+ */
+function icon(name: string, drawing: string, Drawing: Drawing): IconComponent {
   function Icon({ size = 24, ...rest }: IconProps): ReactElement {
     return (
       <span {...boxProps(name, rest)}>
@@ -175,6 +187,7 @@ function icon(name: string, Drawing: LucideIcon): IconComponent {
   return Object.assign(Icon, {
     displayName: `Icon(${pascal})`,
     iconName: name,
+    drawing,
   });
 }
 
@@ -192,190 +205,433 @@ export const SVG_ART = {
 /** One of `SVG_ART`'s drawings. */
 export type SvgArt = LucideIcon;
 
-export const Activity = /* @__PURE__ */ icon("activity", LucideActivity);
-export const AppWindow = /* @__PURE__ */ icon("app-window", LucideAppWindow);
+export const Activity = /* @__PURE__ */ icon(
+  "activity",
+  "activity",
+  ActivityFillIcon,
+);
+export const AppWindow = /* @__PURE__ */ icon(
+  "app-window",
+  "app-window",
+  AppWindowFillIcon,
+);
 export const ArrowDownToLine = /* @__PURE__ */ icon(
   "arrow-down-to-line",
-  LucideArrowDownToLine,
+  "download",
+  DownloadFillIcon,
 );
-export const ArrowLeft = /* @__PURE__ */ icon("arrow-left", LucideArrowLeft);
-export const ArrowRight = /* @__PURE__ */ icon("arrow-right", LucideArrowRight);
+export const ArrowLeft = /* @__PURE__ */ icon(
+  "arrow-left",
+  "arrow-left",
+  ArrowLeftFillIcon,
+);
+export const ArrowRight = /* @__PURE__ */ icon(
+  "arrow-right",
+  "arrow-right",
+  ArrowRightFillIcon,
+);
 export const ArrowRightLeft = /* @__PURE__ */ icon(
   "arrow-right-left",
-  LucideArrowRightLeft,
+  "arrow-left-right",
+  ArrowLeftRightFillIcon,
 );
-export const Bell = /* @__PURE__ */ icon("bell", LucideBell);
-export const Blocks = /* @__PURE__ */ icon("blocks", LucideBlocks);
-export const BookOpen = /* @__PURE__ */ icon("book-open", LucideBookOpen);
-export const Box = /* @__PURE__ */ icon("box", LucideBox);
-export const Boxes = /* @__PURE__ */ icon("boxes", LucideBoxes);
+export const BatchJob = /* @__PURE__ */ icon(
+  "batch-job",
+  "batch-job",
+  BatchJobFillIcon,
+);
+export const Blocks = /* @__PURE__ */ icon("blocks", "blocks", BlocksFillIcon);
+export const BookOpen = /* @__PURE__ */ icon(
+  "book-open",
+  "book-open",
+  BookOpenFillIcon,
+);
+export const Box = /* @__PURE__ */ icon("box", "box", BoxFillIcon);
+export const Boxes = /* @__PURE__ */ icon("boxes", "boxes", BoxesFillIcon);
 export const CalendarClock = /* @__PURE__ */ icon(
   "calendar-clock",
-  LucideCalendarClock,
+  "calendar-clock",
+  CalendarClockFillIcon,
 );
-export const Check = /* @__PURE__ */ icon("check", LucideCheck);
+export const Check = /* @__PURE__ */ icon("check", "check", CheckFillIcon);
 export const ChevronDown = /* @__PURE__ */ icon(
   "chevron-down",
-  LucideChevronDown,
+  "chevron-down",
+  ChevronDownFillIcon,
 );
 export const ChevronLeft = /* @__PURE__ */ icon(
   "chevron-left",
-  LucideChevronLeft,
+  "chevron-left",
+  ChevronLeftFillIcon,
 );
 export const ChevronRight = /* @__PURE__ */ icon(
   "chevron-right",
-  LucideChevronRight,
+  "chevron-right",
+  ChevronRightFillIcon,
 );
-export const ChevronUp = /* @__PURE__ */ icon("chevron-up", LucideChevronUp);
+export const ChevronUp = /* @__PURE__ */ icon(
+  "chevron-up",
+  "chevron-up",
+  ChevronUpFillIcon,
+);
 export const ChevronsUpDown = /* @__PURE__ */ icon(
   "chevrons-up-down",
-  LucideChevronsUpDown,
+  "chevrons-up-down",
+  ChevronsUpDownFillIcon,
 );
 export const CircleAlert = /* @__PURE__ */ icon(
   "circle-alert",
-  LucideCircleAlert,
+  "circle-alert",
+  CircleAlertFillIcon,
 );
 export const CircleArrowUp = /* @__PURE__ */ icon(
   "circle-arrow-up",
-  LucideCircleArrowUp,
+  "arrow-up",
+  ArrowUpFillIcon,
 );
 export const CircleHelp = /* @__PURE__ */ icon(
   "circle-question-mark",
-  LucideCircleQuestionMark,
+  "circle-question-mark",
+  CircleQuestionMarkFillIcon,
 );
 export const CirclePause = /* @__PURE__ */ icon(
   "circle-pause",
-  LucideCirclePause,
+  "circle-pause",
+  CirclePauseFillIcon,
 );
-export const CirclePlay = /* @__PURE__ */ icon("circle-play", LucideCirclePlay);
-export const CircleStop = /* @__PURE__ */ icon("circle-stop", LucideCircleStop);
-export const CircleX = /* @__PURE__ */ icon("circle-x", LucideCircleX);
-export const Columns2 = /* @__PURE__ */ icon("columns-2", LucideColumns2);
-export const Columns3 = /* @__PURE__ */ icon("columns-3", LucideColumns3);
-export const Command = /* @__PURE__ */ icon("command", LucideCommand);
-export const Container = /* @__PURE__ */ icon("container", LucideContainer);
-export const Copy = /* @__PURE__ */ icon("copy", LucideCopy);
+export const CirclePlay = /* @__PURE__ */ icon(
+  "circle-play",
+  "circle-play",
+  CirclePlayFillIcon,
+);
+export const CircleStop = /* @__PURE__ */ icon(
+  "circle-stop",
+  "circle-stop",
+  CircleStopFillIcon,
+);
+export const CircleX = /* @__PURE__ */ icon(
+  "circle-x",
+  "circle-x",
+  CircleXFillIcon,
+);
+export const Columns2 = /* @__PURE__ */ icon(
+  "columns-2",
+  "columns-2",
+  Columns2FillIcon,
+);
+export const Columns3 = /* @__PURE__ */ icon(
+  "columns-3",
+  "columns-2",
+  Columns2FillIcon,
+);
+export const Command = /* @__PURE__ */ icon(
+  "command",
+  "command",
+  CommandFillIcon,
+);
+export const Container = /* @__PURE__ */ icon(
+  "container",
+  "container",
+  ContainerFillIcon,
+);
+export const Copy = /* @__PURE__ */ icon("copy", "copy", CopyFillIcon);
 export const CornerLeftUp = /* @__PURE__ */ icon(
   "corner-left-up",
-  LucideCornerLeftUp,
+  "arrow-up",
+  ArrowUpFillIcon,
 );
-export const Cpu = /* @__PURE__ */ icon("cpu", LucideCpu);
-export const Database = /* @__PURE__ */ icon("database", LucideDatabase);
-export const Download = /* @__PURE__ */ icon("download", LucideDownload);
-export const Ellipsis = /* @__PURE__ */ icon("ellipsis", LucideEllipsis);
+export const Cpu = /* @__PURE__ */ icon("cpu", "cpu", CpuFillIcon);
+export const CronJob = /* @__PURE__ */ icon(
+  "cron-job",
+  "cron-job",
+  CronJobFillIcon,
+);
+export const Database = /* @__PURE__ */ icon(
+  "database",
+  "database",
+  DatabaseFillIcon,
+);
+export const DependencyGraph = /* @__PURE__ */ icon(
+  "dependency-graph",
+  "dependency-graph",
+  DependencyGraphFillIcon,
+);
+export const Deploy = /* @__PURE__ */ icon("deploy", "deploy", DeployFillIcon);
+export const Download = /* @__PURE__ */ icon(
+  "download",
+  "download",
+  DownloadFillIcon,
+);
+export const Ellipsis = /* @__PURE__ */ icon(
+  "ellipsis",
+  "ellipsis",
+  EllipsisFillIcon,
+);
+export const EventStream = /* @__PURE__ */ icon(
+  "event-stream",
+  "event-stream",
+  EventStreamFillIcon,
+);
 export const ExternalLink = /* @__PURE__ */ icon(
   "external-link",
-  LucideExternalLink,
+  "external-link",
+  ExternalLinkFillIcon,
 );
-export const Eye = /* @__PURE__ */ icon("eye", LucideEye);
-export const EyeOff = /* @__PURE__ */ icon("eye-off", LucideEyeOff);
-export const FileCog = /* @__PURE__ */ icon("file-cog", LucideFileCog);
-export const FilePlus = /* @__PURE__ */ icon("file-plus", LucideFilePlus);
-export const FileSearch = /* @__PURE__ */ icon("file-search", LucideFileSearch);
-export const FileText = /* @__PURE__ */ icon("file-text", LucideFileText);
-export const Folder = /* @__PURE__ */ icon("folder", LucideFolder);
-export const FolderPlus = /* @__PURE__ */ icon("folder-plus", LucideFolderPlus);
-export const FolderTree = /* @__PURE__ */ icon("folder-tree", LucideFolderTree);
-export const Folders = /* @__PURE__ */ icon("folders", LucideFolders);
-export const FunnelX = /* @__PURE__ */ icon("funnel-x", LucideFunnelX);
-export const Globe = /* @__PURE__ */ icon("globe", LucideGlobe);
-export const HardDrive = /* @__PURE__ */ icon("hard-drive", LucideHardDrive);
-export const History = /* @__PURE__ */ icon("history", LucideHistory);
-export const ImageIcon = /* @__PURE__ */ icon("image", LucideImage);
-export const ImageUp = /* @__PURE__ */ icon("image-up", LucideImageUp);
-export const Info = /* @__PURE__ */ icon("info", LucideInfo);
-export const KeyRound = /* @__PURE__ */ icon("key-round", LucideKeyRound);
-export const Keyboard = /* @__PURE__ */ icon("keyboard", LucideKeyboard);
-export const Layers = /* @__PURE__ */ icon("layers", LucideLayers);
+export const Eye = /* @__PURE__ */ icon("eye", "eye", EyeFillIcon);
+export const EyeOff = /* @__PURE__ */ icon(
+  "eye-off",
+  "eye-off",
+  EyeOffFillIcon,
+);
+export const FileCog = /* @__PURE__ */ icon(
+  "file-cog",
+  "config-file",
+  ConfigFileFillIcon,
+);
+export const FilePlus = /* @__PURE__ */ icon(
+  "file-plus",
+  "circle-plus",
+  CirclePlusFillIcon,
+);
+export const FileSearch = /* @__PURE__ */ icon(
+  "file-search",
+  "file-search",
+  FileSearchFillIcon,
+);
+export const FileText = /* @__PURE__ */ icon(
+  "file-text",
+  "file-text",
+  FileTextFillIcon,
+);
+export const Folder = /* @__PURE__ */ icon("folder", "folder", FolderFillIcon);
+export const FolderPlus = /* @__PURE__ */ icon(
+  "folder-plus",
+  "folder-plus",
+  FolderPlusFillIcon,
+);
+export const FolderTree = /* @__PURE__ */ icon(
+  "folder-tree",
+  "folder-tree",
+  FolderTreeFillIcon,
+);
+export const FunnelX = /* @__PURE__ */ icon(
+  "funnel-x",
+  "funnel",
+  FunnelFillIcon,
+);
+export const HardDrive = /* @__PURE__ */ icon(
+  "hard-drive",
+  "block-storage",
+  BlockStorageFillIcon,
+);
+export const History = /* @__PURE__ */ icon(
+  "history",
+  "rollback",
+  RollbackFillIcon,
+);
+export const ImageIcon = /* @__PURE__ */ icon("image", "image", ImageFillIcon);
+export const ImageUp = /* @__PURE__ */ icon(
+  "image-up",
+  "upload",
+  UploadFillIcon,
+);
+export const Info = /* @__PURE__ */ icon("info", "info", InfoFillIcon);
+export const Ingress = /* @__PURE__ */ icon(
+  "ingress",
+  "ingress",
+  IngressFillIcon,
+);
+export const KeyRound = /* @__PURE__ */ icon("key-round", "key", KeyFillIcon);
+export const Keyboard = /* @__PURE__ */ icon(
+  "keyboard",
+  "keyboard",
+  KeyboardFillIcon,
+);
+export const Layers = /* @__PURE__ */ icon("layers", "layers", LayersFillIcon);
 export const LayoutDashboard = /* @__PURE__ */ icon(
   "layout-dashboard",
-  LucideLayoutDashboard,
+  "layout-dashboard",
+  LayoutDashboardFillIcon,
 );
-export const LayoutGrid = /* @__PURE__ */ icon("layout-grid", LucideLayoutGrid);
-export const Library = /* @__PURE__ */ icon("library", LucideLibrary);
-export const Link = /* @__PURE__ */ icon("link", LucideLink);
-export const List = /* @__PURE__ */ icon("list", LucideList);
-export const ListTree = /* @__PURE__ */ icon("list-tree", LucideListTree);
-export const LogOut = /* @__PURE__ */ icon("log-out", LucideLogOut);
-export const Maximize2 = /* @__PURE__ */ icon("maximize-2", LucideMaximize2);
-export const Microchip = /* @__PURE__ */ icon("microchip", LucideMicrochip);
-export const Minimize2 = /* @__PURE__ */ icon("minimize-2", LucideMinimize2);
-export const Monitor = /* @__PURE__ */ icon("monitor", LucideMonitor);
-export const Moon = /* @__PURE__ */ icon("moon", LucideMoon);
+export const LayoutGrid = /* @__PURE__ */ icon(
+  "layout-grid",
+  "layout-grid",
+  LayoutGridFillIcon,
+);
+export const Library = /* @__PURE__ */ icon(
+  "library",
+  "registry",
+  RegistryFillIcon,
+);
+export const Link = /* @__PURE__ */ icon("link", "link", LinkFillIcon);
+export const List = /* @__PURE__ */ icon("list", "list", ListFillIcon);
+export const ListTree = /* @__PURE__ */ icon(
+  "list-tree",
+  "folder-tree",
+  FolderTreeFillIcon,
+);
+export const LoadBalancer = /* @__PURE__ */ icon(
+  "load-balancer",
+  "load-balancer",
+  LoadBalancerFillIcon,
+);
+export const LogOut = /* @__PURE__ */ icon(
+  "log-out",
+  "log-out",
+  LogOutFillIcon,
+);
+export const Maximize2 = /* @__PURE__ */ icon(
+  "maximize-2",
+  "maximize-2",
+  Maximize2FillIcon,
+);
+export const Microchip = /* @__PURE__ */ icon("microchip", "gpu", GpuFillIcon);
+export const Minimize2 = /* @__PURE__ */ icon(
+  "minimize-2",
+  "minimize-2",
+  Minimize2FillIcon,
+);
+export const Monitor = /* @__PURE__ */ icon(
+  "monitor",
+  "monitor",
+  MonitorFillIcon,
+);
+export const Moon = /* @__PURE__ */ icon("moon", "moon", MoonFillIcon);
 export const MoveVertical = /* @__PURE__ */ icon(
   "move-vertical",
-  LucideMoveVertical,
+  "arrow-up-down",
+  ArrowUpDownFillIcon,
 );
-export const Network = /* @__PURE__ */ icon("network", LucideNetwork);
-export const Package = /* @__PURE__ */ icon("package", LucidePackage);
+export const Namespace = /* @__PURE__ */ icon(
+  "namespace",
+  "namespace",
+  NamespaceFillIcon,
+);
+export const Network = /* @__PURE__ */ icon(
+  "network",
+  "network",
+  NetworkFillIcon,
+);
+export const Package = /* @__PURE__ */ icon(
+  "package",
+  "package",
+  PackageFillIcon,
+);
 export const PackageCheck = /* @__PURE__ */ icon(
   "package-check",
-  LucidePackageCheck,
+  "package",
+  PackageFillIcon,
 );
 export const PackagePlus = /* @__PURE__ */ icon(
   "package-plus",
-  LucidePackagePlus,
+  "deploy",
+  DeployFillIcon,
 );
 export const PackageSearch = /* @__PURE__ */ icon(
   "package-search",
-  LucidePackageSearch,
+  "helm-chart",
+  HelmChartFillIcon,
 );
 export const PanelBottom = /* @__PURE__ */ icon(
   "panel-bottom",
-  LucidePanelBottom,
+  "dock",
+  DockFillIcon,
 );
 export const PanelRightOpen = /* @__PURE__ */ icon(
   "panel-right-open",
-  LucidePanelRightOpen,
+  "drawer",
+  DrawerFillIcon,
 );
-export const Pen = /* @__PURE__ */ icon("pen", LucidePen);
-export const Pin = /* @__PURE__ */ icon("pin", LucidePin);
-export const Play = /* @__PURE__ */ icon("play", LucidePlay);
-export const Plug = /* @__PURE__ */ icon("plug", LucidePlug);
-export const Plus = /* @__PURE__ */ icon("plus", LucidePlus);
-export const Power = /* @__PURE__ */ icon("power", LucidePower);
-export const Puzzle = /* @__PURE__ */ icon("puzzle", LucidePuzzle);
-export const RefreshCw = /* @__PURE__ */ icon("refresh-cw", LucideRefreshCw);
-export const Rocket = /* @__PURE__ */ icon("rocket", LucideRocket);
-export const RotateCcw = /* @__PURE__ */ icon("rotate-ccw", LucideRotateCcw);
-export const RotateCw = /* @__PURE__ */ icon("rotate-cw", LucideRotateCw);
-export const Scan = /* @__PURE__ */ icon("scan", LucideScan);
-export const ScrollText = /* @__PURE__ */ icon("scroll-text", LucideScrollText);
-export const Search = /* @__PURE__ */ icon("search", LucideSearch);
-export const Server = /* @__PURE__ */ icon("server", LucideServer);
-export const Settings = /* @__PURE__ */ icon("settings", LucideSettings);
+export const Pen = /* @__PURE__ */ icon("pen", "pen", PenFillIcon);
+export const PermissionGroup = /* @__PURE__ */ icon(
+  "permission-group",
+  "permission-group",
+  PermissionGroupFillIcon,
+);
+export const Pin = /* @__PURE__ */ icon("pin", "pin", PinFillIcon);
+export const Play = /* @__PURE__ */ icon("play", "play", PlayFillIcon);
+export const Plug = /* @__PURE__ */ icon("plug", "plug", PlugFillIcon);
+export const Plus = /* @__PURE__ */ icon("plus", "plus", PlusFillIcon);
+export const Pod = /* @__PURE__ */ icon("pod", "pod", PodFillIcon);
+export const Power = /* @__PURE__ */ icon("power", "power", PowerFillIcon);
+export const Puzzle = /* @__PURE__ */ icon("puzzle", "puzzle", PuzzleFillIcon);
+export const RefreshCw = /* @__PURE__ */ icon(
+  "refresh-cw",
+  "refresh-cw",
+  RefreshCwFillIcon,
+);
+export const Replica = /* @__PURE__ */ icon(
+  "replica",
+  "replica",
+  ReplicaFillIcon,
+);
+export const RotateCcw = /* @__PURE__ */ icon(
+  "rotate-ccw",
+  "rotate-ccw",
+  RotateCcwFillIcon,
+);
+export const RotateCw = /* @__PURE__ */ icon(
+  "rotate-cw",
+  "rotate-cw",
+  RotateCwFillIcon,
+);
+export const Scan = /* @__PURE__ */ icon("scan", "scan", ScanFillIcon);
+export const ScrollText = /* @__PURE__ */ icon(
+  "scroll-text",
+  "scroll-text",
+  ScrollTextFillIcon,
+);
+export const Search = /* @__PURE__ */ icon("search", "search", SearchFillIcon);
+export const Secret = /* @__PURE__ */ icon("secret", "secret", SecretFillIcon);
+export const Server = /* @__PURE__ */ icon("server", "server", ServerFillIcon);
+export const Settings = /* @__PURE__ */ icon(
+  "settings",
+  "settings",
+  SettingsFillIcon,
+);
 export const ShieldCheck = /* @__PURE__ */ icon(
   "shield-check",
-  LucideShieldCheck,
+  "shield-check",
+  ShieldCheckFillIcon,
 );
-export const ShieldOff = /* @__PURE__ */ icon("shield-off", LucideShieldOff);
+export const ShieldOff = /* @__PURE__ */ icon(
+  "shield-off",
+  "shield-off",
+  ShieldOffFillIcon,
+);
 export const SlidersHorizontal = /* @__PURE__ */ icon(
   "sliders-horizontal",
-  LucideSlidersHorizontal,
+  "sliders-horizontal",
+  SlidersHorizontalFillIcon,
 );
-export const Split = /* @__PURE__ */ icon("split", LucideSplit);
-export const Square = /* @__PURE__ */ icon("square", LucideSquare);
+export const Split = /* @__PURE__ */ icon("split", "split", SplitFillIcon);
+export const Square = /* @__PURE__ */ icon("square", "square", SquareFillIcon);
 export const SquareDashed = /* @__PURE__ */ icon(
   "square-dashed",
-  LucideSquareDashed,
+  "circle-dashed",
+  CircleDashedFillIcon,
 );
 export const SquareTerminal = /* @__PURE__ */ icon(
   "square-terminal",
-  LucideSquareTerminal,
+  "terminal-prompt",
+  TerminalPromptFillIcon,
 );
-export const Star = /* @__PURE__ */ icon("star", LucideStar);
-export const Sun = /* @__PURE__ */ icon("sun", LucideSun);
-export const Tags = /* @__PURE__ */ icon("tags", LucideTags);
-export const Terminal = /* @__PURE__ */ icon("terminal", LucideTerminal);
-export const Trash2 = /* @__PURE__ */ icon("trash-2", LucideTrash2);
+export const Star = /* @__PURE__ */ icon("star", "star", StarFillIcon);
+export const Sun = /* @__PURE__ */ icon("sun", "sun", SunFillIcon);
+export const Tags = /* @__PURE__ */ icon("tags", "tags", TagsFillIcon);
+export const Terminal = /* @__PURE__ */ icon(
+  "terminal",
+  "terminal",
+  TerminalFillIcon,
+);
+export const Trash2 = /* @__PURE__ */ icon("trash-2", "trash", TrashFillIcon);
 export const TriangleAlert = /* @__PURE__ */ icon(
   "triangle-alert",
-  LucideTriangleAlert,
+  "triangle-alert",
+  TriangleAlertFillIcon,
 );
-export const Unplug = /* @__PURE__ */ icon("unplug", LucideUnplug);
-export const Waypoints = /* @__PURE__ */ icon("waypoints", LucideWaypoints);
-export const Workflow = /* @__PURE__ */ icon("workflow", LucideWorkflow);
-export const X = /* @__PURE__ */ icon("x", LucideX);
-export const Zap = /* @__PURE__ */ icon("zap", LucideZap);
-export const ZoomIn = /* @__PURE__ */ icon("zoom-in", LucideZoomIn);
-export const ZoomOut = /* @__PURE__ */ icon("zoom-out", LucideZoomOut);
+export const Unplug = /* @__PURE__ */ icon("unplug", "unplug", UnplugFillIcon);
+export const X = /* @__PURE__ */ icon("x", "x", XFillIcon);
+export const Zap = /* @__PURE__ */ icon("zap", "zap", ZapFillIcon);
+export const ZoomIn = /* @__PURE__ */ icon("zoom-in", "plus", PlusFillIcon);
+export const ZoomOut = /* @__PURE__ */ icon("zoom-out", "minus", MinusFillIcon);

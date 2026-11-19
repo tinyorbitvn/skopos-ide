@@ -13,7 +13,12 @@
           "options": {
             "patterns": [
               {
-                "group": ["lucide-react", "lucide-react/**"],
+                "group": [
+                  "@thesvg/ui-react",
+                  "@thesvg/ui-react/**",
+                  "lucide-react",
+                  "lucide-react/**"
+                ],
                 "message": "Import icons from design/icons, the one module that maps them."
               }
             ]

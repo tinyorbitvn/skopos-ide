@@ -11,7 +11,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TableColumn } from "../../design";
 import { Menu } from "../../design";
 import { copyText } from "../../design/clipboard";
-import { type IconComponent, Minimize2 } from "../../design/icons";
+import { Minimize2 } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
@@ -798,14 +798,6 @@ const probe = (o: KubeObject) => (
   </button>
 );
 
-/** What an icon draws, to compare a button's icon with the one it should be. */
-function iconMarkup(Icon: IconComponent): string {
-  const { container, unmount } = render(<Icon size={16} aria-hidden="true" />);
-  const markup = container.querySelector("svg")?.innerHTML ?? "";
-  unmount();
-  return markup;
-}
-
 test("the header shows the actions of the object shown, then a divider, Minimize and Close", async () => {
   const f = fake();
   render(withActions(probe));
@@ -821,7 +813,9 @@ test("the header shows the actions of the object shown, then a divider, Minimize
   expect(minimize.getAttribute("aria-label")).toBe("Minimize to the dock");
   const svg = minimize.querySelector("svg");
   expect(svg?.getAttribute("width")).toBe("16");
-  expect(svg?.innerHTML).toBe(iconMarkup(Minimize2));
+  expect(svg?.closest("[data-icon]")?.getAttribute("data-icon")).toBe(
+    Minimize2.iconName,
+  );
 });
 
 test("a deleted object keeps how it looked but gets no actions", async () => {

@@ -7,9 +7,10 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
-- **Still icons:** icons no longer move when you point at or focus their button or menu item; they are
-  Lucide's still drawings again. In the command palette, Nodes shows a server, Namespaces a stack of
-  folders, and Device Resources a microchip.
+- **New icons:** the app's icons are now theSVG UI's filled drawings, and they no longer move when you
+  point at or focus their button or menu item. In the command palette each kind and section has an
+  icon of its own, such as a pod for Pods, a load balancer for Services, a namespace for Namespaces,
+  an event stream for Events, a permission group for Access Control and a GPU for Device Resources.
 - **One + menu in the dock, and several terminals:** the dock's + button opens a menu with Create resource and Terminal Session. Each Terminal Session opens a new local terminal, named Terminal, Terminal 2 and so on, each with its own shell, and they all come back after a restart. Ctrl+` still brings the open terminal forward.
 - **Copy any field of the drawer:** every field of an object's drawer, such as a Pod's Node or IP and each container's image, ports and environment, has a copy button that shows while you point at the row. It copies the value as shown, a line per line, without the buttons beside it.
 - **Resize table columns:** drag the right edge of a column's header, or focus it and use Left and Right, to make the column wider or narrower; a double-click gives it back its own width. Each kind's list keeps the widths it was given, after a restart too.
