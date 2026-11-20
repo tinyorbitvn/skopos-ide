@@ -10,6 +10,7 @@ use ts_rs::TS;
 
 pub use service::Updates;
 
+use crate::app_core::AppCore;
 use crate::error::CoreResult;
 
 /// A release newer than the running one.
@@ -111,4 +112,28 @@ pub trait UpdateSource: Send + Sync + 'static {
     fn blocker(&self) -> Option<String>;
     /// `app`, `nsis`, `appimage` or `deb`; `None` when the copy was not installed from one.
     fn installer(&self) -> Option<String>;
+}
+
+impl AppCore {
+    pub fn update_state(&self) -> UpdateState {
+        self.updates().state()
+    }
+
+    /// A check the user asked for: from the menu, the palette or Settings.
+    pub async fn update_check(&self) -> UpdateState {
+        self.updates().check_now().await
+    }
+
+    /// Downloads, verifies and installs the available release; the app restarts on `Ok`.
+    pub async fn update_install(&self) -> CoreResult<()> {
+        self.updates().install().await
+    }
+
+    pub fn update_cancel(&self) {
+        self.updates().cancel();
+    }
+
+    pub fn update_skip(&self, version: String) -> CoreResult<()> {
+        self.updates().skip(version)
+    }
 }
