@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **Updates from inside the app:** SkoposIDE checks for a newer release 10 seconds after it starts and every 6 hours. When one is out, a toast and an Update button in the status bar offer it once per version. Check for Updates… in the Help menu, the macOS app menu and the command palette checks at once. The update dialog shows the release notes; Install and Restart downloads the release, checks its signature, installs it and restarts with your windows and tabs as they were. Skip This Version hides a release until a newer one is out, and Preferences > Updates turns the automatic checks off. From this version on, SkoposIDE updates itself; 0.9.0 and earlier need this one installed by hand.
+
 ## [0.9.0] - 2026-11-20
 
 - **A glass sidebar in groups:** the cluster switcher and the sidebar share one glass-tinted column, 248 px wide by default; drag its edge between 200 and 360 px, or double-click it to reset. Overview and Resource map come first, then Apps (Helm, and Argo with Argo CD inside it), Cluster (Nodes, Namespaces, Events) and Resources. Each section has its icon, Helm and Argo show their project logos, and a section with one screen is a plain link. The kinds of an open section hang on tree lines, the current page has a soft highlight, and a kind open in another tab of the window shows a small dot. The switcher shows the cluster's tile with a status dot, its distribution and version, and its name.
