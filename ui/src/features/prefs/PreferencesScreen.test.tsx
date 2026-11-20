@@ -21,6 +21,7 @@ const saved: Prefs = {
     { kind: "dir", path: "/home/me/.kube" },
     { kind: "file", path: "/etc/k/one.yaml" },
   ],
+  updateCheck: true,
 };
 
 function show(
@@ -67,7 +68,7 @@ test("lists sources", async () => {
 });
 
 test("explains an empty source list", async () => {
-  show({ theme: "system", syncSources: [] });
+  show({ theme: "system", syncSources: [], updateCheck: true });
 
   expect(await screen.findByText(/No kubeconfig sources/)).toBeTruthy();
 });
@@ -115,6 +116,7 @@ test("adding a path calls prefs_set with it as a file", async () => {
             ...saved.syncSources,
             { kind: "file", path: "/srv/kube/extra.yaml" },
           ],
+          updateCheck: true,
         },
       },
     ]),
@@ -214,6 +216,7 @@ test("removing calls prefs_set without it", async () => {
         prefs: {
           theme: "system",
           syncSources: [{ kind: "file", path: "/etc/k/one.yaml" }],
+          updateCheck: true,
         },
       },
     ]),

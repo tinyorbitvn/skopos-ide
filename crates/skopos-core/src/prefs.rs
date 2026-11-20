@@ -33,7 +33,7 @@ pub enum Theme {
     Light,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, TS, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Prefs {
@@ -51,6 +51,23 @@ pub struct Prefs {
     /// For downloads and helm, such as `http://proxy.example:3128`. `None`: the system proxy.
     #[ts(optional = nullable)]
     pub http_proxy: Option<String>,
+    /// Look for a new release on launch and every 6 hours (in-app update spec D2).
+    pub update_check: bool,
+}
+
+/// By hand, so that a prefs file saved before `update_check` existed reads it as on.
+impl Default for Prefs {
+    fn default() -> Self {
+        Prefs {
+            theme: Theme::default(),
+            sync_sources: Vec::new(),
+            terminal_shell: None,
+            helm_path: None,
+            kubectl_path: None,
+            http_proxy: None,
+            update_check: true,
+        }
+    }
 }
 
 impl Prefs {
@@ -153,5 +170,18 @@ mod tests {
         let settings: ClusterSettings = serde_json::from_str(r#"{"displayName":"Prod"}"#).unwrap();
         assert_eq!(settings.display_name.as_deref(), Some("Prod"));
         assert!(settings.accessible_namespaces.is_empty());
+    }
+
+    #[test]
+    fn a_prefs_file_without_update_check_turns_checks_on() {
+        // What 0.9.0 and earlier saved.
+        let old: Prefs = serde_json::from_str(r#"{"theme":"dark","syncSources":[]}"#).unwrap();
+        assert!(old.update_check);
+        assert_eq!(old.theme, Theme::Dark);
+        assert!(Prefs::default().update_check);
+
+        let off: Prefs = serde_json::from_str(r#"{"updateCheck":false}"#).unwrap();
+        assert!(!off.update_check);
+        assert_eq!(serde_json::to_value(&off).unwrap()["updateCheck"], false);
     }
 }
