@@ -64,32 +64,44 @@ impl AppPaths {
 
     pub fn ensure_dirs(&self) -> CoreResult<()> {
         for dir in [&self.config, &self.data, &self.logs, &self.cache] {
-            let created = if dir == &self.logs {
-                create_private_dir(dir)
-            } else {
-                std::fs::create_dir_all(dir)
-            };
-            created.map_err(|e| {
+            std::fs::create_dir_all(dir).map_err(|e| {
                 let mut err = IpcError::from(e);
                 // Shown to the user when the app cannot start, where the bare OS error says too little.
                 err.message = format!("cannot create {}: {}", dir.display(), err.message);
                 err
             })?;
+            // A file system without modes refuses this, which is no reason not to start.
+            if let Err(e) = keep_to_owner(dir) {
+                tracing::warn!("cannot keep {} to its owner: {e}", dir.display());
+            }
         }
         Ok(())
     }
 }
 
-/// Creates the directory, and its parents, and keeps it to its owner where the system has
-/// file modes: what it holds, such as log lines that name clusters and their objects, is
-/// not for the machine's other accounts. A directory that exists is closed as well.
+/// Creates the directory, and its parents, and keeps it to its owner. A directory that
+/// exists is closed as well.
 pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+    keep_to_owner(dir)
+}
+
+/// Where the system has file modes, takes the directory away from the machine's other
+/// accounts: the app's folders hold settings, kubeconfig copies and log lines that name
+/// clusters and their objects. It only takes away, so a directory its owner made
+/// read-only stays read-only.
+fn keep_to_owner(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        let mode = std::fs::metadata(dir)?.permissions().mode() & 0o7777;
+        let kept = mode & 0o7700;
+        if kept != mode {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(kept))?;
+        }
     }
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
 }
 
@@ -116,27 +128,48 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn ensure_dirs_keeps_the_logs_to_their_owner() {
+    fn ensure_dirs_keeps_every_folder_to_its_owner() {
         let root = tempfile::tempdir().unwrap();
         let p = AppPaths::under(&root.path().join("r"), root.path());
 
         p.ensure_dirs().unwrap();
 
-        assert_eq!(mode(&p.logs), 0o700);
+        for dir in [&p.config, &p.data, &p.logs, &p.cache] {
+            assert_eq!(mode(dir), 0o700, "{}", dir.display());
+        }
     }
 
     #[cfg(unix)]
     #[test]
-    fn ensure_dirs_closes_a_logs_directory_an_earlier_version_left_open() {
+    fn ensure_dirs_closes_folders_an_earlier_version_left_open() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let p = AppPaths::under(&root.path().join("r"), root.path());
-        std::fs::create_dir_all(&p.logs).unwrap();
-        std::fs::set_permissions(&p.logs, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for dir in [&p.config, &p.data, &p.logs, &p.cache] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
         p.ensure_dirs().unwrap();
 
-        assert_eq!(mode(&p.logs), 0o700);
+        for dir in [&p.config, &p.data, &p.logs, &p.cache] {
+            assert_eq!(mode(dir), 0o700, "{}", dir.display());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_dirs_does_not_reopen_a_folder_its_owner_closed() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let p = AppPaths::under(&root.path().join("r"), root.path());
+        std::fs::create_dir_all(&p.config).unwrap();
+        std::fs::set_permissions(&p.config, std::fs::Permissions::from_mode(0o550)).unwrap();
+
+        p.ensure_dirs().unwrap();
+
+        // Still read-only for its owner, and no longer open to the group.
+        assert_eq!(mode(&p.config), 0o500);
     }
 
     #[test]
