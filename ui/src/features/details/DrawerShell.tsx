@@ -1,6 +1,15 @@
-import type { KeyboardEvent, ReactNode, Ref } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { IconButton } from "../../design";
 import { X } from "../../design/icons";
+import { UnsavedEditsContext } from "../../kinds/detail/unsavedEdits";
 import { DRAWER_PANE, usePaneSize } from "../../stores/paneSize";
 import styles from "./DetailDrawer.module.css";
 import { DrawerResize } from "./DrawerResize";
@@ -34,14 +43,79 @@ export interface DrawerShellProps {
   children: ReactNode;
 }
 
+/** A body row of a list's table: a click there shows that row in the drawer instead. */
+const LIST_ROW = '[role="grid"] tbody tr';
+
+/** What the dim covers: its containing block, the screen that owns the drawer. */
+function dimmedScreen(dim: HTMLElement): HTMLElement | null {
+  for (let el = dim.parentElement; el; el = el.parentElement) {
+    if (getComputedStyle(el).position !== "static") return el;
+  }
+  return null;
+}
+
+/**
+ * Closes the drawer on a click of the primary button on the dimmed screen around it, as
+ * Close does. The dim lets clicks through, so a row of the list behind still shows in the
+ * drawer, and that click is not one outside. The press and the release must both land
+ * outside, so a resize drag or a text selection that ends there does not count. A portal
+ * (a menu, a dialog, a tooltip) and the rest of the window (the sidebar, the dock) lie
+ * outside the screen, and unsaved edits keep the drawer open.
+ */
+function useCloseOnClickOutside(
+  dim: RefObject<HTMLDivElement | null>,
+  unsaved: ReadonlySet<object>,
+  onClose: () => void,
+): void {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const outside = (e: PointerEvent): boolean => {
+      const target = e.target;
+      const screen = dim.current ? dimmedScreen(dim.current) : null;
+      return (
+        e.button === 0 &&
+        target instanceof Element &&
+        screen?.contains(target) === true &&
+        target.closest(`[data-drawer], ${LIST_ROW}`) === null
+      );
+    };
+    let pressed = false;
+    const onDown = (e: PointerEvent) => {
+      pressed = outside(e);
+    };
+    const onUp = (e: PointerEvent) => {
+      const clicked = pressed && outside(e);
+      pressed = false;
+      if (clicked && unsaved.size === 0) close.current();
+    };
+    const onCancel = () => {
+      pressed = false;
+    };
+    // Captured, so the target is read before a handler can change what is under it.
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onCancel, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onCancel, true);
+    };
+  }, [dim, unsaved]);
+}
+
 /**
  * The frame every drawer shares (spec H12–H17): a dimmed screen under a floating panel
  * with a resize handle on its left border, a band with the kind, the actions and Close,
- * the title under them, then the drawer's own tabs and content.
+ * the title under them, then the drawer's own tabs and content. A click on the dimmed
+ * screen closes it, unless a part inside holds unsaved edits (`useUnsavedEdits`).
  */
 export function DrawerShell(props: DrawerShellProps) {
   const { onClose } = props;
   const [width, setWidth] = usePaneSize(DRAWER_PANE);
+  const dim = useRef<HTMLDivElement>(null);
+  const [unsaved] = useState(() => new Set<object>());
+  useCloseOnClickOutside(dim, unsaved, onClose);
   const onKeyDown = props.closeOnEscape
     ? (e: KeyboardEvent<HTMLElement>) => {
         if (e.key !== "Escape") return;
@@ -55,6 +129,7 @@ export function DrawerShell(props: DrawerShellProps) {
   return (
     <>
       <div
+        ref={dim}
         className={styles.dim}
         aria-hidden="true"
         data-testid={props.dimTestId ?? `${props.testId}-dim`}
@@ -105,7 +180,9 @@ export function DrawerShell(props: DrawerShellProps) {
               {props.title}
             </h3>
           </header>
-          {props.children}
+          <UnsavedEditsContext.Provider value={unsaved}>
+            {props.children}
+          </UnsavedEditsContext.Provider>
         </div>
       </aside>
     </>

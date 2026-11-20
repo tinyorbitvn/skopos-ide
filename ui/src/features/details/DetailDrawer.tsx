@@ -45,7 +45,8 @@ export function isDrawerEscape(e: React.KeyboardEvent<HTMLElement>): boolean {
  * The drawer of the object the history shows: the row the URL names, or an object a link
  * in it opened (spec H42–H53). It renders nothing while nothing is open. Links push onto
  * the history and Back pops it; both move focus into the drawer. The screen root closes it on Escape
- * (`isDrawerEscape`); closing hands focus back to what had it before.
+ * (`isDrawerEscape`), and a click on the dimmed screen around it closes it as Close does
+ * (`DrawerShell`); closing hands focus back to what had it before.
  */
 export function DetailDrawer(props: DetailDrawerProps): ReactElement | null {
   const { clusterId, resource, history, onClose } = props;

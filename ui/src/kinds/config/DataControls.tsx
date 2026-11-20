@@ -7,6 +7,7 @@ import {
   Segmented,
 } from "../../design";
 import { RotateCcw, Trash2 } from "../../design/icons";
+import { useUnsavedEdits } from "../detail/unsavedEdits";
 import styles from "./config.module.css";
 import {
   convertText,
@@ -179,6 +180,8 @@ export function DataControls(props: {
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [newForm, setNewForm] = useState<ValueForm>("raw");
+  // A key or value typed here but not added yet is an edit a click outside would lose.
+  useUnsavedEdits(newKey !== "" || newValue !== "");
   const valid = isValidDataKey(newKey);
   const valueProblem = valueError(newForm, newValue);
   const canAdd =

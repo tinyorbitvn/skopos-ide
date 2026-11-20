@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { failureMessage, IpcFailure } from "../../ipc/client";
 import type { DataChange } from "../../ipc/generated/DataChange";
+import { useUnsavedEdits } from "../detail/unsavedEdits";
 
 const DATA_KEY = /^[-._a-zA-Z0-9]{1,253}$/;
 
@@ -204,6 +205,7 @@ export function useDataEdits(options: {
   );
   const changes = dataChanges(original, edited, same);
   const dirty = changes.length > 0;
+  useUnsavedEdits(dirty);
 
   if (!dirty) {
     if (baseline.version !== version) {

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import { DrawerShell } from "../../features/details/DrawerShell";
 import { mockBackend } from "../../test/ipc";
 import { CONFIGMAPS } from "../refs";
 import { ConfigMapDetail } from "./ConfigMapDetail";
@@ -195,4 +196,48 @@ test("a ConfigMap value is text only, with no raw or base64 switch", () => {
   show();
   expect(screen.queryByRole("radiogroup")).toBeNull();
   expect(screen.queryByTestId("data-new-form")).toBeNull();
+});
+
+test("an edit or a new key in progress keeps the drawer open on a click outside it", () => {
+  mockBackend({ configmap_update: () => null });
+  const onClose = vi.fn();
+  render(
+    <div style={{ position: "relative" }}>
+      <p data-testid="list">The list</p>
+      <DrawerShell
+        label="ConfigMap details"
+        testId="detail-drawer"
+        kind="ConfigMap"
+        title="c"
+        closeTestId="detail-close"
+        onClose={onClose}
+      >
+        <ConfigMapDetail
+          clusterId="c"
+          object={map()}
+          resource={CONFIGMAPS}
+          resources={[]}
+        />
+      </DrawerShell>
+    </div>,
+  );
+  const clickOutside = () => {
+    const list = screen.getByTestId("list");
+    fireEvent.pointerDown(list, { button: 0 });
+    fireEvent.pointerUp(list, { button: 0 });
+    fireEvent.click(list);
+  };
+  const newKey = (value: string) =>
+    fireEvent.change(screen.getByTestId("data-new-key"), {
+      target: { value },
+    });
+  type("2");
+  clickOutside();
+  type("1");
+  newKey("b");
+  clickOutside();
+  expect(onClose).not.toHaveBeenCalled();
+  newKey("");
+  clickOutside();
+  expect(onClose).toHaveBeenCalledTimes(1);
 });
