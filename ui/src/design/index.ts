@@ -22,6 +22,7 @@ export { Tabs } from "./Tabs";
 export { Toaster, toast } from "./Toast";
 export { Tooltip } from "./Tooltip";
 export { applyTheme, type ThemeChoice } from "./theme";
+export { UsageDonut, type UsageDonutProps } from "./UsageDonut";
 export {
   type ColumnWidths,
   type TableColumn,
