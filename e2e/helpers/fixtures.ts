@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { startFakeKube } from "./fakekube";
@@ -186,6 +188,47 @@ async function startMapFixture() {
   };
 }
 
+/**
+ * A local update server that offers 99.0.0, which the e2e build asks instead of GitHub
+ * (in-app update spec §8). Nothing is downloaded, so the addresses and signatures are
+ * never used.
+ */
+async function startUpdatesFixture() {
+  const file = "http://127.0.0.1:1/never-downloaded";
+  const platform = { signature: "unused", url: file };
+  const manifest = {
+    version: "99.0.0",
+    notes: "- Faster lists\n- Fewer clicks",
+    pub_date: "2026-11-25T12:00:00Z",
+    platforms: {
+      "linux-x86_64": platform,
+      "darwin-aarch64": platform,
+      "darwin-x86_64": platform,
+      "windows-x86_64": platform,
+    },
+  };
+  const server = http.createServer((req, res) => {
+    if (req.url === "/latest.json") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(manifest));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  // The app inherits this environment from the launcher, which starts it next.
+  process.env.SKOPOS_E2E_UPDATE_ENDPOINT = `http://127.0.0.1:${port}/latest.json`;
+  return {
+    kubeconfigs: {},
+    async stop() {
+      delete process.env.SKOPOS_E2E_UPDATE_ENDPOINT;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
 const FIXTURES: Record<string, SpecFixture> = {
   catalog: { kubeconfigs: { config: kubeconfig(["alpha", "beta"]) } },
   "hotbar-restart-1-save": {
@@ -244,6 +287,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   },
   "tabs-restart-2-verify": { kubeconfigs: {}, envGroup: "tabs-restart" },
   windows: { kubeconfigs: {}, start: startKindFixture },
+  updates: { kubeconfigs: {}, start: startUpdatesFixture },
   "catalog-folders": {
     kubeconfigs: { config: kubeconfig(["alpha", "beta", "gamma"]) },
   },
