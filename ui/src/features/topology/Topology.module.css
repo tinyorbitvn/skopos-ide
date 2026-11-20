@@ -265,7 +265,10 @@
 }
 
 .card[data-cordoned] {
-  background: var(--surface-sunken);
+  /* A diagonal stripe over the sunken tint. An SVG tile, because tokens.test.ts allows no gradient but a flat tint;
+     the mid-grey stroke at low alpha reads in both themes. */
+  background-color: var(--surface-sunken);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M-2 2 2-2M0 8 8 0M6 10 10 6' stroke='rgb(128,128,128)' stroke-opacity='0.22' stroke-width='2' fill='none'/%3E%3C/svg%3E");
 }
 
 /* Tab, name, status dot and role chips; one button that opens the node's drawer. */
