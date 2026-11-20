@@ -114,6 +114,10 @@ export function NodeTopologyScreen() {
     (name: string) => openObject("nodes", `/${name}`),
     [openObject],
   );
+  const onOpenPod = useCallback(
+    (key: string) => openObject("pods", key),
+    [openObject],
+  );
   const onQuery = useCallback((q: string) => update("q", q), [update]);
   const onHighlight = useCallback(
     (namespace: string | null) => update("ns", namespace),
@@ -179,6 +183,8 @@ export function NodeTopologyScreen() {
                     usage={usageItems?.get(node.name)}
                     podsHidden={snapshot.podsHidden}
                     onOpen={onOpenNode}
+                    highlight={highlight}
+                    onOpenPod={onOpenPod}
                   />
                 ))}
               </GroupBox>
