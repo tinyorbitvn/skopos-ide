@@ -1083,10 +1083,26 @@ test("a click on the dimmed list beside the drawer closes it, and focus goes bac
   await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
   fireEvent.click(row("team-a", "web") as HTMLElement);
   await act(flush);
-  pointerClick(screen.getByTestId("resource-title"));
+  // The table's scroller, clear of its rows and header: the empty space under the list.
+  pointerClick(
+    screen.getByTestId("resource-table").parentElement as HTMLElement,
+  );
   await act(flush);
   expect(screen.queryByTestId("detail-drawer")).toBeNull();
   expect(document.activeElement).toBe(row("team-a", "web"));
+});
+
+test("a click on the toolbar, the row of filters or a column header leaves the drawer open", async () => {
+  const fake = fakeBackend();
+  await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  pointerClick(screen.getByTestId("resource-title"));
+  pointerClick(screen.getByRole("columnheader", { name: /Age/ }));
+  pointerClick(screen.getByTestId("columns-menu"));
+  await act(flush);
+  expect(screen.getByTestId("detail-drawer")).toBeTruthy();
+  expect(screen.getByTestId("detail-title").textContent).toBe("web");
 });
 
 test("a click on another row while the drawer is open shows that row in the same drawer", async () => {

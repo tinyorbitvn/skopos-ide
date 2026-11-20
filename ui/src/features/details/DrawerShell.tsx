@@ -43,8 +43,16 @@ export interface DrawerShellProps {
   children: ReactNode;
 }
 
-/** A body row of a list's table: a click there shows that row in the drawer instead. */
-const LIST_ROW = '[role="grid"] tbody tr';
+/**
+ * Where a click on the dimmed screen is not one outside, as these parts work with the drawer
+ * open:
+ * - the drawer itself;
+ * - a body row of a list's table, where a click shows that row in the drawer instead;
+ * - the table's header, which sorts and resizes the columns;
+ * - a part marked `data-keeps-drawer`, such as a list's toolbar and its row of filters.
+ */
+const KEEPS_OPEN =
+  '[data-drawer], [data-keeps-drawer], [role="grid"] thead, [role="grid"] tbody tr';
 
 /** What the dim covers: its containing block, the screen that owns the drawer. */
 function dimmedScreen(dim: HTMLElement): HTMLElement | null {
@@ -57,7 +65,8 @@ function dimmedScreen(dim: HTMLElement): HTMLElement | null {
 /**
  * Closes the drawer on a click of the primary button on the dimmed screen around it, as
  * Close does. The dim lets clicks through, so a row of the list behind still shows in the
- * drawer, and that click is not one outside. The press and the release must both land
+ * drawer, and the list's toolbar and column headers still work; those clicks are not ones
+ * outside (`KEEPS_OPEN`). The press and the release must both land
  * outside, so a resize drag or a text selection that ends there does not count. A portal
  * (a menu, a dialog, a tooltip) and the rest of the window (the sidebar, the dock) lie
  * outside the screen, and unsaved edits keep the drawer open.
@@ -77,7 +86,7 @@ function useCloseOnClickOutside(
         e.button === 0 &&
         target instanceof Element &&
         screen?.contains(target) === true &&
-        target.closest(`[data-drawer], ${LIST_ROW}`) === null
+        target.closest(KEEPS_OPEN) === null
       );
     };
     let pressed = false;

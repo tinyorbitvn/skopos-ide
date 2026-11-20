@@ -190,7 +190,7 @@ export function HelmChartsScreen({ clusterId }: { clusterId: string }) {
 
   return (
     <div className={styles.screen} data-testid="helm-charts-screen">
-      <div className={styles.toolbar}>
+      <div className={styles.toolbar} data-keeps-drawer="">
         <h2 className={styles.title} data-testid="helm-charts-title">
           Charts
         </h2>
