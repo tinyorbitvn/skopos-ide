@@ -18,4 +18,8 @@ helmPath?: string | null, kubectlPath?: string | null,
 /**
  * For downloads and helm, such as `http://proxy.example:3128`. `None`: the system proxy.
  */
-httpProxy?: string | null, };
+httpProxy?: string | null, 
+/**
+ * Look for a new release on launch and every 6 hours (in-app update spec D2).
+ */
+updateCheck: boolean, };
