@@ -327,6 +327,96 @@ const CONFIG_MAP_ROW: Keep = Fields(&[
     ("binaryData", Blank),
 ]);
 
+/// A container's CPU and memory, the two amounts the topology sums.
+const CPU_AND_MEMORY: Keep = Fields(&[("cpu", All), ("memory", All)]);
+
+/// What the topology reads of a container's resources: its CPU and memory requests.
+const CONTAINER_REQUESTS: Keep = Fields(&[("requests", CPU_AND_MEMORY)]);
+
+/// What `graph::pod::pod_summary` reads of a container's status. `running` only has to be an
+/// object, so it keeps no field.
+const TOPOLOGY_CONTAINER_STATUS: Keep = Fields(&[
+    ("name", All),
+    ("ready", All),
+    ("started", All),
+    ("restartCount", All),
+    (
+        "state",
+        Fields(&[
+            ("running", Fields(&[])),
+            ("waiting", Fields(&[("reason", All)])),
+            (
+                "terminated",
+                Fields(&[("reason", All), ("signal", All), ("exitCode", All)]),
+            ),
+        ]),
+    ),
+]);
+
+/// What the node topology reads of a Pod (topology spec §4.1): where it runs, what it requests
+/// and what its summary text reads.
+const POD_TOPOLOGY: Keep = Fields(&[
+    (
+        "metadata",
+        Fields(&[
+            ("name", All),
+            ("namespace", All),
+            ("deletionTimestamp", All),
+        ]),
+    ),
+    (
+        "spec",
+        Fields(&[
+            ("nodeName", All),
+            ("overhead", CPU_AND_MEMORY),
+            (
+                "containers",
+                Each(&Fields(&[("name", All), ("resources", CONTAINER_REQUESTS)])),
+            ),
+            (
+                "initContainers",
+                Each(&Fields(&[
+                    ("name", All),
+                    ("restartPolicy", All),
+                    ("resources", CONTAINER_REQUESTS),
+                ])),
+            ),
+        ]),
+    ),
+    (
+        "status",
+        Fields(&[
+            ("phase", All),
+            ("reason", All),
+            (
+                "conditions",
+                Each(&Fields(&[("type", All), ("status", All), ("reason", All)])),
+            ),
+            ("containerStatuses", Each(&TOPOLOGY_CONTAINER_STATUS)),
+            ("initContainerStatuses", Each(&TOPOLOGY_CONTAINER_STATUS)),
+        ]),
+    ),
+]);
+
+/// What the node topology reads of a Node (topology spec §4.1).
+const NODE_TOPOLOGY: Keep = Fields(&[
+    ("metadata", Fields(&[("name", All), ("labels", All)])),
+    ("spec", Fields(&[("unschedulable", All), ("taints", All)])),
+    (
+        "status",
+        Fields(&[
+            (
+                "conditions",
+                Each(&Fields(&[("type", All), ("status", All)])),
+            ),
+            (
+                "allocatable",
+                Fields(&[("cpu", All), ("memory", All), ("pods", All)]),
+            ),
+        ]),
+    ),
+]);
+
 /// A value of another shape than the rule expects is kept as it is.
 fn keep(value: &mut Value, rule: &Keep) {
     match rule {
@@ -390,6 +480,16 @@ pub(super) fn is_core_pods(resource: &ResourceRef) -> bool {
     resource.group.is_empty() && resource.plural == "pods"
 }
 
+/// Core `v1` Nodes.
+fn is_core_nodes(resource: &ResourceRef) -> bool {
+    resource.group.is_empty() && resource.plural == "nodes"
+}
+
+/// Core Pods and Nodes are the only rows with a topology shape of their own.
+pub(super) fn has_topology_row(resource: &ResourceRef) -> bool {
+    is_core_pods(resource) || is_core_nodes(resource)
+}
+
 /// The rule a (group, plural) is trimmed by, for a table row or the Pod table's shape.
 fn row_rule(resource: &ResourceRef) -> Option<&'static Keep> {
     match (resource.group.as_str(), resource.plural.as_str()) {
@@ -414,6 +514,16 @@ pub(super) fn trim_for_watch(resource: &ResourceRef, row: &mut Value) {
 pub(super) fn trim_for_graph(resource: &ResourceRef, row: &mut Value) {
     if is_core_pods(resource) {
         keep(row, &POD_GRAPH);
+    }
+}
+
+/// Trims a topology row after `strip_for_list`. A core Pod or Node keeps what the node
+/// topology reads; any other row is left as it is.
+pub(super) fn trim_for_topology(resource: &ResourceRef, row: &mut Value) {
+    if is_core_pods(resource) {
+        keep(row, &POD_TOPOLOGY);
+    } else if is_core_nodes(resource) {
+        keep(row, &NODE_TOPOLOGY);
     }
 }
 
@@ -1125,5 +1235,109 @@ mod tests {
                 assert!(row.is_object(), "{}", resource.plural);
             }
         }
+    }
+
+    #[test]
+    fn a_topology_pod_row_keeps_what_the_topology_reads() {
+        let mut row = full_pod();
+        row["spec"]["overhead"] = json!({ "cpu": "10m", "memory": "8Mi", "example.com/gpu": "1" });
+        row["spec"]["containers"][0]["resources"] = json!({
+            "requests": { "cpu": "250m", "memory": "64Mi", "ephemeral-storage": "1Gi" },
+            "limits": { "cpu": "1" },
+        });
+        row["spec"]["initContainers"][0]["resources"] = json!({ "requests": { "cpu": "100m" } });
+
+        trim_for_topology(&resource("", "pods", "Pod"), &mut row);
+
+        assert_eq!(
+            row,
+            json!({
+                "metadata": {
+                    "name": "web-1",
+                    "namespace": "default",
+                    "deletionTimestamp": "2026-11-01T09:00:00Z",
+                },
+                "spec": {
+                    "nodeName": "node-1",
+                    "overhead": { "cpu": "10m", "memory": "8Mi" },
+                    "initContainers": [{
+                        "name": "setup",
+                        "restartPolicy": "Always",
+                        "resources": { "requests": { "cpu": "100m" } },
+                    }],
+                    "containers": [{
+                        "name": "app",
+                        "resources": { "requests": { "cpu": "250m", "memory": "64Mi" } },
+                    }],
+                },
+                "status": {
+                    "phase": "Running",
+                    "reason": "Evicted",
+                    "conditions": [{ "type": "Ready", "status": "False", "reason": "ContainersNotReady" }],
+                    "initContainerStatuses": [{
+                        "name": "setup",
+                        "ready": false,
+                        "started": true,
+                        "restartCount": 3,
+                        "state": { "waiting": { "reason": "CrashLoopBackOff" } },
+                    }],
+                    "containerStatuses": [{
+                        "name": "app",
+                        "ready": true,
+                        "restartCount": 0,
+                        "state": { "running": {} },
+                    }, {
+                        "name": "sidecar",
+                        "ready": false,
+                        "restartCount": 1,
+                        "state": { "terminated": { "reason": "OOMKilled", "signal": 9, "exitCode": 137 } },
+                    }],
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_topology_node_row_keeps_what_the_topology_reads() {
+        let mut row = full_node();
+        row["status"]["allocatable"]["hugepages-2Mi"] = json!("0");
+
+        trim_for_topology(&resource("", "nodes", "Node"), &mut row);
+
+        assert_eq!(
+            row,
+            json!({
+                "metadata": { "name": "worker-1", "labels": { "app": "web" } },
+                "spec": {
+                    "unschedulable": true,
+                    "taints": [{ "key": "dedicated", "value": "db", "effect": "NoSchedule", "timeAdded": "2026-11-01T08:00:00Z" }],
+                },
+                "status": {
+                    "conditions": [{ "type": "Ready", "status": "True" }],
+                    "allocatable": { "cpu": "7800m", "memory": "15Gi", "pods": "110" },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn only_core_pods_and_nodes_have_a_topology_trim() {
+        for (group, plural, trimmed) in [
+            ("", "pods", true),
+            ("", "nodes", true),
+            ("", "secrets", false),
+            ("example.com", "nodes", false),
+            ("example.com", "pods", false),
+        ] {
+            assert_eq!(
+                has_topology_row(&resource(group, plural, "X")),
+                trimmed,
+                "{group}/{plural}"
+            );
+        }
+        let mut row = json!({ "kind": "Secret", "data": { "a": "b" } });
+        let before = row.clone();
+        trim_for_topology(&resource("", "secrets", "Secret"), &mut row);
+        assert_eq!(row, before);
     }
 }
