@@ -531,3 +531,144 @@ test("a card is 240 px, and off screen it costs little: content-visibility auto 
     ]),
   );
 });
+
+const cells = (node: string) =>
+  within(screen.getByTestId(`topology-pods-${node}`)).getAllByRole("gridcell");
+const activePod = (node: string) =>
+  cells(node)
+    .find((c) => c.hasAttribute("data-active"))
+    ?.getAttribute("data-pod") ?? null;
+
+test("each pod is a square in its state, grouped by namespace; a node without pods has no grid", async () => {
+  await showDemo();
+  const grid = screen.getByTestId("topology-pods-worker-1");
+  expect([
+    grid.getAttribute("role"),
+    grid.getAttribute("aria-label"),
+    grid.tabIndex,
+  ]).toEqual(["grid", "Pods on worker-1", 0]);
+  expect(within(grid).getAllByRole("row")).toHaveLength(2);
+  expect(
+    cells("worker-1").map((c) => [
+      c.getAttribute("data-pod"),
+      c.getAttribute("data-state"),
+      c.getAttribute("aria-label"),
+    ]),
+  ).toEqual([
+    [
+      "kube-system/kube-proxy-a",
+      "Running",
+      "kube-system/kube-proxy-a · Running",
+    ],
+    ["shop/web-1", "Running", "shop/web-1 · Running"],
+    ["shop/web-2", "Failed", "shop/web-2 · CrashLoopBackOff"],
+  ]);
+  expect(cells("lab-1").map((c) => c.getAttribute("data-state"))).toEqual([
+    "Succeeded",
+    "Unknown",
+  ]);
+  expect(cells("worker-1").some((c) => c.hasAttribute("tabindex"))).toBe(false);
+  expect(screen.queryByTestId("topology-pods-worker-10")).toBeNull();
+});
+
+test("pointing at a square shows its tooltip on the body, and leaving the grid hides it", async () => {
+  await showDemo();
+  const web2 = cells("worker-1")[2];
+  if (!web2) throw new Error("no square");
+  fireEvent.pointerMove(web2);
+  const tip = screen.getByTestId("topology-pod-tip");
+  expect([tip.textContent, tip.parentElement === document.body]).toEqual([
+    "shop/web-2 · CrashLoopBackOff",
+    true,
+  ]);
+  fireEvent.pointerLeave(screen.getByTestId("topology-pods-worker-1"));
+  expect(screen.queryByTestId("topology-pod-tip")).toBeNull();
+});
+
+test("clicking a square opens the pod's drawer", async () => {
+  await showDemo();
+  const web1 = cells("worker-1")[1];
+  if (!web1) throw new Error("no square");
+  fireEvent.click(web1);
+  expect(where()).toBe(`${PAGE}?open=pods&object=shop%2Fweb-1`);
+  await act(flush);
+  expect([text("detail-title"), text("detail-kind")]).toEqual(["web-1", "Pod"]);
+});
+
+test("the grid is one tab stop: arrows move without wrapping, Home and End reach the ends, Enter opens", async () => {
+  await showDemo();
+  const grid = screen.getByTestId("topology-pods-worker-1");
+  act(() => grid.focus());
+  expect(activePod("worker-1")).toBe("kube-system/kube-proxy-a");
+  expect(grid.getAttribute("aria-activedescendant")).toBe(
+    cells("worker-1")[0]?.id,
+  );
+  expect(text("topology-pod-tip")).toBe("kube-system/kube-proxy-a · Running");
+  const press = (key: string) => fireEvent.keyDown(grid, { key });
+  press("ArrowRight");
+  expect(activePod("worker-1")).toBe("shop/web-1");
+  press("ArrowDown");
+  press("ArrowRight");
+  expect(activePod("worker-1")).toBe("shop/web-2");
+  press("Home");
+  press("ArrowLeft");
+  press("ArrowUp");
+  expect(activePod("worker-1")).toBe("kube-system/kube-proxy-a");
+  press("End");
+  expect(text("topology-pod-tip")).toBe("shop/web-2 · CrashLoopBackOff");
+  press("Enter");
+  expect(where()).toBe(`${PAGE}?open=pods&object=shop%2Fweb-2`);
+});
+
+test("a new snapshot keeps the active pod, or the square now at its place (RF2)", async () => {
+  await showDemo();
+  const grid = screen.getByTestId("topology-pods-worker-1");
+  act(() => grid.focus());
+  fireEvent.keyDown(grid, { key: "ArrowRight" });
+  expect(activePod("worker-1")).toBe("shop/web-1");
+
+  const proxy = tpod("kube-system", "kube-proxy-a");
+  const web0 = tpod("shop", "web-0");
+  const web1 = tpod("shop", "web-1");
+  const web2 = tpod("shop", "web-2", "Failed", "CrashLoopBackOff");
+  await t.send({ type: "snapshot", snapshot: demo([proxy, web0, web1, web2]) });
+  expect(activePod("worker-1")).toBe("shop/web-1");
+  expect(grid.getAttribute("aria-activedescendant")).toBe(
+    cells("worker-1")[2]?.id,
+  );
+
+  await t.send({ type: "snapshot", snapshot: demo([proxy, web0, web2]) });
+  expect(activePod("worker-1")).toBe("shop/web-2");
+
+  await t.send({ type: "snapshot", snapshot: demo([proxy]) });
+  expect(activePod("worker-1")).toBe("kube-system/kube-proxy-a");
+  fireEvent.keyDown(grid, { key: "Enter" });
+  expect(where()).toBe(`${PAGE}?open=pods&object=kube-system%2Fkube-proxy-a`);
+});
+
+test("highlighting a namespace fades the other namespaces' squares, and counts stay", async () => {
+  await showDemo();
+  fireEvent.keyDown(screen.getByTestId("topology-highlight"), {
+    key: "Enter",
+  });
+  fireEvent.click(screen.getByTestId("topology-ns-shop"));
+  const faded = (node: string) =>
+    cells(node).map((c) => c.hasAttribute("data-faded"));
+  expect(faded("worker-1")).toEqual([true, false, false]);
+  expect(faded("worker-2")).toEqual([false]);
+  expect(faded("lab-1")).toEqual([true, true]);
+  expect(text("topology-count")).toBe("5");
+  expect(text("topology-pod-count-worker-1")).toBe("3 / 110 pods");
+  const rule = cssRules(
+    CSS_FILES["/src/features/topology/Topology.module.css"] ?? "",
+  ).find((r) => r.selector === ".pod[data-faded]");
+  expect(rule?.decls).toEqual([["opacity", "0.25"]]);
+});
+
+test("a highlighted namespace that is gone fades every square (RF5)", async () => {
+  await showDemo(`${PAGE}?ns=gone`);
+  const all = screen.getAllByRole("gridcell");
+  expect(all).toHaveLength(7);
+  expect(all.every((c) => c.hasAttribute("data-faded"))).toBe(true);
+  expect(text("topology-highlight")).toBe("gone");
+});

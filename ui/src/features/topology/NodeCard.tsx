@@ -12,6 +12,7 @@ import {
   READY_TONE,
   taintLine,
 } from "./model";
+import { PodGrid } from "./PodGrid";
 import styles from "./Topology.module.css";
 
 /** The donuts' size in px (topology spec §3.4). */
@@ -29,6 +30,9 @@ export const NodeCard = memo(function NodeCard(props: {
   usage: UsageItem | undefined;
   podsHidden: boolean;
   onOpen(name: string): void;
+  /** The highlighted namespace: other namespaces' squares fade. */
+  highlight: string | null;
+  onOpenPod(key: string): void;
 }) {
   const { node, usage, podsHidden, onOpen } = props;
   const badges = conditionBadges(node);
@@ -115,6 +119,14 @@ export const NodeCard = memo(function NodeCard(props: {
           >
             {podCountText(node)}
           </p>
+        )}
+        {podsHidden || node.pods.length === 0 ? null : (
+          <PodGrid
+            node={node.name}
+            pods={node.pods}
+            highlight={props.highlight}
+            onOpen={props.onOpenPod}
+          />
         )}
       </div>
     </article>
