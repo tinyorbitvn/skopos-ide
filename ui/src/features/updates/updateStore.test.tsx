@@ -73,6 +73,16 @@ test("Check for Updates opens the dialog and keeps the state the check ended in"
   expect(useUpdates.getState().state?.phase).toEqual({ type: "upToDate" });
 });
 
+test("a rejected check closes the dialog instead of leaving it on checking", async () => {
+  mockBackend({
+    update_check: () => {
+      throw new Error("no such command");
+    },
+  });
+  await act(checkForUpdates);
+  expect(useShell.getState().dialog).toBeNull();
+});
+
 test("Install and Restart saves pending UI state before it installs", async () => {
   const backend = mockBackend({
     ui_state_get: () => null,

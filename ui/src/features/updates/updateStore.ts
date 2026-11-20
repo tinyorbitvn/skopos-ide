@@ -63,6 +63,10 @@ export async function checkForUpdates(): Promise<void> {
   try {
     useUpdates.setState({ state: await api.updateCheck() });
   } catch (error) {
+    // No state came with the failure, so the dialog would show "checking" forever.
+    const phase = useUpdates.getState().state?.phase.type;
+    if (phase === undefined || phase === "checking")
+      useShell.getState().close("updates");
     toast.error("Could not check for updates", failureMessage(error));
   }
 }
