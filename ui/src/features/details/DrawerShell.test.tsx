@@ -22,6 +22,24 @@ function layout(
       </nav>
       <div data-testid="screen" style={{ position: "relative" }}>
         <h2 data-testid="screen-title">Things</h2>
+        <div data-keeps-drawer="">
+          <button type="button">Filter</button>
+        </div>
+        <table
+          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the list's table, as VirtualTable draws it.
+          role="grid"
+        >
+          <thead>
+            <tr>
+              <th>Name</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>db</td>
+            </tr>
+          </tbody>
+        </table>
         <DrawerShell
           label="Thing details"
           testId="thing-drawer"
@@ -113,6 +131,14 @@ test("a click inside the drawer or outside its screen, as on the sidebar, leaves
   click(screen.getByText("Body"));
   click(screen.getByRole("button", { name: "Act" }));
   click(screen.getByRole("button", { name: "Pods" }));
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+test("a click on a row, the table's header or the toolbar leaves it open, as they work with it", () => {
+  const { onClose } = show();
+  click(screen.getByRole("cell", { name: "db" }));
+  click(screen.getByRole("columnheader", { name: "Name" }));
+  click(screen.getByRole("button", { name: "Filter" }));
   expect(onClose).not.toHaveBeenCalled();
 });
 

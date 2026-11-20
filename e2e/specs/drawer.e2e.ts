@@ -142,16 +142,23 @@ async function openPod(index: number): Promise<string> {
   return name;
 }
 
-/** A real pointer click `x` px in from the element's left edge, halfway down it. */
+/**
+ * A real pointer click `x` px in from the element's left edge and `y` px down from its top,
+ * or halfway down it without `y`.
+ */
 async function pointerClickAt(
   element: WebdriverIO.Element,
   x: number,
+  y?: number,
 ): Promise<void> {
   const at = await element.getLocation();
   const size = await element.getSize();
   await browser
     .action("pointer", { parameters: { pointerType: "mouse" } })
-    .move({ x: Math.round(at.x + x), y: Math.round(at.y + size.height / 2) })
+    .move({
+      x: Math.round(at.x + x),
+      y: Math.round(at.y + (y ?? size.height / 2)),
+    })
     .down({ button: 0 })
     .up({ button: 0 })
     .perform();
@@ -300,7 +307,7 @@ describe("the details drawer on a real cluster", () => {
     await closeDrawer();
   });
 
-  it("a row click shows that row and a click on the dim beside the drawer closes it", async () => {
+  it("a row click shows that row, the toolbar leaves it open and a click on the dim beside it closes it", async () => {
     await openPod(0);
     const [, other] = await rowIds();
     // The real pointer, as the driver's element click sends no pointer events. The row is
@@ -308,7 +315,13 @@ describe("the details drawer on a real cluster", () => {
     await pointerClickAt(await shown(other), 80);
     const name = other.slice(`resource-row-${NS}-`.length);
     await showing("Pod", (t) => t.includes(name), `Pod ${name}`);
+    // The toolbar works with the drawer open: a click there leaves it shown.
     await pointerClick(await shown("resource-title"));
+    await browser.pause(300);
+    await shown("detail-drawer");
+    // The empty space under the few rows of the list, clear of the drawer on the right.
+    const list = await shown("resource-screen");
+    await pointerClickAt(list, 40, (await list.getSize()).height - 30);
     await gone("detail-drawer");
   });
 

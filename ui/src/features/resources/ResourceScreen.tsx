@@ -317,7 +317,7 @@ export function ResourceScreen(props: {
         if (e.target === filterBox.current) setSuggesting(false);
       }}
     >
-      <div className={styles.toolbar}>
+      <div className={styles.toolbar} data-keeps-drawer="">
         <h2 className={styles.title} data-testid="resource-title">
           {kind}
         </h2>
