@@ -12,6 +12,7 @@ import type { MoveOutcome } from "./generated/MoveOutcome";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
 import type { ResourceRef } from "./generated/ResourceRef";
 import type { SessionEvent } from "./generated/SessionEvent";
+import type { TopologyEvent } from "./generated/TopologyEvent";
 import type { WatchEvent } from "./generated/WatchEvent";
 import type { WindowLayout } from "./generated/WindowLayout";
 
@@ -394,6 +395,29 @@ test("resource_graph_unsubscribe names the subscription", async () => {
   await api.resourceGraphUnsubscribe("g1");
   expect(backend.calls).toEqual([
     { cmd: "resource_graph_unsubscribe", args: { subscriptionId: "g1" } },
+  ]);
+});
+
+test("node_topology_subscribe gets the cluster and a channel, and gives the id", async () => {
+  const events: TopologyEvent[] = [];
+  const backend = mockBackend({ node_topology_subscribe: () => "t1" });
+  await expect(
+    api.nodeTopologySubscribe("c1", (event) => events.push(event)),
+  ).resolves.toBe("t1");
+  const sent = backend.callsTo("node_topology_subscribe")[0];
+  expect(Object.keys(sent ?? {}).sort()).toEqual(["clusterId", "onEvent"]);
+  expect(sent?.clusterId).toBe("c1");
+  const channel = sent?.onEvent as Channel<TopologyEvent>;
+  expect(channel).toBeInstanceOf(Channel);
+  channel.onmessage({ type: "failure", message: "boom" });
+  expect(events).toEqual([{ type: "failure", message: "boom" }]);
+});
+
+test("node_topology_unsubscribe names the subscription", async () => {
+  const backend = mockBackend({ node_topology_unsubscribe: () => null });
+  await api.nodeTopologyUnsubscribe("t1");
+  expect(backend.calls).toEqual([
+    { cmd: "node_topology_unsubscribe", args: { subscriptionId: "t1" } },
   ]);
 });
 

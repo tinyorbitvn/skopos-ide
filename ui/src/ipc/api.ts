@@ -58,6 +58,7 @@ import type { JsonValue } from "./generated/serde_json/JsonValue";
 import type { TerminalSize } from "./generated/TerminalSize";
 import type { ToolName } from "./generated/ToolName";
 import type { ToolStatus } from "./generated/ToolStatus";
+import type { TopologyEvent } from "./generated/TopologyEvent";
 import type { UsageOf } from "./generated/UsageOf";
 import type { UsageSnapshot } from "./generated/UsageSnapshot";
 import type { WatchEvent } from "./generated/WatchEvent";
@@ -157,6 +158,20 @@ export const api = {
     }),
   resourceGraphUnsubscribe: (subscriptionId: string) =>
     call<void>("resource_graph_unsubscribe", { subscriptionId }),
+  /**
+   * Returns the subscription id. Node topology snapshots go to `onEvent` until
+   * unsubscribed or until a `failure` ends it (topology spec §4.2).
+   */
+  nodeTopologySubscribe: (
+    clusterId: string,
+    onEvent: (event: TopologyEvent) => void,
+  ) =>
+    call<string>("node_topology_subscribe", {
+      clusterId,
+      onEvent: new Channel<TopologyEvent>(onEvent),
+    }),
+  nodeTopologyUnsubscribe: (subscriptionId: string) =>
+    call<void>("node_topology_unsubscribe", { subscriptionId }),
   /**
    * Saves the map as drawn and returns the path written (spec O §6.4). `png`
    * is base64 without a `data:` prefix.
