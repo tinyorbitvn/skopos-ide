@@ -186,6 +186,66 @@ async function startMapFixture() {
   };
 }
 
+const TOPOLOGY_NAMESPACE = "skopos-e2e-topology";
+const TOPOLOGY_OBJECTS = path.resolve(
+  __dirname,
+  "..",
+  "fixtures",
+  "topology.yaml",
+);
+const TOPOLOGY_WORKER = "skopos-e2e-worker";
+const TOPOLOGY_ZONE_LABEL = "topology.kubernetes.io/zone";
+
+/**
+ * The kind cluster with two pods of a Deployment on the worker, which gets a zone label so
+ * the page draws a zone column (topology spec §8). The namespace and the label go when the
+ * run ends.
+ */
+async function startTopologyFixture() {
+  await kubectl([
+    "delete",
+    "namespace",
+    TOPOLOGY_NAMESPACE,
+    "--ignore-not-found",
+    "--wait=true",
+    "--timeout=120s",
+  ]);
+  await kubectl([
+    "label",
+    "node",
+    TOPOLOGY_WORKER,
+    `${TOPOLOGY_ZONE_LABEL}=skopos-e2e-zone`,
+    "--overwrite",
+  ]);
+  await kubectl(["apply", "-f", TOPOLOGY_OBJECTS]);
+  await kubectl([
+    "-n",
+    TOPOLOGY_NAMESPACE,
+    "rollout",
+    "status",
+    "deployment/topology",
+    "--timeout=120s",
+  ]);
+  return {
+    kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
+    async stop() {
+      await kubectl([
+        "delete",
+        "namespace",
+        TOPOLOGY_NAMESPACE,
+        "--ignore-not-found",
+        "--wait=false",
+      ]);
+      await kubectl([
+        "label",
+        "node",
+        TOPOLOGY_WORKER,
+        `${TOPOLOGY_ZONE_LABEL}-`,
+      ]).catch(() => "");
+    },
+  };
+}
+
 const FIXTURES: Record<string, SpecFixture> = {
   catalog: { kubeconfigs: { config: kubeconfig(["alpha", "beta"]) } },
   "hotbar-restart-1-save": {
@@ -235,6 +295,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   // e2e/helpers/metrics.ts installs the providers in the spec, which needs a longer timeout.
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
+  topology: { kubeconfigs: {}, start: startTopologyFixture },
   tabs: { kubeconfigs: {}, start: startKindFixture },
   "sidebar-rail": { kubeconfigs: {}, start: startKindFixture },
   "tabs-restart-1-save": {

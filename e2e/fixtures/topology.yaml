@@ -1,0 +1,26 @@
+# The node topology's objects (topology spec §8). e2e/helpers/fixtures.ts applies this
+# before the app starts, and labels the worker with a zone.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skopos-e2e-topology
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: topology
+  namespace: skopos-e2e-topology
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: topology }
+  template:
+    metadata:
+      labels: { app: topology }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
