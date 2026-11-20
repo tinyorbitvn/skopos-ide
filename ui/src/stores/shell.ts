@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** The shell dialogs: at most one is open (spec C §4.2). */
-export type ShellDialogId = "palette" | "shortcuts" | "about";
+export type ShellDialogId = "palette" | "shortcuts" | "about" | "updates";
 
 interface ShellState {
   dialog: ShellDialogId | null;
