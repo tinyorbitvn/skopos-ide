@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use dashmap::DashMap;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Secret;
 use kube::core::PartialObjectMeta;
@@ -24,6 +23,7 @@ use super::lock;
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, IpcError};
 use crate::kubeconfig::ClusterId;
+use crate::subscriptions::Subscriptions;
 
 /// What Helm labels its release Secrets with.
 const HELM_OWNER: &str = "owner=helm";
@@ -45,7 +45,7 @@ pub enum HelmReleasesEvent {
 /// The running subscriptions, `helm-N`.
 pub(crate) struct ReleaseWatches {
     /// What stops each subscription. Shared with the tasks, which remove their own entry.
-    subscriptions: Arc<DashMap<String, CancellationToken>>,
+    subscriptions: Arc<Subscriptions>,
     next: AtomicU64,
     debounce: Mutex<Duration>,
 }
@@ -53,7 +53,7 @@ pub(crate) struct ReleaseWatches {
 impl ReleaseWatches {
     pub(crate) fn new() -> Self {
         Self {
-            subscriptions: Arc::new(DashMap::new()),
+            subscriptions: Arc::new(Subscriptions::default()),
             next: AtomicU64::new(1),
             debounce: Mutex::new(DEFAULT_DEBOUNCE),
         }
@@ -63,11 +63,12 @@ impl ReleaseWatches {
 impl AppCore {
     /// Sends `Changed` to `tx` when a Helm release Secret changes, until unsubscribed, the
     /// cluster disconnects, the receiver closes or a `Forbidden` or `Failed` event has been
-    /// sent. Returns the subscription id.
+    /// sent. Returns the subscription id. `owner` is the label of the window that asks.
     pub fn helm_releases_subscribe(
         &self,
         id: &ClusterId,
         tx: Sender<HelmReleasesEvent>,
+        owner: &str,
     ) -> CoreResult<String> {
         let client = self.cluster_client(id)?;
         let stop = self.cluster_cancel_token(id)?;
@@ -75,7 +76,7 @@ impl AppCore {
         let subscription = format!("helm-{}", watches.next.fetch_add(1, Ordering::Relaxed));
         watches
             .subscriptions
-            .insert(subscription.clone(), stop.clone());
+            .insert(subscription.clone(), stop.clone(), Some(owner));
         let debounce = *lock(&watches.debounce);
         tokio::spawn(run(
             client,
@@ -90,9 +91,12 @@ impl AppCore {
 
     /// An id that is unknown or already ended is ignored.
     pub fn helm_releases_unsubscribe(&self, subscription: &str) {
-        if let Some((_, stop)) = self.helm().watches.subscriptions.remove(subscription) {
-            stop.cancel();
-        }
+        self.helm().watches.subscriptions.stop(subscription);
+    }
+
+    /// Ends the release subscriptions the window `owner` asked for.
+    pub(crate) fn helm_releases_stop_owned(&self, owner: &str) {
+        self.helm().watches.subscriptions.stop_owned(owner);
     }
 
     /// The trailing debounce of later subscriptions; tests shorten it.
@@ -106,11 +110,11 @@ async fn run(
     stop: CancellationToken,
     tx: Sender<HelmReleasesEvent>,
     debounce: Duration,
-    subscriptions: Arc<DashMap<String, CancellationToken>>,
+    subscriptions: Arc<Subscriptions>,
     subscription: String,
 ) {
     let last = watch_releases(client, &stop, &tx, debounce).await;
-    subscriptions.remove(&subscription);
+    subscriptions.forget(&subscription);
     if let Some(event) = last {
         // A terminal event is sent once; an unsubscribe in the meantime wins.
         tokio::select! {

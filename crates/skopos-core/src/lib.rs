@@ -22,6 +22,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod shell_env;
 pub mod store;
+mod subscriptions;
 pub mod tools;
 pub mod ui_state;
 pub mod windows;

@@ -8,7 +8,7 @@ use skopos_core::resources::{
     ApiResourceInfo, ApplyResult, InvolvedRef, ObjectNames, Propagation, ResourceRef, WatchEvent,
 };
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
@@ -34,11 +34,12 @@ pub async fn resources_names(
     state.core.resources_names(&cluster_id).await
 }
 
-/// Streams the resource to `on_event` and returns the subscription id. When the
-/// channel can no longer be written, as after a webview reload, the subscription
-/// is ended so its watch does not outlive the page.
+/// Streams the resource to `on_event` and returns the subscription id. The subscription
+/// belongs to the window that asks and ends when its page loads again or it closes, so
+/// its watch does not outlive the page; so does one whose channel can no longer be written.
 #[tauri::command]
 pub async fn resources_subscribe(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     resource: ResourceRef,
@@ -47,16 +48,18 @@ pub async fn resources_subscribe(
     let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
-        .resources_subscribe(&cluster_id, resource, tx)
+        .resources_subscribe(&cluster_id, resource, tx, window.label())
         .await?;
     forward(state.core.clone(), id.clone(), rx, on_event);
     Ok(id)
 }
 
 /// Streams one object to `on_event` and returns the subscription id, which
-/// `resources_unsubscribe` ends. The rows are whole objects.
+/// `resources_unsubscribe` ends. The rows are whole objects. It ends with the window's page
+/// as `resources_subscribe` does.
 #[tauri::command]
 pub async fn resources_subscribe_object(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     resource: ResourceRef,
@@ -67,7 +70,7 @@ pub async fn resources_subscribe_object(
     let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
-        .resources_subscribe_object(&cluster_id, resource, namespace, name, tx)
+        .resources_subscribe_object(&cluster_id, resource, namespace, name, tx, window.label())
         .await?;
     forward(state.core.clone(), id.clone(), rx, on_event);
     Ok(id)

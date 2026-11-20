@@ -256,13 +256,15 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             let state = webview.state::<AppState>();
             match payload.event() {
                 // This window is replacing its page, and the new one cannot know the old
-                // one's drains or sessions; other windows keep theirs (P36). Route
-                // changes use the hash, so they load nothing. Port-forwards go on: the
-                // new page lists them. No automated test reaches this hook. The core's
-                // `sessions_stop_owned` and `node_drain_cancel_owned` have their own tests.
+                // one's drains, sessions or subscriptions; other windows keep theirs (P36).
+                // Route changes use the hash, so they load nothing. Port-forwards go on:
+                // the new page lists them. No automated test reaches this hook. The core's
+                // `sessions_stop_owned`, `node_drain_cancel_owned` and
+                // `subscriptions_stop_owned` have their own tests.
                 PageLoadEvent::Started => {
                     state.core.node_drain_cancel_owned(webview.label());
                     state.core.sessions_stop_owned(webview.label());
+                    state.core.subscriptions_stop_owned(webview.label());
                 }
                 PageLoadEvent::Finished => {
                     events::send_startup_warnings(webview.app_handle(), &state.core);

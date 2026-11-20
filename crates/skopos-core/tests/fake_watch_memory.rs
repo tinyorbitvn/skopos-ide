@@ -194,7 +194,9 @@ async fn the_hub_keeps_a_watched_object_in_about_the_size_of_its_json() {
         kind: "Pod".into(),
         namespaced: true,
     };
-    core.resources_subscribe(&id, resource, tx).await.unwrap();
+    core.resources_subscribe(&id, resource, tx, "main")
+        .await
+        .unwrap();
     let text = loop {
         let event = tokio::time::timeout(WAIT, rx.recv())
             .await
