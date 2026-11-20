@@ -6,7 +6,14 @@ import {
   tabIn,
   tabTestId,
 } from "../helpers/tabs";
-import { clickWhenShown, gone, openCluster, shown } from "../helpers/ui";
+import {
+  clickNav,
+  clickWhenShown,
+  gone,
+  navItem,
+  openCluster,
+  shown,
+} from "../helpers/ui";
 import {
   expectWindowCount,
   invoke,
@@ -72,8 +79,8 @@ describe("windows", () => {
 
   before(async () => {
     await openCluster(KIND);
-    await clickWhenShown("nav-item-core-pods");
-    await ctrlClick(await shown("nav-item-core-nodes"));
+    await clickNav("nav-item-core-pods");
+    await ctrlClick(await navItem("nav-item-core-nodes"));
     await expectShape("Pods,*Nodes");
     podsTab = (await tabTestId(0, "Pods")).replace(/^tab-/, "");
   });
@@ -144,7 +151,7 @@ describe("windows", () => {
   // (P31) is sent as the page sends it: the drop command with the release's screen
   // point. Under Xvfb the main window sits at the screen's top left, 1360 × 860.
   it("drops a tab outside every window into a new window, and onto the main window back", async () => {
-    await ctrlClick(await shown("nav-item-core-pods"));
+    await ctrlClick(await navItem("nav-item-core-pods"));
     await expectShape("Nodes,*Pods");
     const pods = (await tabTestId(0, "Pods")).replace(/^tab-/, "");
     // The page saves its layout 300 ms after a change; the drop needs the tab saved.

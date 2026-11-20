@@ -2,8 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { createTestNamespace, deleteTestNamespace, kubectl } from "../helpers/kube";
 import {
-  byTestId, clickWhenShown, dialogButton, gone, openCluster, openResource, pointerClick,
-  resourceRowMenu, rowId, searchResources, shown,
+  byTestId,
+  clickWhenShown,
+  dialogButton,
+  gone,
+  navItem,
+  openCluster,
+  openResource,
+  pointerClick,
+  resourceRowMenu,
+  rowId,
+  searchResources,
+  shown,
 } from "../helpers/ui";
 
 const KIND = "kind-skopos-e2e";
@@ -72,7 +82,7 @@ describe("Argo CD on the kind cluster", () => {
   it("lists Applications in their own section with the Argo CD columns", async () => {
     await shown("nav-section-argo");
     for (const plural of ["applications", "applicationsets", "appprojects"]) {
-      await shown(`nav-item-argoproj.io-${plural}`);
+      await navItem(`nav-item-argoproj.io-${plural}`);
     }
     await openResource(APPS, "Application");
     await searchResources("guestbook");

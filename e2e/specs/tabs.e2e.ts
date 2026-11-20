@@ -16,9 +16,11 @@ import {
 import {
   byTestId,
   catalogRow,
+  clickNav,
   clickWhenShown,
   expectConnected,
   gone,
+  navItem,
   pointerClick,
   shown,
 } from "../helpers/ui";
@@ -51,7 +53,7 @@ describe("tabs and panes", () => {
   });
 
   it("navigates the focused tab with a plain click, and goes back through its history", async () => {
-    await clickWhenShown("nav-item-core-pods");
+    await clickNav("nav-item-core-pods");
 
     await expectShape("Catalog^,*Pods");
     await expectPaneTitle(0, "Pod");
@@ -63,7 +65,7 @@ describe("tabs and panes", () => {
   });
 
   it("opens a new tab at the end of the pane with Ctrl+click", async () => {
-    await ctrlClick(await shown("nav-item-core-namespaces"));
+    await ctrlClick(await navItem("nav-item-core-namespaces"));
 
     await expectShape("Catalog^,Pods,*Namespaces");
     await expectPaneTitle(0, "Namespace");
@@ -73,13 +75,13 @@ describe("tabs and panes", () => {
     await (await tabIn(0, "Catalog")).click();
     await expectShape("*Catalog^,Pods,Namespaces");
 
-    await clickWhenShown("nav-item-core-configmaps");
+    await clickNav("nav-item-core-configmaps");
 
     await expectShape("Catalog^,*ConfigMaps,Pods,Namespaces");
   });
 
   it("opens a middle-click beside, in a new pane on the right", async () => {
-    await middleClick(await shown("nav-item-core-nodes"));
+    await middleClick(await navItem("nav-item-core-nodes"));
 
     await expectShape("Catalog^,*ConfigMaps,Pods,Namespaces | >*Nodes");
     await expectPaneTitle(1, "Node");

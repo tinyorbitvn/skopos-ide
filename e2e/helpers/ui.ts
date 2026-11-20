@@ -91,11 +91,61 @@ export async function openCluster(context: string): Promise<void> {
 }
 
 /** Clicks a sidebar entry and waits for the screen of that kind. */
+/**
+ * Opens every closed section and sub-branch of the cluster sidebar, which start closed
+ * unless they hold the current page. A sub-branch's kinds render only once it is open,
+ * so it goes round until nothing is closed, and it waits for the sidebar's sections to
+ * show first: an empty sidebar has nothing closed yet.
+ */
+export async function revealNav(): Promise<void> {
+  await browser.waitUntil(
+    () =>
+      browser.execute(() => {
+        const nav = document.querySelector('[data-testid="cluster-sidebar"]');
+        if (!nav?.querySelector('[data-testid^="nav-section-"]')) return false;
+        const closed = Array.from(
+          nav.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]'),
+        );
+        for (const toggle of closed) toggle.click();
+        return closed.length === 0;
+      }),
+    { timeout: TIMEOUT, timeoutMsg: "the sidebar's sections did not open" },
+  );
+}
+
+/**
+ * A kind or an overview link of the cluster sidebar, once its section is open. It opens
+ * closed sections until the item shows, since a kind can come after the sidebar first
+ * draws (a CRD, a section that loads late).
+ */
+export async function navItem(id: string, timeout = TIMEOUT) {
+  await browser.waitUntil(
+    () =>
+      browser.execute((target: string) => {
+        const nav = document.querySelector('[data-testid="cluster-sidebar"]');
+        if (!nav) return false;
+        for (const toggle of Array.from(
+          nav.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]'),
+        )) {
+          toggle.click();
+        }
+        const item = document.querySelector(`[data-testid="${target}"]`);
+        return item !== null && item.getClientRects().length > 0;
+      }, id),
+    { timeout, timeoutMsg: `the sidebar never showed ${id}` },
+  );
+  return shown(id);
+}
+
+export async function clickNav(id: string): Promise<void> {
+  await (await navItem(id)).click();
+}
+
 export async function openResource(
-  navItem: string,
+  item: string,
   kind: string,
 ): Promise<void> {
-  await clickWhenShown(navItem);
+  await clickNav(item);
   await expectResourceTitle(kind);
 }
 

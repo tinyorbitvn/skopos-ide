@@ -10,6 +10,7 @@ import {
 import { deleteTestNamespace } from "../helpers/kube";
 import {
   byTestId,
+  clickNav,
   clickWhenShown,
   dialogButton,
   editorContaining,
@@ -72,7 +73,7 @@ describe("helm", () => {
 
   it("lists the chart, renders its README and lists both versions", async () => {
     await openCluster(KIND);
-    await clickWhenShown("nav-helm/charts");
+    await clickNav("nav-helm/charts");
     await clickWhenShown(`helm-chart-${REPO}-${CHART}`);
     const readme = await shown("helm-chart-readme");
     await readme.$(`h3=${CHART}`).waitForDisplayed({ timeout: 30000 });

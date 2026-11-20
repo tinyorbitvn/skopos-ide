@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useState,
 } from "react";
 import { useLocation } from "react-router";
 import { ErrorNotice, Spinner } from "../../design";
@@ -333,7 +334,6 @@ function BranchRow(props: { clusterId: string; branch: NavBranch }) {
   const [open, setOpen] = useRowOpen(
     `cluster.${clusterId}.nav.${branch.id}`,
     active,
-    true,
   );
   const panel = `nav-branch-panel-${branch.id}`;
   return (
@@ -371,7 +371,6 @@ function Section(props: {
   const [open, setOpen] = useRowOpen(
     `cluster.${clusterId}.nav.${section.id}`,
     active,
-    true,
   );
   const panel = `nav-panel-${section.id}`;
   return (
@@ -482,6 +481,8 @@ export function Sidebar(props: {
     [crds, clusterId, pathname],
   );
   const openPaths = useOpenPaths();
+  // Scrolled away from the top: a hairline under the switcher marks where the rows go.
+  const [scrolled, setScrolled] = useState(false);
 
   let body: ReactNode;
   if (props.loading && resources.length === 0) {
@@ -527,6 +528,8 @@ export function Sidebar(props: {
         className={styles.sidebar}
         aria-label="Cluster navigation"
         data-testid="cluster-sidebar"
+        data-scrolled={scrolled ? "true" : undefined}
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
       >
         <div className={styles.group} data-testid="nav-group-top">
           {NAV_SCREENS.map((s) => (

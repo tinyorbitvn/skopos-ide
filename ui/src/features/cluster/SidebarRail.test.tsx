@@ -146,6 +146,15 @@ test("the rail shows one icon per section between group dividers, with the secti
     decl(".flyoutTitle", "font"),
     decl(".flyoutItem", "height"),
     decl(".flyoutItem", "border-radius"),
+    decl(".icons", "padding"),
+    decl(".divider", "margin"),
+    decl(".flyout", "padding"),
+    decl(".flyoutList", "gap"),
+    decl(".flyoutItem", "margin"),
+    decl(".flyoutItem", "color"),
+    decl(".flyoutHead", "gap"),
+    decl(".flyoutHead", "padding"),
+    decl(".caption", "padding"),
   ]).toEqual([
     "40px",
     "36px",
@@ -160,6 +169,15 @@ test("the rail shows one icon per section between group dividers, with the secti
     "var(--type-overline)",
     "30px",
     "var(--radius-full)",
+    "0 0 var(--space-5)",
+    "var(--space-4) 0",
+    "var(--space-4)",
+    "var(--space-2)",
+    "0",
+    "var(--text-primary)",
+    "var(--space-5)",
+    "var(--space-2) var(--space-2) var(--space-4) var(--space-6)",
+    "var(--space-5) var(--space-6) var(--space-2)",
   ]);
 });
 

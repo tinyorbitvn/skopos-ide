@@ -5,13 +5,14 @@ import { kubectl } from "../helpers/kube";
 import {
   byTestId,
   clickWhenShown,
-  gone,
-  openCluster,
   expectRows,
   expectRowsExactly,
+  gone,
+  openCluster,
   openResource,
   pickFilterSuggestion,
   pointerClick,
+  revealNav,
   rowId,
   searchResources,
   shown,
@@ -711,7 +712,9 @@ describe("resource map", () => {
         timeoutMsg: `Network never listed ${plural}`,
       });
     }
-    // Opens the k8s.io domain of Custom Resources, if it has one, to look inside it.
+    // Opens the sections, which start closed, and the k8s.io domain of Custom Resources,
+    // if it has one, to look inside it.
+    await revealNav();
     const domain = byTestId("nav-crd-domain-toggle-k8s.io");
     if (
       (await domain.isExisting()) &&

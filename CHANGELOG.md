@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **A sidebar closer to its design:** sections start closed, except the one that holds the page on screen, and each cluster keeps the ones you open; the Argo CD branch starts closed too. Rows use the label type with brighter kind names, and section icons are dimmer than their names except on the current page. With no cluster picked, the switcher says "Pick a cluster" instead of a line cut short, and the version under its name drops build metadata (v1.37.0, not v1.37.0+rke2r1). Once the sidebar is scrolled, a hairline under the switcher marks where its rows go instead of leaving one cut in half. The cluster menu opens just under the switcher, the collapse handle has a border, and the rail and its flyouts have the design's spacing.
+
 ## [0.9.0] - 2026-11-20
 
 - **A glass sidebar in groups:** the cluster switcher and the sidebar share one glass-tinted column, 248 px wide by default; drag its edge between 200 and 360 px, or double-click it to reset. Overview and Resource map come first, then Apps (Helm, and Argo with Argo CD inside it), Cluster (Nodes, Namespaces, Events) and Resources. Each section has its icon, Helm and Argo show their project logos, and a section with one screen is a plain link. The kinds of an open section hang on tree lines, the current page has a soft highlight, and a kind open in another tab of the window shows a small dot. The switcher shows the cluster's tile with a status dot, its distribution and version, and its name.

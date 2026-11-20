@@ -55,7 +55,7 @@
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--border-default);
   border-radius: 50%;
   background: var(--surface-card);
   box-shadow: var(--shadow-2);
@@ -64,6 +64,7 @@
 }
 
 .collapse:hover {
+  background: var(--surface-raised);
   color: var(--text-primary);
 }
 

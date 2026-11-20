@@ -3,6 +3,7 @@ import {
   clickWhenShown,
   expectResourceTitle,
   gone,
+  navItem,
   openCluster,
   shown,
 } from "../helpers/ui";
@@ -48,6 +49,6 @@ describe("the sidebar rail", () => {
     await shown("cluster-sidebar");
     await gone("cluster-rail");
     expect(await collapsed()).toBeNull();
-    await shown("nav-item-core-pods");
+    await navItem("nav-item-core-pods");
   });
 });

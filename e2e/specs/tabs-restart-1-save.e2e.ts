@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ctrlClick, doubleClick, expectShape, middleClick, tabIn } from "../helpers/tabs";
-import { byTestId, clickWhenShown, openCluster, shown } from "../helpers/ui";
+import {
+  byTestId,
+  clickNav,
+  navItem,
+  openCluster,
+} from "../helpers/ui";
 
 const KIND = "kind-skopos-e2e";
 
@@ -34,12 +39,12 @@ const shownPath = (tab: SavedTab) => tab.history[tab.index] ?? "";
 describe("panes, tabs and pins across a restart: before", () => {
   it("saves two panes, a pinned tab with its history, and the pane widths", async () => {
     await openCluster(KIND);
-    await clickWhenShown("nav-item-core-pods");
+    await clickNav("nav-item-core-pods");
     await expectShape("*Pods");
-    await ctrlClick(await shown("nav-item-core-namespaces"));
+    await ctrlClick(await navItem("nav-item-core-namespaces"));
     await doubleClick(await tabIn(0, "Pods"));
     await expectShape("*Pods^,Namespaces");
-    await middleClick(await shown("nav-item-core-nodes"));
+    await middleClick(await navItem("nav-item-core-nodes"));
     await expectShape("*Pods^,Namespaces | >*Nodes");
 
     await browser.execute(() =>

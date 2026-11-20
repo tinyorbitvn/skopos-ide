@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createTestNamespace, deleteTestNamespace, kubectl } from "../helpers/kube";
-import { byTestId, clickWhenShown, openCluster, shown } from "../helpers/ui";
+import {
+  byTestId,
+  clickNav,
+  openCluster,
+  shown,
+} from "../helpers/ui";
 
 const KIND = "kind-skopos-e2e";
 const NS = "skopos-test-workloads";
@@ -35,7 +40,7 @@ describe("workloads overview", () => {
   });
 
   it("counts each workload kind by the status its list shows", async () => {
-    await clickWhenShown("nav-overview-workloads");
+    await clickNav("nav-overview-workloads");
     await shown("workloads-overview-title");
     await until(async () => {
       const [total, healthy, , failing] = await counts("pods");

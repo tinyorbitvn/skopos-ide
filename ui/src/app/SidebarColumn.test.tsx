@@ -111,6 +111,11 @@ beforeEach(() => {
 test("the column draws one glass layer and the only border; the switcher and the nav draw none (spec Q §1)", () => {
   const column = cssRules(CSS_FILES["/src/app/SidebarColumn.module.css"]);
   expect(decl(column, ".column", "background")).toBe("var(--glass-tint)");
+  // The collapse handle: a ring keeps it apart from the column in dark, as the design draws it.
+  expect([
+    decl(column, ".collapse", "border"),
+    decl(column, ".collapse:hover", "background"),
+  ]).toEqual(["1px solid var(--border-default)", "var(--surface-raised)"]);
   expect(decl(column, ".column", "border-right")).toBe(
     "1px solid var(--border-subtle)",
   );

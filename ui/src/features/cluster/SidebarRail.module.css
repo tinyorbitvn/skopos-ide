@@ -15,7 +15,7 @@
   align-items: center;
   gap: var(--space-2);
   min-height: 0;
-  padding: var(--space-4) 0 var(--space-6);
+  padding: 0 0 var(--space-5);
   overflow-y: auto;
 }
 
@@ -60,7 +60,7 @@
   flex: none;
   width: 28px;
   height: 1px;
-  margin: var(--space-3) 0;
+  margin: var(--space-4) 0;
   border: 0;
   background: var(--tree-line);
 }
@@ -79,7 +79,7 @@
   flex-direction: column;
   width: 236px;
   max-height: calc(100% - 16px);
-  padding: var(--space-3);
+  padding: var(--space-4);
   overflow-y: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -92,8 +92,8 @@
   flex: none;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-2) var(--space-3) var(--space-6);
+  gap: var(--space-5);
+  padding: var(--space-2) var(--space-2) var(--space-4) var(--space-6);
 }
 
 .flyoutTitle {
@@ -110,12 +110,13 @@
 .flyoutList {
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
 }
 
 /* A branch or an API group above its kinds. */
 .caption {
   margin: 0;
-  padding: var(--space-4) var(--space-6) var(--space-2);
+  padding: var(--space-5) var(--space-6) var(--space-2);
   overflow: hidden;
   color: var(--text-secondary);
   font: var(--type-caption);
@@ -128,11 +129,11 @@
   display: block;
   flex: none;
   height: 30px;
-  margin: var(--space-1) 0;
+  margin: 0;
   padding: 0 var(--space-6);
   overflow: hidden;
   border-radius: var(--radius-full);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   line-height: 30px;
   text-decoration: none;
   text-overflow: ellipsis;
