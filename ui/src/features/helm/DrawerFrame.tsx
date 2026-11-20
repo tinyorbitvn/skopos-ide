@@ -4,7 +4,7 @@ import bar from "../resources/ObjectActionBar.module.css";
 
 /**
  * A Helm drawer in the frame every drawer shares: focus comes in on open and goes back on
- * close, and Escape inside the drawer closes it.
+ * close, and Escape inside the drawer or a click on the dim around it closes it.
  */
 export function DrawerFrame(props: {
   label: string;

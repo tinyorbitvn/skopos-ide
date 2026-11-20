@@ -142,6 +142,21 @@ async function openPod(index: number): Promise<string> {
   return name;
 }
 
+/** A real pointer click `x` px in from the element's left edge, halfway down it. */
+async function pointerClickAt(
+  element: WebdriverIO.Element,
+  x: number,
+): Promise<void> {
+  const at = await element.getLocation();
+  const size = await element.getSize();
+  await browser
+    .action("pointer", { parameters: { pointerType: "mouse" } })
+    .move({ x: Math.round(at.x + x), y: Math.round(at.y + size.height / 2) })
+    .down({ button: 0 })
+    .up({ button: 0 })
+    .perform();
+}
+
 async function closeDrawer(): Promise<void> {
   await clickWhenShown("detail-close");
   await gone("detail-drawer");
@@ -283,6 +298,18 @@ describe("the details drawer on a real cluster", () => {
     await gone("detail-drawer");
     await openPod(0);
     await closeDrawer();
+  });
+
+  it("a row click shows that row and a click on the dim beside the drawer closes it", async () => {
+    await openPod(0);
+    const [, other] = await rowIds();
+    // The real pointer, as the driver's element click sends no pointer events. The row is
+    // pressed on its name, clear of the drawer over its right end.
+    await pointerClickAt(await shown(other), 80);
+    const name = other.slice(`resource-row-${NS}-`.length);
+    await showing("Pod", (t) => t.includes(name), `Pod ${name}`);
+    await pointerClick(await shown("resource-title"));
+    await gone("detail-drawer");
   });
 
   it("copies a container's image from its row, without the hints that wrap it", async () => {

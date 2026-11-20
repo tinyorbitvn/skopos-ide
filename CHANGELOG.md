@@ -8,6 +8,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 ## [Unreleased]
 
 - **A sidebar closer to its design:** sections start closed, except the one that holds the page on screen, and each cluster keeps the ones you open; the Argo CD branch starts closed too. Rows use the label type with brighter kind names, and section icons are dimmer than their names except on the current page. With no cluster picked, the switcher says "Pick a cluster" instead of a line cut short, and the version under its name drops build metadata (v1.37.0, not v1.37.0+rke2r1). Once the sidebar is scrolled, a hairline under the switcher marks where its rows go instead of leaving one cut in half. The cluster menu opens just under the switcher, the collapse handle has a border, and the rail and its flyouts have the design's spacing.
+- **Close a drawer with a click beside it:** a click on the dimmed screen around any drawer, such as an object's, a Helm release's or a port forward's, closes it as Close does, and focus goes back where it was. A click on another row of the list still shows that row in the drawer. The drawer stays open while a ConfigMap or Secret in it has unsaved edits, and when the press started inside it, as for a resize or a text selection.
 
 ## [0.9.0] - 2026-11-20
 

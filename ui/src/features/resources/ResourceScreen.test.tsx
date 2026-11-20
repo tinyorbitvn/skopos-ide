@@ -1071,6 +1071,37 @@ test("clicking a row opens its detail drawer through the object param, and Escap
   expect(screen.queryByTestId("detail-drawer")).toBeNull();
 });
 
+/** A press and release of the primary button on `el`, and the click they make. */
+function pointerClick(el: Element) {
+  fireEvent.pointerDown(el, { button: 0 });
+  fireEvent.pointerUp(el, { button: 0 });
+  fireEvent.click(el);
+}
+
+test("a click on the dimmed list beside the drawer closes it, and focus goes back as with Close", async () => {
+  const fake = fakeBackend();
+  await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  pointerClick(screen.getByTestId("resource-title"));
+  await act(flush);
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  expect(document.activeElement).toBe(row("team-a", "web"));
+});
+
+test("a click on another row while the drawer is open shows that row in the same drawer", async () => {
+  const fake = fakeBackend();
+  await show(fake, [pod("web", "team-a"), pod("db", "team-a")], DEPLOYMENTS);
+  fireEvent.click(row("team-a", "web") as HTMLElement);
+  await act(flush);
+  const drawer = screen.getByTestId("detail-drawer");
+  pointerClick(row("team-a", "db") as HTMLElement);
+  await act(flush);
+  expect(screen.getByTestId("detail-title").textContent).toBe("db");
+  // It never closed on the way: the drawer that was open shows the row.
+  expect(screen.getByTestId("detail-drawer")).toBe(drawer);
+});
+
 test("Edit YAML in a row's menu opens the object in the dock", async () => {
   const fake = fakeBackend();
   await show(fake, [pod("web", "team-a")]);

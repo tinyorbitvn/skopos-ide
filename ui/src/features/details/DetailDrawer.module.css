@@ -229,6 +229,8 @@
   }
 }
 
+/* Clicks pass through to the list, so a row click still reaches its table; DrawerShell
+   closes the drawer on a click anywhere else in the screen. */
 .dim {
   position: absolute;
   inset: 0;
