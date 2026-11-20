@@ -42,7 +42,7 @@ const TONE_ORDER: Record<Tone, number> = {
   ok: 4,
 };
 
-function conditionTone(type: string): Tone {
+export function conditionTone(type: string): Tone {
   if (type === "NetworkUnavailable") return "danger";
   if (PRESSURES.has(type)) return "warn";
   return "neutral";

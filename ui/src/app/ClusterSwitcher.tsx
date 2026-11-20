@@ -19,7 +19,7 @@ import { connectCluster } from "../stores/clusters";
 import { useFolders } from "../stores/folders";
 import { useWindowLayout } from "../stores/windowLayout";
 import styles from "./ClusterSwitcher.module.css";
-import { clusterStatus } from "./clusterStatus";
+import { clusterRelease, clusterStatus } from "./clusterStatus";
 import { clusterColor, clusterInitials } from "./clusterVisual";
 import { focusedPane, focusedTab } from "./tabs/layout";
 import { tabCluster } from "./tabs/routes";
@@ -37,8 +37,7 @@ const INDENT_PX = 14;
  */
 export function switcherOverline(state: ConnectionState): string {
   if (state.status !== "connected") return clusterStatus(state).label;
-  const distribution = state.info.distribution.trim() || "Kubernetes";
-  const version = state.info.version.trim().replace(/\+.*$/, "");
+  const { distribution, version } = clusterRelease(state.info);
   return version === "" ? distribution : `${distribution} · ${version}`;
 }
 

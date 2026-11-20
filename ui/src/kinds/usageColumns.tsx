@@ -92,7 +92,7 @@ function level(percent: number): "ok" | "warn" | "critical" {
   return "ok";
 }
 
-function percentOf(share: UsageShare | null): number | null {
+export function percentOf(share: UsageShare | null): number | null {
   if (share === null || share.total === null || !(share.total > 0)) {
     return null;
   }
