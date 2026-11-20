@@ -118,7 +118,8 @@ jobs:
             echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set; see docs/releasing.md"
             exit 1
           fi
-      - uses: tauri-apps/tauri-action@v0
+      # Pinned to a commit: this step gets the updater signing key. Bump by hand.
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
