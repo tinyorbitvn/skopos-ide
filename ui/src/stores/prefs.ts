@@ -12,6 +12,7 @@ export interface PrefsState {
   error: string | null;
   load(): Promise<void>;
   setTheme(theme: Theme): Promise<void>;
+  setUpdateCheck(on: boolean): Promise<void>;
   addSource(source: SyncSource): Promise<void>;
   removeSource(path: string): Promise<void>;
 }
@@ -54,6 +55,11 @@ export const usePrefs = create<PrefsState>((set, get) => {
       if (!prefs) return;
       applyTheme(theme);
       if (!(await save({ ...prefs, theme }))) applyTheme(prefs.theme);
+    },
+    async setUpdateCheck(on) {
+      const { prefs } = get();
+      if (!prefs) return;
+      await save({ ...prefs, updateCheck: on });
     },
     async addSource(source) {
       const { prefs } = get();
