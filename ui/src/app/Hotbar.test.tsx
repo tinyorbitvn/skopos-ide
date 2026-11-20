@@ -16,6 +16,7 @@ import {
   useWindowLayout,
 } from "../stores/windowLayout";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
+import { updateState } from "../test/updates";
 import { Hotbar } from "./Hotbar";
 import { tabPath } from "./tabs/layout";
 import { ShellRouter } from "./tabs/ShellRouter";
@@ -37,6 +38,7 @@ async function show(clusters: ClusterEntry[], hotbar: string[]) {
     catalog_warnings: () => [],
     hotbar_get: () => hotbar,
     hotbar_set: () => null,
+    update_check: () => updateState({ phase: { type: "upToDate" } }),
   });
   await useCatalog.getState().init();
   render(
@@ -242,6 +244,7 @@ test("the Help menu sits directly above Preferences and lists three items", asyn
     ["help-palette", "Command palette"],
     ["help-shortcuts", "Keyboard shortcuts"],
     ["help-about", "About SkoposIDE"],
+    ["help-check-updates", "Check for Updates…"],
   ]);
 });
 
@@ -256,4 +259,12 @@ test("the Help menu's items open the three shell dialogs", async () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   }
   expect(opened).toEqual(["palette", "shortcuts", "about"]);
+});
+
+test("the Help menu's Check for Updates opens the update dialog and checks", async () => {
+  const ipc = await show([alpha], []);
+  fireEvent.keyDown(screen.getByTestId("hotbar-help"), { key: "Enter" });
+  fireEvent.click(await screen.findByTestId("help-check-updates"));
+  expect(useShell.getState().dialog).toBe("updates");
+  await waitFor(() => expect(ipc.callsTo("update_check")).toHaveLength(1));
 });

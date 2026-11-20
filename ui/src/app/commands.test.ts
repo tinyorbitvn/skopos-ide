@@ -3,6 +3,10 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
 import { ChevronLeft, ChevronRight } from "../design/icons";
 import { openTerminal } from "../features/dock/openTerminal";
+import {
+  resetUpdatesForTest,
+  useUpdates,
+} from "../features/updates/updateStore";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetPrefsForTest } from "../stores/prefs";
@@ -16,6 +20,7 @@ import {
   useWindowLayout,
 } from "../stores/windowLayout";
 import { mockBackend } from "../test/ipc";
+import { updateState } from "../test/updates";
 import {
   COMMANDS,
   type CommandContext,
@@ -49,6 +54,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   resetShellForTest();
+  resetUpdatesForTest();
   resetPrefsForTest();
   resetWindowLayoutForTest();
   resetSidebarToggleForTest();
@@ -68,6 +74,7 @@ test("the registry lists the spec's commands in order", () => {
       ["resource-map", "Resource map of prod", null],
       ["shortcuts", "Show keyboard shortcuts", "shortcuts"],
       ["about", "About SkoposIDE", null],
+      ["check-updates", "Check for Updates", null],
       ["theme-dark", "Theme: Dark", null],
       ["theme-light", "Theme: Light", null],
       ["theme-system", "Theme: System", null],
@@ -366,4 +373,25 @@ test("toggle-sidebar collapses or expands the mounted sidebar, named and drawn f
     "Expand the sidebar",
     ChevronRight,
   ]);
+});
+
+test("Check for Updates opens the update dialog and checks", async () => {
+  const ipc = mockBackend({
+    update_check: () => updateState({ phase: { type: "upToDate" } }),
+  });
+  runCommand("check-updates", context());
+  expect(useShell.getState().dialog).toBe("updates");
+  await waitFor(() => expect(ipc.callsTo("update_check")).toHaveLength(1));
+  await waitFor(() =>
+    expect(useUpdates.getState().state?.phase).toEqual({ type: "upToDate" }),
+  );
+});
+
+test("the macOS menu's check_updates runs the same command", async () => {
+  const ipc = mockBackend({
+    update_check: () => updateState({ phase: { type: "upToDate" } }),
+  });
+  runMenuCommand("check_updates", context());
+  expect(useShell.getState().dialog).toBe("updates");
+  await waitFor(() => expect(ipc.callsTo("update_check")).toHaveLength(1));
 });

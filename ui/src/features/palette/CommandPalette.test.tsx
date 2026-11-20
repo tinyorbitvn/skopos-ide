@@ -213,7 +213,7 @@ test("without a query: Commands and Clusters at their caps", async () => {
     "palette-command-add-cluster",
     "palette-command-shortcuts",
     "palette-command-about",
-    "palette-command-theme-dark",
+    "palette-command-check-updates",
   ]);
   expect(rowIds("clusters")).toHaveLength(8);
   expect(screen.getByTestId("palette-count").textContent).toBe("14 results");
