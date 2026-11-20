@@ -13,6 +13,7 @@ const ICONS = Object.entries(iconModule).filter(
 const RENAMED: Record<string, string> = {
   CircleHelp: "circle-question-mark",
   ImageIcon: "image",
+  MapIcon: "map",
 };
 
 const kebab = (name: string) =>
