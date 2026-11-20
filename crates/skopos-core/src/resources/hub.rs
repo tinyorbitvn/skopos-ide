@@ -48,6 +48,14 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// One watcher's scope: a namespace, or `None` for the whole cluster.
 type Partition = Option<String>;
 
+/// True for an object the partition's watcher lists.
+fn in_partition(key: &ObjectKey, partition: &Partition) -> bool {
+    match partition {
+        None => true,
+        Some(namespace) => key.namespace.as_ref() == Some(namespace),
+    }
+}
+
 /// What a subscriber's rows keep: what the tables read, or what the relationship graph reads.
 /// The two differ only for core Pods, so a group stores both rows of each Pod, and every other
 /// resource has one row for both shapes.
@@ -73,6 +81,12 @@ impl StoredRow {
             RowShape::Table => &self.table,
             RowShape::Graph => self.graph.as_ref().unwrap_or(&self.table),
         }
+    }
+
+    /// True when a subscriber of either shape would get the same text from both.
+    fn same_as(&self, other: &StoredRow) -> bool {
+        self.table.json() == other.table.json()
+            && self.graph.as_ref().map(Row::json) == other.graph.as_ref().map(Row::json)
     }
 }
 
@@ -178,6 +192,28 @@ impl GroupState {
             subscriber.snapshot_due = true;
             subscriber.changes.clear();
             subscriber.wake.notify_one();
+        }
+    }
+
+    /// Makes the partition hold `listed`, and queues each row that differs as a change.
+    /// Most rows of a new listing are the ones held already, and those are not sent again.
+    fn replace_by_changes(&mut self, partition: &Partition, listed: HashMap<ObjectKey, StoredRow>) {
+        let gone: Vec<ObjectKey> = self
+            .store
+            .keys()
+            .filter(|key| in_partition(key, partition) && !listed.contains_key(*key))
+            .cloned()
+            .collect();
+        for key in gone {
+            self.store.remove(&key);
+            self.record_change(&key, None);
+        }
+        for (key, row) in listed {
+            if self.store.get(&key).is_some_and(|held| held.same_as(&row)) {
+                continue;
+            }
+            self.record_change(&key, Some(&row));
+            self.store.insert(key, row);
         }
     }
 
@@ -321,24 +357,26 @@ impl Group {
         (events, state.terminal)
     }
 
-    /// Replaces what the partition holds with a completed listing.
+    /// Replaces what the partition holds with a completed listing. The first listing of a
+    /// group is a snapshot. A later one, after a failure or an expired resource version,
+    /// reaches subscribers as the changes it makes to the rows they hold.
     fn finish_init(&self, partition: &Partition, listed: HashMap<ObjectKey, StoredRow>) {
         let mut state = self.lock();
-        match partition {
-            None => state.store = listed,
-            Some(namespace) => {
-                state
-                    .store
-                    .retain(|key, _| key.namespace.as_ref() != Some(namespace));
-                state.store.extend(listed);
-            }
+        let held = state.synced();
+        if held {
+            state.replace_by_changes(partition, listed);
+        } else {
+            state.store.retain(|key, _| !in_partition(key, partition));
+            state.store.extend(listed);
         }
         if let Some(entry) = state.partitions.get_mut(partition) {
             entry.phase = Phase::Live;
             entry.synced_once = true;
         }
         state.publish_status();
-        state.queue_snapshot();
+        if !held {
+            state.queue_snapshot();
+        }
     }
 
     fn apply(&self, key: ObjectKey, value: StoredRow) {
@@ -778,8 +816,8 @@ pub(super) async fn pause(backoff: &mut Duration, token: &CancellationToken) -> 
 }
 
 /// Runs one watcher until it is cancelled or must not be retried. After a failure
-/// it starts over with a new list, so that subscribers get a snapshot of what they
-/// missed instead of `watcher` quietly resuming from its last resource version.
+/// it starts over with a new list, so that subscribers get what they missed instead
+/// of `watcher` quietly resuming from its last resource version.
 async fn run_partition(group: &Group, client: &Client, partition: Partition) -> PartitionEnd {
     let resource = &group.resource;
     let api_resource = ApiResource {
@@ -1098,6 +1136,128 @@ mod tests {
         }
     }
 
+    /// A Pod as the store holds it.
+    fn pod_row(name: &str, namespace: &str, version: &str) -> (ObjectKey, StoredRow) {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": { "name": name, "namespace": namespace, "resourceVersion": version },
+            "spec": { "containers": [] },
+        }))
+        .unwrap();
+        to_row(&object, &resource("", "pods")).unwrap()
+    }
+
+    fn names(rows: &[Row]) -> Vec<String> {
+        let mut names: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                row.to_value()["metadata"]["name"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn key_of(namespace: &str, name: &str) -> ObjectKey {
+        ObjectKey {
+            namespace: Some(namespace.to_owned()),
+            name: name.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_new_listing_of_a_synced_group_queues_what_differs_and_no_snapshot() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        group.finish_init(
+            &None,
+            HashMap::from([
+                pod_row("kept", "a", "1"),
+                pod_row("changed", "a", "1"),
+                pod_row("gone", "a", "1"),
+            ]),
+        );
+        let first = group.take_events("table").0;
+        assert!(
+            matches!(&first[0], WatchEvent::Snapshot { items } if items.len() == 3),
+            "{first:?}"
+        );
+
+        group.finish_init(
+            &None,
+            HashMap::from([
+                pod_row("kept", "a", "1"),
+                pod_row("changed", "a", "2"),
+                pod_row("added", "a", "1"),
+            ]),
+        );
+
+        let events = group.take_events("table").0;
+        let [WatchEvent::Batch { upserts, deletes }] = events.as_slice() else {
+            panic!("expected one batch, got {events:?}");
+        };
+        assert_eq!(names(upserts), ["added", "changed"]);
+        assert_eq!(deletes, &[key_of("a", "gone")]);
+
+        // The store is the new listing, which is what a later subscriber starts with.
+        assert!(group.attach("late", RowShape::Table, Arc::default()));
+        let late = group.take_events("late").0;
+        let Some(WatchEvent::Snapshot { items }) = late
+            .iter()
+            .find(|event| matches!(event, WatchEvent::Snapshot { .. }))
+        else {
+            panic!("expected a snapshot, got {late:?}");
+        };
+        assert_eq!(names(items), ["added", "changed", "kept"]);
+    }
+
+    #[test]
+    fn a_new_listing_that_differs_in_nothing_queues_nothing() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        let listing = || HashMap::from([pod_row("one", "a", "1"), pod_row("two", "b", "7")]);
+        group.finish_init(&None, listing());
+        group.take_events("table");
+
+        group.finish_init(&None, listing());
+
+        let events = group.take_events("table").0;
+        assert!(events.is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn a_new_listing_of_one_namespace_leaves_the_rows_of_the_others() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        group.begin_fallback(&["a".to_owned(), "b".to_owned()]);
+        group.finish_init(
+            &Some("a".to_owned()),
+            HashMap::from([pod_row("one", "a", "1")]),
+        );
+        group.finish_init(
+            &Some("b".to_owned()),
+            HashMap::from([pod_row("two", "b", "1")]),
+        );
+        let first = group.take_events("table").0;
+        assert!(
+            matches!(&first[0], WatchEvent::Snapshot { items } if items.len() == 2),
+            "{first:?}"
+        );
+
+        group.finish_init(&Some("a".to_owned()), HashMap::new());
+
+        let events = group.take_events("table").0;
+        let [WatchEvent::Batch { upserts, deletes }] = events.as_slice() else {
+            panic!("expected one batch, got {events:?}");
+        };
+        assert!(upserts.is_empty(), "{upserts:?}");
+        assert_eq!(deletes, &[key_of("a", "one")]);
+    }
+
     /// The rows a batch of events carries, as values.
     fn rows_of(events: &[WatchEvent]) -> Vec<Value> {
         events
@@ -1342,8 +1502,9 @@ mod tests {
         assert_eq!(status, WatchStatus::Reconnecting);
         assert_eq!(message.as_deref(), Some("boom"));
 
-        // After its first snapshot a subscriber gets the status before the next one.
-        rig.group.finish_init(&None, HashMap::new());
+        // After its first snapshot a subscriber gets the status before the rows that follow.
+        rig.group
+            .finish_init(&None, HashMap::from([pod_row("new", "a", "1")]));
         assert!(matches!(
             rig.rx.recv().await,
             Some(WatchEvent::Status {
@@ -1353,7 +1514,7 @@ mod tests {
         ));
         assert!(matches!(
             rig.rx.recv().await,
-            Some(WatchEvent::Snapshot { .. })
+            Some(WatchEvent::Batch { upserts, .. }) if upserts.len() == 1
         ));
 
         rig.group
