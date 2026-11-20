@@ -49,7 +49,7 @@ test("the build signs with the repository secrets, after checking the key is set
     build,
     /^ {10}TAURI_SIGNING_PRIVATE_KEY_PASSWORD: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY_PASSWORD \}\}$/m,
   );
-  inOrder(build, ["secrets.TAURI_SIGNING_PRIVATE_KEY != ''", "uses: tauri-apps/tauri-action@v0"]);
+  inOrder(build, ["secrets.TAURI_SIGNING_PRIVATE_KEY != ''", "uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5"]);
 });
 
 test("publish builds latest.json, uploads it to the draft, checks the draft, publishes, then checks the link", () => {
