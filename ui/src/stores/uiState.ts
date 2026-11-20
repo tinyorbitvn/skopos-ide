@@ -13,6 +13,20 @@ const SAVE_DELAY_MS = 300;
  */
 const unsaved = new Map<string, { value: unknown }>();
 
+/** The flush of every mounted state, so the app can save them all before it restarts. */
+const flushers = new Set<() => void>();
+/** Writes sent to the backend and not answered yet. */
+const inFlight = new Set<Promise<unknown>>();
+
+/**
+ * Saves every pending write now and resolves once the backend answered them all. The
+ * app calls it before it restarts into an update (in-app update R4).
+ */
+export async function flushUiStateWrites(): Promise<void> {
+  for (const flush of [...flushers]) flush();
+  await Promise.all([...inFlight]);
+}
+
 /**
  * A value kept between runs. It shows `initial` until the saved one arrives, unless
  * it was changed by then. Writes are saved after 300 ms without another change,
@@ -36,17 +50,20 @@ export function useUiState<T>(
     const next = pending.current;
     pending.current = null;
     if (next) {
-      void api
+      const write: Promise<void> = api
         .uiStateSet(key, next.value as JsonValue)
         .catch(() => {})
         .finally(() => {
           // A newer change of the key keeps its own entry.
           if (unsaved.get(key) === next) unsaved.delete(key);
+          inFlight.delete(write);
         });
+      inFlight.add(write);
     }
   }, [key]);
 
   useEffect(() => {
+    flushers.add(flush);
     changed.current = false;
     let current = true;
     const local = unsaved.get(key);
@@ -64,6 +81,7 @@ export function useUiState<T>(
       });
     return () => {
       current = false;
+      flushers.delete(flush);
       flush();
     };
   }, [key, flush]);

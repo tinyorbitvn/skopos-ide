@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { flush, mockBackend } from "../test/ipc";
-import { useUiState } from "./uiState";
+import { flushUiStateWrites, useUiState } from "./uiState";
 
 test("loads the saved value and saves changes after a pause", async () => {
   const backend = mockBackend({
@@ -107,4 +107,39 @@ test("a reader mounted while a write is unsaved shows that write, though its rea
   const third = renderHook(() => useUiState("race", "a"));
   await act(flush);
   expect(third.result.current[0]).toBe("c");
+});
+
+test("flushUiStateWrites saves pending writes at once and waits for the backend", async () => {
+  let save: () => void = () => {};
+  const backend = mockBackend({
+    ui_state_get: () => null,
+    ui_state_set: () =>
+      new Promise((resolve) => {
+        save = () => resolve(null);
+      }),
+  });
+  const { result } = renderHook(() => useUiState("flushed", "a"));
+  await act(flush);
+  act(() => result.current[1]("b"));
+
+  let done = false;
+  const flushed = flushUiStateWrites().then(() => {
+    done = true;
+  });
+  expect(backend.callsTo("ui_state_set")).toEqual([
+    { key: "flushed", value: "b" },
+  ]);
+  await flush();
+  expect(done).toBe(false);
+  save();
+  await flushed;
+  expect(done).toBe(true);
+});
+
+test("flushUiStateWrites with nothing pending resolves without a call", async () => {
+  const backend = mockBackend({ ui_state_get: () => null });
+  renderHook(() => useUiState("idle", "a"));
+  await act(flush);
+  await flushUiStateWrites();
+  expect(backend.callsTo("ui_state_set")).toEqual([]);
 });
