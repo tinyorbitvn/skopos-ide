@@ -253,6 +253,28 @@ impl Consumer {
         })
     }
 
+    /// The status of the last status event.
+    fn last_status(&self) -> Option<&WatchStatus> {
+        self.seen.iter().rev().find_map(|event| match event {
+            WatchEvent::Status { status, .. } => Some(status),
+            _ => None,
+        })
+    }
+
+    /// The names the batches from `seen[marker]` on upserted and deleted, each sorted.
+    fn changes_since(&self, marker: usize) -> (Vec<String>, Vec<String>) {
+        let (mut upserted, mut deleted) = (Vec::new(), Vec::new());
+        for event in &self.seen[marker..] {
+            if let WatchEvent::Batch { upserts, deletes } = event {
+                upserted.extend(upserts.iter().map(|row| row_of(&row.to_value()).name));
+                deleted.extend(deletes.iter().map(|key| key.name.clone()));
+            }
+        }
+        upserted.sort();
+        deleted.sort();
+        (upserted, deleted)
+    }
+
     fn has(&self, namespace: &str, name: &str) -> bool {
         self.rows
             .contains_key(&(Some(namespace.to_owned()), name.to_owned()))
@@ -703,9 +725,12 @@ async fn watch_drop_reconnects_and_reports_status() {
     fake.add_pod("default", "during-outage");
 
     fake.fail_watches_with("pods", None);
-    pods.until("the resync", |c| c.snapshots() == 2).await;
+    pods.until("the pod added meanwhile", |c| {
+        c.has("default", "during-outage")
+    })
+    .await;
 
-    assert!(pods.has("default", "during-outage"));
+    assert_eq!(pods.snapshots(), 1, "{}", pods.summary());
     let after: Vec<&WatchEvent> = pods.seen[marker..].iter().collect();
     let live = after
         .iter()
@@ -719,11 +744,11 @@ async fn watch_drop_reconnects_and_reports_status() {
             )
         })
         .expect("status live after the outage");
-    let snapshot = after
+    let rows = after
         .iter()
-        .position(|e| matches!(e, WatchEvent::Snapshot { .. }))
+        .position(|e| matches!(e, WatchEvent::Batch { .. }))
         .unwrap();
-    assert!(live < snapshot, "{}", pods.summary());
+    assert!(live < rows, "{}", pods.summary());
 }
 
 #[tokio::test]
@@ -753,12 +778,139 @@ async fn an_expired_resource_version_lists_again_without_reconnecting() {
         .await;
     eventually("the watch", || fake.open_watch_count() == 1).await;
 
+    let lists = fake.request_count(PODS) - fake.watch_request_count(PODS);
     fake.expire_watches("pods");
 
-    pods.until("the fresh snapshot", |c| c.snapshots() == 2)
+    eventually("the watch after the new list", || {
+        fake.watch_request_count(PODS) == 2
+    })
+    .await;
+    assert_eq!(
+        fake.request_count(PODS) - fake.watch_request_count(PODS),
+        lists + 1,
+        "one new list"
+    );
+    fake.add_pod("default", "after");
+    pods.until("a later pod", |c| c.has("default", "after"))
         .await;
     assert!(!pods.saw_status(WatchStatus::Reconnecting));
     assert!(pods.has("default", "one"));
+}
+
+#[tokio::test]
+async fn a_new_list_that_changes_nothing_sends_no_rows() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_watch_timing_for_test(FAST_BATCH, LONG_LINGER);
+    fake.add_pod("default", "one");
+    fake.add_pod("default", "two");
+    let mut pods = Consumer::subscribe(&core, &id, pods()).await;
+    pods.until("the snapshot and Live", |c| {
+        c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+    })
+    .await;
+    eventually("the watch", || fake.open_watch_count() == 1).await;
+    let seen = pods.seen.len();
+
+    fake.expire_watches("pods");
+    eventually("the watch after the new list", || {
+        fake.watch_request_count(PODS) == 2
+    })
+    .await;
+
+    pods.drain_for(Duration::from_millis(300)).await;
+    assert_eq!(pods.seen.len(), seen, "{}", pods.summary());
+    assert!(pods.has("default", "one") && pods.has("default", "two"));
+}
+
+#[tokio::test]
+async fn a_new_list_after_an_outage_sends_only_what_changed() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_watch_timing_for_test(FAST_BATCH, LONG_LINGER);
+    for name in ["kept", "changed", "gone"] {
+        fake.upsert("pods", numbered_pod(name, 1));
+    }
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    table
+        .until("the snapshot and Live", |c| {
+            c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+        })
+        .await;
+    eventually("the watch", || fake.open_watch_count() == 1).await;
+
+    fake.fail_watches_with("pods", Some(500));
+    fake.drop_watches();
+    table
+        .until("status reconnecting", |c| {
+            c.saw_status(WatchStatus::Reconnecting)
+        })
+        .await;
+    let marker = table.seen.len();
+    fake.upsert("pods", numbered_pod("changed", 2));
+    fake.upsert("pods", numbered_pod("added", 1));
+    fake.delete("pods", Some("default"), "gone");
+    fake.fail_watches_with("pods", None);
+
+    table
+        .until("what changed meanwhile", |c| {
+            c.has("default", "added")
+                && !c.has("default", "gone")
+                && rev_of(c, "changed").as_deref() == Some("2")
+        })
+        .await;
+
+    assert_eq!(table.snapshots(), 1, "{}", table.summary());
+    let (upserted, deleted) = table.changes_since(marker);
+    assert_eq!(upserted, ["added", "changed"], "{}", table.summary());
+    assert_eq!(deleted, ["gone"], "{}", table.summary());
+    // A table opened now starts from the same rows.
+    let mut late = Consumer::subscribe(&core, &id, pods()).await;
+    late.until("the snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(
+        late.rows.keys().collect::<Vec<_>>(),
+        table.rows.keys().collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn a_new_list_of_each_namespace_sends_no_rows_of_the_other() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        forbid_cluster_wide_pods: true,
+        namespaces: vec!["a".into(), "b".into()],
+        ..Default::default()
+    })
+    .await;
+    core.set_watch_timing_for_test(FAST_BATCH, LONG_LINGER);
+    fake.add_pod("a", "in-a");
+    fake.add_pod("b", "in-b");
+    let mut pods = Consumer::subscribe(&core, &id, pods()).await;
+    pods.until("the snapshot and Live", |c| {
+        c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+    })
+    .await;
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    fake.fail_watches_with("pods", Some(500));
+    fake.drop_watches();
+    pods.until("status reconnecting", |c| {
+        c.saw_status(WatchStatus::Reconnecting)
+    })
+    .await;
+    let marker = pods.seen.len();
+    fake.fail_watches_with("pods", None);
+    // The old watches are gone, so each of these arrives only once its namespace is listed
+    // again.
+    fake.add_pod("a", "later-a");
+    fake.add_pod("b", "later-b");
+    pods.until("a later pod of each namespace", |c| {
+        c.has("a", "later-a") && c.has("b", "later-b")
+    })
+    .await;
+
+    assert_eq!(pods.snapshots(), 1, "{}", pods.summary());
+    let (upserted, deleted) = pods.changes_since(marker);
+    assert_eq!(upserted, ["later-a", "later-b"], "{}", pods.summary());
+    assert!(deleted.is_empty(), "{deleted:?}");
+    assert!(pods.has("a", "in-a") && pods.has("b", "in-b"));
 }
 
 #[tokio::test]
@@ -947,7 +1099,9 @@ async fn not_found_while_discovery_still_serves_it_keeps_retrying() {
     fake.fail_watches_with("widgets", None);
 
     widgets_sub
-        .until("the resync", |c| c.snapshots() == 2)
+        .until("status live again", |c| {
+            c.last_status() == Some(&WatchStatus::Live)
+        })
         .await;
     assert!(!widgets_sub.saw_status(WatchStatus::NotServed));
 }
