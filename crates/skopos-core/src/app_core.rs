@@ -34,6 +34,7 @@ use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
 use crate::tools::{ToolProgress, Tools};
 use crate::ui_state::UiState;
+use crate::updates::UpdateState;
 use crate::windows::{WindowLayout, Windows};
 
 const STORE_VERSION: u32 = 1;
@@ -77,6 +78,11 @@ pub enum CoreEvent {
     /// window (`layout.label`) needs it.
     WindowLayoutChanged {
         layout: WindowLayout,
+    },
+    /// The in-app update state changed (in-app update spec §5.1). `state.toast_window` is set
+    /// only on the change that announces a release for the first time.
+    UpdateState {
+        state: UpdateState,
     },
 }
 

@@ -22,6 +22,7 @@ pub mod shell_env;
 pub mod store;
 pub mod tools;
 pub mod ui_state;
+pub mod updates;
 pub mod windows;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
