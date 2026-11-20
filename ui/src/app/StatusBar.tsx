@@ -1,7 +1,10 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useMemo, useState } from "react";
 import { StatusDot } from "../design";
+import { Download } from "../design/icons";
 import { runningText } from "../features/portForward/forwardText";
+import { openUpdates, useUpdates } from "../features/updates/updateStore";
+import { statusButtonText } from "../features/updates/updateText";
 import { useCatalog } from "../stores/catalog";
 import { runningCount, usePortForwards } from "../stores/portForwards";
 import { useWindowLayout } from "../stores/windowLayout";
@@ -42,6 +45,34 @@ function FocusedCluster() {
   );
 }
 
+/**
+ * The version, or, while a release is offered or downloading, a button that opens the
+ * update dialog (in-app update spec §5.3).
+ */
+function VersionOrUpdate(props: { version: string | null }) {
+  const text = useUpdates((s) =>
+    s.state === null ? null : statusButtonText(s.state),
+  );
+  if (text === null) {
+    return (
+      <span data-testid="status-version">
+        {props.version ? `SkoposIDE ${props.version}` : "SkoposIDE"}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={styles.statusUpdate}
+      data-testid="status-update"
+      onClick={openUpdates}
+    >
+      <Download size={14} aria-hidden="true" />
+      {text}
+    </button>
+  );
+}
+
 export function StatusBar() {
   const forwards = runningText(
     usePortForwards((s) => runningCount(s.forwards)),
@@ -68,7 +99,7 @@ export function StatusBar() {
         <span className={styles.statusLine} data-testid="status-layout">
           {`${counted(panes, "pane")} · ${counted(tabs, "tab")}`}
         </span>
-        <span>{version ? `SkoposIDE ${version}` : "SkoposIDE"}</span>
+        <VersionOrUpdate version={version} />
       </span>
     </footer>
   );

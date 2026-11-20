@@ -18,6 +18,7 @@ import {
   Pin,
   Plus,
   Power,
+  RefreshCw,
   Settings,
   SlidersHorizontal,
   SquareTerminal,
@@ -28,6 +29,7 @@ import { openTerminal } from "../features/dock/openTerminal";
 import { chartsPath } from "../features/helm/helmText";
 import { mapPath } from "../features/map/paths";
 import { settingsPath } from "../features/settings/paths";
+import { checkForUpdates } from "../features/updates/updateStore";
 import type { Theme } from "../ipc/generated/Theme";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
@@ -59,6 +61,7 @@ export type CommandId =
   | "resource-map"
   | "shortcuts"
   | "about"
+  | "check-updates"
   | "theme-dark"
   | "theme-light"
   | "theme-system"
@@ -237,6 +240,13 @@ export const COMMANDS: readonly AppCommand[] = [
     available: always,
     run: () => useShell.getState().open("about"),
   },
+  {
+    id: "check-updates",
+    label: () => "Check for Updates",
+    icon: RefreshCw,
+    available: always,
+    run: () => void checkForUpdates(),
+  },
   theme("theme-dark", "Theme: Dark", Moon, "dark"),
   theme("theme-light", "Theme: Light", Sun, "light"),
   theme("theme-system", "Theme: System", Monitor, "system"),
@@ -328,7 +338,8 @@ export function runCommand(id: CommandId, ctx: CommandContext): void {
 }
 
 /**
- * The macOS menu's app items (spec C §9.2): `palette` opens the palette. Like the
+ * The macOS menu's app items (spec C §9.2): `palette` opens the palette and
+ * `check_updates` runs the check-updates command. Like the
  * shell keys, they do nothing while another modal dialog is open, so a menu item
  * cannot cover a Scale or Drain dialog or navigate away from what was typed in it.
  */
@@ -337,7 +348,7 @@ export function runMenuCommand(id: string, ctx: CommandContext): void {
   if (id === "palette") useShell.getState().open("palette");
   else if (id === "about" || id === "preferences" || id === "shortcuts") {
     runCommand(id, ctx);
-  }
+  } else if (id === "check_updates") runCommand("check-updates", ctx);
 }
 
 export function useCommandContext(): CommandContext {
