@@ -9,6 +9,11 @@ import type { TerminalSize } from "../ipc/generated/TerminalSize";
 import { useCatalog } from "../stores/catalog";
 import { clusterEntry } from "./ipc";
 
+/** The cursor position request (DSR 6) a Windows pseudoconsole sends before its first output. */
+export const CURSOR_REQUEST = "\x1b[6n";
+/** The fake's answer to it: the cursor is at row 1, column 1. */
+export const CURSOR_REPORT = "\x1b[1;1R";
+
 /** A `TermView` that records what it is told, for unit tests. */
 export class FakeTermView implements TermView {
   readonly host: HTMLDivElement = document.createElement("div");
@@ -26,16 +31,26 @@ export class FakeTermView implements TermView {
   private pending: (() => void)[] = [];
   private listener: ((data: string) => void) | null = null;
 
-  write(data: Uint8Array, done: () => void): void {
-    this.written.push(new TextDecoder().decode(data));
-    this.pending.push(done);
-  }
-
-  /** Runs the `done` of every write so far, as xterm does once it has parsed them. */
+  /**
+   * Runs the `done` of every write so far, as xterm does once it has parsed them. Like
+   * xterm, it answers a cursor position request it parses, unless input is off: xterm's
+   * `disableStdin` drops its replies too.
+   */
   finishWrites(): void {
     const done = this.pending;
     this.pending = [];
     for (const run of done) run();
+  }
+
+  write(data: Uint8Array, done: () => void): void {
+    const text = new TextDecoder().decode(data);
+    this.written.push(text);
+    this.pending.push(() => {
+      if (this.inputEnabled && text.includes(CURSOR_REQUEST)) {
+        this.listener?.(CURSOR_REPORT);
+      }
+      done();
+    });
   }
 
   writeNote(text: string, tone: NoteTone): void {
