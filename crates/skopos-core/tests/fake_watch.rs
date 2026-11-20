@@ -138,8 +138,31 @@ impl Consumer {
         resource: ResourceRef,
         capacity: usize,
     ) -> Consumer {
+        Self::start(core, id, resource, capacity, "main").await
+    }
+
+    /// A table in the window `owner`.
+    async fn subscribe_as(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        owner: &str,
+    ) -> Consumer {
+        Self::start(core, id, resource, 64, owner).await
+    }
+
+    async fn start(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        capacity: usize,
+        owner: &str,
+    ) -> Consumer {
         let (tx, rx) = mpsc::channel(capacity);
-        let id = core.resources_subscribe(id, resource, tx).await.unwrap();
+        let id = core
+            .resources_subscribe(id, resource, tx, owner)
+            .await
+            .unwrap();
         Consumer {
             id,
             rx,
@@ -259,6 +282,18 @@ impl Consumer {
         namespace: Option<&str>,
         name: &str,
     ) -> Consumer {
+        Self::subscribe_object_as(core, id, resource, namespace, name, "main").await
+    }
+
+    /// A detail panel in the window `owner`.
+    async fn subscribe_object_as(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        namespace: Option<&str>,
+        name: &str,
+        owner: &str,
+    ) -> Consumer {
         let (tx, rx) = mpsc::channel(64);
         let id = core
             .resources_subscribe_object(
@@ -267,6 +302,7 @@ impl Consumer {
                 namespace.map(str::to_owned),
                 name.to_owned(),
                 tx,
+                owner,
             )
             .await
             .unwrap();
@@ -518,7 +554,7 @@ async fn a_resource_path_with_odd_characters_is_refused() {
     ] {
         let (tx, _rx) = mpsc::channel(1);
         let err = core
-            .resources_subscribe(&id, wrong.clone(), tx)
+            .resources_subscribe(&id, wrong.clone(), tx, "main")
             .await
             .expect_err(&format!("{wrong:?}"));
         assert_eq!(err.code, skopos_core::error::ErrorCode::InvalidInput);
@@ -949,11 +985,14 @@ async fn subscribing_to_disconnected_cluster_errors() {
     core.cluster_disconnect(&id).await.unwrap();
 
     let (tx, _rx) = mpsc::channel(1);
-    assert!(core.resources_subscribe(&id, pods(), tx).await.is_err());
+    assert!(core
+        .resources_subscribe(&id, pods(), tx, "main")
+        .await
+        .is_err());
 
     let (tx, _rx) = mpsc::channel(1);
     assert!(core
-        .resources_subscribe(&"no-such-cluster".to_owned(), pods(), tx)
+        .resources_subscribe(&"no-such-cluster".to_owned(), pods(), tx, "main")
         .await
         .is_err());
 }
@@ -1406,6 +1445,7 @@ async fn an_object_watch_refuses_a_name_or_scope_that_does_not_fit_before_any_re
                 namespace.map(str::to_owned),
                 name.to_owned(),
                 tx,
+                "main",
             )
             .await
             .unwrap_err();
@@ -1420,7 +1460,14 @@ async fn an_object_watch_refuses_a_name_or_scope_that_does_not_fit_before_any_re
     core.cluster_disconnect(&id).await.unwrap();
     let (tx, _rx) = mpsc::channel(1);
     assert!(core
-        .resources_subscribe_object(&id, pods(), Some("default".into()), "web".into(), tx)
+        .resources_subscribe_object(
+            &id,
+            pods(),
+            Some("default".into()),
+            "web".into(),
+            tx,
+            "main",
+        )
         .await
         .is_err());
 }
@@ -1483,7 +1530,8 @@ async fn a_table_and_the_graph_share_one_pod_watcher_and_each_gets_its_own_rows(
 
     let mut table = Consumer::subscribe(&core, &id, pods()).await;
     let (tx, mut graph) = mpsc::channel(16);
-    core.resource_graph_subscribe(&id, None, tx).unwrap();
+    core.resource_graph_subscribe(&id, None, tx, "main")
+        .unwrap();
     table.until("the snapshot", |c| c.snapshots() == 1).await;
     let snapshot = graph_mounting(&mut graph, "web").await;
 
@@ -1523,7 +1571,9 @@ async fn the_pod_watcher_outlives_a_table_while_the_graph_still_reads_it() {
     seed_mounting_pods(&fake);
     let mut table = Consumer::subscribe(&core, &id, pods()).await;
     let (tx, mut graph) = mpsc::channel(16);
-    let graph_id = core.resource_graph_subscribe(&id, None, tx).unwrap();
+    let graph_id = core
+        .resource_graph_subscribe(&id, None, tx, "main")
+        .unwrap();
     table.until("the snapshot", |c| c.snapshots() == 1).await;
     graph_mounting(&mut graph, "web").await;
     assert_eq!(fake.watch_request_count(PODS), 1);
@@ -1573,4 +1623,53 @@ async fn a_quiet_subscription_sends_nothing_and_a_late_change_still_arrives_with
         "took {:?}",
         started.elapsed()
     );
+}
+
+#[tokio::test]
+async fn a_window_s_tables_end_with_it_and_another_window_s_go_on() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_watch_timing_for_test(FAST_BATCH, Duration::from_millis(100));
+    fake.add_pod("default", "one");
+    let mut kept = Consumer::subscribe_as(&core, &id, pods(), "main").await;
+    let mut shared = Consumer::subscribe_as(&core, &id, pods(), "window-2").await;
+    let mut alone = Consumer::subscribe_as(&core, &id, secrets(), "window-2").await;
+    for table in [&mut kept, &mut shared, &mut alone] {
+        table.until("the snapshot", |c| c.snapshots() == 1).await;
+    }
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    shared.until_closed("the window's Pods", WAIT).await;
+    alone.until_closed("the window's Secrets", WAIT).await;
+    // The watch only that window read closes. The one it shared stays for the other window.
+    eventually("the Secrets watch to close", || {
+        fake.open_watch_count() == 1
+    })
+    .await;
+    fake.add_pod("default", "two");
+    kept.until("the second pod", |c| c.has("default", "two"))
+        .await;
+}
+
+#[tokio::test]
+async fn a_window_s_object_watch_ends_with_it_and_another_window_s_goes_on() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", rich_pod("web", 1));
+    let mut kept =
+        Consumer::subscribe_object_as(&core, &id, pods(), Some("default"), "web", "main").await;
+    let mut ended =
+        Consumer::subscribe_object_as(&core, &id, pods(), Some("default"), "web", "window-2").await;
+    for panel in [&mut kept, &mut ended] {
+        panel.until("the snapshot", |c| c.snapshots() == 1).await;
+    }
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    ended.until_closed("the window's watch", WAIT).await;
+    eventually("its watch to close", || fake.open_watch_count() == 1).await;
+    fake.upsert("pods", rich_pod("web", 2));
+    kept.until("the update", |c| rev_of(c, "web").as_deref() == Some("2"))
+        .await;
 }

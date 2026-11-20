@@ -133,16 +133,20 @@ pub async fn helm_release_history(
 }
 
 /// Sends `changed` to `on_event` when a release changes, and returns the subscription id.
-/// When the channel can no longer be written, as after a webview reload, the subscription
-/// is ended so its watch does not outlive the page.
+/// The subscription belongs to the window that asks and ends when its page loads again or
+/// it closes, so its watch does not outlive the page; so does one whose channel can no
+/// longer be written.
 #[tauri::command]
 pub async fn helm_releases_subscribe(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     on_event: Channel<HelmReleasesEvent>,
 ) -> Result<String, IpcError> {
     let (tx, mut rx) = mpsc::channel(RELEASES_BACKLOG);
-    let id = state.core.helm_releases_subscribe(&cluster_id, tx)?;
+    let id = state
+        .core
+        .helm_releases_subscribe(&cluster_id, tx, window.label())?;
     let core = state.core.clone();
     let subscription = id.clone();
     tauri::async_runtime::spawn(async move {

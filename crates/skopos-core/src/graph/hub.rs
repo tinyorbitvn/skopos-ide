@@ -23,6 +23,7 @@ use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::resources::{state_name, RowShape};
+use crate::subscriptions::Subscriptions;
 
 /// Spec E §4.3: later snapshots at most once every 2 s.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(2);
@@ -163,7 +164,7 @@ impl Graph {
 pub(crate) struct GraphHub {
     graphs: DashMap<ClusterId, Arc<Graph>>,
     /// What stops each subscription's task.
-    subscriptions: DashMap<String, CancellationToken>,
+    subscriptions: Subscriptions,
     next_subscription: AtomicU64,
     interval: Mutex<Duration>,
 }
@@ -172,7 +173,7 @@ impl Default for GraphHub {
     fn default() -> Self {
         Self {
             graphs: DashMap::new(),
-            subscriptions: DashMap::new(),
+            subscriptions: Subscriptions::default(),
             next_subscription: AtomicU64::new(1),
             interval: Mutex::new(DEFAULT_INTERVAL),
         }
@@ -234,13 +235,14 @@ impl GraphHub {
         namespaces: Option<Vec<String>>,
         tx: mpsc::Sender<Arc<GraphEvent>>,
         cluster: &CancellationToken,
+        owner: &str,
     ) -> CoreResult<String> {
         let graph = self.join(core, id, cluster)?;
         let number = self.next_subscription.fetch_add(1, Ordering::Relaxed);
         let subscription = format!("graph-{number}");
         let stop = graph.token.child_token();
         self.subscriptions
-            .insert(subscription.clone(), stop.clone());
+            .insert(subscription.clone(), stop.clone(), Some(owner));
         let linger = core.watches().linger();
         tokio::spawn(serve(
             self.clone(),
@@ -255,9 +257,12 @@ impl GraphHub {
     }
 
     fn unsubscribe(&self, subscription: &str) {
-        if let Some((_, stop)) = self.subscriptions.remove(subscription) {
-            stop.cancel();
-        }
+        self.subscriptions.stop(subscription);
+    }
+
+    /// Ends the subscriptions the window `owner` asked for.
+    pub(crate) fn stop_owned(&self, owner: &str) {
+        self.subscriptions.stop_owned(owner);
     }
 
     fn running(&self) -> usize {
@@ -301,7 +306,7 @@ async fn build_loop(
     for kind in kinds {
         let (tx, rx) = mpsc::channel(EVENT_BACKLOG);
         let watch = core
-            .subscribe_rows(id, kind.resource(), RowShape::Graph, tx)
+            .subscribe_rows(id, kind.resource(), RowShape::Graph, tx, None)
             .map_err(|e| e.message)?;
         watches.push(watch);
         let events = stream::unfold(rx, move |mut rx| async move {
@@ -408,19 +413,21 @@ async fn serve(
             () = tx.closed() => break,
         }
     }
-    hub.subscriptions.remove(&subscription);
+    hub.subscriptions.forget(&subscription);
     graph.detach(linger);
 }
 
 impl AppCore {
     /// Sends the cluster's graph, seen through `namespaces`, to `tx` until unsubscribed, the
     /// cluster disconnects, the receiver closes or the graph fails (spec E §4.1). `None` sees
-    /// the whole graph. Returns the subscription id.
+    /// the whole graph. Returns the subscription id. `owner` is the label of the window that
+    /// asks.
     pub fn resource_graph_subscribe(
         &self,
         id: &ClusterId,
         namespaces: Option<Vec<String>>,
         tx: mpsc::Sender<Arc<GraphEvent>>,
+        owner: &str,
     ) -> CoreResult<String> {
         let state = self.cluster_state(id);
         if !matches!(state, ConnectionState::Connected { .. }) {
@@ -430,7 +437,8 @@ impl AppCore {
             ));
         }
         let cluster = self.cluster_cancel_token(id)?;
-        self.graphs().subscribe(self, id, namespaces, tx, &cluster)
+        self.graphs()
+            .subscribe(self, id, namespaces, tx, &cluster, owner)
     }
 
     /// An id that is unknown or already ended is ignored.
@@ -503,7 +511,8 @@ mod tests {
         let (tx, rx) = mpsc::channel(4);
         assert!(graph.attach());
         let stop = graph.token.child_token();
-        hub.subscriptions.insert("graph-1".to_owned(), stop.clone());
+        hub.subscriptions
+            .insert("graph-1".to_owned(), stop.clone(), None);
         let task = tokio::spawn(serve(
             hub.clone(),
             graph.clone(),
@@ -630,7 +639,7 @@ mod tests {
         );
         assert_eq!(rx.recv().await, None);
         task.await.unwrap();
-        assert!(hub.subscriptions.is_empty());
+        assert_eq!(hub.subscriptions.len(), 0);
         assert!(graph.is_closed());
         assert!(graph.token.is_cancelled(), "a failed graph does not linger");
         assert!(!graph.attach(), "a retry needs a new graph");

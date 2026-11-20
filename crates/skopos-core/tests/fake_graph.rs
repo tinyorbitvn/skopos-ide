@@ -177,10 +177,20 @@ struct Subscription {
 
 impl Subscription {
     fn start(core: &AppCore, cluster: &ClusterId, namespaces: Option<&[&str]>) -> Self {
+        Self::start_as(core, cluster, namespaces, "main")
+    }
+
+    /// A map in the window `owner`.
+    fn start_as(
+        core: &AppCore,
+        cluster: &ClusterId,
+        namespaces: Option<&[&str]>,
+        owner: &str,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(16);
         let namespaces = namespaces.map(|list| list.iter().map(|n| (*n).to_owned()).collect());
         let id = core
-            .resource_graph_subscribe(cluster, namespaces, tx)
+            .resource_graph_subscribe(cluster, namespaces, tx, owner)
             .unwrap();
         Self { id, rx }
     }
@@ -538,6 +548,30 @@ async fn the_graph_stops_after_its_last_subscription_and_the_linger() {
 }
 
 #[tokio::test]
+async fn a_window_s_map_ends_with_it_and_another_window_s_goes_on() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default(), true).await;
+    seed_web(&fake, "default");
+    let mut kept = Subscription::start_as(&core, &id, None, "main");
+    let mut ended = Subscription::start_as(&core, &id, Some(&["default"]), "window-2");
+    kept.snapshot().await;
+    ended.snapshot().await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    ended.ended().await;
+    // The graph and the rows it reads belong to no window: the other map still follows them.
+    fake.delete("configmaps", Some("default"), "web-config");
+    kept.until("the ConfigMap to be gone", |s| {
+        s.node("ConfigMap/default/web-config")
+            .status_text
+            .as_deref()
+            == Some("Not found")
+    })
+    .await;
+    assert_eq!(core.running_graphs_for_test(), 1);
+}
+
+#[tokio::test]
 async fn a_kind_the_user_may_not_list_is_named_missing() {
     let cfg = FakeKubeConfig {
         deny: vec![DenyRule {
@@ -631,7 +665,9 @@ async fn a_disconnect_ends_the_subscription_and_a_reconnect_starts_a_new_graph()
     map.ended().await;
     assert_eq!(core.running_graphs_for_test(), 0);
     let (tx, _rx) = mpsc::channel(1);
-    let refused = core.resource_graph_subscribe(&id, None, tx).unwrap_err();
+    let refused = core
+        .resource_graph_subscribe(&id, None, tx, "main")
+        .unwrap_err();
     assert_eq!(refused.code, ErrorCode::InvalidInput);
 
     let state = core.cluster_connect(&id).await.unwrap();

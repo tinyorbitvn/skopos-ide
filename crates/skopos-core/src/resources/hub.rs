@@ -29,6 +29,7 @@ use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
+use crate::subscriptions::Subscriptions;
 
 const DEFAULT_BATCH: Duration = Duration::from_millis(150);
 const DEFAULT_LINGER: Duration = Duration::from_secs(30);
@@ -411,7 +412,7 @@ pub(crate) struct WatchHub {
     /// Keyed by cluster, group and plural.
     groups: DashMap<GroupKey, Arc<Group>>,
     /// What stops each subscription's flush task.
-    subscriptions: DashMap<String, CancellationToken>,
+    subscriptions: Subscriptions,
     next_subscription: AtomicU64,
     timing: Mutex<Timing>,
     /// How many times a flusher reached `take_events`.
@@ -423,7 +424,7 @@ impl Default for WatchHub {
     fn default() -> Self {
         Self {
             groups: DashMap::new(),
-            subscriptions: DashMap::new(),
+            subscriptions: Subscriptions::default(),
             next_subscription: AtomicU64::new(1),
             timing: Mutex::new(Timing {
                 batch: DEFAULT_BATCH,
@@ -464,15 +465,21 @@ impl WatchHub {
     }
 
     /// Makes `stop` what `unsubscribe` cancels for a new id, for a watch that has no group.
-    pub(super) fn register(&self, stop: CancellationToken) -> String {
+    /// `owner` is the window that asked, if one did.
+    pub(super) fn register(&self, stop: CancellationToken, owner: Option<&str>) -> String {
         let subscription = self.new_subscription();
-        self.subscriptions.insert(subscription.clone(), stop);
+        self.subscriptions.insert(subscription.clone(), stop, owner);
         subscription
     }
 
     /// Forgets an id whose watch has ended.
     pub(super) fn deregister(&self, subscription: &str) {
-        self.subscriptions.remove(subscription);
+        self.subscriptions.forget(subscription);
+    }
+
+    /// Ends the subscriptions the window `owner` asked for.
+    pub(crate) fn stop_owned(&self, owner: &str) {
+        self.subscriptions.stop_owned(owner);
     }
 
     fn subscribe(
@@ -482,6 +489,7 @@ impl WatchHub {
         shape: RowShape,
         tx: mpsc::Sender<WatchEvent>,
         connection: &Connection,
+        owner: Option<&str>,
     ) -> CoreResult<String> {
         let subscription = self.new_subscription();
         let wake = Arc::new(Notify::new());
@@ -500,7 +508,7 @@ impl WatchHub {
         };
         let stop = group.token.child_token();
         self.subscriptions
-            .insert(subscription.clone(), stop.clone());
+            .insert(subscription.clone(), stop.clone(), owner);
         tokio::spawn(flush_subscriber(
             self.clone(),
             group,
@@ -538,9 +546,7 @@ impl WatchHub {
     }
 
     fn unsubscribe(&self, subscription: &str) {
-        if let Some((_, stop)) = self.subscriptions.remove(subscription) {
-            stop.cancel();
-        }
+        self.subscriptions.stop(subscription);
     }
 }
 
@@ -598,7 +604,7 @@ async fn flush_subscriber(
             break;
         }
     }
-    hub.subscriptions.remove(&subscription);
+    hub.subscriptions.forget(&subscription);
     group.detach(&subscription, hub.timing().linger);
 }
 
@@ -891,27 +897,31 @@ pub(super) fn validate(resource: &ResourceRef) -> CoreResult<()> {
 impl AppCore {
     /// Delivers `resource` to `tx` until unsubscribed, the cluster disconnects, the
     /// receiver closes or a final status has been sent. Returns the subscription id.
+    /// `owner` is the label of the window that asks, which `subscriptions_stop_owned` reads.
     pub async fn resources_subscribe(
         &self,
         id: &ClusterId,
         resource: ResourceRef,
         tx: mpsc::Sender<WatchEvent>,
+        owner: &str,
     ) -> CoreResult<String> {
         validate(&resource)?;
-        self.subscribe_rows(id, resource, RowShape::Table, tx)
+        self.subscribe_rows(id, resource, RowShape::Table, tx, Some(owner))
     }
 
-    /// `resources_subscribe` for a reader inside the core, which picks the rows' shape.
+    /// `resources_subscribe` with the rows' shape picked. A reader inside the core has no
+    /// `owner`, so no window's reload ends its subscription.
     pub(crate) fn subscribe_rows(
         &self,
         id: &ClusterId,
         resource: ResourceRef,
         shape: RowShape,
         tx: mpsc::Sender<WatchEvent>,
+        owner: Option<&str>,
     ) -> CoreResult<String> {
         let connection = self.connection_of(id)?;
         self.watches()
-            .subscribe(id, resource, shape, tx, &connection)
+            .subscribe(id, resource, shape, tx, &connection, owner)
     }
 
     /// The client, token and namespaces of a connected cluster.
@@ -1145,18 +1155,18 @@ mod tests {
     #[test]
     fn registered_subscriptions_share_the_counter_and_unsubscribe_cancels_them() {
         let hub = WatchHub::default();
-        let first = hub.register(CancellationToken::new());
+        let first = hub.register(CancellationToken::new(), None);
         assert_eq!(first, "watch-1");
         assert_eq!(hub.new_subscription(), "watch-2");
 
         let stop = CancellationToken::new();
-        let third = hub.register(stop.clone());
+        let third = hub.register(stop.clone(), None);
         assert_eq!(third, "watch-3");
         hub.unsubscribe(&third);
         assert!(stop.is_cancelled());
 
         let kept = CancellationToken::new();
-        let fourth = hub.register(kept.clone());
+        let fourth = hub.register(kept.clone(), None);
         hub.deregister(&fourth);
         hub.unsubscribe(&fourth);
         assert!(!kept.is_cancelled(), "a released id is no longer known");
