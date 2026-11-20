@@ -69,3 +69,42 @@ test("reports loaded once the saved value was read, also when the read fails", a
   await act(flush);
   expect(failed.result.current[2]).toBe(true);
 });
+
+test("a reader mounted while a write is unsaved shows that write, though its read overtakes it", async () => {
+  // The backend may answer a read sent after a write before it saves that write: a
+  // screen that unmounts flushes its change, and the next screen reads the same key.
+  let stored: unknown = "a";
+  let save: () => void = () => {};
+  const backend = mockBackend({
+    ui_state_get: () => stored,
+    ui_state_set: (args) =>
+      new Promise((resolve) => {
+        save = () => {
+          stored = (args as { value: unknown }).value;
+          resolve(null);
+        };
+      }),
+  });
+  const first = renderHook(() => useUiState("race", "a"));
+  await act(flush);
+  act(() => first.result.current[1]("b"));
+  first.unmount();
+  expect(backend.callsTo("ui_state_set")).toEqual([
+    { key: "race", value: "b" },
+  ]);
+
+  const second = renderHook(() => useUiState("race", "a"));
+  await act(flush);
+  expect(second.result.current[0]).toBe("b");
+
+  // Once saved, a new reader asks the backend again, which another window may have
+  // changed since.
+  await act(async () => {
+    save();
+    await flush();
+  });
+  stored = "c";
+  const third = renderHook(() => useUiState("race", "a"));
+  await act(flush);
+  expect(third.result.current[0]).toBe("c");
+});
