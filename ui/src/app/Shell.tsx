@@ -4,6 +4,8 @@ import { AboutDialog } from "../features/about/AboutDialog";
 import { Dock } from "../features/dock/Dock";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { ShortcutsDialog } from "../features/shortcuts/ShortcutsDialog";
+import { UpdateDialog } from "../features/updates/UpdateDialog";
+import { initUpdates } from "../features/updates/updateStore";
 import { events } from "../ipc/events";
 import { useCatalog } from "../stores/catalog";
 import { useClusterState } from "../stores/clusters";
@@ -73,6 +75,11 @@ function ShellEffects() {
   useEffect(() => {
     void initFolders();
   }, [initFolders]);
+
+  // The update state, and the toast that announces a release (in-app update spec §5.3).
+  useEffect(() => {
+    void initUpdates();
+  }, []);
 
   // Back and forward move the focused tab (spec P3).
   useEffect(() => installHistoryShortcuts((d) => shellNavigator.go(d)), []);
@@ -193,6 +200,7 @@ export function Shell() {
         <CommandPalette />
         <ShortcutsDialog />
         <AboutDialog />
+        <UpdateDialog />
       </ShellRouter>
     </div>
   );

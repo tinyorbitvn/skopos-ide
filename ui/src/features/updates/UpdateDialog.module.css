@@ -1,0 +1,84 @@
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-7);
+  margin-bottom: var(--space-8);
+}
+
+.titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--text-primary);
+  font: var(--type-heading);
+}
+
+.subtitle {
+  margin: var(--space-3) 0 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: 0;
+}
+
+.notes {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.link {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-accent);
+  font: var(--type-body-sm);
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.note,
+.size {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+
+.message {
+  margin: 0;
+  color: var(--text-danger);
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-5);
+  margin-top: var(--space-10);
+}
+
+.skip {
+  margin-right: auto;
+}
