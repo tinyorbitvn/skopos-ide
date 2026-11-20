@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { flush } from "../test/ipc";
+import { CONNECTED, connectClusters, setClusterState } from "../test/terminal";
 import {
   tnode,
   topologyBackend,
@@ -8,6 +9,7 @@ import {
   tsnapshot,
   tzone,
 } from "../test/topology";
+import { resetCatalogForTest } from "./catalog";
 import { LINGER_MS } from "./resources";
 import {
   resetTopologyForTest,
@@ -156,4 +158,45 @@ test("useTopology watches while mounted, retries, and a null cluster watches not
     { subscriptionId: "t2" },
   ]);
   expect(t.backend.callsTo("node_topology_subscribe")).toHaveLength(2);
+});
+
+test("a disconnect drops a lingering watch, so a reconnect within the linger subscribes again", async () => {
+  fakeClock();
+  connectClusters({ id: "c1", name: "c1" });
+  const t = topologyBackend();
+  watchTopology("c1")();
+  await act(flush);
+  await t.send({ type: "snapshot", snapshot: ONE });
+
+  setClusterState("c1", { status: "disconnected" });
+  expect(entry("c1")).toBeUndefined();
+  expect(t.backend.callsTo("node_topology_unsubscribe")).toEqual([
+    { subscriptionId: "t1" },
+  ]);
+
+  setClusterState("c1", CONNECTED);
+  const leave = watchTopology("c1");
+  await act(flush);
+  expect(t.backend.callsTo("node_topology_subscribe")).toHaveLength(2);
+  expect(entry("c1")).toEqual({ snapshot: null, error: null, loading: true });
+  leave();
+  resetCatalogForTest();
+});
+
+test("a disconnect while watched shows an error that Retry clears", async () => {
+  fakeClock();
+  connectClusters({ id: "c1", name: "c1" });
+  const t = topologyBackend();
+  const leave = watchTopology("c1");
+  await act(flush);
+  await t.send({ type: "snapshot", snapshot: ONE });
+  setClusterState("c1", { status: "disconnected" });
+  expect(entry("c1")).toMatchObject({ error: "Cluster disconnected" });
+  setClusterState("c1", CONNECTED);
+  retryTopology("c1");
+  await act(flush);
+  expect(t.backend.callsTo("node_topology_subscribe")).toHaveLength(2);
+  expect(entry("c1")?.error).toBeNull();
+  leave();
+  resetCatalogForTest();
 });
