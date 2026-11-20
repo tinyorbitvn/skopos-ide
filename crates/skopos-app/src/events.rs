@@ -8,6 +8,7 @@ use skopos_core::app_core::{AppCore, CoreEvent};
 use skopos_core::cluster::ConnectionState;
 use skopos_core::kubeconfig::{ClusterId, SyncWarning};
 use skopos_core::portforward::PortForward;
+use skopos_core::updates::UpdateState;
 use skopos_core::windows::WindowLayout;
 use tauri::{AppHandle, Emitter, EventTarget};
 use tokio::sync::broadcast::error::RecvError;
@@ -20,6 +21,7 @@ const STORE_WARNING: &str = "store://warning";
 const PORTFORWARD_CHANGED: &str = "portforward://changed";
 const TOOLS_PROGRESS: &str = "tools://progress";
 const WINDOW_LAYOUT: &str = "window://layout";
+const UPDATE_STATE: &str = "update://state";
 
 /// The page has loaded by the time this starts, but its listeners register
 /// asynchronously afterwards, and an event sent before that is lost.
@@ -54,6 +56,7 @@ fn route(event: CoreEvent) -> serde_json::Result<(&'static str, EventTarget, Val
             to_all(TOOLS_PROGRESS, serde_json::to_value(progress)?)
         }
         CoreEvent::CatalogFoldersChanged => to_all(CATALOG_FOLDERS_CHANGED, Value::Null),
+        CoreEvent::UpdateState { state } => to_all(UPDATE_STATE, serde_json::to_value(state)?),
         CoreEvent::WindowLayoutChanged { layout } => Ok((
             WINDOW_LAYOUT,
             EventTarget::webview_window(layout.label.clone()),
@@ -80,6 +83,7 @@ fn emit(app: &AppHandle, event: CoreEvent) {
 fn resync_events(
     warnings: Vec<SyncWarning>,
     forwards: Vec<PortForward>,
+    update: UpdateState,
     layouts: Vec<WindowLayout>,
 ) -> Vec<CoreEvent> {
     let shared = [
@@ -87,6 +91,7 @@ fn resync_events(
         CoreEvent::CatalogFoldersChanged,
         CoreEvent::KubeconfigWarnings { warnings },
         CoreEvent::PortForwardsChanged { forwards },
+        CoreEvent::UpdateState { state: update },
     ];
     let layouts = layouts
         .into_iter()
@@ -106,6 +111,7 @@ pub fn spawn_forwarder(app: AppHandle, core: AppCore) {
                     let resync = resync_events(
                         core.catalog_warnings(),
                         core.portforward_list(),
+                        core.update_state(),
                         core.windows_list(),
                     );
                     for event in resync {
@@ -137,6 +143,7 @@ pub fn send_startup_warnings(app: &AppHandle, core: &AppCore) {
 
 #[cfg(test)]
 mod tests {
+    use skopos_core::updates::{UpdatePhase, UpdateState};
     use skopos_core::windows::{start_layout, WindowLayout};
 
     use super::*;
@@ -146,6 +153,34 @@ mod tests {
             label: label.to_owned(),
             ..start_layout()
         }
+    }
+
+    fn idle_update() -> UpdateState {
+        UpdateState {
+            phase: UpdatePhase::Idle,
+            current: "0.9.0".into(),
+            blocker: None,
+            installer: None,
+            skipped: None,
+            last_checked_at: None,
+            toast_window: None,
+        }
+    }
+
+    #[test]
+    fn the_update_state_goes_to_every_window() {
+        let (name, target, payload) = route(CoreEvent::UpdateState {
+            state: UpdateState {
+                toast_window: Some("window-2".into()),
+                ..idle_update()
+            },
+        })
+        .unwrap();
+        assert_eq!(name, "update://state");
+        assert_eq!(target, EventTarget::Any);
+        assert_eq!(payload["phase"]["type"], "idle");
+        assert_eq!(payload["toastWindow"], "window-2");
+        assert_eq!(payload["lastCheckedAt"], serde_json::Value::Null);
     }
 
     #[test]
@@ -182,6 +217,7 @@ mod tests {
         let events = resync_events(
             Vec::new(),
             Vec::new(),
+            idle_update(),
             vec![layout("main"), layout("window-3")],
         );
 
@@ -199,6 +235,7 @@ mod tests {
                 ("catalog://folders-changed", EventTarget::Any),
                 ("kubeconfig://warnings", EventTarget::Any),
                 ("portforward://changed", EventTarget::Any),
+                ("update://state", EventTarget::Any),
                 ("window://layout", EventTarget::webview_window("main")),
                 ("window://layout", EventTarget::webview_window("window-3")),
             ]
