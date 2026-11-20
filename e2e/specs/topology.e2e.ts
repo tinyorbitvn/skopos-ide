@@ -28,6 +28,29 @@ function squares(node: string): Promise<string[]> {
   );
 }
 
+/**
+ * Waits until the point at a square's centre hits the square. A card uses
+ * `content-visibility: auto`, so for a moment after it appears its contents are skipped:
+ * the card keeps its intrinsic size and a click there lands on the card, not the square.
+ */
+function underPointer(selector: string): Promise<true> {
+  return until(
+    () =>
+      browser.execute((sel: string) => {
+        const el = document.querySelector(sel);
+        if (el === null) return false;
+        const box = el.getBoundingClientRect();
+        return (
+          document.elementFromPoint(
+            box.left + box.width / 2,
+            box.top + box.height / 2,
+          ) === el
+        );
+      }, selector),
+    `${selector} never came under the pointer`,
+  );
+}
+
 describe("node topology", () => {
   before(async () => {
     await openCluster(KIND);
@@ -50,7 +73,9 @@ describe("node topology", () => {
   it("opens a pod's drawer from its square", async () => {
     const [key] = (await squares(WORKER)).filter((k) => k.startsWith(`${NS}/`));
     if (key === undefined) throw new Error("no fixture pod on the worker");
-    await pointerClick(await browser.$(`[data-pod="${key}"]`));
+    const square = `[data-pod="${key}"]`;
+    await underPointer(square);
+    await pointerClick(await browser.$(square));
     await shown("detail-drawer");
     await until(
       async () =>
