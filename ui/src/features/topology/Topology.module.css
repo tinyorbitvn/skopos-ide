@@ -1,0 +1,442 @@
+/* The node topology page (topology spec §3). */
+.screen {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5) var(--space-7);
+  padding: var(--space-7) var(--space-8);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-15);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.filter {
+  width: 200px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.note {
+  margin-left: auto;
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin: var(--space-7) var(--space-8) 0;
+  padding: var(--space-5) var(--space-7);
+  border: 1px solid var(--status-critical);
+  border-radius: var(--radius-sm);
+  background: var(--status-critical-soft);
+  color: var(--status-critical-text);
+}
+
+.errorText {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  margin: var(--space-7) var(--space-8) 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-8);
+}
+
+.skeletons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.skeleton {
+  width: 240px;
+  height: 200px;
+  border-radius: 0;
+  background: var(--surface-sunken);
+}
+
+/* The cluster: a solid accent box with a filled tab flush at its top-left (spec §3.3). */
+.cluster {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 2px solid var(--border-accent);
+}
+
+.clusterHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.clusterTab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--surface-accent);
+  color: var(--text-on-accent);
+}
+
+.clusterLabel {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  font: var(--type-label);
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clusterBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-8);
+}
+
+/*
+ * A region or a zone: a dashed box. An SVG rect over the box draws the dashes, so their
+ * length is exact; the label and the body are positioned, so they paint above it.
+ */
+.group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dash {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.dash rect {
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+}
+
+.group[data-kind="zone"] .dash rect {
+  stroke: var(--border-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+}
+
+.group[data-muted] .dash rect {
+  stroke: var(--text-tertiary);
+}
+
+.groupLabel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: 0;
+  font: var(--type-label);
+  color: var(--text-primary);
+}
+
+.group[data-kind="zone"] .groupLabel {
+  padding: var(--space-5) var(--space-7) 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.group[data-muted] .groupLabel {
+  color: var(--text-tertiary);
+}
+
+/* A region's tab, flush at its top-left. */
+.groupTab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--text-secondary);
+  color: var(--text-inverse);
+}
+
+.group[data-muted] .groupTab {
+  background: var(--text-tertiary);
+}
+
+.zoneIcon {
+  color: var(--border-accent);
+}
+
+.group[data-muted] .zoneIcon {
+  color: var(--text-tertiary);
+}
+
+.groupBody {
+  position: relative;
+  padding: var(--space-7);
+}
+
+/* Zone boxes sit side by side and wrap onto more rows in a narrow window. */
+.zones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+/* Node cards stack inside their zone. */
+.nodes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+/* A 240 px card. Off screen it skips layout and paint; its intrinsic size keeps the scrollbar steady. */
+.card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px auto 220px;
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-1);
+}
+
+.card[data-ready="NotReady"] {
+  border-color: var(--status-critical);
+}
+
+.card[data-cordoned] {
+  background: var(--surface-sunken);
+}
+
+/* Tab, name, status dot and role chips; one button that opens the node's drawer. */
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: 0 var(--space-5) 0 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cardHeader:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.nodeTab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--surface-accent-soft);
+  color: var(--text-on-accent-soft);
+}
+
+.nodeName {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-7) var(--space-7);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.taints {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+  font: var(--type-caption);
+  cursor: default;
+}
+
+.taints:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tipLine {
+  display: block;
+}
+
+/* The CPU and Memory donuts, one under the other. */
+.donuts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.podCount {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+/* The pod squares: 8 px with a 2 px gap, namespaces 6 px apart (topology spec §3.4). */
+.pods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xs);
+}
+
+.pods:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.podRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pod,
+.swatch {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
+  background: var(--status-offline);
+}
+
+.pod {
+  cursor: pointer;
+}
+
+.pod[data-state="Running"],
+.swatch[data-state="Running"] {
+  background: var(--status-nominal);
+}
+
+.pod[data-state="Pending"],
+.swatch[data-state="Pending"] {
+  background: var(--status-warning);
+}
+
+.pod[data-state="Failed"],
+.swatch[data-state="Failed"] {
+  background: var(--status-critical);
+}
+
+.pod[data-state="Succeeded"],
+.swatch[data-state="Succeeded"] {
+  background: var(--status-offline);
+}
+
+.pod[data-state="Unknown"],
+.swatch[data-state="Unknown"] {
+  background: color-mix(in srgb, var(--status-offline) 50%, transparent);
+}
+
+.pod[data-faded] {
+  opacity: 0.25;
+}
+
+.pod[data-active] {
+  box-shadow: var(--focus-ring);
+}
+
+/* One tooltip per grid, fixed on the body, so a card's content-visibility cannot clip it. */
+.tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 320px;
+  padding: var(--space-3) var(--space-5);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inverse);
+  box-shadow: var(--shadow-2);
+  color: var(--text-inverse);
+  font: var(--type-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 6px));
+}

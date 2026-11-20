@@ -37,6 +37,7 @@ import { CirclePlusFillIcon } from "@thesvg/ui-react/circle-plus";
 import { CircleQuestionMarkFillIcon } from "@thesvg/ui-react/circle-question-mark";
 import { CircleStopFillIcon } from "@thesvg/ui-react/circle-stop";
 import { CircleXFillIcon } from "@thesvg/ui-react/circle-x";
+import { ClusterFillIcon } from "@thesvg/ui-react/cluster";
 import { Columns2FillIcon } from "@thesvg/ui-react/columns-2";
 import { CommandFillIcon } from "@thesvg/ui-react/command";
 import { ConfigFileFillIcon } from "@thesvg/ui-react/config-file";
@@ -75,6 +76,7 @@ import { LinkFillIcon } from "@thesvg/ui-react/link";
 import { ListFillIcon } from "@thesvg/ui-react/list";
 import { LoadBalancerFillIcon } from "@thesvg/ui-react/load-balancer";
 import { LogOutFillIcon } from "@thesvg/ui-react/log-out";
+import { MapFillIcon } from "@thesvg/ui-react/map";
 import { Maximize2FillIcon } from "@thesvg/ui-react/maximize-2";
 import { Minimize2FillIcon } from "@thesvg/ui-react/minimize-2";
 import { MinusFillIcon } from "@thesvg/ui-react/minus";
@@ -112,6 +114,7 @@ import { SquareFillIcon } from "@thesvg/ui-react/square";
 import { StarFillIcon } from "@thesvg/ui-react/star";
 import { SunFillIcon } from "@thesvg/ui-react/sun";
 import { TagsFillIcon } from "@thesvg/ui-react/tags";
+import { TargetFillIcon } from "@thesvg/ui-react/target";
 import { TerminalFillIcon } from "@thesvg/ui-react/terminal";
 import { TerminalPromptFillIcon } from "@thesvg/ui-react/terminal-prompt";
 import { TrashFillIcon } from "@thesvg/ui-react/trash";
@@ -314,6 +317,12 @@ export const CircleX = /* @__PURE__ */ icon(
   "circle-x",
   CircleXFillIcon,
 );
+
+export const Cluster = /* @__PURE__ */ icon(
+  "cluster",
+  "cluster",
+  ClusterFillIcon,
+);
 export const Columns2 = /* @__PURE__ */ icon(
   "columns-2",
   "columns-2",
@@ -480,6 +489,9 @@ export const LogOut = /* @__PURE__ */ icon(
   "log-out",
   LogOutFillIcon,
 );
+
+/** Named so that it does not shadow the global `Map`. */
+export const MapIcon = /* @__PURE__ */ icon("map", "map", MapFillIcon);
 export const Maximize2 = /* @__PURE__ */ icon(
   "maximize-2",
   "maximize-2",
@@ -619,6 +631,8 @@ export const SquareTerminal = /* @__PURE__ */ icon(
 export const Star = /* @__PURE__ */ icon("star", "star", StarFillIcon);
 export const Sun = /* @__PURE__ */ icon("sun", "sun", SunFillIcon);
 export const Tags = /* @__PURE__ */ icon("tags", "tags", TagsFillIcon);
+
+export const Target = /* @__PURE__ */ icon("target", "target", TargetFillIcon);
 export const Terminal = /* @__PURE__ */ icon(
   "terminal",
   "terminal",
