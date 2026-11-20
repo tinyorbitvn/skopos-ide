@@ -36,5 +36,14 @@
     "macOS": {
       "signingIdentity": "-"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdBMzMyMEExNDI3MEVBQjMKUldTejZuQkNvU0F6ZWdPWjU0N0dGVUNNWSt3MGlkbkNzMzhzMUh2dnNZR3J2TWx6TDM0SUZWTngK",
+      "endpoints": ["https://github.com/vanlongme/skopos-ide/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -209,6 +209,16 @@ fn close_main_after_flush<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
+/// Before the app restarts into an update: every window saves its layout and its bounds are
+/// recorded, as when `main` closes (P34; in-app update R4).
+pub async fn prepare_restart<R: Runtime>(app: &AppHandle<R>) {
+    flush_windows(app).await;
+    let state = app.state::<AppState>();
+    for window in app.webview_windows().values() {
+        report_bounds(&state.core, window);
+    }
+}
+
 fn work_area(monitor: &Monitor) -> ScreenRect {
     let area = monitor.work_area();
     ScreenRect {
