@@ -367,6 +367,44 @@ async fn usage_from_a_registered_but_unavailable_metrics_server_is_unreachable()
 }
 
 #[tokio::test]
+async fn usage_that_metrics_server_does_not_answer_in_time_is_unreachable() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    fake.serve_metrics_api(
+        vec![node_metrics("n1", "2026-11-09T10:00:00Z", "250m", "1Gi")],
+        vec![],
+    );
+    fake.delay_metrics_api(Duration::from_secs(2));
+    core.set_metrics_limits_for_test(MetricsLimits {
+        usage: Duration::from_millis(100),
+        ..MetricsLimits::default()
+    });
+
+    let started = Instant::now();
+    let err = core
+        .metrics_usage(&id, UsageOf::Nodes, None)
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::Unreachable);
+    assert!(
+        err.message.contains("metrics-server did not answer within"),
+        "{}",
+        err.message
+    );
+    assert_ne!(err.details.as_deref(), Some("noMetricsServer"));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "took {:?}",
+        started.elapsed()
+    );
+
+    // An answer inside the limit is read as before.
+    fake.delay_metrics_api(Duration::ZERO);
+    let snapshot = core.metrics_usage(&id, UsageOf::Nodes, None).await.unwrap();
+    assert_eq!(snapshot.items.len(), 1);
+}
+
+#[tokio::test]
 async fn usage_needs_the_list_right_and_a_usable_namespace() {
     let (core, fake, id, _root) = connected_fake(FakeKubeConfig {
         deny: vec![DenyRule {

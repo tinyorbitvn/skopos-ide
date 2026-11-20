@@ -35,6 +35,9 @@ pub struct MetricsLimits {
     pub query: Duration,
     /// How long a detection is kept.
     pub cache: Duration,
+    /// How long one read of metrics.k8s.io waits. Shorter than the 15 s between two reads,
+    /// so a slow metrics-server is reported instead of being asked again on top.
+    pub usage: Duration,
 }
 
 impl Default for MetricsLimits {
@@ -43,6 +46,7 @@ impl Default for MetricsLimits {
             probe: Duration::from_secs(5),
             query: Duration::from_secs(15),
             cache: Duration::from_secs(600),
+            usage: Duration::from_secs(10),
         }
     }
 }

@@ -26,9 +26,11 @@ function isForbidden(e: unknown): boolean {
 }
 
 /**
- * Reads the disk of `names` now and every 30 s; undefined while there are no names
- * (any list but Nodes). The names go by value, so a watch event that keeps the same
- * nodes does not start over.
+ * Reads the disk of `names` now and every 30 s while the window shows; undefined while
+ * there are no names (any list but Nodes). The names go by value, so a watch event that
+ * keeps the same nodes does not start over. One read asks every kubelet, so a poll is
+ * skipped while the last one is still under way, and a hidden window asks nothing until
+ * it shows again.
  */
 export function useNodesDisk(
   clusterId: string,
@@ -40,7 +42,17 @@ export function useNodesDisk(
     if (key === null || key === "") return;
     const wanted = key.split("\n");
     let alive = true;
+    let reading = false;
+    // A poll fell while the window was hidden.
+    let missed = false;
     const read = () => {
+      if (reading) return;
+      if (document.visibilityState !== "visible") {
+        missed = true;
+        return;
+      }
+      missed = false;
+      reading = true;
       api
         .nodesDiskUsage(clusterId, wanted)
         .then((snapshot) => {
@@ -53,13 +65,21 @@ export function useNodesDisk(
         .catch((e: unknown) => {
           if (!alive) return;
           setView({ items: null, forbidden: isForbidden(e) });
+        })
+        .finally(() => {
+          reading = false;
         });
+    };
+    const onVisibility = () => {
+      if (missed) read();
     };
     read();
     const timer = setInterval(read, NODES_DISK_POLL_MS);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       alive = false;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [clusterId, key]);
   return key === null ? undefined : view;
