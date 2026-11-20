@@ -23,7 +23,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::discovery::state_name;
 use super::sanitize::strip_for_list;
-use super::trim::{is_core_pods, trim_for_graph, trim_for_watch};
+use super::trim::{
+    has_topology_row, is_core_pods, trim_for_graph, trim_for_topology, trim_for_watch,
+};
 use super::types::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
 use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
@@ -47,14 +49,16 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// One watcher's scope: a namespace, or `None` for the whole cluster.
 type Partition = Option<String>;
 
-/// What a subscriber's rows keep: what the tables read, or what the relationship graph reads.
-/// The two differ only for core Pods, so a group stores both rows of each Pod, and every other
-/// resource has one row for both shapes.
+/// what the node topology reads. The graph shape differs only for core Pods and the topology
+/// shape only for core Pods and Nodes, so a group stores those rows beside the table row, and
+/// every other resource has one row for every shape.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) enum RowShape {
     #[default]
     Table,
     Graph,
+    #[cfg_attr(not(test), allow(dead_code))]
+    Topology,
 }
 
 /// What a group keeps of one object.
@@ -63,6 +67,8 @@ struct StoredRow {
     table: Row,
     /// Only core Pods have a graph row of their own.
     graph: Option<Row>,
+    /// Only core Pods and Nodes have a topology row of their own.
+    topology: Option<Row>,
 }
 
 impl StoredRow {
@@ -71,6 +77,7 @@ impl StoredRow {
         match shape {
             RowShape::Table => &self.table,
             RowShape::Graph => self.graph.as_ref().unwrap_or(&self.table),
+            RowShape::Topology => self.topology.as_ref().unwrap_or(&self.table),
         }
     }
 }
@@ -756,9 +763,23 @@ fn to_row(object: &DynamicObject, resource: &ResourceRef) -> Option<(ObjectKey, 
     } else {
         None
     };
+    let topology = if has_topology_row(resource) {
+        let mut topology = value.clone();
+        trim_for_topology(resource, &mut topology);
+        Some(Row::new(&topology).ok()?)
+    } else {
+        None
+    };
     trim_for_watch(resource, &mut value);
     let table = Row::new(&value).ok()?;
-    Some((key, StoredRow { table, graph }))
+    Some((
+        key,
+        StoredRow {
+            table,
+            graph,
+            topology,
+        },
+    ))
 }
 
 /// Sleeps unless cancelled first, and lengthens the next pause.
@@ -982,6 +1003,7 @@ mod tests {
                 StoredRow {
                     table: row,
                     graph: None,
+                    topology: None,
                 },
             );
         }
@@ -1081,6 +1103,43 @@ mod tests {
             if !own_graph_row {
                 assert_eq!(
                     stored.pick(RowShape::Graph).json(),
+                    stored.pick(RowShape::Table).json(),
+                    "{group}/{plural}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn core_pods_and_nodes_store_a_topology_row_of_their_own() {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": { "name": "x", "namespace": "a", "annotations": { "note": "dropped" } },
+            "spec": { "nodeName": "n1", "serviceAccountName": "x" },
+        }))
+        .unwrap();
+        for (group, plural, own_topology_row) in [
+            ("", "pods", true),
+            ("", "nodes", true),
+            ("", "secrets", false),
+            ("example.com", "pods", false),
+        ] {
+            let (_, stored) = to_row(&object, &resource(group, plural)).unwrap();
+            assert_eq!(
+                stored.topology.is_some(),
+                own_topology_row,
+                "{group}/{plural}"
+            );
+            let topology = stored.pick(RowShape::Topology);
+            if own_topology_row {
+                assert!(
+                    topology.to_value()["metadata"].get("annotations").is_none(),
+                    "{group}/{plural}"
+                );
+            } else {
+                assert_eq!(
+                    topology.json(),
                     stored.pick(RowShape::Table).json(),
                     "{group}/{plural}"
                 );
@@ -1200,6 +1259,7 @@ mod tests {
             StoredRow {
                 table: row,
                 graph: None,
+                topology: None,
             },
         )
     }
