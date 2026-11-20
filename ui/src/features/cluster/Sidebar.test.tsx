@@ -65,6 +65,17 @@ beforeEach(() => {
   resetWindowLayoutForTest();
 });
 
+/** Opens the named sections, which start closed unless they hold the current page. */
+function openSections(...ids: string[]) {
+  for (const id of ids) {
+    const toggle = screen
+      .getByTestId(`nav-section-${id}`)
+      .querySelector<HTMLButtonElement>("button[aria-expanded]");
+    if (toggle?.getAttribute("aria-expanded") === "false")
+      fireEvent.click(toggle);
+  }
+}
+
 const RULES = cssRules(CSS_FILES["/src/features/cluster/Sidebar.module.css"]);
 
 function decl(selector: string, prop: string) {
@@ -84,6 +95,7 @@ const WIDE = [
 
 test("shows the visible sections and items", async () => {
   await show();
+  openSections("network");
   expect(screen.getByTestId("cluster-sidebar")).toBeTruthy();
   expect(screen.getByTestId("nav-section-workloads")).toBeTruthy();
   expect(screen.getByTestId("nav-overview-workloads")).toBeTruthy();
@@ -124,24 +136,45 @@ test("Overview is active on the cluster home", async () => {
   );
 });
 
-test("collapsing a section is saved through the UI state", async () => {
+test("opening a section is saved through the UI state", async () => {
   const backend = await show();
   const toggle = within(screen.getByTestId("nav-section-workloads")).getByRole(
     "button",
     { name: "Workloads" },
   );
-  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
   vi.useFakeTimers();
   fireEvent.click(toggle);
   act(() => {
     vi.advanceTimersByTime(300);
   });
   vi.useRealTimers();
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(backend.callsTo("ui_state_set")).toContainEqual({
     key: "cluster.c1.nav.workloads",
-    value: false,
+    value: true,
   });
+});
+
+// As the design has it: sections start closed, and the one holding the page opens itself.
+test("sections start closed, except the one holding the current page", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/apps/deployments");
+  const expanded = (id: string) =>
+    screen
+      .getByTestId(`nav-section-${id}`)
+      .querySelector("button[aria-expanded]")
+      ?.getAttribute("aria-expanded");
+  expect(["workloads", "helm", "argo"].map(expanded)).toEqual([
+    "true",
+    "false",
+    "false",
+  ]);
+  openSections("argo");
+  expect(
+    screen
+      .getByTestId("nav-branch-toggle-argocd")
+      .getAttribute("aria-expanded"),
+  ).toBe("false");
 });
 
 test("a saved collapsed section stays collapsed", async () => {
@@ -183,6 +216,7 @@ test("a failed refresh keeps the navigation and shows the error with a retry", a
 
 test("Custom Resources lists Definitions before the CRD groups", async () => {
   await show();
+  openSections("custom");
   fireEvent.click(screen.getByTestId("nav-crd-toggle-acme.io"));
   const section = screen.getByTestId("nav-section-custom");
   const links = within(section).getAllByRole("link");
@@ -249,6 +283,7 @@ function crdToggle(group: string): HTMLElement {
 
 test("a CRD group starts closed and shows its name, a tooltip and its kind count", async () => {
   await show({ resources: MANY });
+  openSections("custom");
   const toggle = crdToggle("acme.io");
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(toggle.textContent).toContain("acme.io");
@@ -520,7 +555,10 @@ test("Helm and Argo show their logos, Workloads its icon, and Argo holds the Arg
       .querySelector("[data-icon]")
       ?.getAttribute("data-icon"),
   ).toBe(SECTION_ICONS.workloads?.iconName);
+  openSections("argo");
   const branch = screen.getByTestId("nav-branch-toggle-argocd");
+  expect(branch.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(branch);
   expect([
     branch.textContent,
     branch.getAttribute("aria-expanded"),
@@ -534,8 +572,12 @@ test("Helm and Argo show their logos, Workloads its icon, and Argo holds the Arg
   ).toEqual(["nav-item-argoproj.io-applications"]);
 });
 
-test("closing the Argo CD branch is saved under today's Argo CD key", async () => {
+test("opening the Argo CD branch is saved under today's Argo CD key", async () => {
   const backend = await show({ resources: WIDE });
+  openSections("argo");
+  expect(screen.getByTestId("nav-branch-panel-argocd").childElementCount).toBe(
+    0,
+  );
   vi.useFakeTimers();
   fireEvent.click(screen.getByTestId("nav-branch-toggle-argocd"));
   act(() => {
@@ -543,11 +585,11 @@ test("closing the Argo CD branch is saved under today's Argo CD key", async () =
   });
   vi.useRealTimers();
   expect(screen.getByTestId("nav-branch-panel-argocd").childElementCount).toBe(
-    0,
+    1,
   );
   expect(backend.callsTo("ui_state_set")).toContainEqual({
     key: "cluster.c1.nav.argocd",
-    value: false,
+    value: true,
   });
 });
 
@@ -750,4 +792,52 @@ test("a kind open in another tab of this window shows a dot", async () => {
   act(() => resetWindowLayoutForTest());
   expect(dot("nav-item-apps-deployments")).toBeNull();
   expect(dot("nav-map")).toBeNull();
+});
+
+test("once scrolled, a hairline under the switcher marks where the rows go", async () => {
+  await show();
+  const nav = screen.getByTestId("cluster-sidebar");
+  expect(nav.dataset.scrolled).toBeUndefined();
+
+  nav.scrollTop = 40;
+  fireEvent.scroll(nav);
+  expect(nav.dataset.scrolled).toBe("true");
+  // A border kept at all times and coloured once scrolled: rows scroll inside it, so none covers
+  // it, and nothing moves (the padding gives back its pixel). A flat colour, no gradient (tokens.test).
+  expect([
+    decl(".sidebar", "border-top"),
+    decl(".sidebar", "padding"),
+    decl('.sidebar[data-scrolled="true"]', "border-top-color"),
+  ]).toEqual([
+    "1px solid transparent",
+    "calc(var(--space-4) - 1px) var(--space-6) var(--space-6)",
+    "var(--border-subtle)",
+  ]);
+
+  nav.scrollTop = 0;
+  fireEvent.scroll(nav);
+  expect(nav.dataset.scrolled).toBeUndefined();
+});
+
+test("rows, icons and pills have the design's type and colours (spec Q §2)", () => {
+  expect([
+    decl(".group", "gap"),
+    decl(".row", "font"),
+    decl(".row", "letter-spacing"),
+    decl(".rowIcon", "color"),
+    decl(
+      '.row[data-active="true"] .rowIcon,\n.row[aria-current="page"] .rowIcon',
+      "color",
+    ),
+    decl(".pill", "color"),
+    decl(".pill", "letter-spacing"),
+  ]).toEqual([
+    "var(--space-2)",
+    "var(--type-label)",
+    "var(--track-tight)",
+    "var(--text-secondary)",
+    "var(--text-primary)",
+    "var(--text-primary)",
+    "var(--track-tight)",
+  ]);
 });

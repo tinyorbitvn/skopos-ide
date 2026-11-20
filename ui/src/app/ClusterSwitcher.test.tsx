@@ -99,9 +99,9 @@ test("with no cluster the switcher asks for one", () => {
 
   const trigger = screen.getByTestId("switcher-trigger");
   expect(trigger.textContent).toContain("No cluster");
-  expect(trigger.querySelector(".over")?.textContent).toBe(
-    "Pick one to see its navigation",
-  );
+  // Short enough for the overline's room in the narrowest column; the empty note under
+  // the switcher says the rest.
+  expect(trigger.querySelector(".over")?.textContent).toBe("Pick a cluster");
   expect(trigger.querySelector(".tileDot")).toBeNull();
   expect(trigger.getAttribute("aria-label")).toBe(
     "Cluster shown in the sidebar",
@@ -234,6 +234,10 @@ test("the overline reads the distribution and version, or the state word", () =>
     "Kubernetes Â· v1.31.0",
   );
   expect(switcherOverline(connected("eks", ""))).toBe("eks");
+  // Build metadata after "+" would push the version out of the overline's room.
+  expect(switcherOverline(connected("rke2", "v1.37.0+rke2r1"))).toBe(
+    "rke2 Â· v1.37.0",
+  );
   expect(switcherOverline({ status: "disconnected" })).toBe("Disconnected");
   expect(switcherOverline({ status: "connecting" })).toBe("Connecting");
   expect(
@@ -319,9 +323,16 @@ test("the trigger and its menu have the design's metrics and open look (spec Q Â
       (r) => r.selector.includes(".name") && r.selector.includes(".over"),
     )?.decls,
   ).toContainEqual(["text-overflow", "ellipsis"]);
+  // The design's head: initials in label type, 2px between the overline and the name.
+  expect([decl(".tile", "font"), decl(".text", "gap")]).toEqual([
+    "var(--type-label)",
+    "var(--space-2)",
+  ]);
+  // The menu sits 66px down and 8px in from the top of the switcher, padded 6px.
   expect([
     decl(".panel", "top"),
     decl(".panel", "left"),
+    decl(".panel", "padding"),
     decl(".panel", "width"),
     decl('.switcher[data-collapsed="true"] .panel', "top"),
     decl('.switcher[data-collapsed="true"] .panel', "left"),
@@ -330,8 +341,9 @@ test("the trigger and its menu have the design's metrics and open look (spec Q Â
     decl('.switcher[data-collapsed="true"] .text', "display"),
     decl('.switcher[data-collapsed="true"] .updown', "display"),
   ]).toEqual([
-    "calc(var(--space-6) + 54px)",
-    "calc(var(--space-6) + 8px)",
+    "66px",
+    "var(--space-5)",
+    "var(--space-4)",
     "272px",
     "var(--space-5)",
     "calc(100% + 6px)",

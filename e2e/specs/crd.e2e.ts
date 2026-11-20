@@ -9,6 +9,8 @@ import {
   gone,
   openCluster,
   openResource,
+  navItem,
+  revealNav,
   rowId,
   shown,
   tableHeaders,
@@ -130,8 +132,10 @@ describe("custom resources", () => {
 
     await kubectl(["apply", "-f", "-"], CRD);
 
-    await shown(`nav-crd-group-${GROUP}`, 30000);
-    // CRD groups start closed (spec G §3.3); a saved state may already have it open.
+    await byTestId(`nav-crd-group-${GROUP}`).waitForExist({ timeout: 30000 });
+    // Custom Resources and its CRD groups start closed (spec G §3.3); a saved state may
+    // already have them open.
+    await revealNav();
     const toggle = await shown(`nav-crd-toggle-${GROUP}`);
     if ((await toggle.getAttribute("aria-expanded")) !== "true") {
       await toggle.click();
@@ -206,7 +210,7 @@ describe("custom resources", () => {
 
     // The rest of the app carries on.
     await gone(`nav-crd-group-${GROUP}`, 30000);
-    await shown("nav-item-core-pods");
+    await navItem("nav-item-core-pods");
     await expectConnected(5000);
     await openResource("nav-item-core-pods", "Pod");
   });

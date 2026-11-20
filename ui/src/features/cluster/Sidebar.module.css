@@ -5,14 +5,23 @@
   flex-direction: column;
   gap: 14px;
   min-height: 0;
-  padding: var(--space-4) var(--space-6) var(--space-6);
+  /* The top border is kept at all times, so the padding gives back its pixel. */
+  padding: calc(var(--space-4) - 1px) var(--space-6) var(--space-6);
   overflow-y: auto;
+  border-top: 1px solid transparent;
+}
+
+/* Scrolled: a hairline under the switcher, so a row cut by the top edge goes under it
+   rather than ending in the open. Rows scroll inside the border, so none covers it. */
+.sidebar[data-scrolled="true"] {
+  border-top-color: var(--border-subtle);
 }
 
 .group {
   display: flex;
   flex: none;
   flex-direction: column;
+  gap: var(--space-2);
 }
 
 /* A group's caption, not a button. The first group has none. */
@@ -43,6 +52,8 @@
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-primary);
+  font: var(--type-label);
+  letter-spacing: var(--track-tight);
   text-align: left;
   text-decoration: none;
   cursor: pointer;
@@ -70,8 +81,15 @@
   font-weight: var(--weight-semibold);
 }
 
+/* Icons are quiet; the row holding the current page shows its icon in full. */
 .rowIcon {
   flex: none;
+  color: var(--text-secondary);
+}
+
+.row[data-active="true"] .rowIcon,
+.row[aria-current="page"] .rowIcon {
+  color: var(--text-primary);
 }
 
 .rowChevron {
@@ -144,7 +162,8 @@
   margin: var(--space-1) 0;
   padding: 0 var(--space-6);
   border-radius: var(--radius-full);
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  letter-spacing: var(--track-tight);
   text-decoration: none;
 }
 

@@ -9,6 +9,7 @@ import {
   byTestId,
   clickWhenShown,
   gone,
+  navItem,
   openCluster,
   openResource,
   pointerClick,
@@ -140,7 +141,7 @@ describe("a user limited by RBAC", () => {
   });
 
   it("shows Pods and hides Nodes and Secrets", async () => {
-    await shown("nav-item-core-pods");
+    await navItem("nav-item-core-pods");
     expect(await byTestId("nav-item-core-nodes").isExisting()).toBe(false);
     expect(await byTestId("nav-item-core-secrets").isExisting()).toBe(false);
   });

@@ -60,7 +60,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: #ffffff;
-  font: var(--type-caption);
+  font: var(--type-label);
   font-weight: var(--weight-semibold);
   object-fit: cover;
 }
@@ -78,6 +78,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -133,18 +134,18 @@
   text-decoration: underline;
 }
 
-/* The menu, at the design's top: 54px and left: 8px from the trigger, which sits
-   inside the switcher's 10 px padding (spec Q §2). */
+/* The menu, 66px down and 8px in from the top of the switcher, as the design places it
+   (spec Q §2). */
 .panel {
   position: absolute;
-  top: calc(var(--space-6) + 54px);
-  left: calc(var(--space-6) + 8px);
+  top: 66px;
+  left: var(--space-5);
   z-index: 30;
   display: flex;
   flex-direction: column;
   width: 272px;
   max-width: calc(100vw - 32px);
-  padding: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-raised);

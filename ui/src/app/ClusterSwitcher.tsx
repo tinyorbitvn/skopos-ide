@@ -32,12 +32,13 @@ const INDENT_PX = 14;
 /**
  * The line above the switcher's name: `<distribution> · <version>` while connected
  * (CSS draws it in capitals), else the state word. An empty distribution reads
- * "Kubernetes"; an empty version is left out (spec Q §2).
+ * "Kubernetes"; an empty version is left out (spec Q §2). Build metadata after a "+"
+ * (`v1.37.0+rke2r1`) is left out too: the overline has room for the release only.
  */
 export function switcherOverline(state: ConnectionState): string {
   if (state.status !== "connected") return clusterStatus(state).label;
   const distribution = state.info.distribution.trim() || "Kubernetes";
-  const version = state.info.version.trim();
+  const version = state.info.version.trim().replace(/\+.*$/, "");
   return version === "" ? distribution : `${distribution} · ${version}`;
 }
 
@@ -296,9 +297,7 @@ export function ClusterSwitcher(props: {
       </span>
       <span className={styles.text}>
         <span className={styles.over}>
-          {cluster
-            ? switcherOverline(cluster.state)
-            : "Pick one to see its navigation"}
+          {cluster ? switcherOverline(cluster.state) : "Pick a cluster"}
         </span>
         <span className={styles.name}>{name}</span>
       </span>
