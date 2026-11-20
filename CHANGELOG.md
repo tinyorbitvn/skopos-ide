@@ -10,7 +10,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **Secret values stay out of Helm manifests:** the manifest of a release, and the one a preview renders, shows each Secret's keys with their values hidden. A document that cannot be read and names a Secret is hidden whole.
 - **Safer paste in terminals:** control characters are removed from pasted text, whichever way it is pasted, so text copied from a cluster cannot end the paste early and run commands in a local shell. Links in terminal output open through the same check as every other link.
 - **Windows stay on the app's own pages:** a window refuses to load any other page, and a file or link dropped on a window no longer opens in it.
-- **Hardening:** the log folder is kept to your user account, a failed access review no longer logs text the server sent, the connection log warns when a kubeconfig turns off TLS verification, and the content security policy forbids frames, plugins, form posts and a changed base address.
+- **The app asks where to save, not the page:** a log download, a map export and a ServiceAccount kubeconfig are saved where you choose in a dialog the app itself opens, so the interface never names the file to write. A map's save dialog now opens once its image is drawn.
+- **Hardening:** the app's settings, data, log and cache folders are kept to your user account, a failed access review no longer logs text the server sent, the connection log warns when a kubeconfig turns off TLS verification, and the content security policy forbids frames, plugins, form posts and a changed base address.
 
 ## [0.9.0] - 2026-11-20
 
