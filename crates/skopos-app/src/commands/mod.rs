@@ -16,4 +16,5 @@ pub mod resources;
 pub mod sessions;
 pub mod settings;
 pub mod tools;
+pub mod topology;
 pub mod windows;
