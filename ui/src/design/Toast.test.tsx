@@ -83,3 +83,25 @@ test("an info toast can carry details too", () => {
   expect(screen.getByText("bitnami, stable")).toBeTruthy();
   dismiss();
 });
+
+test("a toast can carry an action, which runs and closes it", () => {
+  render(<Toaster />);
+  const view = vi.fn();
+  act(() =>
+    toast.info("SkoposIDE 0.10.0 is available", undefined, {
+      action: { label: "View", onSelect: view },
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View" }));
+  expect(view).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("SkoposIDE 0.10.0 is available")).toBeNull();
+});
+
+test("a toast given a duration stays that long", () => {
+  render(<Toaster />);
+  act(() => toast.info("Kept for ten seconds", undefined, { duration: 10000 }));
+  act(() => vi.advanceTimersByTime(5000));
+  expect(screen.queryByText("Kept for ten seconds")).not.toBeNull();
+  act(() => vi.advanceTimersByTime(5500));
+  expect(screen.queryByText("Kept for ten seconds")).toBeNull();
+});

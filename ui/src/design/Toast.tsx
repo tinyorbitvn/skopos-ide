@@ -3,11 +3,23 @@ import { useSyncExternalStore } from "react";
 import styles from "./Toast.module.css";
 
 type Kind = "success" | "error" | "info";
+/** A button in the toast, such as View. Choosing it closes the toast. */
+export interface ToastAction {
+  label: string;
+  onSelect(): void;
+}
+export interface ToastOptions {
+  action?: ToastAction;
+  /** In milliseconds; otherwise the kind's own. */
+  duration?: number;
+}
 interface Item {
   id: number;
   kind: Kind;
   message: string;
   details?: string;
+  action?: ToastAction;
+  duration?: number;
 }
 
 let items: Item[] = [];
@@ -17,8 +29,23 @@ const listeners = new Set<() => void>();
 function emit(): void {
   for (const l of listeners) l();
 }
-function push(kind: Kind, message: string, details?: string): void {
-  items = [...items, { id: nextId++, kind, message, details }];
+function push(
+  kind: Kind,
+  message: string,
+  details?: string,
+  options?: ToastOptions,
+): void {
+  items = [
+    ...items,
+    {
+      id: nextId++,
+      kind,
+      message,
+      details,
+      action: options?.action,
+      duration: options?.duration,
+    },
+  ];
   emit();
 }
 function dismiss(id: number): void {
@@ -37,13 +64,17 @@ function isList(details: string | undefined): boolean {
 
 function durationOf(item: Item): number {
   if (isList(item.details)) return Number.POSITIVE_INFINITY;
+  if (item.duration !== undefined) return item.duration;
   return item.kind === "error" ? 10000 : 4000;
 }
 
 export const toast = {
-  success: (m: string, details?: string) => push("success", m, details),
-  error: (m: string, details?: string) => push("error", m, details),
-  info: (m: string, details?: string) => push("info", m, details),
+  success: (m: string, details?: string, options?: ToastOptions) =>
+    push("success", m, details, options),
+  error: (m: string, details?: string, options?: ToastOptions) =>
+    push("error", m, details, options),
+  info: (m: string, details?: string, options?: ToastOptions) =>
+    push("info", m, details, options),
 };
 
 export function Toaster() {
@@ -72,6 +103,15 @@ export function Toaster() {
             >
               {t.details}
             </RT.Description>
+          ) : null}
+          {t.action ? (
+            <RT.Action
+              className={styles.action}
+              altText={t.action.label}
+              onClick={t.action.onSelect}
+            >
+              {t.action.label}
+            </RT.Action>
           ) : null}
           <RT.Close className={styles.close} aria-label="Dismiss">
             ×

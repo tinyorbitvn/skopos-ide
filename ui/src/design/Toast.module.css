@@ -90,3 +90,23 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+.action {
+  align-self: flex-start;
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-accent);
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--surface-hover);
+}
+
+.action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
