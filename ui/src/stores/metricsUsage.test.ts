@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { UsageItem } from "../ipc/generated/UsageItem";
+import type { UsageSnapshot } from "../ipc/generated/UsageSnapshot";
 import { flush, mockBackend } from "../test/ipc";
 import {
   FORBIDDEN,
@@ -83,6 +84,64 @@ test("usage watchers share a poller that asks at once and every 15 s, and say wh
   vi.advanceTimersByTime(USAGE_POLL_MS);
   await flush();
   expect(backend.callsTo("metrics_usage")).toHaveLength(2);
+});
+
+test("a usage read that is still under way is not asked again, and its late answer is shown", async () => {
+  pollTimers();
+  const answers: ((snapshot: UsageSnapshot) => void)[] = [];
+  const backend = mockBackend({
+    metrics_usage: () =>
+      new Promise<UsageSnapshot>((resolve) => {
+        answers.push(resolve);
+      }),
+  });
+  const stop = watchUsage("c1", "pods", null);
+  await flush();
+  expect(backend.callsTo("metrics_usage")).toHaveLength(1);
+
+  // Two polls pass while metrics-server works on the first read.
+  vi.advanceTimersByTime(2 * USAGE_POLL_MS);
+  await flush();
+  expect(backend.callsTo("metrics_usage")).toHaveLength(1);
+  expect(metrics().usage[PODS]?.nextAt).toBe(T0 * 1000 + 3 * USAGE_POLL_MS);
+
+  answers[0]?.(usageSnapshot([WEB], T0));
+  await flush();
+  expect(metrics().usage[PODS]?.value?.items).toEqual([WEB]);
+  expect(metrics().usage[PODS]?.loading).toBe(false);
+
+  vi.advanceTimersByTime(USAGE_POLL_MS);
+  await flush();
+  expect(backend.callsTo("metrics_usage")).toHaveLength(2);
+  stop();
+});
+
+test("Retry asks at once while a read is under way, and only the newer answer is kept", async () => {
+  pollTimers();
+  const answers: ((snapshot: UsageSnapshot) => void)[] = [];
+  const backend = mockBackend({
+    metrics_usage: () =>
+      new Promise<UsageSnapshot>((resolve) => {
+        answers.push(resolve);
+      }),
+  });
+  const stop = watchUsage("c1", "pods", null);
+  await flush();
+
+  const retried = askUsage("c1", "pods", null);
+  await flush();
+  expect(backend.callsTo("metrics_usage")).toHaveLength(2);
+  answers[1]?.(usageSnapshot([DB], T0));
+  await retried;
+  answers[0]?.(usageSnapshot([WEB], T0));
+  await flush();
+  expect(metrics().usage[PODS]?.value?.items).toEqual([DB]);
+
+  // Both have answered, so the next poll asks again.
+  vi.advanceTimersByTime(USAGE_POLL_MS);
+  await flush();
+  expect(backend.callsTo("metrics_usage")).toHaveLength(3);
+  stop();
 });
 
 test("usage asks follow the window's visibility like queries", async () => {

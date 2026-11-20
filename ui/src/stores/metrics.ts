@@ -118,6 +118,8 @@ const historyReaders = new Map<string, Map<string, number>>();
 const ALL_ITEMS = "\0all";
 // Clusters whose provider was read again after a noMetricsServer answer, until forgetProvider.
 const notServedRefreshed = new Set<string>();
+// By usage key: the reads of metrics.k8s.io that have not answered yet.
+const usageReads = new Map<string, number>();
 let unwatchCatalog: (() => void) | null = null;
 
 /** The same string for the same cluster, target and range, whatever order the target's fields were written in. */
@@ -166,6 +168,9 @@ function mayAsk(poller: Poller): boolean {
 function tick(poller: Poller): void {
   if (poller.usage) {
     patchUsage(poller.key, { nextAt: Date.now() + USAGE_POLL_MS });
+    // A read that takes longer than the poll is waited for. Asking again would drop its
+    // answer for the newer one's, and the usage of a slow metrics-server would never show.
+    if (usageReads.has(poller.key)) return;
   }
   if (mayAsk(poller)) {
     poller.missed = false;
@@ -600,6 +605,7 @@ export async function askUsage(
   const key = usageKey(clusterId, of, namespace);
   const mine = nextSeq(key);
   patchUsage(key, { loading: true });
+  usageReads.set(key, (usageReads.get(key) ?? 0) + 1);
   try {
     const snapshot = await api.metricsUsage(clusterId, of, namespace);
     if (seqs.get(key) !== mine) return;
@@ -639,6 +645,10 @@ export async function askUsage(
     } else {
       patchUsage(key, { error: failure, loading: false });
     }
+  } finally {
+    const left = (usageReads.get(key) ?? 1) - 1;
+    if (left > 0) usageReads.set(key, left);
+    else usageReads.delete(key);
   }
 }
 
@@ -670,6 +680,7 @@ export function resetMetricsForTest(): void {
   providerLoads.clear();
   historyReaders.clear();
   notServedRefreshed.clear();
+  usageReads.clear();
   stopListening();
   unwatchCatalog?.();
   unwatchCatalog = null;

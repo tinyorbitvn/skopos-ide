@@ -117,7 +117,18 @@ impl AppCore {
                 format!("could not build the metrics request: {e}"),
             )
         })?;
-        let list: Value = client.request(request).await.map_err(|e| {
+        // The list of a large cluster or a struggling metrics-server can take longer than
+        // the time between two reads; without a limit those reads would pile up.
+        let limit = self.metrics().limits().usage;
+        let answer = tokio::time::timeout(limit, client.request::<Value>(request))
+            .await
+            .map_err(|_| {
+                IpcError::new(
+                    ErrorCode::Unreachable,
+                    format!("metrics-server did not answer within {limit:?}"),
+                )
+            })?;
+        let list = answer.map_err(|e| {
             let err = IpcError::from(e);
             if err.code == ErrorCode::NotFound {
                 IpcError::new(
