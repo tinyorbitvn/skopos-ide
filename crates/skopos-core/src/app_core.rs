@@ -33,6 +33,7 @@ use crate::secrets::{MemorySecretStore, SecretStore, Secrets};
 use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
 use crate::tools::{ToolProgress, Tools};
+use crate::topology::TopologyHub;
 use crate::ui_state::UiState;
 use crate::windows::{WindowLayout, Windows};
 
@@ -97,6 +98,7 @@ struct Inner {
     connections: Arc<ClusterManager>,
     watches: Arc<WatchHub>,
     graphs: Arc<GraphHub>,
+    topologies: Arc<TopologyHub>,
     drains: DashMap<(ClusterId, String), RunningDrain>,
     next_drain: AtomicU64,
     /// The discovery run of each cluster, shared by its `refresh` callers.
@@ -282,6 +284,7 @@ impl AppCore {
                 connections,
                 watches: Arc::new(WatchHub::default()),
                 graphs: Arc::new(GraphHub::default()),
+                topologies: Arc::new(TopologyHub::default()),
                 drains: DashMap::new(),
                 next_drain: AtomicU64::new(1),
                 discoveries: DashMap::new(),
@@ -528,6 +531,10 @@ impl AppCore {
 
     pub(crate) fn graphs(&self) -> &Arc<GraphHub> {
         &self.inner.graphs
+    }
+
+    pub(crate) fn topologies(&self) -> &Arc<TopologyHub> {
+        &self.inner.topologies
     }
 
     pub(crate) fn drains(&self) -> &DashMap<(ClusterId, String), RunningDrain> {
