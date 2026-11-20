@@ -13,6 +13,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **The app asks where to save, not the page:** a log download, a map export and a ServiceAccount kubeconfig are saved where you choose in a dialog the app itself opens, so the interface never names the file to write. A map's save dialog now opens once its image is drawn.
 - **A window's watches end with it:** when a window reloads or closes, the lists, detail panels, resource map and Helm release list it was following stop being watched, where they could keep running in the background. Other windows keep theirs.
 - **A reconnect sends only what changed:** when a watch reconnects or its resource version expires, the lists and the resource map receive only the rows that changed meanwhile, where every row was sent and drawn again.
+- **Slow metrics no longer pile up:** a metrics-server read that takes longer than the 15 s between polls is waited for and shown, where its answer was dropped and usage never appeared, and a read gives up after 10 s with a message. The Nodes list asks the kubelets for disk use only while the window shows, and not while its last read is still under way.
 - **Hardening:** the app's settings, data, log and cache folders are kept to your user account, a failed access review no longer logs text the server sent, the connection log warns when a kubeconfig turns off TLS verification, and the content security policy forbids frames, plugins, form posts and a changed base address.
 
 ## [0.9.0] - 2026-11-20
