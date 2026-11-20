@@ -13,6 +13,8 @@ import { resetHelmForTest } from "../../stores/helm";
 import { resetPrefsForTest, usePrefs } from "../../stores/prefs";
 import { toolStatus } from "../../test/helm";
 import { mockBackend } from "../../test/ipc";
+import { updateState } from "../../test/updates";
+import { resetUpdatesForTest } from "../updates/updateStore";
 import { PreferencesScreen } from "./PreferencesScreen";
 
 const saved: Prefs = {
@@ -53,6 +55,7 @@ function show(
 beforeEach(() => {
   resetPrefsForTest();
   resetHelmForTest();
+  resetUpdatesForTest();
   delete document.documentElement.dataset.theme;
 });
 
@@ -271,5 +274,52 @@ test("Tools and Helm repositories sit between Kubeconfig sources and Appearance"
   await screen.findByTestId("pref-tool-helm");
   expect(
     screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent),
-  ).toEqual(["Kubeconfig sources", "Tools", "Helm repositories", "Appearance"]);
+  ).toEqual([
+    "Kubeconfig sources",
+    "Tools",
+    "Helm repositories",
+    "Appearance",
+    "Updates",
+  ]);
+});
+
+test("Updates: the switch saves updateCheck, and Check Now checks and shows when", async () => {
+  const ipc = show(saved, {
+    update_check: () =>
+      updateState({
+        phase: { type: "upToDate" },
+        lastCheckedAt: Math.floor(Date.now() / 1000),
+      }),
+  });
+  const toggle = await screen.findByRole("switch", {
+    name: "Check for updates automatically",
+  });
+  expect((toggle as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByTestId("prefs-last-checked").textContent).toBe(
+    "Never checked",
+  );
+
+  fireEvent.click(screen.getByTestId("prefs-update-check"));
+  await waitFor(() =>
+    expect(ipc.callsTo("prefs_set")).toEqual([
+      { prefs: { ...saved, updateCheck: false } },
+    ]),
+  );
+  expect(usePrefs.getState().prefs?.updateCheck).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "Check Now" }));
+  await waitFor(() => expect(ipc.callsTo("update_check")).toHaveLength(1));
+  await waitFor(() =>
+    expect(screen.getByTestId("prefs-last-checked").textContent).toBe(
+      "Last checked just now",
+    ),
+  );
+});
+
+test("a saved updateCheck of false shows the switch off", async () => {
+  show({ ...saved, updateCheck: false });
+  const toggle = await screen.findByRole("switch", {
+    name: "Check for updates automatically",
+  });
+  expect((toggle as HTMLInputElement).checked).toBe(false);
 });
