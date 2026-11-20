@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { api } from "../ipc/api";
 import { failureMessage } from "../ipc/client";
 import type { TopologySnapshot } from "../ipc/generated/TopologySnapshot";
+import { useCatalog } from "./catalog";
 import { LINGER_MS } from "./resources";
 
 /** One cluster's node topology (topology spec §4.3). */
@@ -119,6 +120,7 @@ function subscribe(watch: Watch): void {
  * that leaves; calling it again does nothing.
  */
 export function watchTopology(clusterId: string): () => void {
+  listen();
   let watch = watches.get(clusterId);
   if (!watch) {
     watch = {
@@ -153,6 +155,44 @@ export function watchTopology(clusterId: string): () => void {
       if (mine.count === 0) drop(mine);
     }, LINGER_MS);
   };
+}
+
+let listening = false;
+
+function statusesOf(): Map<string, string> {
+  return new Map(
+    useCatalog.getState().clusters.map((c) => [c.id, c.state.status] as const),
+  );
+}
+
+/**
+ * A disconnect ends the backend subscription without an event. A lingering watch is
+ * dropped, so a quick reconnect subscribes again; a watched one is marked failed, so
+ * its page shows the error and Retry.
+ */
+function listen(): void {
+  if (listening) return;
+  listening = true;
+  let statuses = statusesOf();
+  useCatalog.subscribe(() => {
+    const before = statuses;
+    statuses = statusesOf();
+    for (const [clusterId, status] of before) {
+      if (status !== "connected" || statuses.get(clusterId) === "connected") {
+        continue;
+      }
+      const watch = watches.get(clusterId);
+      if (!watch) continue;
+      if (watch.count === 0) {
+        drop(watch);
+        continue;
+      }
+      watch.generation += 1;
+      watch.failed = true;
+      endSubscription(watch);
+      patch(clusterId, { error: "Cluster disconnected", loading: false });
+    }
+  });
 }
 
 /** Subscribes a watched cluster again, after a failure or a refused subscribe. */
