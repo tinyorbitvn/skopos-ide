@@ -14,6 +14,8 @@ import {
 import { type Backend, flush, mockBackend } from "../../test/ipc";
 import {
   CONNECTED,
+  CURSOR_REPORT,
+  CURSOR_REQUEST,
   captureResizeObservers,
   connectClusters,
   type FakeTermView,
@@ -239,8 +241,7 @@ test("a tab waits for its cluster to connect, then starts", () => {
 });
 
 test("output is written, and acknowledged 50 ms after xterm has taken it in", async () => {
-  open(TERMINAL);
-  await answer(startAt(0), "t1");
+  await running();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   startAt(0).data("hello\r\n");
   expect(viewAt(0).written).toEqual(["hello\r\n"]);
@@ -253,8 +254,7 @@ test("output is written, and acknowledged 50 ms after xterm has taken it in", as
 });
 
 test("acknowledgements batch: one call per 50 ms, or at once at 64 KiB", async () => {
-  open(TERMINAL);
-  await answer(startAt(0), "t1");
+  await running();
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   startAt(0).data("abc");
   viewAt(0).finishWrites();
@@ -311,16 +311,18 @@ test("pending acknowledgements are dropped when the tab closes", async () => {
   expect(calls("session_ack")).toEqual([]);
 });
 
-test("output before the id is acknowledged as one sum when the id comes, then batched", async () => {
+test("output held until the session can answer is acknowledged once shown, then batched", async () => {
   open(TERMINAL);
   startAt(0).data("abc");
   startAt(0).data("de");
-  viewAt(0).finishWrites();
+  startAt(0).send({ type: "started", tty: true });
+  await answer(startAt(0), "t1");
   expect(viewAt(0).written).toEqual(["abc", "de"]);
   expect(calls("session_ack")).toEqual([]);
 
-  await answer(startAt(0), "t1");
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  viewAt(0).finishWrites();
+  vi.advanceTimersByTime(50);
   expect(calls("session_ack")).toEqual([{ sessionId: "t1", bytes: 5 }]);
 
   startAt(0).data("f");
@@ -330,6 +332,53 @@ test("output before the id is acknowledged as one sum when the id comes, then ba
     { sessionId: "t1", bytes: 5 },
     { sessionId: "t1", bytes: 1 },
   ]);
+});
+
+// A Windows pseudoconsole asks for the cursor position before anything else and waits for
+// the answer, and its question may overtake both the started event and the id.
+test.each([
+  ["the started event", "started", "id"],
+  ["the id", "id", "started"],
+])(
+  "a cursor request that comes before %s and the other is still answered",
+  async (_, first, second) => {
+    open(TERMINAL);
+    const start = startAt(0);
+    const view = viewAt(0);
+    const steps: Record<string, () => Promise<void>> = {
+      started: async () => start.send({ type: "started", tty: true }),
+      id: () => answer(start, "t1"),
+    };
+    start.data(CURSOR_REQUEST);
+    view.finishWrites();
+    await steps[first]?.();
+    view.finishWrites();
+    expect(view.written).toEqual([]);
+
+    await steps[second]?.();
+    // Fake timers keep the batched acknowledgement from firing in a later test.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    view.finishWrites();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(calls("session_ack")).toEqual([
+      { sessionId: "t1", bytes: CURSOR_REQUEST.length },
+    ]);
+    expect(view.written).toEqual([CURSOR_REQUEST]);
+    expect(calls("session_write")).toEqual([
+      {
+        sessionId: "t1",
+        data: Array.from(new TextEncoder().encode(CURSOR_REPORT)),
+      },
+    ]);
+  },
+);
+
+test("held output is shown when the session ends before it could answer", async () => {
+  open(TERMINAL);
+  startAt(0).data("bye\r\n");
+  startAt(0).send({ type: "exited", code: 3 });
+  expect(viewAt(0).written).toEqual(["bye\r\n"]);
+  expect(info(TERMINAL.id).status).toBe("ended");
 });
 
 test("input goes out in order while connected with a TTY, and stops when the session ends", async () => {

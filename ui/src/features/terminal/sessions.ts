@@ -67,8 +67,13 @@ interface Session {
   over: boolean;
   started: boolean;
   tty: boolean | null;
-  /** Bytes xterm has taken in before the id came. */
-  unacked: number;
+  /**
+   * Output that came before the session could answer it, that is before both the id and
+   * the started event. A Windows pseudoconsole asks for the cursor position first and waits
+   * for the answer, but xterm drops its answers while input is off and `sendInput` drops
+   * them without an id.
+   */
+  held: Uint8Array[];
   /** Bytes xterm has parsed that no `session_ack` has reported yet. */
   pendingAck: number;
   /** Fires the batched acknowledgement, 50 ms after the first unsent byte. */
@@ -290,7 +295,7 @@ function start(entry: Entry, size: TerminalSize): void {
     over: false,
     started: false,
     tty: null,
-    unacked: 0,
+    held: [],
     pendingAck: 0,
     ackTimer: null,
     size,
@@ -312,15 +317,29 @@ function start(entry: Entry, size: TerminalSize): void {
     setInfo(tab.id, info);
   }
 
+  function show(bytes: Uint8Array): void {
+    view.write(bytes, () => {
+      // Reconnect or Close may have come while xterm parsed the chunk.
+      if (!current() || session.over || session.id === null) return;
+      queueAck(session, session.id, bytes.length);
+    });
+  }
+
+  /** Shows the held output: the session can answer it now, or it has ended. */
+  function release(): void {
+    const held = session.held;
+    session.held = [];
+    for (const bytes of held) show(bytes);
+  }
+
   function onData(chunk: ArrayBuffer): void {
     if (!current()) return;
     const bytes = new Uint8Array(chunk);
-    view.write(bytes, () => {
-      // Reconnect or Close may have come while xterm parsed the chunk.
-      if (!current() || session.over) return;
-      if (session.id === null) session.unacked += bytes.length;
-      else queueAck(session, session.id, bytes.length);
-    });
+    if (!session.over && (session.id === null || !session.started)) {
+      session.held.push(bytes);
+    } else {
+      show(bytes);
+    }
   }
 
   function onEvent(event: SessionEvent): void {
@@ -339,9 +358,11 @@ function start(entry: Entry, size: TerminalSize): void {
           tty: event.tty,
           message: null,
         });
+        if (session.id !== null) release();
         if (shown(entry)) view.focus();
         break;
       case "exited":
+        release();
         view.writeNote(
           event.code === null
             ? "Session ended"
@@ -359,6 +380,7 @@ function start(entry: Entry, size: TerminalSize): void {
         const prefix = session.started
           ? "The session failed"
           : "Could not start the session";
+        release();
         view.writeNote(`${prefix}: ${event.error.message}`, "error");
         for (const line of event.podEvents) view.writeNote(line, "note");
         end({
@@ -381,18 +403,16 @@ function start(entry: Entry, size: TerminalSize): void {
       }
       session.id = id;
       if (session.over) return;
-      if (session.unacked > 0) {
-        void api.sessionAck(id, session.unacked).catch(() => {});
-        session.unacked = 0;
-      }
       if (!sameSize(session.size, session.sentSize)) {
         session.sentSize = session.size;
         void api.sessionResize(id, session.size).catch(() => {});
       }
+      if (session.started) release();
     },
     (e: unknown) => {
       if (!current()) return;
       const message = failureMessage(e);
+      release();
       view.writeNote(`Could not start the session: ${message}`, "error");
       end({ status: "failed", exitCode: null, tty: null, message });
     },
