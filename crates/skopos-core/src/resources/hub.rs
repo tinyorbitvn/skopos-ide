@@ -57,7 +57,6 @@ pub(crate) enum RowShape {
     #[default]
     Table,
     Graph,
-    #[cfg_attr(not(test), allow(dead_code))]
     Topology,
 }
 
