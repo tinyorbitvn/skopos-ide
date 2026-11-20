@@ -21,6 +21,7 @@ import {
   type NavIcon,
   type NavSection,
   navItemKey,
+  navLabel,
   resourcePath,
 } from "../../kinds/nav";
 import { useUiState } from "../../stores/uiState";
@@ -399,7 +400,7 @@ function Section(props: {
   );
 }
 
-/** A section with one screen (Nodes, Namespaces, Events): a direct link to it. */
+/** A section with one screen (Namespaces, Events): a direct link to it. */
 function DirectSection(props: { clusterId: string; section: NavSection }) {
   const { clusterId, section } = props;
   const item = section.items[0];
@@ -437,7 +438,7 @@ function SectionItems(props: {
         <Pill
           key={navItemKey(i)}
           to={itemPath(clusterId, i)}
-          label={i.label}
+          label={navLabel(i)}
           testId={itemTestId(i)}
         />
       ))}

@@ -115,10 +115,15 @@ test("the rail shows one icon per section between group dividers, with the secti
     icon("workloads").querySelector("[data-icon]")?.getAttribute("data-icon"),
   ).toBe(SECTION_ICONS.workloads?.iconName);
   expect([
+    icon("namespaces").tagName,
+    icon("namespaces").getAttribute("href"),
+    icon("namespaces").getAttribute("aria-label"),
+  ]).toEqual(["A", "/cluster/c1/r/core/namespaces", "Namespaces"]);
+  expect([
     icon("nodes").tagName,
-    icon("nodes").getAttribute("href"),
     icon("nodes").getAttribute("aria-label"),
-  ]).toEqual(["A", "/cluster/c1/r/core/nodes", "Nodes"]);
+    icon("nodes").getAttribute("aria-haspopup"),
+  ]).toEqual(["BUTTON", "Nodes", "menu"]);
   expect([
     icon("workloads").tagName,
     icon("workloads").getAttribute("aria-label"),
@@ -194,11 +199,11 @@ test("the section holding the current page is the current icon", async () => {
 
 test("a single-screen icon navigates with the sidebar's link handlers", async () => {
   await show();
-  fireEvent.click(icon("nodes"));
-  expect(paths()).toEqual(["/cluster/c1/r/core/nodes"]);
+  fireEvent.click(icon("events"));
+  expect(paths()).toEqual(["/cluster/c1/r/core/events"]);
   fireEvent.click(icon("namespaces"), { ctrlKey: true });
   expect(paths()).toEqual([
-    "/cluster/c1/r/core/nodes",
+    "/cluster/c1/r/core/events",
     "/cluster/c1/r/core/namespaces",
   ]);
 });
@@ -343,6 +348,24 @@ test("choosing an item navigates with the sidebar's link handlers and closes the
   );
   expect(useWindowLayout.getState().layout.panes).toHaveLength(2);
   expect(flyout("workloads")).toBeNull();
+});
+
+test("the Nodes flyout lists List and Topology, and Topology opens the page", async () => {
+  await show();
+  fireEvent.click(icon("nodes"));
+  const box = flyout("nodes");
+  if (box === null) throw new Error("no flyout");
+  const items = within(
+    within(box).getByRole("menu", { name: "Nodes" }),
+  ).getAllByRole("menuitem");
+  expect(
+    items.map((i) => [i.textContent, i.getAttribute("data-testid")]),
+  ).toEqual([
+    ["List", "rail-item-core-nodes"],
+    ["Topology", "rail-item-node-topology"],
+  ]);
+  fireEvent.click(screen.getByTestId("rail-item-node-topology"));
+  expect(paths()).toEqual(["/cluster/c1/node-topology"]);
 });
 
 test("double-clicking a flyout item pins its tab and closes the flyout", async () => {

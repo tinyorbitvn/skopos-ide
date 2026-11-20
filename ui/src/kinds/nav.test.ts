@@ -14,6 +14,7 @@ import {
   NAV_SCREENS,
   NAV_SECTIONS,
   navItemKey,
+  navLabel,
   pluralKind,
   resourcePath,
   visibleSections,
@@ -49,7 +50,7 @@ const EXPECTED: [string, string[]][] = [
       "argoproj.io/appprojects",
     ],
   ],
-  ["nodes", ["/nodes"]],
+  ["nodes", ["/nodes", "route:node-topology"]],
   ["namespaces", ["/namespaces"]],
   ["events", ["/events"]],
   [
@@ -243,17 +244,33 @@ test("Helm and Argo show their logos; every other section the palette's icon", (
   }
 });
 
-test("Nodes, Namespaces and Events are direct links to their only kind", () => {
+test("Namespaces and Events are direct links to their only kind; Nodes holds List and Topology", () => {
   expect(
     NAV_SECTIONS.filter((s) => s.direct).map((s) => [
       s.id,
       s.items.map(navItemKey),
     ]),
   ).toEqual([
-    ["nodes", ["/nodes"]],
     ["namespaces", ["/namespaces"]],
     ["events", ["/events"]],
   ]);
+  const nodes = NAV_SECTIONS.find((s) => s.id === "nodes");
+  expect(
+    nodes?.items.map((i) => [navItemKey(i), navLabel(i), i.label]),
+  ).toEqual([
+    ["/nodes", "List", "Nodes"],
+    ["route:node-topology", "Topology", "Topology"],
+  ]);
+});
+
+test("Topology shows only where nodes can be listed, so Nodes hides whole", () => {
+  const nodes = (resources: ApiResourceInfo[]) =>
+    visibleSections(resources)
+      .find((s) => s.id === "nodes")
+      ?.items.map(navItemKey);
+  expect(nodes([info("", "nodes")])).toEqual(["/nodes", "route:node-topology"]);
+  expect(nodes([info("", "nodes", { canList: false })])).toBeUndefined();
+  expect(nodes([info("", "pods")])).toBeUndefined();
 });
 
 test("Argo holds one sub-branch, Argo CD, with its kinds; kinds not served leave it", () => {

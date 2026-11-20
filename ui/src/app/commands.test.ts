@@ -66,6 +66,7 @@ test("the registry lists the spec's commands in order", () => {
       ["disconnect", "Disconnect prod", null],
       ["cluster-settings", "Cluster settings for prod", null],
       ["resource-map", "Resource map of prod", null],
+      ["node-topology", "Node topology of prod", null],
       ["shortcuts", "Show keyboard shortcuts", "shortcuts"],
       ["about", "About SkoposIDE", null],
       ["theme-dark", "Theme: Dark", null],
@@ -82,7 +83,7 @@ test("the registry lists the spec's commands in order", () => {
   );
 });
 
-test("terminal, disconnect, install-chart and resource-map need the current cluster connected; cluster-settings any cluster", () => {
+test("terminal, disconnect, install-chart, resource-map and node-topology need the current cluster connected; cluster-settings any cluster", () => {
   const available = (ctx: CommandContext) =>
     COMMANDS.filter((c) => c.available(ctx)).map((c) => c.id);
   // toggle-sidebar needs a mounted sidebar, not a cluster; its own test covers it.
@@ -92,6 +93,7 @@ test("terminal, disconnect, install-chart and resource-map need the current clus
       id !== "terminal" &&
       id !== "disconnect" &&
       id !== "install-chart" &&
+      id !== "node-topology" &&
       id !== "resource-map",
   );
   const always = onCluster.filter((id) => id !== "cluster-settings");
@@ -109,6 +111,12 @@ test("resource-map opens the cluster's map", () => {
   const ctx = context({ cluster: on(CONNECTED) });
   runCommand("resource-map", ctx);
   expect(ctx.navigate.mock.calls).toEqual([["/cluster/c1/map"]]);
+});
+
+test("node-topology opens the cluster's node topology", () => {
+  const ctx = context({ cluster: on(CONNECTED) });
+  runCommand("node-topology", ctx);
+  expect(ctx.navigate.mock.calls).toEqual([["/cluster/c1/node-topology"]]);
 });
 
 test("install-chart opens the cluster's Charts", () => {
@@ -344,6 +352,7 @@ test("the commands that open a location name it, so the click modes can open it 
     ["install-chart", "/cluster/c1/helm/charts"],
     ["cluster-settings", "/cluster/c1/settings"],
     ["resource-map", "/cluster/c1/map"],
+    ["node-topology", "/cluster/c1/node-topology"],
   ]);
   expect(commandById("resource-map").path?.(context())).toBeNull();
 });

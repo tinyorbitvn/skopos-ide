@@ -13,6 +13,7 @@ import {
   Ingress,
   Layers,
   LayoutDashboard,
+  LayoutGrid,
   LoadBalancer,
   Microchip,
   Namespace,
@@ -64,6 +65,7 @@ export const ROUTE_ICONS: Partial<Record<string, IconComponent>> = {
   "port-forwards": ArrowRightLeft,
   "helm/charts": Package,
   "helm/releases": PackageCheck,
+  "node-topology": LayoutGrid,
 };
 
 export const OVERVIEW_ICON: IconComponent = LayoutDashboard;

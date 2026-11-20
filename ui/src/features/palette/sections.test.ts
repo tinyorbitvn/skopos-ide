@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { CommandContext } from "../../app/commands";
 import { toast } from "../../design";
-import { ChevronRight, Server } from "../../design/icons";
+import { ChevronRight, LayoutGrid, Server } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import {
@@ -308,6 +308,21 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
     ["/cluster/c1/r/core/configmaps"],
     ["/cluster/c1/port-forwards"],
     ["/cluster/c1/r/example.com/widgets"],
+  ]);
+});
+
+test("Nodes gives two pages: its list and Topology", () => {
+  const pages = pageEntries("c1", [info("", "nodes", "Node")]).filter((p) =>
+    p.testId.includes("node"),
+  );
+  expect(pages.map((p) => [p.testId, p.label, p.icon, p.path])).toEqual([
+    ["palette-page-r/core/nodes", "Nodes", Server, "/cluster/c1/r/core/nodes"],
+    [
+      "palette-page-node-topology",
+      "Topology",
+      LayoutGrid,
+      "/cluster/c1/node-topology",
+    ],
   ]);
 });
 
