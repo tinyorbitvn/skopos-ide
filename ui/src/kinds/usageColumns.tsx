@@ -1,3 +1,4 @@
+import { USAGE_CRITICAL_AT, USAGE_WARN_AT } from "../design/UsageDonut";
 import type { TableColumn } from "../design/VirtualTable";
 import {
   columnCpu,
@@ -84,13 +85,10 @@ export interface UsageShare {
   total: number | null;
 }
 
-/** At this share a bar turns to the warning colour, and at the next to the critical one. */
-const WARN_AT = 80;
-const CRITICAL_AT = 95;
-
+/** A bar's level, at the thresholds the usage donut uses. */
 function level(percent: number): "ok" | "warn" | "critical" {
-  if (percent >= CRITICAL_AT) return "critical";
-  if (percent >= WARN_AT) return "warn";
+  if (percent >= USAGE_CRITICAL_AT) return "critical";
+  if (percent >= USAGE_WARN_AT) return "warn";
   return "ok";
 }
 

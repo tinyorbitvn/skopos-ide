@@ -1,0 +1,60 @@
+/* The shared usage donut (topology spec §4.3, chart style 1). */
+.donut {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.chart {
+  display: block;
+  flex: none;
+}
+
+.track {
+  fill: none;
+  stroke: var(--surface-inset);
+}
+
+.arc {
+  fill: none;
+  stroke: var(--status-nominal);
+}
+
+.donut[data-tone="warning"] .arc {
+  stroke: var(--status-warning);
+}
+
+.donut[data-tone="critical"] .arc {
+  stroke: var(--status-critical);
+}
+
+/* The size comes from the element, in the viewBox's units. */
+.pct {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.caption {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.name {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.values {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-12);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
