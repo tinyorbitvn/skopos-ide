@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-20
+
 - **A glass sidebar in groups:** the cluster switcher and the sidebar share one glass-tinted column, 248 px wide by default; drag its edge between 200 and 360 px, or double-click it to reset. Overview and Resource map come first, then Apps (Helm, and Argo with Argo CD inside it), Cluster (Nodes, Namespaces, Events) and Resources. Each section has its icon, Helm and Argo show their project logos, and a section with one screen is a plain link. The kinds of an open section hang on tree lines, the current page has a soft highlight, and a kind open in another tab of the window shows a small dot. The switcher shows the cluster's tile with a status dot, its distribution and version, and its name.
 - **Collapse the sidebar to icons:** the round handle on the sidebar's edge, Ctrl+B (Cmd+B on macOS) or the palette's Collapse the sidebar command shrink it to a 64 px rail of section icons, and each window remembers its choice. A section with several kinds opens a flyout of them beside the rail: Up, Down, Home and End move in it, Escape closes it, and choosing a kind opens it as the sidebar does.
 - **Calmer menus, dialogs and panes:** menus are wider, with a divider between groups; dialogs sit higher on a scrim without blur; the command palette has an inset search field. While a tab is dragged, the drop zones are easier to see, and the label beside the pointer turns red over a pane that cannot take the tab. A splitter shows an accent line while you drag it, and the selected tab has a Tab actions button that opens its menu.
