@@ -21,6 +21,7 @@ pub mod sessions;
 pub mod shell_env;
 pub mod store;
 pub mod tools;
+pub mod topology;
 pub mod ui_state;
 pub mod windows;
 
