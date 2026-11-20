@@ -338,6 +338,23 @@ mod capability_tests {
         }
     }
 
+    /// A command that writes a file opens the save dialog itself, so a page holds only
+    /// the dialog that picks a file to read: with the save dialog it could still ask for
+    /// a path, and with the default set it would get it back.
+    #[test]
+    fn the_webview_opens_no_save_dialog() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let dialog: Vec<&str> = capability["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|permission| permission.starts_with("dialog:"))
+            .collect();
+        assert_eq!(dialog, ["dialog:allow-open"]);
+    }
+
     /// Spec P35: the core owns window bounds, so the window-state plugin is gone.
     #[test]
     fn the_window_state_plugin_is_gone() {

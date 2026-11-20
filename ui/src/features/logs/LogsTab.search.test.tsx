@@ -188,10 +188,9 @@ test("one line reads 1 line, and no match turns the arrows off", async () => {
   expect(button("logs-next-match").disabled).toBe(true);
 });
 
-test("Download asks where, saves all lines, and says where it saved them", async () => {
+test("Download saves all lines, and says where the backend saved them", async () => {
   const b = backend({
-    "plugin:dialog|save": () => "/home/me/web.log",
-    logs_download: () => ({ bytes: 1536 }),
+    logs_download: () => ({ bytes: 1536, path: "/home/me/web.log" }),
   });
   await show(withOptions(POD_TAB, { previous: true, tail: 100 }));
 
@@ -201,14 +200,6 @@ test("Download asks where, saves all lines, and says where it saved them", async
       "Saved 1.5 KiB to /home/me/web.log",
     ),
   );
-  expect(b.callsTo("plugin:dialog|save")).toEqual([
-    {
-      options: {
-        defaultPath: "web-7d9f-aaaaa.log",
-        filters: [{ name: "Log", extensions: ["log", "txt"] }],
-      },
-    },
-  ]);
   expect(b.callsTo("logs_download")).toEqual([
     {
       clusterId: "c1",
@@ -224,7 +215,7 @@ test("Download asks where, saves all lines, and says where it saved them", async
         tailLines: null,
         sinceSeconds: null,
       },
-      destPath: "/home/me/web.log",
+      suggestedName: "web-7d9f-aaaaa.log",
     },
   ]);
   expect(screen.getByTestId("logs-note")).toBeTruthy();
@@ -232,7 +223,6 @@ test("Download asks where, saves all lines, and says where it saved them", async
 
 test("Download is off while it saves", async () => {
   backend({
-    "plugin:dialog|save": () => "/home/me/web.log",
     logs_download: () => new Promise(() => {}),
   });
   await show(POD_TAB);
@@ -242,20 +232,18 @@ test("Download is off while it saves", async () => {
 });
 
 test("a cancelled dialog does nothing", async () => {
-  const b = backend({ "plugin:dialog|save": () => null });
+  const b = backend({ logs_download: () => null });
   await show(POD_TAB);
   fireEvent.click(button("logs-download"));
   await act(flush);
 
-  expect(b.callsTo("plugin:dialog|save")).toHaveLength(1);
-  expect(b.callsTo("logs_download")).toEqual([]);
+  expect(b.callsTo("logs_download")).toHaveLength(1);
   expect(screen.queryByTestId("logs-note")).toBeNull();
   expect(button("logs-download").disabled).toBe(false);
 });
 
 test("a failed download says why, in the danger color", async () => {
   backend({
-    "plugin:dialog|save": () => "/home/me/web.log",
     logs_download: () => {
       throw { code: "Internal", message: "disk full", details: null };
     },

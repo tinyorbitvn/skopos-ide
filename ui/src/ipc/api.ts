@@ -158,11 +158,16 @@ export const api = {
   resourceGraphUnsubscribe: (subscriptionId: string) =>
     call<void>("resource_graph_unsubscribe", { subscriptionId }),
   /**
-   * Saves the map as drawn and returns the path written (spec O §6.4). `png`
-   * is base64 without a `data:` prefix.
+   * Saves the map as drawn: the backend opens the save dialog with the suggested
+   * name and returns the path written, or null when the user cancels (spec O §6.4).
+   * `png` is base64 without a `data:` prefix.
    */
-  mapExport: (path: string, format: MapFormat, png: string, scale: number) =>
-    call<string>("map_export", { path, format, png, scale }),
+  mapExport: (
+    suggestedName: string,
+    format: MapFormat,
+    png: string,
+    scale: number,
+  ) => call<string | null>("map_export", { suggestedName, format, png, scale }),
   resourceGet: (
     clusterId: string,
     resource: ResourceRef,
@@ -316,14 +321,14 @@ export const api = {
     clusterId: string,
     namespace: string,
     name: string,
-    destPath: string,
+    suggestedName: string,
     expirationSeconds: number,
   ) =>
-    call<SavedKubeconfig>("service_account_kubeconfig_save", {
+    call<SavedKubeconfig | null>("service_account_kubeconfig_save", {
       clusterId,
       namespace,
       name,
-      destPath,
+      suggestedName,
       expirationSeconds,
     }),
   nodeSetUnschedulable: (
@@ -398,13 +403,13 @@ export const api = {
     clusterId: string,
     target: LogTarget,
     options: LogOptions,
-    destPath: string,
+    suggestedName: string,
   ) =>
-    call<LogDownload>("logs_download", {
+    call<LogDownload | null>("logs_download", {
       clusterId,
       target,
       options,
-      destPath,
+      suggestedName,
     }),
   /** Tells the backend that `bytes` of a session's output are stored. */
   sessionAck: (sessionId: string, bytes: number) =>

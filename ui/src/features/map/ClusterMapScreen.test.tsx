@@ -479,42 +479,31 @@ describe("ClusterMapScreen Export", () => {
     expect(exportButton().disabled).toBe(true);
   });
 
-  it.each<[MapFormat, string, string, string]>([
+  it.each<[MapFormat, string, string]>([
     [
       "png",
-      "PNG image",
       "Map exported as PNG",
       "arn-aws-eks-eu-west-1-1-cluster-prod-map.png",
     ],
     [
       "pdf",
-      "PDF document",
       "Map exported as PDF",
       "arn-aws-eks-eu-west-1-1-cluster-prod-map.pdf",
     ],
   ])(
-    "%s asks where to save as %s, writes the drawn canvas and toasts the path written",
-    async (format, filter, done, name) => {
+    "%s suggests the cluster name, writes the drawn canvas and toasts the path written",
+    async (format, done, name) => {
       const success = vi.spyOn(toast, "success");
       await show({}, null, {
-        "plugin:dialog|save": () => "/home/me/maps/prod",
         map_export: () => `/home/me/maps/prod.${format}`,
       });
       await g.send(demoSnapshot());
       await pickExport(format);
-      expect(g.backend.callsTo("plugin:dialog|save")).toEqual([
-        {
-          options: {
-            defaultPath: name,
-            filters: [{ name: filter, extensions: [format] }],
-          },
-        },
-      ]);
       expect(renderMapPng).toHaveBeenCalledWith(
         screen.getByTestId("map-canvas"),
       );
       expect(g.backend.callsTo("map_export")).toEqual([
-        { path: "/home/me/maps/prod", format, png: MAP_IMAGE.png, scale: 2 },
+        { suggestedName: name, format, png: MAP_IMAGE.png, scale: 2 },
       ]);
       expect(success).toHaveBeenCalledWith(
         done,
@@ -526,12 +515,10 @@ describe("ClusterMapScreen Export", () => {
   it("does nothing more, and says nothing, when the save dialog is cancelled", async () => {
     const success = vi.spyOn(toast, "success");
     const error = vi.spyOn(toast, "error");
-    await show({}, null, { "plugin:dialog|save": () => null });
+    await show({}, null, { map_export: () => null });
     await g.send(demoSnapshot());
     await pickExport("png");
-    expect(g.backend.callsTo("plugin:dialog|save")).toHaveLength(1);
-    expect(renderMapPng).not.toHaveBeenCalled();
-    expect(g.backend.callsTo("map_export")).toEqual([]);
+    expect(g.backend.callsTo("map_export")).toHaveLength(1);
     expect(success).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
     expect(exportButton().disabled).toBe(false);
@@ -540,7 +527,6 @@ describe("ClusterMapScreen Export", () => {
   it("is disabled while an export runs, and a second one does nothing", async () => {
     let finish: (path: string) => void = () => {};
     await show({}, null, {
-      "plugin:dialog|save": () => "/home/me/prod.png",
       map_export: () =>
         new Promise<string>((resolve) => {
           finish = resolve;
@@ -550,7 +536,7 @@ describe("ClusterMapScreen Export", () => {
     await pickExport("png");
     expect(exportButton().disabled).toBe(true);
     await pickExport("pdf");
-    expect(g.backend.callsTo("plugin:dialog|save")).toHaveLength(1);
+    expect(g.backend.callsTo("map_export")).toHaveLength(1);
     await act(async () => {
       finish("/home/me/prod.png");
       await flush();
@@ -561,7 +547,6 @@ describe("ClusterMapScreen Export", () => {
   it("shows the reason when map_export fails", async () => {
     const error = vi.spyOn(toast, "error");
     await show({}, null, {
-      "plugin:dialog|save": () => "/root/prod.png",
       map_export: () => {
         throw { code: "Forbidden", message: "Permission denied (os error 13)" };
       },
