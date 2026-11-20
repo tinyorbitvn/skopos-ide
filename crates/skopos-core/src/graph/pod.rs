@@ -153,7 +153,7 @@ pub(crate) fn pod_status(text: &str) -> GraphStatus {
 }
 
 /// `Init:N/M`, as the interface's `/^Init:\d+\/\d+$/` matches it.
-fn is_init_progress(text: &str) -> bool {
+pub(crate) fn is_init_progress(text: &str) -> bool {
     let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
     text.strip_prefix("Init:")
         .and_then(|rest| rest.split_once('/'))
