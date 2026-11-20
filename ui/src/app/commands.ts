@@ -28,6 +28,7 @@ import { openTerminal } from "../features/dock/openTerminal";
 import { chartsPath } from "../features/helm/helmText";
 import { mapPath } from "../features/map/paths";
 import { settingsPath } from "../features/settings/paths";
+import { topologyPath } from "../features/topology/paths";
 import type { Theme } from "../ipc/generated/Theme";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
@@ -57,6 +58,7 @@ export type CommandId =
   | "disconnect"
   | "cluster-settings"
   | "resource-map"
+  | "node-topology"
   | "shortcuts"
   | "about"
   | "theme-dark"
@@ -220,6 +222,16 @@ export const COMMANDS: readonly AppCommand[] = [
     available: connected,
     run: (ctx) => {
       if (ctx.cluster) go(ctx, mapPath(ctx.cluster.id));
+    },
+  },
+  {
+    id: "node-topology",
+    label: (ctx) => `Node topology of ${clusterName(ctx)}`,
+    icon: LayoutGrid,
+    path: (ctx) => clusterPath(ctx, topologyPath),
+    available: connected,
+    run: (ctx) => {
+      if (ctx.cluster) go(ctx, topologyPath(ctx.cluster.id));
     },
   },
   {

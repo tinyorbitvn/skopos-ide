@@ -20,6 +20,7 @@ test("every screen of today's route table is a tab route, with its query", () =>
     "/cluster/kind-a/helm/upgrade/default/web",
     "/cluster/kind-a/settings",
     "/cluster/kind-a/map?object=x",
+    "/cluster/kind-a/node-topology?q=worker&ns=shop",
   ]) {
     expect(isTabRoute(path), path).toBe(true);
   }
@@ -53,6 +54,13 @@ test("a cluster tab's title is the screen, then the cluster (P9)", () => {
   expect(tabInfo("/cluster/kind-a/helm/upgrade/ns/web", CLUSTERS).screen).toBe(
     "Upgrade web",
   );
+  expect(
+    tabInfo("/cluster/kind-a/node-topology?ns=shop", CLUSTERS),
+  ).toMatchObject({
+    title: "Topology · kind-a",
+    screen: "Topology",
+    icon: LayoutGrid,
+  });
 });
 
 test("a custom resource the sidebar does not list is named by its plural", () => {

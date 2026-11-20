@@ -500,24 +500,29 @@ test("the screens come first, then Apps, Cluster and Resources under their capti
   ]);
 });
 
-test("Overview, Resource map, Nodes, Namespaces and Events are direct links with their icons", async () => {
-  await show({ resources: WIDE }, "/cluster/c1/r/core/nodes");
-  const nodes = screen.getByTestId("nav-item-core-nodes");
+test("Overview, Resource map, Namespaces and Events are direct links with their icons", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/core/namespaces");
+  const namespaces = screen.getByTestId("nav-item-core-namespaces");
   expect([
-    nodes.tagName,
-    nodes.getAttribute("href"),
-    nodes.textContent,
-    nodes.getAttribute("aria-current"),
-    nodes.classList.contains("row"),
-  ]).toEqual(["A", "/cluster/c1/r/core/nodes", "Nodes", "page", true]);
-  expect(nodes.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe(
-    SECTION_ICONS.nodes?.iconName,
-  );
+    namespaces.tagName,
+    namespaces.getAttribute("href"),
+    namespaces.textContent,
+    namespaces.getAttribute("aria-current"),
+    namespaces.classList.contains("row"),
+  ]).toEqual([
+    "A",
+    "/cluster/c1/r/core/namespaces",
+    "Namespaces",
+    "page",
+    true,
+  ]);
   expect(
-    within(screen.getByTestId("nav-section-nodes")).queryByRole("button"),
+    namespaces.querySelector("[data-icon]")?.getAttribute("data-icon"),
+  ).toBe(SECTION_ICONS.namespaces?.iconName);
+  expect(
+    within(screen.getByTestId("nav-section-namespaces")).queryByRole("button"),
   ).toBeNull();
   for (const [id, href] of [
-    ["nav-item-core-namespaces", "/cluster/c1/r/core/namespaces"],
     ["nav-item-core-events", "/cluster/c1/r/core/events"],
     ["nav-overview", "/cluster/c1"],
     ["nav-map", "/cluster/c1/map"],
@@ -536,6 +541,49 @@ test("Overview, Resource map, Nodes, Namespaces and Events are direct links with
       ?.getAttribute("data-icon");
   expect(icon("nav-overview")).toBe(OVERVIEW_ICON.iconName);
   expect(icon("nav-map")).toBe(MAP_ICON.iconName);
+});
+
+test("Nodes is a section of List and Topology, open while the Nodes list is shown", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/core/nodes");
+  const toggle = within(screen.getByTestId("nav-section-nodes")).getByRole(
+    "button",
+    { name: "Nodes" },
+  );
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe(
+    SECTION_ICONS.nodes?.iconName,
+  );
+  const list = screen.getByTestId("nav-item-core-nodes");
+  expect([
+    list.getAttribute("href"),
+    list.textContent,
+    list.getAttribute("title"),
+    list.getAttribute("aria-current"),
+  ]).toEqual(["/cluster/c1/r/core/nodes", "List", "List", "page"]);
+  const topology = screen.getByTestId("nav-node-topology");
+  expect([
+    topology.getAttribute("href"),
+    topology.textContent,
+    topology.getAttribute("aria-current"),
+  ]).toEqual(["/cluster/c1/node-topology", "Topology", null]);
+});
+
+test("the Topology page opens Nodes too", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/node-topology");
+  const toggle = within(screen.getByTestId("nav-section-nodes")).getByRole(
+    "button",
+    { name: "Nodes" },
+  );
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(
+    screen.getByTestId("nav-node-topology").getAttribute("aria-current"),
+  ).toBe("page");
+});
+
+test("a cluster that cannot list nodes has no Nodes item", async () => {
+  await show({ resources: [...SERVED, info("", "nodes", "Node", false)] });
+  expect(screen.queryByTestId("nav-section-nodes")).toBeNull();
+  expect(screen.queryByTestId("nav-node-topology")).toBeNull();
 });
 
 test("Helm and Argo show their logos, Workloads its icon, and Argo holds the Argo CD branch", async () => {

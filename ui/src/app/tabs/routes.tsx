@@ -36,6 +36,7 @@ import { PortForwardsRoute } from "../../features/portForward/PortForwardsScreen
 import { PreferencesScreen } from "../../features/prefs/PreferencesScreen";
 import { ResourceRoute } from "../../features/resources/ResourceScreen";
 import { ClusterSettingsRoute } from "../../features/settings/ClusterSettingsScreen";
+import { NodeTopologyScreen } from "../../features/topology/NodeTopologyScreen";
 import { WorkloadsOverview } from "../../features/workloads/WorkloadsOverview";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import { groupFromSegment, NAV_SECTIONS } from "../../kinds/nav";
@@ -65,6 +66,7 @@ export function tabRoutes(): RouteObject[] {
         },
         { path: "settings", element: <ClusterSettingsRoute /> },
         { path: "map", element: <MapRoute /> },
+        { path: "node-topology", element: <NodeTopologyScreen /> },
       ],
     },
     { path: "preferences", element: <PreferencesScreen /> },
@@ -163,6 +165,11 @@ const SCREENS: readonly Screen[] = [
     pattern: "/cluster/:id/map",
     name: named("Resource map"),
     icon: Network,
+  },
+  {
+    pattern: "/cluster/:id/node-topology",
+    name: named("Topology"),
+    icon: LayoutGrid,
   },
 ];
 

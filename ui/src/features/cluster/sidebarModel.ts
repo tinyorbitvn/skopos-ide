@@ -11,6 +11,7 @@ import {
   type NavScreen,
   type NavSection,
   navItemKey,
+  navLabel,
   resourcePath,
   visibleSections,
 } from "../../kinds/nav";
@@ -166,7 +167,7 @@ export function flyoutEntries(
     return {
       type: "link",
       key: `link:${path}`,
-      label: item.label,
+      label: navLabel(item),
       path,
       testId: railItemTestId(item),
     };

@@ -235,3 +235,14 @@ test("a flyout lists the section's items, Argo's branch under its caption, and t
     }),
   ).toBe("rail-item-core-pods");
 });
+
+test("the Nodes flyout lists List and Topology", () => {
+  expect(
+    flyoutEntries("c1", section("nodes"), []).map((e) =>
+      e.type === "link" ? [e.label, e.path, e.testId] : [e.label],
+    ),
+  ).toEqual([
+    ["List", "/cluster/c1/r/core/nodes", "rail-item-core-nodes"],
+    ["Topology", "/cluster/c1/node-topology", "rail-item-node-topology"],
+  ]);
+});

@@ -10,6 +10,8 @@ import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 export interface NavResource {
   type: "resource";
   label: string;
+  /** The sidebar's text where it differs from the kind's label: the Nodes list reads "List". */
+  sidebarLabel?: string;
   /** The API group; "" is the core group. */
   group: string;
   plural: string;
@@ -20,6 +22,8 @@ export interface NavRoute {
   type: "route";
   label: string;
   path: string;
+  /** The `group/plural` the cluster must list for the route to show: Topology needs `/nodes`. */
+  requires?: string;
 }
 
 export type NavItem = NavResource | NavRoute;
@@ -29,6 +33,13 @@ export function navItemKey(item: NavItem): string {
   return item.type === "route"
     ? `route:${item.path}`
     : `${item.group}/${item.plural}`;
+}
+
+/** An item's text in the sidebar and in its rail flyout. */
+export function navLabel(item: NavItem): string {
+  return item.type === "resource"
+    ? (item.sidebarLabel ?? item.label)
+    : item.label;
 }
 
 /** The sidebar's groups, in order (spec Q §2). The first one has no label. */
@@ -114,8 +125,9 @@ const ARGO_CD: NavResource[] = [
 
 /**
  * The sidebar sections of F4, in their groups and in order (spec Q §2): Apps (Helm,
- * Argo), Cluster (Nodes, Namespaces, Events), then Resources. Nodes, Namespaces and
- * Events are direct links. Argo holds the Argo CD kinds in its "Argo CD" branch (spec
+ * Argo), Cluster (Nodes, Namespaces, Events), then Resources. Namespaces and Events are
+ * direct links. Nodes holds its list, which the sidebar calls List, and the Topology
+ * page, which shows only where nodes can be listed. Argo holds the Argo CD kinds in its "Argo CD" branch (spec
  * G §3). The Workloads Overview entry links to the Workloads overview (F17). Port
  * Forwarding and Helm's Charts and Releases are routes of the cluster screen, not
  * resource kinds. Custom Resources starts with Definitions; the entries for each CRD are
@@ -148,8 +160,15 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Nodes",
     group: "cluster",
     icon: glyph("nodes"),
-    direct: true,
-    items: [r("Nodes", "", "nodes")],
+    items: [
+      { ...r("Nodes", "", "nodes"), sidebarLabel: "List" },
+      {
+        type: "route",
+        label: "Topology",
+        path: "node-topology",
+        requires: "/nodes",
+      },
+    ],
   },
   {
     id: "namespaces",
@@ -373,9 +392,11 @@ function otherGatewayItems(resources: ApiResourceInfo[]): NavResource[] {
  */
 export function visibleSections(resources: ApiResourceInfo[]): NavSection[] {
   const ok = listable(resources);
-  // A route needs no resource to list, so it always shows.
+  // A route needs no resource to list, unless it names the one it requires.
   const shows = (i: NavItem) =>
-    i.type === "route" || ok.has(`${i.group}/${i.plural}`);
+    i.type === "route"
+      ? i.requires === undefined || ok.has(i.requires)
+      : ok.has(`${i.group}/${i.plural}`);
   const gateway = otherGatewayItems(resources);
   return NAV_SECTIONS.map((section) => {
     let items = section.items.filter(shows);
