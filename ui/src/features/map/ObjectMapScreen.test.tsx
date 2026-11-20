@@ -254,46 +254,34 @@ describe("ObjectMapScreen Export", () => {
     expect(exportButton().disabled).toBe(true);
   });
 
-  it.each<[MapFormat, string, string]>([
-    ["png", "PNG image", "Map exported as PNG"],
-    ["pdf", "PDF document", "Map exported as PDF"],
+  it.each<[MapFormat, string]>([
+    ["png", "Map exported as PNG"],
+    ["pdf", "Map exported as PDF"],
   ])(
-    "%s saves as ‹kind›-‹name›-map in lower case with the %s filter",
-    async (format, filter, done) => {
+    "%s suggests ‹kind›-‹name›-map in lower case and toasts the path written",
+    async (format, done) => {
       const success = vi.spyOn(toast, "success");
       await show(
         objectMapPath("c1", DEMO.deployment),
         {},
         {
-          "plugin:dialog|save": () => `/home/me/deployment-web-map.${format}`,
-          map_export: (a: { path: string }) => a.path,
+          map_export: () => `/home/me/chosen.${format}`,
         },
       );
       await g.send(demoSnapshot());
       await pickExport(format);
-      expect(g.backend.callsTo("plugin:dialog|save")).toEqual([
-        {
-          options: {
-            defaultPath: `deployment-web-map.${format}`,
-            filters: [{ name: filter, extensions: [format] }],
-          },
-        },
-      ]);
       expect(renderMapPng).toHaveBeenCalledWith(
         screen.getByTestId("map-canvas"),
       );
       expect(g.backend.callsTo("map_export")).toEqual([
         {
-          path: `/home/me/deployment-web-map.${format}`,
+          suggestedName: `deployment-web-map.${format}`,
           format,
           png: MAP_IMAGE.png,
           scale: 2,
         },
       ]);
-      expect(success).toHaveBeenCalledWith(
-        done,
-        `/home/me/deployment-web-map.${format}`,
-      );
+      expect(success).toHaveBeenCalledWith(done, `/home/me/chosen.${format}`);
     },
   );
 
@@ -303,14 +291,11 @@ describe("ObjectMapScreen Export", () => {
     await show(
       objectMapPath("c1", DEMO.deployment),
       {},
-      {
-        "plugin:dialog|save": () => null,
-      },
+      { map_export: () => null },
     );
     await g.send(demoSnapshot());
     await pickExport("pdf");
-    expect(renderMapPng).not.toHaveBeenCalled();
-    expect(g.backend.callsTo("map_export")).toEqual([]);
+    expect(g.backend.callsTo("map_export")).toHaveLength(1);
     expect(success).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
   });
@@ -321,7 +306,6 @@ describe("ObjectMapScreen Export", () => {
       objectMapPath("c1", DEMO.deployment),
       {},
       {
-        "plugin:dialog|save": () => "/home/me/web.pdf",
         map_export: () =>
           new Promise<string>((resolve) => {
             finish = resolve;
@@ -332,7 +316,7 @@ describe("ObjectMapScreen Export", () => {
     await pickExport("pdf");
     expect(exportButton().disabled).toBe(true);
     await pickExport("png");
-    expect(g.backend.callsTo("plugin:dialog|save")).toHaveLength(1);
+    expect(g.backend.callsTo("map_export")).toHaveLength(1);
     await act(async () => {
       finish("/home/me/web.pdf");
       await flush();
@@ -346,7 +330,6 @@ describe("ObjectMapScreen Export", () => {
       objectMapPath("c1", DEMO.deployment),
       {},
       {
-        "plugin:dialog|save": () => "/home/me/web.png",
         map_export: () => {
           throw { code: "InvalidInput", message: "The map image is not valid" };
         },

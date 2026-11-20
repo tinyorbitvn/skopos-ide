@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::error::{ErrorCode, IpcError};
+use crate::save_file::{self, SaveKind};
 
 /// The most pixels an exported image may hold (spec O §6.4).
 pub const MAX_PIXELS: u64 = 16_777_216;
@@ -35,6 +36,14 @@ impl MapFormat {
         match self {
             MapFormat::Png => "png",
             MapFormat::Pdf => "pdf",
+        }
+    }
+
+    /// What the save dialog offers for this format.
+    pub fn save_kind(self) -> SaveKind {
+        match self {
+            MapFormat::Png => save_file::PNG,
+            MapFormat::Pdf => save_file::PDF,
         }
     }
 }
@@ -251,6 +260,15 @@ mod tests {
     use png::{BitDepth, ColorType, Encoder};
 
     use super::*;
+
+    #[test]
+    fn each_format_is_saved_as_its_own_kind_of_file() {
+        for format in [MapFormat::Png, MapFormat::Pdf] {
+            assert_eq!(format.save_kind().extensions, [format.extension()]);
+        }
+        assert_eq!(MapFormat::Png.save_kind().label, "PNG image");
+        assert_eq!(MapFormat::Pdf.save_kind().label, "PDF document");
+    }
 
     fn encode(width: u32, height: u32, color: ColorType, depth: BitDepth, data: &[u8]) -> Vec<u8> {
         let mut bytes = Vec::new();

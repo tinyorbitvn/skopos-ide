@@ -1,4 +1,3 @@
-import { save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useRef, useState } from "react";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
@@ -29,9 +28,9 @@ export interface DownloadNote {
 }
 
 /**
- * Download all lines (spec §6.9): the save dialog, then `logs_download` with the tab's
- * target, Previous as set, no follow and no tail. One download runs at a time, so a
- * second press before the dialog opens asks nothing and writes nothing.
+ * Download all lines (spec §6.9): `logs_download` with the tab's target, Previous as
+ * set, no follow and no tail. The backend opens the save dialog, so the page never
+ * names the file. One download runs at a time, so a second press does nothing.
  */
 export function useLogDownload(tab: LogsDockTab): {
   saving: boolean;
@@ -50,12 +49,7 @@ export function useLogDownload(tab: LogsDockTab): {
     setSaving(true);
     const current = latest.current;
     try {
-      const destPath = await save({
-        defaultPath: `${current.name}.log`,
-        filters: [{ name: "Log", extensions: ["log", "txt"] }],
-      });
-      if (destPath === null) return;
-      const { bytes } = await api.logsDownload(
+      const saved = await api.logsDownload(
         current.clusterId,
         logTarget(current),
         {
@@ -64,10 +58,12 @@ export function useLogDownload(tab: LogsDockTab): {
           tailLines: null,
           sinceSeconds: null,
         },
-        destPath,
+        `${current.name}.log`,
       );
+      // The user cancelled the save dialog.
+      if (saved === null) return;
       setNote({
-        text: `Saved ${formatSize(bytes)} to ${destPath}`,
+        text: `Saved ${formatSize(saved.bytes)} to ${saved.path}`,
         failed: false,
       });
     } catch (e) {
