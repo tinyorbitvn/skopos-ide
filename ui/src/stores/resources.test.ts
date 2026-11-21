@@ -731,12 +731,14 @@ test("the trimmed kinds are core Pods, Nodes and ConfigMaps, apps ReplicaSets an
     ["", "configmaps"],
     ["apps", "replicasets"],
     ["apiextensions.k8s.io", "customresourcedefinitions"],
+    ["", "events"],
+    ["argoproj.io", "applications"],
   ]) {
     expect(rowsAreTrimmed(ref(group, plural))).toBe(true);
   }
   for (const [group, plural] of [
-    ["", "events"],
     ["events.k8s.io", "events"],
+    ["argoproj.io", "applicationsets"],
     ["", "secrets"],
     ["", "services"],
     ["apps", "deployments"],
