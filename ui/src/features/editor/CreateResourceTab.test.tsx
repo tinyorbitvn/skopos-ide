@@ -17,6 +17,7 @@ import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { CreateResourceTab } from "./CreateResourceTab";
 import { TEMPLATES } from "./templates";
+import { CHECK_AT_ONCE_CHARS } from "./useYamlCheck";
 
 vi.mock("./YamlEditor", () => ({
   YamlEditor: (props: {
@@ -83,6 +84,17 @@ function type(text: string) {
 
 function dirty() {
   return useDock.getState().tabs.find((t) => t.id === TAB.id)?.dirty;
+}
+
+/** Valid YAML lines that make a document longer than the editor checks as it is typed. */
+function longData(): string {
+  const lines: string[] = [];
+  for (let size = 0; size <= CHECK_AT_ONCE_CHARS; ) {
+    const line = `  key-${lines.length}: value\n`;
+    lines.push(line);
+    size += line.length;
+  }
+  return `data:\n${lines.join("")}`;
 }
 
 function pickTemplate(id: string) {
@@ -269,6 +281,25 @@ test("invalid YAML blocks apply", async () => {
   type(DOCUMENT);
   expect(screen.queryByTestId("yaml-error")).toBeNull();
   expect(applyButton().disabled).toBe(false);
+});
+
+test("long text is checked once the typing pauses, and cannot be applied before", async () => {
+  const calls = backend();
+  show();
+  const long = `${DOCUMENT}${longData()}`;
+
+  type(`${long}broken: [1\n`);
+  expect(applyButton().disabled).toBe(true);
+  expect(screen.queryByTestId("yaml-error")).toBeNull();
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(screen.getByTestId("yaml-error")).toBeTruthy());
+  expect(applyButton().disabled).toBe(true);
+
+  type(long);
+  expect(applyButton().disabled).toBe(true);
+  await waitFor(() => expect(applyButton().disabled).toBe(false));
+  expect(screen.queryByTestId("yaml-error")).toBeNull();
+  expect(calls.callsTo("resource_apply")).toEqual([]);
 });
 
 test("text with no documents has nothing to apply", () => {

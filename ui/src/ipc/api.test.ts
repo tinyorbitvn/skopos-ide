@@ -464,6 +464,24 @@ test("resources_subscribe_object sends null for a cluster-scoped object", async 
   ).toBeNull();
 });
 
+test("resources_subscribe_node_pods gets the node and a channel, and gives the id", async () => {
+  const events: WatchEvent[] = [];
+  const backend = mockBackend({
+    resources_subscribe_node_pods: () => "watch-3",
+  });
+  await expect(
+    api.resourcesSubscribeNodePods("c1", "worker-1", (event) =>
+      events.push(event),
+    ),
+  ).resolves.toBe("watch-3");
+  const sent = backend.callsTo("resources_subscribe_node_pods")[0];
+  expect(sent).toMatchObject({ clusterId: "c1", node: "worker-1" });
+  const channel = sent?.onEvent as Channel<WatchEvent>;
+  expect(channel).toBeInstanceOf(Channel);
+  channel.onmessage({ type: "snapshot", items: [] });
+  expect(events).toEqual([{ type: "snapshot", items: [] }]);
+});
+
 const LAYOUT: WindowLayout = {
   label: "window-2",
   bounds: null,

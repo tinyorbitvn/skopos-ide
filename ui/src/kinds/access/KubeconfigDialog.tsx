@@ -1,4 +1,3 @@
-import { save } from "@tauri-apps/plugin-dialog";
 import { useRef, useState } from "react";
 import { Button, Dialog, ErrorNotice, Select, toast } from "../../design";
 import { api } from "../../ipc/api";
@@ -36,18 +35,15 @@ export function KubeconfigDialog(props: {
     setBusy(true);
     setError(null);
     try {
-      const destPath = await save({
-        defaultPath: `${name}.kubeconfig`,
-        filters: [{ name: "Kubeconfig", extensions: ["kubeconfig", "yaml"] }],
-      });
-      if (destPath === null) return;
       const saved = await api.serviceAccountKubeconfigSave(
         clusterId,
         namespace,
         name,
-        destPath,
+        `${name}.kubeconfig`,
         Number(lifetime),
       );
+      // The user cancelled the save dialog.
+      if (saved === null) return;
       toast.success(
         `Saved the kubeconfig · token expires ${new Date(saved.expiresAt).toLocaleString()}`,
       );

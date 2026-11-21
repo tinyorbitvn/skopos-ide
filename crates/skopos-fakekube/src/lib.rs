@@ -94,11 +94,18 @@ struct State_ {
     history: Vec<WatchEvent>,
     counts: BTreeMap<String, usize>,
     watch_counts: BTreeMap<String, usize>,
+    /// path -> the field selector of each list of it, oldest first.
+    list_field_selectors: BTreeMap<String, Vec<Option<String>>>,
     access_reviews: Vec<AccessReview>,
     fail: BTreeMap<String, u16>,
     fail_discovery: Option<u16>,
     /// How long `/apis` holds its answer before it sends it.
     discovery_delay: Duration,
+    /// How long a list of one namespace's objects waits before it is answered.
+    namespaced_list_delay: Duration,
+    /// The lists of one namespace's objects waiting to be answered now, and the most ever.
+    namespaced_lists: usize,
+    most_namespaced_lists: usize,
     /// (namespace, name) of a pod -> scripted eviction failure and the answers left.
     eviction_failures: BTreeMap<(String, String), (u16, Option<usize>)>,
     /// Whether an accepted eviction leaves the pod in place.
@@ -182,6 +189,8 @@ struct MetricsApi {
     pods: Vec<Value>,
     /// Every metrics.k8s.io request answers this status instead.
     failure: Option<u16>,
+    /// How long a list waits before it answers.
+    delay: Duration,
 }
 
 /// What a served Service answers.
@@ -397,10 +406,14 @@ impl FakeKube {
                 history: Vec::new(),
                 counts: BTreeMap::new(),
                 watch_counts: BTreeMap::new(),
+                list_field_selectors: BTreeMap::new(),
                 access_reviews: Vec::new(),
                 fail: BTreeMap::new(),
                 fail_discovery: None,
                 discovery_delay: Duration::ZERO,
+                namespaced_list_delay: Duration::ZERO,
+                namespaced_lists: 0,
+                most_namespaced_lists: 0,
                 eviction_failures: BTreeMap::new(),
                 hold_evicted_pods: false,
                 writes: BTreeMap::new(),
@@ -523,6 +536,17 @@ impl FakeKube {
         self.inner.lock().discovery_delay = delay;
     }
 
+    /// Makes every list of one namespace's objects wait `delay` before it is answered, so a
+    /// test can see how many a client asks for at one time. `Duration::ZERO` clears it.
+    pub fn delay_namespaced_lists(&self, delay: Duration) {
+        self.inner.lock().namespaced_list_delay = delay;
+    }
+
+    /// The most lists of one namespace's objects that waited to be answered at one time.
+    pub fn most_namespaced_lists_at_once(&self) -> usize {
+        self.inner.lock().most_namespaced_lists
+    }
+
     /// Makes evicting the pod fail with `http_status`, `times` times or, for
     /// `None`, always.
     pub fn fail_evictions_with(
@@ -609,6 +633,17 @@ impl FakeKube {
             .get(path)
             .copied()
             .unwrap_or(0)
+    }
+
+    /// The field selector of each list that reached `path`, oldest first: `None` for a
+    /// list that asked for every object.
+    pub fn list_field_selectors(&self, path: &str) -> Vec<Option<String>> {
+        self.inner
+            .lock()
+            .list_field_selectors
+            .get(path)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The writes that reached `path` with this method, oldest first.
@@ -764,6 +799,16 @@ impl FakeKube {
         let api = st.metrics_api.get_or_insert_with(MetricsApi::default);
         api.nodes = nodes;
         api.pods = pods;
+    }
+
+    /// Makes every metrics.k8s.io list wait `delay` before it answers, as a metrics-server
+    /// under load does. `Duration::ZERO` clears it.
+    pub fn delay_metrics_api(&self, delay: Duration) {
+        self.inner
+            .lock()
+            .metrics_api
+            .get_or_insert_with(MetricsApi::default)
+            .delay = delay;
     }
 
     /// Every metrics.k8s.io request, the group's document included, answers `code`, as an
@@ -992,18 +1037,32 @@ fn openapi_url(key: &str, hash: &str) -> String {
 }
 
 async fn node_metrics(State(s): State<Shared>) -> Response {
-    metrics_answer(&s, Some("nodes"), None)
+    metrics_list(&s, "nodes", None).await
 }
 
 async fn pod_metrics(State(s): State<Shared>) -> Response {
-    metrics_answer(&s, Some("pods"), None)
+    metrics_list(&s, "pods", None).await
 }
 
 async fn namespaced_pod_metrics(
     State(s): State<Shared>,
     UrlPath(namespace): UrlPath<String>,
 ) -> Response {
-    metrics_answer(&s, Some("pods"), Some(&namespace))
+    metrics_list(&s, "pods", Some(&namespace)).await
+}
+
+/// A metrics.k8s.io list, after the delay a test asked for.
+async fn metrics_list(s: &Shared, plural: &str, namespace: Option<&str>) -> Response {
+    let delay = {
+        let st = s.lock();
+        st.metrics_api
+            .as_ref()
+            .map_or(Duration::ZERO, |api| api.delay)
+    };
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
+    }
+    metrics_answer(s, Some(plural), namespace)
 }
 
 /// metrics.k8s.io: the group's document when `plural` is `None`, else a list.
@@ -1447,6 +1506,18 @@ async fn generic(
             return status_for_code(code);
         }
     }
+    if verb == "list" && t.namespace.is_some() {
+        let delay = {
+            let mut st = s.lock();
+            st.namespaced_lists += 1;
+            st.most_namespaced_lists = st.most_namespaced_lists.max(st.namespaced_lists);
+            st.namespaced_list_delay
+        };
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        s.lock().namespaced_lists -= 1;
+    }
     match verb {
         "list" => list(&s, &res, &t, &q, &headers, uri.path()),
         "watch" => watch_response(s, &res, &t, uri.path(), &q),
@@ -1640,6 +1711,10 @@ fn list(
     if metadata_only {
         *st.metadata_lists.entry(path.to_string()).or_insert(0) += 1;
     }
+    st.list_field_selectors
+        .entry(path.to_string())
+        .or_default()
+        .push(q.get("fieldSelector").cloned());
     let mut items: Vec<Value> = st
         .objects
         .get(&res.plural)

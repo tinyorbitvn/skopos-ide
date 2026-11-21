@@ -52,7 +52,7 @@ impl AppCore {
                 endpoint,
             },
             PrometheusApi::Remote(endpoint) => {
-                remote = self.remote(id, endpoint)?;
+                remote = self.remote(id, endpoint).await?;
                 Transport::Remote(&remote)
             }
         };

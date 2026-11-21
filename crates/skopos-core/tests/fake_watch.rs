@@ -12,7 +12,9 @@ use skopos_core::error::ErrorCode;
 use skopos_core::graph::{GraphEvent, GraphRel};
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
-use skopos_core::resources::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
+use skopos_core::resources::{
+    ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus, NAMESPACE_LISTS_AT_ONCE,
+};
 use skopos_fakekube::{DenyRule, FakeKube, FakeKubeConfig, FakeResource};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
@@ -138,8 +140,65 @@ impl Consumer {
         resource: ResourceRef,
         capacity: usize,
     ) -> Consumer {
+        Self::start(core, id, resource, capacity, "main", &[]).await
+    }
+
+    /// A table in the window `owner`.
+    async fn subscribe_as(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        owner: &str,
+    ) -> Consumer {
+        Self::start(core, id, resource, 64, owner, &[]).await
+    }
+
+    /// A Node's drawer: the Pods bound to `node`.
+    async fn subscribe_on_node(core: &AppCore, id: &ClusterId, node: &str) -> Consumer {
+        let (tx, rx) = mpsc::channel(64);
+        let id = core
+            .resources_subscribe_node_pods(id, node.to_owned(), tx, "main")
+            .await
+            .unwrap();
+        Consumer {
+            id,
+            rx,
+            rows: BTreeMap::new(),
+            seen: Vec::new(),
+        }
+    }
+
+    /// The names of the rows, sorted.
+    fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.rows.keys().map(|(_, name)| name.as_str()).collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// A drawer, or a table that shows only `namespaces`.
+    async fn subscribe_in(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        namespaces: &[&str],
+    ) -> Consumer {
+        Self::start(core, id, resource, 64, "main", namespaces).await
+    }
+
+    async fn start(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        capacity: usize,
+        owner: &str,
+        namespaces: &[&str],
+    ) -> Consumer {
         let (tx, rx) = mpsc::channel(capacity);
-        let id = core.resources_subscribe(id, resource, tx).await.unwrap();
+        let namespaces = namespaces.iter().map(|&name| name.to_owned()).collect();
+        let id = core
+            .resources_subscribe(id, resource, namespaces, tx, owner)
+            .await
+            .unwrap();
         Consumer {
             id,
             rx,
@@ -167,6 +226,9 @@ impl Consumer {
                 }
             }
             WatchEvent::Status { .. } => {}
+            WatchEvent::SnapshotPart { .. } => {
+                panic!("only the forwarder to the webview cuts a snapshot")
+            }
         }
         self.seen.push(event);
     }
@@ -230,6 +292,28 @@ impl Consumer {
         })
     }
 
+    /// The status of the last status event.
+    fn last_status(&self) -> Option<&WatchStatus> {
+        self.seen.iter().rev().find_map(|event| match event {
+            WatchEvent::Status { status, .. } => Some(status),
+            _ => None,
+        })
+    }
+
+    /// The names the batches from `seen[marker]` on upserted and deleted, each sorted.
+    fn changes_since(&self, marker: usize) -> (Vec<String>, Vec<String>) {
+        let (mut upserted, mut deleted) = (Vec::new(), Vec::new());
+        for event in &self.seen[marker..] {
+            if let WatchEvent::Batch { upserts, deletes } = event {
+                upserted.extend(upserts.iter().map(|row| row_of(&row.to_value()).name));
+                deleted.extend(deletes.iter().map(|key| key.name.clone()));
+            }
+        }
+        upserted.sort();
+        deleted.sort();
+        (upserted, deleted)
+    }
+
     fn has(&self, namespace: &str, name: &str) -> bool {
         self.rows
             .contains_key(&(Some(namespace.to_owned()), name.to_owned()))
@@ -240,6 +324,7 @@ impl Consumer {
             .seen
             .iter()
             .map(|event| match event {
+                WatchEvent::SnapshotPart { items } => format!("part({})", items.len()),
                 WatchEvent::Snapshot { items } => format!("snapshot({})", items.len()),
                 WatchEvent::Batch { upserts, deletes } => {
                     format!("batch(+{} -{})", upserts.len(), deletes.len())
@@ -259,6 +344,18 @@ impl Consumer {
         namespace: Option<&str>,
         name: &str,
     ) -> Consumer {
+        Self::subscribe_object_as(core, id, resource, namespace, name, "main").await
+    }
+
+    /// A detail panel in the window `owner`.
+    async fn subscribe_object_as(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        namespace: Option<&str>,
+        name: &str,
+        owner: &str,
+    ) -> Consumer {
         let (tx, rx) = mpsc::channel(64);
         let id = core
             .resources_subscribe_object(
@@ -267,6 +364,7 @@ impl Consumer {
                 namespace.map(str::to_owned),
                 name.to_owned(),
                 tx,
+                owner,
             )
             .await
             .unwrap();
@@ -504,6 +602,49 @@ async fn a_wrong_kind_does_not_exempt_secrets() {
     assert!(!text.contains("czNjcjN0"), "{text}");
 }
 
+/// A drawer, or a table that shows a few namespaces, asks for those only. It is sent their
+/// rows, from the one watch that also serves a table of every namespace.
+#[tokio::test]
+async fn a_subscription_of_some_namespaces_is_sent_only_their_rows() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.add_pod("default", "one");
+    fake.add_pod("other", "two");
+
+    let mut whole = Consumer::subscribe(&core, &id, pods()).await;
+    let mut scoped = Consumer::subscribe_in(&core, &id, pods(), &["default"]).await;
+    whole.until("both pods", |c| c.rows.len() == 2).await;
+    scoped.until("its snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(scoped.rows.len(), 1, "{}", scoped.summary());
+
+    fake.add_pod("other", "three");
+    fake.add_pod("default", "four");
+    whole.until("both new pods", |c| c.rows.len() == 4).await;
+    scoped.until("its new pod", |c| c.rows.len() == 2).await;
+
+    let names: Vec<&str> = scoped.rows.keys().map(|(_, name)| name.as_str()).collect();
+    assert_eq!(names, ["four", "one"]);
+    let sent = serde_json::to_string(&scoped.seen).unwrap();
+    assert!(!sent.contains("other"), "{sent}");
+    assert_eq!(fake.watch_request_count("/api/v1/pods"), 1);
+}
+
+#[tokio::test]
+async fn namespaces_that_cannot_apply_are_refused() {
+    let (core, _fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    for (resource, namespace) in [
+        (resource("", "Node", "nodes", false), "default"),
+        (pods(), "../kube-system"),
+        (pods(), ""),
+    ] {
+        let (tx, _rx) = mpsc::channel(1);
+        let err = core
+            .resources_subscribe(&id, resource, vec![namespace.to_owned()], tx, "main")
+            .await
+            .expect_err(namespace);
+        assert_eq!(err.code, skopos_core::error::ErrorCode::InvalidInput);
+    }
+}
+
 #[tokio::test]
 async fn a_resource_path_with_odd_characters_is_refused() {
     let (core, _fake, id, _root) = connected(FakeKubeConfig::default()).await;
@@ -518,11 +659,119 @@ async fn a_resource_path_with_odd_characters_is_refused() {
     ] {
         let (tx, _rx) = mpsc::channel(1);
         let err = core
-            .resources_subscribe(&id, wrong.clone(), tx)
+            .resources_subscribe(&id, wrong.clone(), Vec::new(), tx, "main")
             .await
             .expect_err(&format!("{wrong:?}"));
         assert_eq!(err.code, skopos_core::error::ErrorCode::InvalidInput);
     }
+}
+
+fn pod_on(namespace: &str, name: &str, node: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": { "namespace": namespace, "name": name },
+        "spec": { "nodeName": node, "containers": [{ "name": "app", "image": "app" }] },
+        "status": { "phase": "Running" },
+    })
+}
+
+/// A Node's drawer shows the Pods bound to it. The API server picks them, so the Pods of
+/// the other nodes are neither listed nor sent.
+#[tokio::test]
+async fn a_nodes_pods_are_picked_by_the_server_and_no_other_pod_is_sent() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", pod_on("default", "one", "node-a"));
+    fake.upsert("pods", pod_on("other", "two", "node-b"));
+
+    let mut on_node = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    on_node.until("its snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(on_node.names(), ["one"], "{}", on_node.summary());
+
+    fake.upsert("pods", pod_on("other", "three", "node-a"));
+    fake.upsert("pods", pod_on("default", "four", "node-b"));
+    fake.upsert("pods", pod_on("default", "five", "node-a"));
+    on_node
+        .until("the node's new pods", |c| c.has("default", "five"))
+        .await;
+    assert_eq!(on_node.names(), ["five", "one", "three"]);
+    fake.delete_pod("default", "one");
+    on_node
+        .until("the delete", |c| !c.has("default", "one"))
+        .await;
+
+    let sent = serde_json::to_string(&on_node.seen).unwrap();
+    assert!(!sent.contains("node-b"), "{sent}");
+    assert_eq!(
+        fake.list_field_selectors(PODS),
+        [Some("spec.nodeName=node-a".to_owned())]
+    );
+}
+
+/// The watch of one node holds only that node's Pods, so a table of every Pod never
+/// shares it, and a node's drawer never shares the table's.
+#[tokio::test]
+async fn a_nodes_pods_and_a_table_of_every_pod_keep_their_own_watch() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", pod_on("default", "one", "node-a"));
+    fake.upsert("pods", pod_on("default", "two", "node-b"));
+
+    let mut on_a = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    let mut whole = Consumer::subscribe(&core, &id, pods()).await;
+    let mut on_b = Consumer::subscribe_on_node(&core, &id, "node-b").await;
+    let mut again = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    whole.until("its snapshot", |c| c.snapshots() == 1).await;
+    on_a.until("its snapshot", |c| c.snapshots() == 1).await;
+    on_b.until("its snapshot", |c| c.snapshots() == 1).await;
+    again.until("its snapshot", |c| c.snapshots() == 1).await;
+
+    assert_eq!(whole.names(), ["one", "two"]);
+    assert_eq!(on_a.names(), ["one"]);
+    assert_eq!(on_b.names(), ["two"]);
+    assert_eq!(again.names(), ["one"]);
+    // One watch for each node and one for the table: the second drawer of a node shares.
+    assert_eq!(fake.watch_request_count(PODS), 3);
+}
+
+/// When Pods may not be listed in every namespace, a node's Pods are picked the same way
+/// in each namespace.
+#[tokio::test]
+async fn a_nodes_pods_fall_back_to_each_namespace_with_the_same_selector() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        forbid_cluster_wide_pods: true,
+        namespaces: vec!["a".into(), "b".into()],
+        ..Default::default()
+    })
+    .await;
+    fake.upsert("pods", pod_on("a", "in-a", "node-a"));
+    fake.upsert("pods", pod_on("b", "in-b", "node-a"));
+    fake.upsert("pods", pod_on("b", "elsewhere", "node-b"));
+
+    let mut on_node = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    on_node.until("its snapshot", |c| c.snapshots() == 1).await;
+
+    assert_eq!(on_node.names(), ["in-a", "in-b"], "{}", on_node.summary());
+    for path in ["/api/v1/namespaces/a/pods", "/api/v1/namespaces/b/pods"] {
+        assert_eq!(
+            fake.list_field_selectors(path),
+            [Some("spec.nodeName=node-a".to_owned())],
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_node_name_that_is_no_name_is_refused() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    for node in ["", "..", "a/b", "a?b"] {
+        let (tx, _rx) = mpsc::channel(1);
+        let err = core
+            .resources_subscribe_node_pods(&id, node.to_owned(), tx, "main")
+            .await
+            .expect_err(node);
+        assert_eq!(err.code, ErrorCode::InvalidInput, "{node}");
+    }
+    assert_eq!(fake.request_count(PODS), 0);
 }
 
 fn numbered_pod(name: &str, rev: usize) -> Value {
@@ -667,9 +916,12 @@ async fn watch_drop_reconnects_and_reports_status() {
     fake.add_pod("default", "during-outage");
 
     fake.fail_watches_with("pods", None);
-    pods.until("the resync", |c| c.snapshots() == 2).await;
+    pods.until("the pod added meanwhile", |c| {
+        c.has("default", "during-outage")
+    })
+    .await;
 
-    assert!(pods.has("default", "during-outage"));
+    assert_eq!(pods.snapshots(), 1, "{}", pods.summary());
     let after: Vec<&WatchEvent> = pods.seen[marker..].iter().collect();
     let live = after
         .iter()
@@ -683,11 +935,11 @@ async fn watch_drop_reconnects_and_reports_status() {
             )
         })
         .expect("status live after the outage");
-    let snapshot = after
+    let rows = after
         .iter()
-        .position(|e| matches!(e, WatchEvent::Snapshot { .. }))
+        .position(|e| matches!(e, WatchEvent::Batch { .. }))
         .unwrap();
-    assert!(live < snapshot, "{}", pods.summary());
+    assert!(live < rows, "{}", pods.summary());
 }
 
 #[tokio::test]
@@ -717,12 +969,177 @@ async fn an_expired_resource_version_lists_again_without_reconnecting() {
         .await;
     eventually("the watch", || fake.open_watch_count() == 1).await;
 
+    let lists = fake.request_count(PODS) - fake.watch_request_count(PODS);
     fake.expire_watches("pods");
 
-    pods.until("the fresh snapshot", |c| c.snapshots() == 2)
+    eventually("the watch after the new list", || {
+        fake.watch_request_count(PODS) == 2
+    })
+    .await;
+    assert_eq!(
+        fake.request_count(PODS) - fake.watch_request_count(PODS),
+        lists + 1,
+        "one new list"
+    );
+    fake.add_pod("default", "after");
+    pods.until("a later pod", |c| c.has("default", "after"))
         .await;
     assert!(!pods.saw_status(WatchStatus::Reconnecting));
     assert!(pods.has("default", "one"));
+}
+
+#[tokio::test]
+async fn a_new_list_that_changes_nothing_sends_no_rows() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_watch_timing_for_test(FAST_BATCH, LONG_LINGER);
+    fake.add_pod("default", "one");
+    fake.add_pod("default", "two");
+    let mut pods = Consumer::subscribe(&core, &id, pods()).await;
+    pods.until("the snapshot and Live", |c| {
+        c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+    })
+    .await;
+    eventually("the watch", || fake.open_watch_count() == 1).await;
+    let seen = pods.seen.len();
+
+    fake.expire_watches("pods");
+    eventually("the watch after the new list", || {
+        fake.watch_request_count(PODS) == 2
+    })
+    .await;
+
+    pods.drain_for(Duration::from_millis(300)).await;
+    assert_eq!(pods.seen.len(), seen, "{}", pods.summary());
+    assert!(pods.has("default", "one") && pods.has("default", "two"));
+}
+
+#[tokio::test]
+async fn a_new_list_after_an_outage_sends_only_what_changed() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_watch_timing_for_test(FAST_BATCH, LONG_LINGER);
+    for name in ["kept", "changed", "gone"] {
+        fake.upsert("pods", numbered_pod(name, 1));
+    }
+    let mut table = Consumer::subscribe(&core, &id, pods()).await;
+    table
+        .until("the snapshot and Live", |c| {
+            c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+        })
+        .await;
+    eventually("the watch", || fake.open_watch_count() == 1).await;
+
+    fake.fail_watches_with("pods", Some(500));
+    fake.drop_watches();
+    table
+        .until("status reconnecting", |c| {
+            c.saw_status(WatchStatus::Reconnecting)
+        })
+        .await;
+    let marker = table.seen.len();
+    fake.upsert("pods", numbered_pod("changed", 2));
+    fake.upsert("pods", numbered_pod("added", 1));
+    fake.delete("pods", Some("default"), "gone");
+    fake.fail_watches_with("pods", None);
+
+    table
+        .until("what changed meanwhile", |c| {
+            c.has("default", "added")
+                && !c.has("default", "gone")
+                && rev_of(c, "changed").as_deref() == Some("2")
+        })
+        .await;
+
+    assert_eq!(table.snapshots(), 1, "{}", table.summary());
+    let (upserted, deleted) = table.changes_since(marker);
+    assert_eq!(upserted, ["added", "changed"], "{}", table.summary());
+    assert_eq!(deleted, ["gone"], "{}", table.summary());
+    // A table opened now starts from the same rows.
+    let mut late = Consumer::subscribe(&core, &id, pods()).await;
+    late.until("the snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(
+        late.rows.keys().collect::<Vec<_>>(),
+        table.rows.keys().collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn a_new_list_of_each_namespace_sends_no_rows_of_the_other() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        forbid_cluster_wide_pods: true,
+        namespaces: vec!["a".into(), "b".into()],
+        ..Default::default()
+    })
+    .await;
+    core.set_watch_timing_for_test(FAST_BATCH, LONG_LINGER);
+    fake.add_pod("a", "in-a");
+    fake.add_pod("b", "in-b");
+    let mut pods = Consumer::subscribe(&core, &id, pods()).await;
+    pods.until("the snapshot and Live", |c| {
+        c.snapshots() == 1 && c.saw_status(WatchStatus::Live)
+    })
+    .await;
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    fake.fail_watches_with("pods", Some(500));
+    fake.drop_watches();
+    pods.until("status reconnecting", |c| {
+        c.saw_status(WatchStatus::Reconnecting)
+    })
+    .await;
+    let marker = pods.seen.len();
+    fake.fail_watches_with("pods", None);
+    // The old watches are gone, so each of these arrives only once its namespace is listed
+    // again.
+    fake.add_pod("a", "later-a");
+    fake.add_pod("b", "later-b");
+    pods.until("a later pod of each namespace", |c| {
+        c.has("a", "later-a") && c.has("b", "later-b")
+    })
+    .await;
+
+    assert_eq!(pods.snapshots(), 1, "{}", pods.summary());
+    let (upserted, deleted) = pods.changes_since(marker);
+    assert_eq!(upserted, ["later-a", "later-b"], "{}", pods.summary());
+    assert!(deleted.is_empty(), "{deleted:?}");
+    assert!(pods.has("a", "in-a") && pods.has("b", "in-b"));
+}
+
+/// Without the right to list a kind in every namespace, each namespace is listed by itself.
+/// A cluster can have hundreds, so only some of them are listed at one time, whatever the
+/// number of kinds being listed.
+#[tokio::test]
+async fn namespaces_are_listed_a_few_at_a_time_after_a_cluster_wide_refusal() {
+    let names: Vec<String> = (0..40).map(|n| format!("team-{n:02}")).collect();
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        forbid_cluster_wide_pods: true,
+        deny_cluster_wide: vec![DenyRule {
+            verb: "list".into(),
+            plural: "secrets".into(),
+            namespace: None,
+        }],
+        namespaces: names.clone(),
+        ..Default::default()
+    })
+    .await;
+    for name in &names {
+        fake.add_pod(name, "web");
+    }
+    fake.delay_namespaced_lists(Duration::from_millis(30));
+
+    let mut pods = Consumer::subscribe(&core, &id, pods()).await;
+    let _secrets = Consumer::subscribe(&core, &id, secrets()).await;
+    pods.until("the pod of every namespace", |c| c.rows.len() == 40)
+        .await;
+    eventually("a watch of every namespace for both kinds", || {
+        fake.open_watch_count() == 80
+    })
+    .await;
+
+    let most = fake.most_namespaced_lists_at_once();
+    assert!(
+        (2..=NAMESPACE_LISTS_AT_ONCE).contains(&most),
+        "{most} namespaces were listed at one time"
+    );
 }
 
 #[tokio::test]
@@ -911,7 +1328,9 @@ async fn not_found_while_discovery_still_serves_it_keeps_retrying() {
     fake.fail_watches_with("widgets", None);
 
     widgets_sub
-        .until("the resync", |c| c.snapshots() == 2)
+        .until("status live again", |c| {
+            c.last_status() == Some(&WatchStatus::Live)
+        })
         .await;
     assert!(!widgets_sub.saw_status(WatchStatus::NotServed));
 }
@@ -949,11 +1368,20 @@ async fn subscribing_to_disconnected_cluster_errors() {
     core.cluster_disconnect(&id).await.unwrap();
 
     let (tx, _rx) = mpsc::channel(1);
-    assert!(core.resources_subscribe(&id, pods(), tx).await.is_err());
+    assert!(core
+        .resources_subscribe(&id, pods(), Vec::new(), tx, "main")
+        .await
+        .is_err());
 
     let (tx, _rx) = mpsc::channel(1);
     assert!(core
-        .resources_subscribe(&"no-such-cluster".to_owned(), pods(), tx)
+        .resources_subscribe(
+            &"no-such-cluster".to_owned(),
+            pods(),
+            Vec::new(),
+            tx,
+            "main"
+        )
         .await
         .is_err());
 }
@@ -1406,6 +1834,7 @@ async fn an_object_watch_refuses_a_name_or_scope_that_does_not_fit_before_any_re
                 namespace.map(str::to_owned),
                 name.to_owned(),
                 tx,
+                "main",
             )
             .await
             .unwrap_err();
@@ -1420,7 +1849,14 @@ async fn an_object_watch_refuses_a_name_or_scope_that_does_not_fit_before_any_re
     core.cluster_disconnect(&id).await.unwrap();
     let (tx, _rx) = mpsc::channel(1);
     assert!(core
-        .resources_subscribe_object(&id, pods(), Some("default".into()), "web".into(), tx)
+        .resources_subscribe_object(
+            &id,
+            pods(),
+            Some("default".into()),
+            "web".into(),
+            tx,
+            "main",
+        )
         .await
         .is_err());
 }
@@ -1483,7 +1919,8 @@ async fn a_table_and_the_graph_share_one_pod_watcher_and_each_gets_its_own_rows(
 
     let mut table = Consumer::subscribe(&core, &id, pods()).await;
     let (tx, mut graph) = mpsc::channel(16);
-    core.resource_graph_subscribe(&id, None, tx).unwrap();
+    core.resource_graph_subscribe(&id, None, tx, "main")
+        .unwrap();
     table.until("the snapshot", |c| c.snapshots() == 1).await;
     let snapshot = graph_mounting(&mut graph, "web").await;
 
@@ -1523,7 +1960,9 @@ async fn the_pod_watcher_outlives_a_table_while_the_graph_still_reads_it() {
     seed_mounting_pods(&fake);
     let mut table = Consumer::subscribe(&core, &id, pods()).await;
     let (tx, mut graph) = mpsc::channel(16);
-    let graph_id = core.resource_graph_subscribe(&id, None, tx).unwrap();
+    let graph_id = core
+        .resource_graph_subscribe(&id, None, tx, "main")
+        .unwrap();
     table.until("the snapshot", |c| c.snapshots() == 1).await;
     graph_mounting(&mut graph, "web").await;
     assert_eq!(fake.watch_request_count(PODS), 1);
@@ -1573,4 +2012,53 @@ async fn a_quiet_subscription_sends_nothing_and_a_late_change_still_arrives_with
         "took {:?}",
         started.elapsed()
     );
+}
+
+#[tokio::test]
+async fn a_window_s_tables_end_with_it_and_another_window_s_go_on() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    core.set_watch_timing_for_test(FAST_BATCH, Duration::from_millis(100));
+    fake.add_pod("default", "one");
+    let mut kept = Consumer::subscribe_as(&core, &id, pods(), "main").await;
+    let mut shared = Consumer::subscribe_as(&core, &id, pods(), "window-2").await;
+    let mut alone = Consumer::subscribe_as(&core, &id, secrets(), "window-2").await;
+    for table in [&mut kept, &mut shared, &mut alone] {
+        table.until("the snapshot", |c| c.snapshots() == 1).await;
+    }
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    shared.until_closed("the window's Pods", WAIT).await;
+    alone.until_closed("the window's Secrets", WAIT).await;
+    // The watch only that window read closes. The one it shared stays for the other window.
+    eventually("the Secrets watch to close", || {
+        fake.open_watch_count() == 1
+    })
+    .await;
+    fake.add_pod("default", "two");
+    kept.until("the second pod", |c| c.has("default", "two"))
+        .await;
+}
+
+#[tokio::test]
+async fn a_window_s_object_watch_ends_with_it_and_another_window_s_goes_on() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", rich_pod("web", 1));
+    let mut kept =
+        Consumer::subscribe_object_as(&core, &id, pods(), Some("default"), "web", "main").await;
+    let mut ended =
+        Consumer::subscribe_object_as(&core, &id, pods(), Some("default"), "web", "window-2").await;
+    for panel in [&mut kept, &mut ended] {
+        panel.until("the snapshot", |c| c.snapshots() == 1).await;
+    }
+    eventually("both watches", || fake.open_watch_count() == 2).await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    ended.until_closed("the window's watch", WAIT).await;
+    eventually("its watch to close", || fake.open_watch_count() == 1).await;
+    fake.upsert("pods", rich_pod("web", 2));
+    kept.until("the update", |c| rev_of(c, "web").as_deref() == Some("2"))
+        .await;
 }

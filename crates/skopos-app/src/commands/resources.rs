@@ -8,7 +8,7 @@ use skopos_core::resources::{
     ApiResourceInfo, ApplyResult, InvolvedRef, ObjectNames, Propagation, ResourceRef, WatchEvent,
 };
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
@@ -34,29 +34,34 @@ pub async fn resources_names(
     state.core.resources_names(&cluster_id).await
 }
 
-/// Streams the resource to `on_event` and returns the subscription id. When the
-/// channel can no longer be written, as after a webview reload, the subscription
-/// is ended so its watch does not outlive the page.
+/// Streams the resource to `on_event` and returns the subscription id. The subscription
+/// belongs to the window that asks and ends when its page loads again or it closes, so
+/// its watch does not outlive the page; so does one whose channel can no longer be written.
+/// With `namespaces`, only the objects of those namespaces are sent; with none, all are.
 #[tauri::command]
 pub async fn resources_subscribe(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     resource: ResourceRef,
+    namespaces: Vec<String>,
     on_event: Channel<WatchEvent>,
 ) -> Result<String, IpcError> {
     let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
-        .resources_subscribe(&cluster_id, resource, tx)
+        .resources_subscribe(&cluster_id, resource, namespaces, tx, window.label())
         .await?;
     forward(state.core.clone(), id.clone(), rx, on_event);
     Ok(id)
 }
 
 /// Streams one object to `on_event` and returns the subscription id, which
-/// `resources_unsubscribe` ends. The rows are whole objects.
+/// `resources_unsubscribe` ends. The rows are whole objects. It ends with the window's page
+/// as `resources_subscribe` does.
 #[tauri::command]
 pub async fn resources_subscribe_object(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     resource: ResourceRef,
@@ -67,7 +72,28 @@ pub async fn resources_subscribe_object(
     let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
-        .resources_subscribe_object(&cluster_id, resource, namespace, name, tx)
+        .resources_subscribe_object(&cluster_id, resource, namespace, name, tx, window.label())
+        .await?;
+    forward(state.core.clone(), id.clone(), rx, on_event);
+    Ok(id)
+}
+
+/// Streams the Pods bound to the node `node` to `on_event`, as the rows `resources_subscribe`
+/// sends for Pods, and returns the subscription id, which `resources_unsubscribe` ends. The
+/// API server picks the Pods, so those of the other nodes are never read. It ends with the
+/// window's page as `resources_subscribe` does.
+#[tauri::command]
+pub async fn resources_subscribe_node_pods(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    node: String,
+    on_event: Channel<WatchEvent>,
+) -> Result<String, IpcError> {
+    let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
+    let id = state
+        .core
+        .resources_subscribe_node_pods(&cluster_id, node, tx, window.label())
         .await?;
     forward(state.core.clone(), id.clone(), rx, on_event);
     Ok(id)
@@ -82,12 +108,22 @@ fn forward(
 ) {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if on_event.send(event).is_err() {
+            if !send_parts(&on_event, event) {
                 core.resources_unsubscribe(&subscription);
                 break;
             }
         }
     });
+}
+
+/// Sends `event` to the webview, a large snapshot a part at a time, so that no single
+/// message takes the webview long to parse. The parts go one after another, with no other
+/// event between them. False once the channel can no longer be written.
+fn send_parts(on_event: &Channel<WatchEvent>, event: WatchEvent) -> bool {
+    event
+        .into_parts()
+        .into_iter()
+        .all(|part| on_event.send(part).is_ok())
 }
 
 #[tauri::command]
@@ -248,11 +284,51 @@ pub async fn ui_state_set(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use serde_json::json;
-    use skopos_core::resources::Row;
+    use skopos_core::resources::{Row, SNAPSHOT_PART_ROWS};
     use tauri::ipc::{InvokeResponseBody, IpcResponse};
 
     use super::*;
+
+    /// A snapshot of many rows would be one long text for the webview to parse in one go.
+    #[test]
+    fn a_large_snapshot_crosses_the_channel_a_part_at_a_time() {
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let seen = bodies.clone();
+        let channel = Channel::new(move |body| {
+            let InvokeResponseBody::Json(text) = body else {
+                panic!("the event did not cross as JSON");
+            };
+            seen.lock().unwrap().push(text);
+            Ok(())
+        });
+        let items = (0..=SNAPSHOT_PART_ROWS)
+            .map(|n| Row::new(&json!({ "n": n })).unwrap())
+            .collect();
+
+        assert!(send_parts(&channel, WatchEvent::Snapshot { items }));
+
+        let sent: Vec<Value> = bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|text| serde_json::from_str(text).unwrap())
+            .collect();
+        let shape: Vec<(&str, usize)> = sent
+            .iter()
+            .map(|event| {
+                let rows = event["items"].as_array().unwrap().len();
+                (event["type"].as_str().unwrap(), rows)
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [("snapshotPart", SNAPSHOT_PART_ROWS), ("snapshot", 1)]
+        );
+        assert_eq!(sent[1]["items"][0], json!({ "n": SNAPSHOT_PART_ROWS }));
+    }
 
     /// A row is kept as text, and must still reach the webview as the object.
     #[test]

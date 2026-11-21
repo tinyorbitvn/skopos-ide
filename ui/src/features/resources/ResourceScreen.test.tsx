@@ -15,6 +15,7 @@ import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
 import { type DeleteDialogProps, registerKind } from "../../kinds/registry";
+import { resetCatalogForTest } from "../../stores/catalog";
 import {
   type DetailsDockTab,
   detailsTab,
@@ -24,6 +25,7 @@ import {
 import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
 import { mockElementSize } from "../../test/size";
+import { connectClusters } from "../../test/terminal";
 import { Dock } from "../dock/Dock";
 import { ResourceRoute, ResourceScreen } from "./ResourceScreen";
 
@@ -215,7 +217,62 @@ beforeEach(() => {
 afterEach(() => {
   resetDockForTest();
   resetResourcesForTest();
+  resetCatalogForTest();
   vi.restoreAllMocks();
+});
+
+/** The namespaces each subscription to Pods asked for, oldest first. */
+const podsAskedFor = (fake: Fake) =>
+  fake.backend
+    .callsTo("resources_subscribe")
+    .filter((c) => (c.resource as ResourceRef).plural === "pods")
+    .map((c) => c.namespaces);
+
+test("a table of chosen namespaces asks for those, and never for every namespace first", async () => {
+  const fake = fakeBackend({ uiState: { "namespaces:c1": ["team-a"] } });
+  await show(fake, [pod("a", "team-a")]);
+
+  expect(row("team-a", "a")).toBeTruthy();
+  expect(podsAskedFor(fake)).toEqual([["team-a"]]);
+});
+
+test("the Pods behind Deployments are asked for the chosen namespaces only, never every namespace first", async () => {
+  const fake = fakeBackend({ uiState: { "namespaces:c1": ["team-a"] } });
+  await show(fake, [], DEPLOYMENTS);
+
+  expect(podsAskedFor(fake)).toEqual([["team-a"]]);
+});
+
+test("choosing a namespace asks for it, and the rows already here stay meanwhile", async () => {
+  const fake = fakeBackend();
+  await show(fake, [pod("a", "team-a"), pod("b", "team-b")]);
+  expect(podsAskedFor(fake)).toEqual([[]]);
+
+  openMenu("namespace-filter");
+  fireEvent.click(screen.getByTestId("namespace-option-team-a"));
+  closeMenu();
+  await act(flush);
+
+  expect(podsAskedFor(fake)).toEqual([[], ["team-a"]]);
+  // The new list has sent nothing yet: the table keeps the rows it had, filtered.
+  expect(screen.queryByRole("status", { name: /Loading/ })).toBeNull();
+  expect(row("team-a", "a")).toBeTruthy();
+  expect(row("team-b", "b")).toBeNull();
+
+  await fake.send("pods", {
+    type: "snapshot",
+    items: [pod("a", "team-a"), pod("c", "team-a")],
+  } as WatchEvent);
+  expect(row("team-a", "c")).toBeTruthy();
+});
+
+test("the namespace filter offers the cluster's namespaces, with or without rows", async () => {
+  connectClusters({ id: "c1", name: "one" });
+  const fake = fakeBackend({ uiState: { "namespaces:c1": ["default"] } });
+  await show(fake, [pod("a", "default")]);
+
+  openMenu("namespace-filter");
+  expect(screen.getByTestId("namespace-option-shop")).toBeTruthy();
 });
 
 test("shows loading, then rows, then empty text with the namespace filter's context", async () => {

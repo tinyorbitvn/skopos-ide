@@ -1,14 +1,14 @@
-use std::path::PathBuf;
-
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::resources::{
     DataChange, DrainEvent, DrainOptions, ResourceRef, SavedKubeconfig, SecretChange, SecretValue,
 };
+use skopos_core::save_file;
 use tauri::ipc::Channel;
 use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
+use super::save::ask_save_path;
 use crate::state::AppState;
 
 /// Events wait here while the webview catches up.
@@ -241,15 +241,22 @@ pub async fn ingress_class_set_default(
         .await
 }
 
+/// Saves a kubeconfig for the ServiceAccount where the user chooses in the save dialog.
+/// `None` when they cancel, and then no token is asked for.
 #[tauri::command]
 pub async fn service_account_kubeconfig_save(
     state: State<'_, AppState>,
+    window: WebviewWindow,
     cluster_id: ClusterId,
     namespace: String,
     name: String,
-    dest_path: PathBuf,
+    suggested_name: String,
     expiration_seconds: Option<i64>,
-) -> Result<SavedKubeconfig, IpcError> {
+) -> Result<Option<SavedKubeconfig>, IpcError> {
+    let Some(dest_path) = ask_save_path(&window, save_file::KUBECONFIG, &suggested_name).await?
+    else {
+        return Ok(None);
+    };
     state
         .core
         .service_account_kubeconfig_save(
@@ -260,4 +267,5 @@ pub async fn service_account_kubeconfig_save(
             expiration_seconds,
         )
         .await
+        .map(Some)
 }

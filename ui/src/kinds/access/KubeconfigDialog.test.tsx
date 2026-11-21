@@ -19,7 +19,6 @@ afterEach(() => vi.restoreAllMocks());
 
 const SA: KubeObject = { metadata: { name: "robot", namespace: "ci" } };
 const EXPIRES = "2026-11-08T13:00:00Z";
-const PATH = "/home/me/robot.kubeconfig";
 
 function show(handlers: Parameters<typeof mockBackend>[0]) {
   const backend = mockBackend(handlers);
@@ -33,7 +32,6 @@ const saved = () => ({ expiresAt: EXPIRES });
 test("the dialog explains the token and saves a one-hour token by default", async () => {
   const success = vi.spyOn(toast, "success");
   const { backend, close } = show({
-    "plugin:dialog|save": () => PATH,
     service_account_kubeconfig_save: saved,
   });
   expect(
@@ -46,19 +44,16 @@ test("the dialog explains the token and saves a one-hour token by default", asyn
   ).toBeTruthy();
   fireEvent.click(screen.getByTestId("kubeconfig-save"));
   await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
-  expect(backend.callsTo("plugin:dialog|save")[0]).toMatchObject({
-    options: {
-      defaultPath: "robot.kubeconfig",
-      filters: [{ extensions: ["kubeconfig", "yaml"] }],
-    },
-  });
-  expect(backend.callsTo("service_account_kubeconfig_save")[0]).toMatchObject({
+  const [call] = backend.callsTo("service_account_kubeconfig_save");
+  expect(call).toMatchObject({
     clusterId: "c",
     namespace: "ci",
     name: "robot",
-    destPath: PATH,
+    suggestedName: "robot.kubeconfig",
     expirationSeconds: 3600,
   });
+  expect(call).not.toHaveProperty("destPath");
+  expect(call).not.toHaveProperty("path");
   expect(success).toHaveBeenCalledWith(
     `Saved the kubeconfig · token expires ${new Date(EXPIRES).toLocaleString()}`,
   );
@@ -69,7 +64,6 @@ test.each([
   ["24 hours", 86400],
 ])("choosing %s asks for %i seconds", async (label, seconds) => {
   const { backend, close } = show({
-    "plugin:dialog|save": () => PATH,
     service_account_kubeconfig_save: saved,
   });
   fireEvent.keyDown(screen.getByRole("combobox", { name: "Token lifetime" }), {
@@ -83,15 +77,17 @@ test.each([
   });
 });
 
-test("a cancelled file dialog keeps the dialog open and saves nothing", async () => {
+test("a cancelled file dialog keeps the dialog open with no message or toast", async () => {
+  const success = vi.spyOn(toast, "success");
   const { backend, close } = show({
-    "plugin:dialog|save": () => null,
-    service_account_kubeconfig_save: saved,
+    service_account_kubeconfig_save: () => null,
   });
   fireEvent.click(screen.getByTestId("kubeconfig-save"));
   await act(flush);
+  expect(backend.callsTo("service_account_kubeconfig_save")).toHaveLength(1);
   expect(close).not.toHaveBeenCalled();
-  expect(backend.callsTo("service_account_kubeconfig_save")).toHaveLength(0);
+  expect(success).not.toHaveBeenCalled();
+  expect(screen.queryByText("Could not save the kubeconfig")).toBeNull();
   expect(
     (screen.getByTestId("kubeconfig-save") as HTMLButtonElement).disabled,
   ).toBe(false);
@@ -99,7 +95,6 @@ test("a cancelled file dialog keeps the dialog open and saves nothing", async ()
 
 test("a refused save shows the server's message inside the dialog", async () => {
   const { close } = show({
-    "plugin:dialog|save": () => PATH,
     service_account_kubeconfig_save: () => {
       throw {
         code: "Forbidden",
@@ -118,10 +113,9 @@ test("a refused save shows the server's message inside the dialog", async () => 
 
 test("a failing file dialog shows its error and lets Save be pressed again", async () => {
   const { close } = show({
-    "plugin:dialog|save": () => {
+    service_account_kubeconfig_save: () => {
       throw new Error("no portal for the file dialog");
     },
-    service_account_kubeconfig_save: saved,
   });
   fireEvent.click(screen.getByTestId("kubeconfig-save"));
   expect(await screen.findByText(/no portal for the file dialog/)).toBeTruthy();
@@ -133,7 +127,6 @@ test("a failing file dialog shows its error and lets Save be pressed again", asy
 
 test("pressing Save twice while saving saves once", async () => {
   const { backend } = show({
-    "plugin:dialog|save": () => PATH,
     service_account_kubeconfig_save: () => new Promise(() => {}),
   });
   const button = screen.getByTestId("kubeconfig-save");
@@ -142,7 +135,6 @@ test("pressing Save twice while saving saves once", async () => {
   await act(flush);
   fireEvent.click(button);
   await act(flush);
-  expect(backend.callsTo("plugin:dialog|save")).toHaveLength(1);
   expect(backend.callsTo("service_account_kubeconfig_save")).toHaveLength(1);
 });
 

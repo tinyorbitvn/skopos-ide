@@ -20,6 +20,7 @@ import {
   Trash2,
 } from "../../design/icons";
 import type { HelmRelease } from "../../ipc/generated/HelmRelease";
+import { useClusterNamespaces } from "../../stores/clusters";
 import {
   type HelmRun,
   isToolMissing,
@@ -42,11 +43,7 @@ import {
 } from "./helmText";
 import { Notice } from "./Notice";
 import { RollbackDialog, UninstallDialog } from "./ReleaseDialogs";
-import {
-  useClusterNamespaces,
-  useNamespaceSelection,
-  useWatchReleases,
-} from "./useReleases";
+import { useNamespaceSelection, useWatchReleases } from "./useReleases";
 
 type Dialog = { kind: "rollback" | "uninstall"; release: HelmRelease };
 

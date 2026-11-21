@@ -12,8 +12,10 @@ import {
   autoHidden,
   buildModel,
   chipNamespaces,
+  countsFirst,
   countText,
   FORCE_MAX_NODES,
+  graphFilter,
   levelSort,
   linksOf,
   listLabel,
@@ -216,6 +218,51 @@ describe("namespaces", () => {
   it("keeps the first namespace by name when the default one is empty", () => {
     expect(autoHidden(counts, "default")).toEqual(["default", "jobs", "shop"]);
     expect(autoHidden(counts, null)).toEqual(["default", "jobs", "shop"]);
+  });
+
+  describe("what the map asks for", () => {
+    const small = [
+      { namespace: "", nodes: 4 },
+      { namespace: "jobs", nodes: 300 },
+      { namespace: "shop", nodes: 1196 },
+    ];
+
+    it("is the counts alone until it knows them, unless nothing is hidden", () => {
+      expect(graphFilter(null, null)).toEqual([]);
+      expect(graphFilter(["shop"], null)).toEqual([]);
+      expect(graphFilter([], null)).toBeNull();
+      expect(countsFirst(null, null)).toBe(true);
+      expect(countsFirst(["shop"], null)).toBe(true);
+      expect(countsFirst([], null)).toBe(false);
+    });
+
+    it("is the whole graph with no saved choice, when the counts hold at most 1,500 nodes", () => {
+      expect(graphFilter(null, small)).toBeNull();
+      expect(countsFirst(null, small)).toBe(false);
+    });
+
+    it("stays the counts alone above 1,500 nodes, until a namespace is kept", () => {
+      expect(graphFilter(null, counts)).toEqual([]);
+      expect(countsFirst(null, counts)).toBe(true);
+      const kept = autoHidden(counts, "jobs");
+      expect(graphFilter(kept, counts)).toEqual(["jobs"]);
+      expect(countsFirst(kept, counts)).toBe(false);
+    });
+
+    it("is the shown namespaces of a saved choice, whatever the counts", () => {
+      expect(graphFilter(["shop"], counts)).toEqual([
+        "argo",
+        "default",
+        "jobs",
+      ]);
+      expect(graphFilter([], counts)).toBeNull();
+      expect(graphFilter(["argo", "default", "jobs", "shop"], counts)).toEqual(
+        [],
+      );
+      expect(countsFirst(["argo", "default", "jobs", "shop"], counts)).toBe(
+        false,
+      );
+    });
   });
 
   it("knows when too many nodes are shown", () => {

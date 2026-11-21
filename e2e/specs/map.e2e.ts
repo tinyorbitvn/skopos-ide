@@ -83,12 +83,15 @@ const ACCESS: [string, string, string][] = [
   [VIEW_BINDING, "grants", VIEW_ROLE],
   [LEADER_BINDING, "grants", LEADER_ROLE],
 ];
-// Where the save dialog's answer puts the exported map; removed when the test ends.
-const EXPORT_DIR = path.resolve(__dirname, "..", ".tmp", "map-export");
-const EXPORTS = {
-  png: path.join(EXPORT_DIR, "map.png"),
-  pdf: path.join(EXPORT_DIR, "map.pdf"),
-};
+/** The one file with this extension that the app saved (see `saveDirOf` in helpers/env.ts). */
+function saved(extension: string): Buffer {
+  const dir = process.env.SKOPOS_E2E_SAVE_DIR ?? "";
+  const names = fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(`.${extension}`));
+  expect(names).toHaveLength(1);
+  return fs.readFileSync(path.join(dir, names[0]));
+}
 
 const until = (
   check: () => Promise<boolean>,
@@ -273,37 +276,6 @@ async function inAccessBox(ids: string[]): Promise<boolean[]> {
       return x > box.left && x < box.right && y > box.top && y < box.bottom;
     });
   }, ids);
-}
-
-/**
- * Makes the page's save dialog answer `paths[‹extension›]`, by the extension of its one
- * filter, so an export writes there and no dialog opens. Tauri defines
- * `window.__TAURI_INTERNALS__.invoke` read-only, so this wraps the `fetch` through which it
- * sends each command to the app.
- */
-async function answerSaveDialog(paths: Record<string, string>): Promise<void> {
-  await browser.execute((answers: Record<string, string>) => {
-    const { __TAURI_INTERNALS__: internals } = window as unknown as {
-      __TAURI_INTERNALS__: {
-        convertFileSrc(file: string, protocol: string): string;
-      };
-    };
-    const save = internals.convertFileSrc("plugin:dialog|save", "ipc");
-    const send = window.fetch.bind(window);
-    window.fetch = (input, init) => {
-      if (String(input) !== save) return send(input, init);
-      const { options } = JSON.parse(String(init?.body));
-      const answer = answers[options.filters[0].extensions[0]] ?? null;
-      return Promise.resolve(
-        new Response(JSON.stringify(answer), {
-          headers: {
-            "Content-Type": "application/json",
-            "Tauri-Response": "ok",
-          },
-        }),
-      );
-    };
-  }, paths);
 }
 
 /** Picks an item of the toolbar's Export menu and waits for its toast. */
@@ -654,20 +626,12 @@ describe("resource map", () => {
   });
 
   it("exports the map as a PNG image and a PDF document", async () => {
-    fs.rmSync(EXPORT_DIR, { recursive: true, force: true });
-    fs.mkdirSync(EXPORT_DIR, { recursive: true });
     await chooseLayout("grouped");
     await shown("map-access", 15000);
-    await answerSaveDialog(EXPORTS);
     await exportAs("png", "Map exported as PNG");
-    expect(fs.readFileSync(EXPORTS.png).subarray(0, 4).toString("latin1")).toBe(
-      "\x89PNG",
-    );
+    expect(saved("png").subarray(0, 4).toString("latin1")).toBe("\x89PNG");
     await exportAs("pdf", "Map exported as PDF");
-    expect(fs.readFileSync(EXPORTS.pdf).subarray(0, 5).toString("latin1")).toBe(
-      "%PDF-",
-    );
-    fs.rmSync(EXPORT_DIR, { recursive: true, force: true });
+    expect(saved("pdf").subarray(0, 5).toString("latin1")).toBe("%PDF-");
   });
 
   it("lists the Gateway's class and the HTTPRoute's parents", async () => {

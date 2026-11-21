@@ -453,6 +453,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
                 Destroyed::Forget => {
                     core.sessions_stop_owned(label);
                     core.node_drain_cancel_owned(label);
+                    core.subscriptions_stop_owned(label);
                     if let Err(e) = core.window_closed(label) {
                         tracing::warn!("cannot drop the layout of window {label}: {e}");
                     }

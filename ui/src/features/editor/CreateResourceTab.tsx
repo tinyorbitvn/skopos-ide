@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge, Button, ConfirmDialog, ErrorNotice, Menu } from "../../design";
 import { ChevronDown } from "../../design/icons";
 import { api } from "../../ipc/api";
@@ -14,7 +14,8 @@ import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { useCreateTarget } from "./apiDocsKind";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
 import { TEMPLATES } from "./templates";
-import { validateYaml, yamlProblem } from "./validate";
+import { useYamlCheck } from "./useYamlCheck";
+import { yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
 import styles from "./YamlEditor.module.css";
 
@@ -64,7 +65,8 @@ export function CreateResourceTab(props: {
   const target = useCreateTarget(text, caret);
 
   const dirty = text.trim() !== "" && text !== baseline;
-  const check = useMemo(() => validateYaml(text), [text]);
+  // `unchecked` while a long text waits for its check: it is not sent before.
+  const { check, pending: unchecked } = useYamlCheck(text);
 
   useEffect(() => {
     useDock.getState().setDirty(id, dirty);
@@ -117,7 +119,7 @@ export function CreateResourceTab(props: {
           variant="primary"
           size="sm"
           loading={busy}
-          disabled={!check.ok || check.documents === 0}
+          disabled={!check.ok || check.documents === 0 || unchecked}
           onClick={() => void apply()}
           data-testid="create-apply"
         >

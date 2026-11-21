@@ -151,11 +151,43 @@ async fn connect_success_reaches_connected_and_logs_each_step() {
         );
     }
 
+    assert!(
+        !log.iter().any(|entry| entry.message.contains("TLS")),
+        "{log:?}"
+    );
+
     let listed = core.catalog_list();
     assert_eq!(listed[0].state, state);
     core.cluster_client(&id).unwrap();
     let discovery = core.cluster_discovery(&id).unwrap();
     assert!(discovery.has_group("apps"));
+}
+
+#[tokio::test]
+async fn a_cluster_that_skips_tls_verification_is_named_in_the_log() {
+    let fake = FakeKube::start(FakeKubeConfig::default()).await.unwrap();
+    let text = format!(
+        "apiVersion: v1\nkind: Config\n\
+         clusters:\n- {{ name: c1, cluster: {{ server: \"{}\", insecure-skip-tls-verify: true }} }}\n\
+         users:\n- name: u1\n  user: {TOKEN_USER}\n\
+         contexts:\n- {{ name: {CONTEXT}, context: {{ cluster: c1, user: u1 }} }}\n\
+         current-context: {CONTEXT}\n",
+        fake.url()
+    );
+    let (core, id, _root) = core_with_kubeconfig(&text).await;
+
+    let state = core.cluster_connect(&id).await.unwrap();
+
+    assert!(
+        matches!(state, ConnectionState::Connected { .. }),
+        "{state:?}"
+    );
+    let log = core.cluster_log(&id);
+    assert!(
+        log.iter()
+            .any(|entry| matches!(entry.level, LogLevel::Warn) && entry.message.contains("TLS")),
+        "{log:?}"
+    );
 }
 
 #[tokio::test]

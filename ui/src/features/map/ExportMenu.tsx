@@ -1,4 +1,3 @@
-import { save } from "@tauri-apps/plugin-dialog";
 import { type RefObject, useCallback, useRef, useState } from "react";
 import { Button } from "../../design/Button";
 import { ChevronDown, Download, FileText, ImageIcon } from "../../design/icons";
@@ -9,7 +8,7 @@ import { failureMessage } from "../../ipc/client";
 import type { MapFormat } from "../../ipc/generated/MapFormat";
 import { renderMapPng } from "./exportMap";
 
-/** The menu item and save filter name, and the toast, of each format (spec O §6). */
+/** The menu item name and the toast, of each format (spec O §6). */
 const FORMATS: Readonly<Record<MapFormat, { name: string; done: string }>> = {
   png: { name: "PNG image", done: "Map exported as PNG" },
   pdf: { name: "PDF document", done: "Map exported as PDF" },
@@ -24,9 +23,9 @@ export function exportFileName(stem: string, format: MapFormat): string {
 }
 
 /**
- * Saves the map drawn in `canvas` (spec O §6.2): the save dialog with the default name
- * and that format's filter, the image, then `map_export` and a toast. Cancel ends it
- * quietly. One export runs at a time: another asked for meanwhile does nothing.
+ * Saves the map drawn in `canvas` (spec O §6.2): the image, then `map_export`, which
+ * opens the save dialog with the default name, and a toast. Cancel ends it quietly.
+ * One export runs at a time: another asked for meanwhile does nothing.
  */
 export function useMapExport(
   canvas: RefObject<HTMLElement | null>,
@@ -40,16 +39,17 @@ export function useMapExport(
       if (busy.current) return;
       busy.current = true;
       setRunning(true);
-      const { name, done } = FORMATS[format];
+      const { done } = FORMATS[format];
       try {
-        const path = await save({
-          defaultPath: exportFileName(stem, format),
-          filters: [{ name, extensions: [format] }],
-        });
-        if (path === null) return;
         if (!canvas.current) throw new Error("The map is not drawn");
         const { png, scale } = await renderMapPng(canvas.current);
-        const written = await api.mapExport(path, format, png, scale);
+        const written = await api.mapExport(
+          exportFileName(stem, format),
+          format,
+          png,
+          scale,
+        );
+        if (written === null) return;
         toast.success(done, written);
       } catch (e) {
         toast.error("Could not export the map", failureMessage(e));

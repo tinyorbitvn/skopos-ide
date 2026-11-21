@@ -13,6 +13,7 @@ import {
   resetResourcesForTest,
   rowsAreTrimmed,
   useHeldList,
+  useNodePods,
   useObjectWatch,
   useResourceList,
 } from "./resources";
@@ -731,12 +732,14 @@ test("the trimmed kinds are core Pods, Nodes and ConfigMaps, apps ReplicaSets an
     ["", "configmaps"],
     ["apps", "replicasets"],
     ["apiextensions.k8s.io", "customresourcedefinitions"],
+    ["", "events"],
+    ["argoproj.io", "applications"],
   ]) {
     expect(rowsAreTrimmed(ref(group, plural))).toBe(true);
   }
   for (const [group, plural] of [
-    ["", "events"],
     ["events.k8s.io", "events"],
+    ["argoproj.io", "applicationsets"],
     ["", "secrets"],
     ["", "services"],
     ["apps", "deployments"],
@@ -935,4 +938,152 @@ test("a held list is read without holding it, and is null once dropped", async (
   // An object watch is no list.
   await mountObject(pods, "default", "web");
   expect(peek.result.current).toBeNull();
+});
+
+const SOME_NODES: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "nodes",
+  kind: "Node",
+  namespaced: false,
+};
+
+async function mountIn(namespaces: string[], resource: ResourceRef = pods) {
+  const hook = renderHook(() => useResourceList("a", resource, namespaces));
+  await act(flush);
+  return hook;
+}
+
+test("a list of some namespaces asks for those, each once and in one order", async () => {
+  const { backend } = setup();
+  await mountIn(["b", "a", "b"]);
+  await mount();
+
+  const asked = backend.callsTo("resources_subscribe").map((c) => c.namespaces);
+  expect(asked).toEqual([["a", "b"], []]);
+});
+
+test("lists of the same namespaces share a subscription, and others have their own", async () => {
+  const { subs } = setup();
+  await mountIn(["a", "b"]);
+  const same = await mountIn(["b", "a"]);
+  const other = await mountIn(["a"]);
+  const whole = await mount();
+  expect(subs).toHaveLength(3);
+
+  await subs[0].send(snapshot(pod("x", "a")));
+  expect(same.result.current.items).toHaveLength(1);
+  expect(other.result.current.items).toHaveLength(0);
+  expect(whole.result.current.items).toHaveLength(0);
+});
+
+test("a cluster-scoped list is never asked for by namespace", async () => {
+  const { backend } = setup();
+  await mountIn(["a"], SOME_NODES);
+
+  expect(backend.callsTo("resources_subscribe")[0].namespaces).toEqual([]);
+});
+
+const part = (...items: KubeObject[]): WatchEvent => ({
+  type: "snapshotPart",
+  items,
+});
+const namesOf = (state: ResourceListState) =>
+  state.items.map((o) => o.metadata.name);
+
+test("a snapshot sent in parts is shown whole, once its last part arrives", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+
+  await subs[0].send(part(pod("a"), pod("b")));
+  await subs[0].send(part(pod("c")));
+  expect(result.current.loading).toBe(true);
+  expect(result.current.items).toEqual([]);
+
+  await subs[0].send(snapshot(pod("d")));
+  expect(result.current.loading).toBe(false);
+  expect(namesOf(result.current)).toEqual(["a", "b", "c", "d"]);
+});
+
+test("a new snapshot sent in parts leaves the rows shown until it is whole", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  await subs[0].send(snapshot(pod("old-1"), pod("old-2")));
+  const shown = result.current.items;
+
+  await subs[0].send(part(pod("new-1")));
+  expect(result.current.items).toBe(shown);
+
+  await subs[0].send(snapshot(pod("new-2")));
+  expect(namesOf(result.current)).toEqual(["new-1", "new-2"]);
+});
+
+/** A backend that serves lists and the Pods of a node, each with its own sender. */
+function setupNodes() {
+  const onNode: { node: string; send(event: WatchEvent): Promise<void> }[] = [];
+  const lists: Sub["send"][] = [];
+  const sender =
+    (onEvent: { onmessage: (e: WatchEvent) => void }) =>
+    async (event: WatchEvent) => {
+      await act(async () => {
+        onEvent.onmessage(event);
+        await flush();
+      });
+    };
+  const backend = mockBackend({
+    resources_subscribe: (args: {
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      lists.push(sender(args.onEvent));
+      return `list-${lists.length}`;
+    },
+    resources_subscribe_node_pods: (args: {
+      node: string;
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      onNode.push({ node: args.node, send: sender(args.onEvent) });
+      return `node-${onNode.length}`;
+    },
+    resources_unsubscribe: () => null,
+  });
+  return { backend, onNode, lists };
+}
+
+test("the Pods of a node are one subscription for each node, shared by those who show it", async () => {
+  const { backend, onNode } = setupNodes();
+  const first = renderHook(() => useNodePods("c1", "node-a"));
+  const second = renderHook(() => useNodePods("c1", "node-a"));
+  const other = renderHook(() => useNodePods("c1", "node-b"));
+  await act(flush);
+
+  expect(onNode.map((sub) => sub.node)).toEqual(["node-a", "node-b"]);
+  expect(first.result.current.loading).toBe(true);
+  await onNode[0]?.send(snapshot(pod("one")));
+  expect(first.result.current.items).toEqual([pod("one")]);
+  expect(second.result.current.items).toEqual([pod("one")]);
+  expect(other.result.current.loading).toBe(true);
+  expect(backend.callsTo("resources_subscribe")).toHaveLength(0);
+});
+
+test("the Pods of a node are never taken for the list of every Pod", async () => {
+  const { onNode, lists } = setupNodes();
+  renderHook(() => useNodePods("c1", "node-a"));
+  await act(flush);
+  await onNode[0]?.send(snapshot(pod("one")));
+
+  const whole = renderHook(() => useResourceList("c1", pods));
+  await act(flush);
+  expect(whole.result.current.loading).toBe(true);
+  expect(lists).toHaveLength(1);
+  await lists[0]?.(snapshot(pod("one"), pod("two")));
+  expect(whole.result.current.items).toHaveLength(2);
+});
+
+test("with no node named, no Pods are asked for", async () => {
+  const { backend } = setupNodes();
+  const { result } = renderHook(() => useNodePods("c1", null));
+  await act(flush);
+
+  expect(result.current.loading).toBe(false);
+  expect(backend.callsTo("resources_subscribe_node_pods")).toHaveLength(0);
 });

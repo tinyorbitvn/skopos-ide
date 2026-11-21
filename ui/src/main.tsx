@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { bootstrap } from "./app/bootstrap";
+import { installDropGuard } from "./app/dropGuard";
 import { Toaster, toast } from "./design";
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -12,6 +13,8 @@ import "@fontsource/jetbrains-mono/600.css";
 import "./design/global.css";
 import { failureMessage } from "./ipc/client";
 import "./kinds";
+
+installDropGuard(window);
 
 bootstrap().catch((error) => {
   toast.error("Startup problem", failureMessage(error));

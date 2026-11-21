@@ -22,7 +22,7 @@ use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
-use crate::resources::{state_name, ResourceRef, RowShape};
+use crate::resources::{state_name, ResourceRef, RowShape, Scope};
 
 /// As the graph's: later snapshots at most once every 2 s.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(2);
@@ -304,7 +304,9 @@ async fn build_loop(
             id,
             core_resource("nodes", "Node", false),
             RowShape::Topology,
+            Scope::default(),
             nodes_tx,
+            None,
         )
         .map_err(|e| e.message)?;
     watches.push(watch);
@@ -314,7 +316,9 @@ async fn build_loop(
             id,
             core_resource("pods", "Pod", true),
             RowShape::Topology,
+            Scope::default(),
             pods_tx,
+            None,
         )
         .map_err(|e| e.message)?;
     watches.push(watch);

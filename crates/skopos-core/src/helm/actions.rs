@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use ts_rs::TS;
 
 use super::charts::{chart_name, check_version};
+use super::redact::hide_secret_values;
 use super::{
     args, check_name, check_namespace, cluster_args, flag, helm_failure, parse_json, HelmBinary,
     HelmMajor,
@@ -292,7 +293,7 @@ pub(crate) fn parse_preview(stdout: &[u8]) -> CoreResult<HelmPreview> {
     };
     Ok(HelmPreview {
         release_name: text(&value["name"]).unwrap_or_default(),
-        manifest: value["manifest"].as_str().unwrap_or_default().to_owned(),
+        manifest: hide_secret_values(value["manifest"].as_str().unwrap_or_default()),
         notes: text(&value["info"]["notes"]),
     })
 }
@@ -851,6 +852,19 @@ mod tests {
             parse_preview(b"no json").unwrap_err().code,
             ErrorCode::Internal
         );
+    }
+
+    #[test]
+    fn a_preview_hides_the_values_of_the_secrets_in_its_manifest() {
+        let stdout = br#"{"name":"n","info":{"notes":""},"manifest":"---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: auth\nstringData:\n  token: plain-token\n"}"#;
+        let preview = parse_preview(stdout).unwrap();
+
+        assert!(
+            !preview.manifest.contains("plain-token"),
+            "{}",
+            preview.manifest
+        );
+        assert!(preview.manifest.contains("token:"));
     }
 
     #[test]

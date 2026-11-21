@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogEvent } from "../../ipc/generated/LogEvent";
 import type { LogLine } from "../../ipc/generated/LogLine";
+import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
 import { DEPLOYMENTS, PODS } from "../../kinds/refs";
@@ -493,6 +494,15 @@ function pendingWhole(): KubeObject {
     },
   };
 }
+
+test("a workload tab asks for the Pods of its own namespace only", async () => {
+  const b = backend();
+  await show(WORKLOAD_TAB);
+  const asked = b
+    .callsTo("resources_subscribe")
+    .filter((a) => (a.resource as ResourceRef).plural === "pods");
+  expect(asked.map((a) => a.namespaces)).toEqual([["shop"]]);
+});
 
 test("a Pod tab watches its one Pod, not every Pod", async () => {
   const b = backend();

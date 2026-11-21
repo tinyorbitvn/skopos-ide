@@ -143,3 +143,30 @@ test("flushUiStateWrites with nothing pending resolves without a call", async ()
   await flushUiStateWrites();
   expect(backend.callsTo("ui_state_set")).toEqual([]);
 });
+
+test("a value this window is still saving under another key is not taken", async () => {
+  let saved: unknown = ["a"];
+  let finish: () => void = () => {};
+  mockBackend({
+    ui_state_get: () => saved,
+    ui_state_set: (args) =>
+      new Promise((resolve) => {
+        finish = () => {
+          saved = (args as { value: unknown }).value;
+          resolve(null);
+        };
+      }),
+  });
+  const first = renderHook(() => useUiState<string[]>("saving", []));
+  await act(flush);
+  act(() => first.result.current[1](["b"]));
+  first.unmount();
+
+  const other = renderHook(() => useUiState<string[]>("another", []));
+  await act(flush);
+  expect(other.result.current[0]).toEqual(["a"]);
+  await act(async () => {
+    finish();
+    await flush();
+  });
+});

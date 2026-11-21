@@ -442,7 +442,7 @@ impl Map {
     fn start(core: &AppCore, cluster: &ClusterId) -> Self {
         let (tx, rx) = mpsc::channel(16);
         let id = core
-            .resource_graph_subscribe(cluster, Some(vec![NAMESPACE.to_owned()]), tx)
+            .resource_graph_subscribe(cluster, Some(vec![NAMESPACE.to_owned()]), tx, "main")
             .unwrap();
         Self { id, rx }
     }

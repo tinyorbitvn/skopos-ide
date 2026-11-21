@@ -290,15 +290,17 @@ impl AppCore {
     /// The client of the cluster's URL, with the secret its setting sends, kept until the
     /// setting or the secret change (spec I41). `InvalidInput` when Basic or Bearer has no
     /// secret saved.
-    pub(crate) fn remote(
+    pub(crate) async fn remote(
         &self,
         id: &ClusterId,
         endpoint: &RemoteEndpoint,
     ) -> CoreResult<Arc<Remote>> {
         let secret = match endpoint.auth {
-            RemoteAuth::Basic { .. } | RemoteAuth::Bearer => {
-                Some(self.secrets().get(id)?.ok_or_else(|| invalid(NO_SECRET))?)
-            }
+            RemoteAuth::Basic { .. } | RemoteAuth::Bearer => Some(
+                self.metrics_secret(id)
+                    .await?
+                    .ok_or_else(|| invalid(NO_SECRET))?,
+            ),
             RemoteAuth::Anonymous | RemoteAuth::Mtls { .. } => None,
         };
         self.metrics().remote(id, endpoint, secret)
@@ -310,6 +312,8 @@ mod tests {
     use std::fmt;
     use std::io;
 
+    use std::time::Instant;
+
     use http::{Method, StatusCode};
     use rustls::{AlertDescription, CertificateError};
 
@@ -318,7 +322,7 @@ mod tests {
     use crate::metrics::prometheus::{answer, build_request, TENANT_HEADER};
     use crate::metrics::Metrics;
     use crate::paths::AppPaths;
-    use crate::secrets::Secret;
+    use crate::secrets::{Secret, SecretStore};
 
     fn endpoint(url: &str, auth: RemoteAuth) -> RemoteEndpoint {
         RemoteEndpoint {
@@ -498,7 +502,7 @@ mod tests {
             basic.clone(),
             endpoint("https://mimir.example.com", RemoteAuth::Bearer),
         ] {
-            let err = core.remote(&id, &target).unwrap_err();
+            let err = core.remote(&id, &target).await.unwrap_err();
             assert_eq!(err.code, ErrorCode::InvalidInput);
             assert_eq!(
                 err.message,
@@ -507,9 +511,53 @@ mod tests {
         }
         assert!(core
             .remote(&id, &anonymous("https://mimir.example.com"))
+            .await
             .is_ok());
         core.metrics_secret_set(&id, Secret::new("pw")).unwrap();
-        assert!(core.remote(&id, &basic).is_ok());
+        assert!(core.remote(&id, &basic).await.is_ok());
+    }
+
+    /// A keychain that takes its time, as one that waits for its user to unlock it does.
+    struct SlowKeychain(Duration);
+
+    impl SecretStore for SlowKeychain {
+        fn get(&self, _: &ClusterId) -> CoreResult<Option<Secret>> {
+            std::thread::sleep(self.0);
+            Ok(Some(Secret::new("pw")))
+        }
+
+        fn set(&self, _: &ClusterId, _: &Secret) -> CoreResult<()> {
+            Ok(())
+        }
+
+        fn delete(&self, _: &ClusterId) -> CoreResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_slow_keychain_read_does_not_hold_the_async_thread() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+        let keychain = Arc::new(SlowKeychain(Duration::from_millis(400)));
+        let core = AppCore::start_with_secret_store(paths, None, keychain)
+            .await
+            .unwrap();
+        let id = "c".repeat(32);
+        let bearer = endpoint("https://mimir.example.com", RemoteAuth::Bearer);
+
+        // This test's runtime has one thread, so a read made on it keeps the timer waiting.
+        let started = Instant::now();
+        let (remote, ticked) = tokio::join!(core.remote(&id, &bearer), async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            started.elapsed()
+        });
+
+        assert!(remote.is_ok());
+        assert!(
+            ticked < Duration::from_millis(300),
+            "the timer waited {ticked:?} for the keychain"
+        );
     }
 
     #[test]

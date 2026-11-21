@@ -121,6 +121,23 @@ test("a service shows its own endpoints only", async () => {
   expect(screen.queryByText("8.8.8.8")).toBeNull();
 });
 
+test("a service asks for the slices of its own namespace only", async () => {
+  const backend = mockBackend({
+    resources_subscribe: () => "sub",
+    resources_unsubscribe: () => null,
+  });
+  show(
+    ServiceDetail,
+    { metadata: { name: "web", namespace: "d" }, spec: {} },
+    SERVICES,
+  );
+  await act(flush);
+  const asked = backend
+    .callsTo("resources_subscribe")
+    .filter((a) => (a.resource as ResourceRef).plural === "endpointslices");
+  expect(asked.map((a) => a.namespaces)).toEqual([["d"]]);
+});
+
 test("a service without a selector has no chips", () => {
   mockBackend({
     resources_subscribe: () => "s",

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { launcher as TauriLauncher } from "@wdio/tauri-service";
 import { stopApp } from "./helpers/app";
-import { type AppEnv, prepareAppEnv } from "./helpers/env";
+import { type AppEnv, prepareAppEnv, saveDirOf } from "./helpers/env";
 import { fixtureFor } from "./helpers/fixtures";
 
 const root = path.resolve(__dirname, "..");
@@ -27,6 +27,7 @@ function useEnv(env: AppEnv): void {
   process.env.HOME = env.home;
   process.env.USERPROFILE = env.home;
   process.env.SKOPOS_CONFIG_DIR = env.configDir;
+  process.env.SKOPOS_E2E_SAVE_DIR = saveDirOf(env.home);
 }
 
 /**

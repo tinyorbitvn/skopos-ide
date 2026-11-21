@@ -16,6 +16,7 @@ use serde_json::Value;
 use serde_yaml_ng::Value as Yaml;
 use ts_rs::TS;
 
+use super::redact::hide_secret_values;
 use super::{
     args, check_name, check_namespace, cluster_args, flag, lock, parse_json, HelmBinary,
     LooseVersion,
@@ -240,7 +241,7 @@ pub(crate) fn detail_from(
         notes: text(info, "notes"),
         first_deployed: text(info, "first_deployed").and_then(|time| rfc3339(&time)),
         last_deployed,
-        manifest: manifest.to_owned(),
+        manifest: hide_secret_values(manifest),
     }
 }
 
@@ -859,5 +860,27 @@ just text
         // A status without a manifest gives an empty one.
         let bare = serde_json::json!({ "name": "rel", "version": 1 });
         assert_eq!(detail_from(&bare, &[], &lookup).manifest, "");
+    }
+
+    #[test]
+    fn a_detail_hides_the_values_of_the_secrets_in_its_manifest() {
+        let status = serde_json::json!({
+            "name": "rel",
+            "version": 1,
+            "namespace": "ns",
+            "manifest": "---\n# Source: chart/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: rel-auth\ndata:\n  password: aHVudGVyMg==\n",
+        });
+        let lookup = |_: &str, _: &str| -> Option<ResourceRef> { None };
+        let detail = detail_from(&status, &[], &lookup);
+
+        assert!(
+            !detail.manifest.contains("aHVudGVyMg=="),
+            "{}",
+            detail.manifest
+        );
+        assert!(detail.manifest.contains("password:"));
+        // The Secret is still one of the release's resources.
+        assert_eq!(detail.resources.len(), 1);
+        assert_eq!(detail.resources[0].name, "rel-auth");
     }
 }

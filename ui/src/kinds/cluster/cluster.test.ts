@@ -1,4 +1,6 @@
 import { expect, test } from "vitest";
+import { EVENT_ROW, WHOLE_EVENT } from "../../test/trimmedRows";
+import type { KubeObject } from "../objects";
 import {
   eventCount,
   eventLastSeen,
@@ -116,3 +118,17 @@ test("printer column rows", () => {
   ]);
   expect(printerColumnRows(undefined)).toEqual([]);
 });
+
+test.each([
+  ["its status", eventStatus],
+  ["its count", eventCount],
+  ["the object it is about", eventObjectText],
+  ["when it was last seen", eventLastSeen],
+  ["its message", (o: KubeObject) => o.message ?? o.note],
+] as [string, (o: KubeObject) => unknown][])(
+  "a watched Event row gives %s as the whole Event does",
+  (_, read) => {
+    expect(read(EVENT_ROW)).toEqual(read(WHOLE_EVENT));
+    expect(read(EVENT_ROW)).toBeDefined();
+  },
+);

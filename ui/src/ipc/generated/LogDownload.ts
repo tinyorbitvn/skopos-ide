@@ -3,4 +3,8 @@
 /**
  * What `logs_download` wrote.
  */
-export type LogDownload = { bytes: number, };
+export type LogDownload = { bytes: number, 
+/**
+ * The file written, which the user chose and the page did not.
+ */
+path: string, };

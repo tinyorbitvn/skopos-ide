@@ -21,19 +21,26 @@ function answers(list: ResourceListState): boolean {
 /**
  * The Pods of each workload in a list of `info`'s kind, from the shared watches of Pods and,
  * for Deployments and CronJobs, of ReplicaSets or Jobs (spec N3). Undefined for any other
- * kind, and while a needed list is loading, not served or forbidden.
+ * kind, and while a needed list is loading, not served or forbidden. The lists cover only
+ * `namespaces`; an empty array means every namespace.
  */
 export function useOwnedPods(
   clusterId: string,
   info: ApiResourceInfo | undefined,
+  namespaces: readonly string[],
 ): OwnedPods | undefined {
   const kind = workloadKind(info);
-  const pods = useResourceList(clusterId, kind ? PODS : null);
+  const pods = useResourceList(clusterId, kind ? PODS : null, namespaces);
   const replicaSets = useResourceList(
     clusterId,
     kind === "deployments" ? REPLICASETS : null,
+    namespaces,
   );
-  const jobs = useResourceList(clusterId, kind === "cronjobs" ? JOBS : null);
+  const jobs = useResourceList(
+    clusterId,
+    kind === "cronjobs" ? JOBS : null,
+    namespaces,
+  );
   const ready =
     kind !== null &&
     answers(pods) &&

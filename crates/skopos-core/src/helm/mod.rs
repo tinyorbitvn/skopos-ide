@@ -3,6 +3,7 @@
 //! commands pass the per-context kubeconfig that F3 writes.
 mod actions;
 mod charts;
+mod redact;
 mod refusal;
 mod releases;
 mod repos;
