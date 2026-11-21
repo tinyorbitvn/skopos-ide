@@ -28,10 +28,13 @@ import {
 import { openTerminal } from "../features/dock/openTerminal";
 import { chartsPath } from "../features/helm/helmText";
 import { mapPath } from "../features/map/paths";
+import { OVERVIEW_ICONS } from "../features/palette/icons";
 import { settingsPath } from "../features/settings/paths";
 import { topologyPath } from "../features/topology/paths";
 import { checkForUpdates } from "../features/updates/updateStore";
+import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { Theme } from "../ipc/generated/Theme";
+import { visibleSections } from "../kinds/nav";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
 import { useShell } from "../stores/shell";
@@ -49,6 +52,11 @@ export interface CommandContext {
   navigate(to: string | number): void;
   pathname: string;
   cluster: CurrentCluster | null;
+  /**
+   * What the current cluster serves, where the caller has read it (the palette does). An
+   * overview command shows only while the sidebar shows its page, which this tells.
+   */
+  resources?: ApiResourceInfo[];
 }
 
 export type CommandId =
@@ -61,6 +69,11 @@ export type CommandId =
   | "cluster-settings"
   | "resource-map"
   | "node-topology"
+  | "workloads-overview"
+  | "nodes-overview"
+  | "namespaces-overview"
+  | "network-overview"
+  | "storage-overview"
   | "shortcuts"
   | "about"
   | "check-updates"
@@ -143,6 +156,34 @@ function theme(
     icon,
     available: always,
     run: () => void setTheme(value),
+  };
+}
+
+/**
+ * A section overview's command (section overviews spec §3.7), labelled
+ * `<page title> of <cluster>`: it shows while the cluster is connected and the sidebar
+ * shows the page at `/cluster/:id/<page>`.
+ */
+function overviewCommand(
+  id: CommandId,
+  page: string,
+  title: string,
+  icon: IconComponent,
+): AppCommand {
+  const pagePath = (clusterId: string) =>
+    `/cluster/${encodeURIComponent(clusterId)}/${page}`;
+  return {
+    id,
+    label: (ctx) => `${title} of ${clusterName(ctx)}`,
+    icon,
+    path: (ctx) => clusterPath(ctx, pagePath),
+    available: (ctx) =>
+      connected(ctx) &&
+      ctx.resources !== undefined &&
+      visibleSections(ctx.resources).some((s) => s.overview === page),
+    run: (ctx) => {
+      if (ctx.cluster) go(ctx, pagePath(ctx.cluster.id));
+    },
   };
 }
 
@@ -237,6 +278,36 @@ export const COMMANDS: readonly AppCommand[] = [
       if (ctx.cluster) go(ctx, topologyPath(ctx.cluster.id));
     },
   },
+  overviewCommand(
+    "workloads-overview",
+    "workloads",
+    "Workloads overview",
+    OVERVIEW_ICONS.workloads,
+  ),
+  overviewCommand(
+    "nodes-overview",
+    "nodes",
+    "Nodes overview",
+    OVERVIEW_ICONS.nodes,
+  ),
+  overviewCommand(
+    "namespaces-overview",
+    "namespaces",
+    "Namespaces overview",
+    OVERVIEW_ICONS.namespaces,
+  ),
+  overviewCommand(
+    "network-overview",
+    "network",
+    "Network overview",
+    OVERVIEW_ICONS.network,
+  ),
+  overviewCommand(
+    "storage-overview",
+    "storage",
+    "Storage overview",
+    OVERVIEW_ICONS.storage,
+  ),
   {
     id: "shortcuts",
     label: () => "Show keyboard shortcuts",

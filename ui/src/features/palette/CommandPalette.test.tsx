@@ -249,6 +249,20 @@ test("Pages and Objects stay hidden off a connected cluster", async () => {
   expect(ipc.callsTo("resources_names")).toHaveLength(0);
 });
 
+test("the overview commands follow the sidebar: Nodes, Workloads and Network here, not Namespaces or Storage", async () => {
+  await show("/cluster/c1");
+
+  type("overview of");
+
+  // Network shows at once; Nodes and Workloads once the palette has read discovery.
+  await screen.findByTestId("palette-command-nodes-overview");
+  expect(rowIds("commands").sort()).toEqual([
+    "palette-command-network-overview",
+    "palette-command-nodes-overview",
+    "palette-command-workloads-overview",
+  ]);
+});
+
 test("sections sort by their best row", async () => {
   await show("/cluster/c1");
 
