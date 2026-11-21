@@ -99,6 +99,11 @@ struct State_ {
     fail_discovery: Option<u16>,
     /// How long `/apis` holds its answer before it sends it.
     discovery_delay: Duration,
+    /// How long a list of one namespace's objects waits before it is answered.
+    namespaced_list_delay: Duration,
+    /// The lists of one namespace's objects waiting to be answered now, and the most ever.
+    namespaced_lists: usize,
+    most_namespaced_lists: usize,
     /// (namespace, name) of a pod -> scripted eviction failure and the answers left.
     eviction_failures: BTreeMap<(String, String), (u16, Option<usize>)>,
     /// Whether an accepted eviction leaves the pod in place.
@@ -403,6 +408,9 @@ impl FakeKube {
                 fail: BTreeMap::new(),
                 fail_discovery: None,
                 discovery_delay: Duration::ZERO,
+                namespaced_list_delay: Duration::ZERO,
+                namespaced_lists: 0,
+                most_namespaced_lists: 0,
                 eviction_failures: BTreeMap::new(),
                 hold_evicted_pods: false,
                 writes: BTreeMap::new(),
@@ -523,6 +531,17 @@ impl FakeKube {
     /// made meanwhile is not in it. `Duration::ZERO` clears it.
     pub fn delay_discovery(&self, delay: Duration) {
         self.inner.lock().discovery_delay = delay;
+    }
+
+    /// Makes every list of one namespace's objects wait `delay` before it is answered, so a
+    /// test can see how many a client asks for at one time. `Duration::ZERO` clears it.
+    pub fn delay_namespaced_lists(&self, delay: Duration) {
+        self.inner.lock().namespaced_list_delay = delay;
+    }
+
+    /// The most lists of one namespace's objects that waited to be answered at one time.
+    pub fn most_namespaced_lists_at_once(&self) -> usize {
+        self.inner.lock().most_namespaced_lists
     }
 
     /// Makes evicting the pod fail with `http_status`, `times` times or, for
@@ -1472,6 +1491,18 @@ async fn generic(
         if let Some(code) = failure {
             return status_for_code(code);
         }
+    }
+    if verb == "list" && t.namespace.is_some() {
+        let delay = {
+            let mut st = s.lock();
+            st.namespaced_lists += 1;
+            st.most_namespaced_lists = st.most_namespaced_lists.max(st.namespaced_lists);
+            st.namespaced_list_delay
+        };
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        s.lock().namespaced_lists -= 1;
     }
     match verb {
         "list" => list(&s, &res, &t, &q, &headers, uri.path()),

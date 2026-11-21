@@ -17,7 +17,7 @@ use kube::api::{ApiResource, DynamicObject};
 use kube::runtime::watcher;
 use kube::{Api, Client};
 use serde_json::Value;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, Notify, Semaphore, SemaphorePermit};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -35,6 +35,9 @@ use crate::subscriptions::Subscriptions;
 const DEFAULT_BATCH: Duration = Duration::from_millis(150);
 const DEFAULT_LINGER: Duration = Duration::from_secs(30);
 const PAGE_SIZE: u32 = 500;
+/// How many namespaces of one cluster are listed at one time, counting every kind, once
+/// listing a kind in every namespace has been refused. A cluster can have hundreds.
+pub const NAMESPACE_LISTS_AT_ONCE: usize = 16;
 pub(super) const MIN_BACKOFF: Duration = Duration::from_secs(1);
 pub(super) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Pending changes may reach this many, or the number of objects if larger,
@@ -485,6 +488,8 @@ pub(crate) struct WatchHub {
     groups: DashMap<GroupKey, Arc<Group>>,
     /// What stops each subscription's flush task.
     subscriptions: Subscriptions,
+    /// What the namespaces of each cluster wait on for their turn to be listed.
+    list_turns: DashMap<ClusterId, Arc<Semaphore>>,
     next_subscription: AtomicU64,
     timing: Mutex<Timing>,
     /// How many times a flusher reached `take_events`.
@@ -497,6 +502,7 @@ impl Default for WatchHub {
         Self {
             groups: DashMap::new(),
             subscriptions: Subscriptions::default(),
+            list_turns: DashMap::new(),
             next_subscription: AtomicU64::new(1),
             timing: Mutex::new(Timing {
                 batch: DEFAULT_BATCH,
@@ -610,12 +616,18 @@ impl WatchHub {
             entry => {
                 let group = Arc::new(Group::new(resource.clone(), connection.token.child_token()));
                 entry.insert(group.clone());
+                let turns = self
+                    .list_turns
+                    .entry(id.clone())
+                    .or_insert_with(|| Arc::new(Semaphore::new(NAMESPACE_LISTS_AT_ONCE)))
+                    .clone();
                 tokio::spawn(run_group(
                     self.clone(),
                     key,
                     group.clone(),
                     connection.client.clone(),
                     connection.namespaces.clone(),
+                    turns,
                 ));
                 group
             }
@@ -698,8 +710,9 @@ async fn run_group(
     group: Arc<Group>,
     client: Client,
     namespaces: Vec<String>,
+    turns: Arc<Semaphore>,
 ) {
-    match run_partitions(&group, &client, &namespaces).await {
+    match run_partitions(&group, &client, &namespaces, &turns).await {
         PartitionEnd::Cancelled => {}
         PartitionEnd::Forbidden(message) => group.finish(WatchStatus::Forbidden, Some(message)),
         PartitionEnd::Gone => {
@@ -712,9 +725,15 @@ async fn run_group(
 }
 
 /// Watches the whole cluster, or each namespace when that is forbidden. Returns
-/// only once nothing is left to watch.
-async fn run_partitions(group: &Group, client: &Client, namespaces: &[String]) -> PartitionEnd {
-    let mut denied = match run_partition(group, client, None).await {
+/// only once nothing is left to watch. The namespaces wait on `turns` to be listed, and
+/// are all watched once they have been.
+async fn run_partitions(
+    group: &Group,
+    client: &Client,
+    namespaces: &[String],
+    turns: &Semaphore,
+) -> PartitionEnd {
+    let mut denied = match run_partition(group, client, None, None).await {
         PartitionEnd::Forbidden(message) => message,
         end => return end,
     };
@@ -725,7 +744,7 @@ async fn run_partitions(group: &Group, client: &Client, namespaces: &[String]) -
     let mut running: FuturesUnordered<_> = namespaces
         .iter()
         .map(|namespace| async move {
-            let end = run_partition(group, client, Some(namespace.clone())).await;
+            let end = run_partition(group, client, Some(namespace.clone()), Some(turns)).await;
             (namespace, end)
         })
         .collect();
@@ -854,10 +873,32 @@ pub(super) async fn pause(backoff: &mut Duration, token: &CancellationToken) -> 
     }
 }
 
+/// A partition's turn to list its objects, which it holds until the list ends. `turns` is
+/// what it waits on, if anything limits it. The error is the group being cancelled first.
+async fn list_turn<'a>(
+    turns: Option<&'a Semaphore>,
+    token: &CancellationToken,
+) -> Result<Option<SemaphorePermit<'a>>, PartitionEnd> {
+    let Some(turns) = turns else {
+        return Ok(None);
+    };
+    tokio::select! {
+        () = token.cancelled() => Err(PartitionEnd::Cancelled),
+        // Nothing closes the semaphore, so this never fails.
+        turn = turns.acquire() => Ok(turn.ok()),
+    }
+}
+
 /// Runs one watcher until it is cancelled or must not be retried. After a failure
 /// it starts over with a new list, so that subscribers get what they missed instead
-/// of `watcher` quietly resuming from its last resource version.
-async fn run_partition(group: &Group, client: &Client, partition: Partition) -> PartitionEnd {
+/// of `watcher` quietly resuming from its last resource version. With `turns`, it lists
+/// only while it holds a turn, and watches without one.
+async fn run_partition(
+    group: &Group,
+    client: &Client,
+    partition: Partition,
+    turns: Option<&Semaphore>,
+) -> PartitionEnd {
     let resource = &group.resource;
     let api_resource = ApiResource {
         group: resource.group.clone(),
@@ -873,6 +914,10 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
     let config = watcher::Config::default().page_size(PAGE_SIZE);
     let mut backoff = MIN_BACKOFF;
     loop {
+        let mut turn = match list_turn(turns, &group.token).await {
+            Ok(turn) => turn,
+            Err(end) => return end,
+        };
         let mut stream = Box::pin(watcher(api.clone(), config.clone()));
         let mut listing = HashMap::new();
         let mut live_since = None;
@@ -884,6 +929,13 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
             let err = match item {
                 Some(Ok(watcher::Event::Init)) => {
                     listing = HashMap::new();
+                    // The stream lists again by itself once its resource version expires.
+                    if turn.is_none() {
+                        turn = match list_turn(turns, &group.token).await {
+                            Ok(turn) => turn,
+                            Err(end) => return end,
+                        };
+                    }
                     continue;
                 }
                 Some(Ok(watcher::Event::InitApply(object))) => {
@@ -893,6 +945,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                 Some(Ok(watcher::Event::InitDone)) => {
                     group.finish_init(&partition, std::mem::take(&mut listing));
                     live_since = Some(Instant::now());
+                    turn = None;
                     continue;
                 }
                 Some(Ok(watcher::Event::Apply(object))) => {
@@ -910,6 +963,8 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                 Some(Err(err)) => err,
                 None => break None,
             };
+            // A list that failed gives its turn up before it waits to try again.
+            turn = None;
             if live_since.is_some_and(|since: Instant| since.elapsed() >= MAX_BACKOFF) {
                 backoff = MIN_BACKOFF;
             }
@@ -922,6 +977,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
             }
             break Some(describe(err));
         };
+        drop(turn);
         if let Some(failure) = end_of_stream {
             if failure.code == Some(403) {
                 return PartitionEnd::Forbidden(failure.message);
