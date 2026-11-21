@@ -320,13 +320,18 @@ test("Updates: the switch saves updateCheck, and Check Now checks and shows when
 test("Last checked moves on while Preferences stays open", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
+    // Pin the time to a whole second before mounting and stamp the check with that same
+    // second. The shared clock starts at mount, so a stamp taken from the clock after the
+    // mount can fall a wall-clock second later, and two minutes then read as one.
+    const pinned = new Date("2026-11-22T12:00:00Z");
+    vi.setSystemTime(pinned);
     show(saved);
     await screen.findByRole("switch", {
       name: "Check for updates automatically",
     });
     act(() =>
       useUpdates.setState({
-        state: updateState({ lastCheckedAt: Math.floor(Date.now() / 1000) }),
+        state: updateState({ lastCheckedAt: pinned.getTime() / 1000 }),
       }),
     );
     const text = () => screen.getByTestId("prefs-last-checked").textContent;
