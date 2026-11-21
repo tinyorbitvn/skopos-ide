@@ -5,7 +5,8 @@ import {
   useResourceList,
 } from "../../stores/resources";
 
-const WAITING: ResourceListState = {
+/** A list that is not asked for yet, as the saved choice of namespaces is still read. */
+export const WAITING: ResourceListState = {
   items: [],
   status: "syncing",
   message: null,

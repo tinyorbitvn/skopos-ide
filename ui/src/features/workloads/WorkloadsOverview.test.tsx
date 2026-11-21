@@ -12,8 +12,14 @@ import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
+import { resetCatalogForTest } from "../../stores/catalog";
 import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
+import {
+  CONNECTED,
+  connectClusters,
+  setClusterState,
+} from "../../test/terminal";
 import type { ClusterOutletContext } from "../cluster/ClusterLayout";
 import { WorkloadsOverview } from "./WorkloadsOverview";
 
@@ -86,7 +92,16 @@ function fakeBackend(uiState: Record<string, unknown> = {}) {
     backend
       .callsTo("resources_subscribe")
       .map((a) => (a.resource as ResourceRef).plural);
-  return { backend, uiState, send, snapshot, subscribed };
+  /** What each subscription named, sorted by plural: the plural and the namespaces. */
+  const askedFor = () =>
+    backend
+      .callsTo("resources_subscribe")
+      .map((a): [string, string[]] => [
+        (a.resource as ResourceRef).plural,
+        a.namespaces as string[],
+      ])
+      .sort(([a], [b]) => a.localeCompare(b));
+  return { backend, uiState, send, snapshot, subscribed, askedFor };
 }
 
 type Fake = ReturnType<typeof fakeBackend>;
@@ -114,20 +129,33 @@ async function show(
   await act(flush);
 }
 
+/** What the overview watches, sorted. */
+const WATCHED = [
+  "cronjobs",
+  "daemonsets",
+  "deployments",
+  "events",
+  "jobs",
+  "pods",
+  "replicasets",
+  "statefulsets",
+];
+
 /** Every kind's first list, empty unless given. */
 async function snapshots(fake: Fake, lists: Record<string, KubeObject[]>) {
-  for (const plural of [
-    "pods",
-    "deployments",
-    "daemonsets",
-    "statefulsets",
-    "replicasets",
-    "jobs",
-    "cronjobs",
-    "events",
-  ]) {
+  for (const plural of WATCHED) {
     await fake.snapshot(plural, lists[plural] ?? []);
   }
+}
+
+/** A connected cluster `c1` with these namespaces. */
+function connect(namespaces: string[]) {
+  connectClusters({ id: "c1", name: "one" });
+  if (CONNECTED.status !== "connected") throw new Error("not connected");
+  setClusterState("c1", {
+    status: "connected",
+    info: { ...CONNECTED.info, namespaces },
+  });
 }
 
 function pod(
@@ -216,6 +244,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   resetResourcesForTest();
+  resetCatalogForTest();
 });
 
 test("each kind is counted by its list's status, in the sidebar's order", async () => {
@@ -390,8 +419,24 @@ test("events the user may not list leave the kinds alone", async () => {
 });
 
 test("the namespace filter of the lists limits the counts and the events", async () => {
+  connect(["team-a", "team-b"]);
   const fake = fakeBackend({ "namespaces:c1": ["team-a"] });
   await show();
+  await snapshots(fake, {
+    pods: [pod("a", "team-a", "running")],
+    events: [event("ea", { namespace: "team-a" })],
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("namespace-filter").textContent).toContain(
+      "team-a",
+    ),
+  );
+  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
+  expect(screen.getByText("Pod/pod-ea")).toBeTruthy();
+
+  // The open menu hides the page from the accessibility tree, so it closes each time.
+  toggleNamespace("team-b");
+  await act(flush);
   await snapshots(fake, {
     pods: [
       pod("a", "team-a", "running"),
@@ -403,23 +448,58 @@ test("the namespace filter of the lists limits the counts and the events", async
       event("eb", { namespace: "team-b" }),
     ],
   });
-  await waitFor(() =>
-    expect(screen.getByTestId("namespace-filter").textContent).toContain(
-      "team-a",
-    ),
-  );
-  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
-  expect(screen.getByText("Pod/pod-ea")).toBeTruthy();
-  expect(screen.queryByText("Pod/pod-eb")).toBeNull();
-
-  // The open menu hides the page from the accessibility tree, so it closes each time.
-  toggleNamespace("team-b");
   expect(cells("pods")).toEqual(["Pods", "3", "1", "0", "2"]);
   expect(screen.getByText("Pod/pod-eb")).toBeTruthy();
+
   toggleNamespace("team-a");
+  await act(flush);
+  await snapshots(fake, {
+    pods: [pod("b", "team-b", "crashing"), pod("c", "team-b", "crashing")],
+    events: [event("eb", { namespace: "team-b" })],
+  });
   expect(cells("pods")).toEqual(["Pods", "2", "0", "0", "2"]);
   expect(screen.queryByText("Pod/pod-ea")).toBeNull();
   await waitFor(() =>
     expect(fake.uiState["namespaces:c1"]).toEqual(["team-b"]),
   );
+});
+
+test("a saved choice of namespaces is all that is asked for, and never every namespace first", async () => {
+  const fake = fakeBackend({ "namespaces:c1": ["team-a"] });
+  await show();
+
+  expect(fake.askedFor()).toEqual(
+    WATCHED.map((plural) => [plural, ["team-a"]]),
+  );
+});
+
+test("with no namespace chosen, every namespace is asked for", async () => {
+  const fake = fakeBackend();
+  await show();
+
+  expect(fake.askedFor()).toEqual(WATCHED.map((plural) => [plural, []]));
+});
+
+test("choosing a namespace asks for it, and a kind loads until its list of that namespace is there", async () => {
+  connect(["team-a", "team-b"]);
+  const fake = fakeBackend();
+  await show();
+  await snapshots(fake, {
+    pods: [pod("a", "team-a", "running"), pod("b", "team-b", "crashing")],
+    events: [event("eb", { namespace: "team-b" })],
+  });
+  expect(cells("pods")).toEqual(["Pods", "2", "1", "0", "1"]);
+
+  toggleNamespace("team-a");
+  await act(flush);
+
+  expect(fake.askedFor().filter(([, within]) => within.length > 0)).toEqual(
+    WATCHED.map((plural) => [plural, ["team-a"]]),
+  );
+  // The counts of every namespace are not shown as those of `team-a`.
+  expect(within(kindRow("pods")).getByRole("status")).toBeTruthy();
+  expect(screen.getByRole("status", { name: "Loading events" })).toBeTruthy();
+
+  await fake.snapshot("pods", [pod("a", "team-a", "running")]);
+  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
 });
