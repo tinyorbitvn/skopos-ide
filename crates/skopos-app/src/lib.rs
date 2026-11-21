@@ -229,8 +229,10 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
         ])
         .setup(move |app| {
             windows::restore(app.handle(), &forwarded);
-            updates::start(app.handle(), &forwarded);
+            let updates_core = forwarded.clone();
+            // The forwarder subscribes first, so the update service's first state is sent on.
             events::spawn_forwarder(app.handle().clone(), forwarded);
+            updates::start(app.handle(), &updates_core);
             #[cfg(target_os = "macos")]
             menu::install(app.handle())?;
             Ok(())
