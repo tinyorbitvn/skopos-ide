@@ -23,3 +23,13 @@
   gap: var(--space-8) var(--space-10);
   min-width: 0;
 }
+
+/*
+ * The Network Summary's seven tiles sit four then three from 716 px of row (spec §3.5): TileRow
+ * has no rule for seven. `div` lifts the selector over TileRow's `.row:not([data-n="1"])`.
+ */
+@container tiles (min-width: 716px) {
+  .networkSummary div[data-n="7"] {
+    --cols: 4;
+  }
+}
