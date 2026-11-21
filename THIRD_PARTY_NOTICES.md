@@ -214,7 +214,7 @@ MIT:
 - `block-buffer` 0.10.4: Copyright (c) 2018-2019 The RustCrypto Project Developers
 - `block-buffer` 0.12.1, `block-padding`: Copyright (c) 2018-2025 The RustCrypto Project
   Developers
-- `block2`, `objc2`, `objc2-encode`, `objc2-exception-helper`, `objc2-osa-kit`: Author: Mads Marquart
+- `block2`, `objc2`, `objc2-encode`, `objc2-exception-helper`: Author: Mads Marquart
 - `brotli`: Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
 - `bytemuck`: Copyright (c) 2019 Daniel "Lokathor" Gee.
 - `bytes`: Copyright (c) 2018 Carl Lerche
@@ -422,7 +422,8 @@ MIT:
 - `tar`: Copyright (c) The tar-rs Project Contributors
 - `tauri`, `tauri-codegen`, `tauri-macros`, `tauri-plugin-clipboard-manager`,
   `tauri-plugin-dialog`, `tauri-plugin-fs`, `tauri-plugin-opener`, `tauri-plugin-updater`,
-  `tauri-runtime`, `tauri-runtime-wry`, `tauri-utils`: Copyright (c) 2017 - Present Tauri Apps Contributors
+  `tauri-runtime`, `tauri-runtime-wry`, `tauri-utils`: Copyright (c) 2017 - Present Tauri Apps
+  Contributors
 - `tempfile`: Copyright (c) 2015 Steven Allen
 - `tendril`: Copyright (c) 2015 Keegan McAllister
 - `tiff`: Copyright (c) 2018 PistonDevelopers
@@ -473,10 +474,10 @@ MIT:
 - `zune-core`, `zune-jpeg`: Copyright (c) zune-image developers
 - `zvariant_utils`: Authors: Zeeshan Ali Khan, turbocooler
 - `blocking`, `cargo-platform`, `libappindicator-sys`, `objc2-app-kit`, `objc2-core-foundation`,
-  `objc2-core-graphics`, `objc2-core-services`, `objc2-foundation`, `objc2-quartz-core`,
-  `objc2-web-kit`, `pin-project`, `pin-project-internal`, `pin-project-lite`, `serde-saphyr`,
-  `serde_json`, `webview2-com`, `webview2-com-macros`, `webview2-com-sys`, `winnow`: no copyright
-  line or author stated
+  `objc2-core-graphics`, `objc2-core-services`, `objc2-foundation`, `objc2-osa-kit`,
+  `objc2-quartz-core`, `objc2-web-kit`, `pin-project`, `pin-project-internal`, `pin-project-lite`,
+  `serde-saphyr`, `serde_json`, `webview2-com`, `webview2-com-macros`, `webview2-com-sys`,
+  `winnow`: no copyright line or author stated
 
 Apache-2.0, whose text is in this file (`dpi`'s copy of rust-lang/libm is MIT, listed above):
 
