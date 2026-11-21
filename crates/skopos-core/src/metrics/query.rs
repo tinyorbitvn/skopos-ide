@@ -37,7 +37,22 @@ impl AppCore {
     ) -> CoreResult<MetricsResult> {
         check_target(target)?;
         let chosen = self.chosen_provider(id, false).await?;
+        let window = range.window(Timestamp::now().as_second());
         let Some(api) = chosen.api else {
+            if *target == MetricsTarget::ControlPlane {
+                // metrics-server keeps no history, so the control plane has none to show.
+                return Ok(MetricsResult {
+                    start: window.start,
+                    end: window.end,
+                    step: window.step,
+                    series: BTreeMap::new(),
+                    missing: queries(&Scope::ControlPlane, window.step, None)
+                        .into_iter()
+                        .map(|(name, _)| name)
+                        .collect(),
+                    failed: Vec::new(),
+                });
+            }
             return Err(IpcError::new(
                 ErrorCode::NotFound,
                 "no Prometheus is in use for this cluster",
@@ -56,7 +71,6 @@ impl AppCore {
                 Transport::Remote(&remote)
             }
         };
-        let window = range.window(Timestamp::now().as_second());
         let pods = match target {
             MetricsTarget::Pod { name, .. } => vec![name.clone()],
             MetricsTarget::Workload {
@@ -68,6 +82,7 @@ impl AppCore {
         };
         let scope = match target {
             MetricsTarget::Cluster => Scope::Cluster,
+            MetricsTarget::ControlPlane => Scope::ControlPlane,
             MetricsTarget::Node { name } => Scope::Node(name),
             MetricsTarget::Pod { namespace, .. } | MetricsTarget::Workload { namespace, .. } => {
                 Scope::Pods {
@@ -138,7 +153,7 @@ impl AppCore {
 /// Names reach API paths and PromQL, so they must be single path segments.
 fn check_target(target: &MetricsTarget) -> CoreResult<()> {
     let names: Vec<&str> = match target {
-        MetricsTarget::Cluster => Vec::new(),
+        MetricsTarget::Cluster | MetricsTarget::ControlPlane => Vec::new(),
         MetricsTarget::Node { name } => vec![name.as_str()],
         MetricsTarget::Pod { namespace, name }
         | MetricsTarget::Workload {

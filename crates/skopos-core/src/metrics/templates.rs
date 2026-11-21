@@ -78,6 +78,8 @@ pub(crate) fn escape_regex(text: &str) -> String {
 /// What a target covers, with a workload's pods already listed.
 pub(crate) enum Scope<'a> {
     Cluster,
+    /// The API server's own metrics, and etcd as the API server sees it.
+    ControlPlane,
     Node(&'a str),
     /// One pod, or a workload's pods. Never empty.
     Pods {
@@ -100,6 +102,7 @@ pub(crate) fn queries(
     let window = rate_window(step);
     match scope {
         Scope::Cluster => machines(None, &window, extra),
+        Scope::ControlPlane => control_plane(&window, extra),
         Scope::Node(name) => machines(Some(*name), &window, extra),
         Scope::Pods { namespace, pods } => pods_of(namespace, pods, &window, extra),
         Scope::Pvc { namespace, name } => volume(namespace, name, extra),
@@ -349,6 +352,47 @@ fn volume(namespace: &str, name: &str, extra: Option<&LabelMatcher>) -> Vec<(Met
     ]
 }
 
+/// The control plane, from the API server's own metrics: a managed cluster, whose etcd nobody
+/// scrapes, has them too. The database size reads `apiserver_storage_size_bytes`, and falls
+/// back to the deprecated `etcd_db_total_size_in_bytes` that older clusters still export.
+fn control_plane(window: &str, extra: Option<&LabelMatcher>) -> Vec<(MetricName, String)> {
+    let requests = |matchers: &[String]| {
+        format!(
+            "sum(rate({}[{window}]))",
+            selector("apiserver_request_total", matchers, extra)
+        )
+    };
+    let p99 = |metric: &str, matchers: &[String]| {
+        format!(
+            "histogram_quantile(0.99, sum by (le) (rate({}[{window}])))",
+            selector(metric, matchers, extra)
+        )
+    };
+    vec![
+        (ApiRequests, requests(&[])),
+        (ApiErrors, requests(&[r#"code=~"5..""#.to_owned()])),
+        (
+            ApiLatencyP99,
+            p99(
+                "apiserver_request_duration_seconds_bucket",
+                &[r#"verb!~"WATCH|CONNECT""#.to_owned()],
+            ),
+        ),
+        (
+            EtcdLatencyP99,
+            p99("etcd_request_duration_seconds_bucket", &[]),
+        ),
+        (
+            EtcdDbSize,
+            format!(
+                "max({}) or max({})",
+                selector("apiserver_storage_size_bytes", &[], extra),
+                selector("etcd_db_total_size_in_bytes", &[], extra)
+            ),
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,6 +606,16 @@ mod tests {
         ];
         assert_eq!(names(Scope::Cluster), machine);
         assert_eq!(names(Scope::Node("n")), machine);
+        assert_eq!(
+            names(Scope::ControlPlane),
+            [
+                ApiRequests,
+                ApiErrors,
+                ApiLatencyP99,
+                EtcdLatencyP99,
+                EtcdDbSize
+            ]
+        );
         let pods = ["p".to_owned()];
         assert_eq!(
             names(Scope::Pods {
@@ -794,5 +848,69 @@ mod tests {
             ),
             r#"max(kubelet_volume_stats_used_bytes{namespace="shop", persistentvolumeclaim="data", cluster="prod"})"#
         );
+    }
+
+    #[test]
+    fn the_control_plane_reads_the_api_servers_own_metrics() {
+        let at = |name| query(&Scope::ControlPlane, 60, name);
+        assert_eq!(at(ApiRequests), "sum(rate(apiserver_request_total[120s]))");
+        assert_eq!(
+            at(ApiErrors),
+            r#"sum(rate(apiserver_request_total{code=~"5.."}[120s]))"#
+        );
+        assert_eq!(
+            at(ApiLatencyP99),
+            r#"histogram_quantile(0.99, sum by (le) (rate(apiserver_request_duration_seconds_bucket{verb!~"WATCH|CONNECT"}[120s])))"#
+        );
+        assert_eq!(
+            at(EtcdLatencyP99),
+            "histogram_quantile(0.99, sum by (le) (rate(etcd_request_duration_seconds_bucket[120s])))"
+        );
+        // apiserver_storage_size_bytes replaces the deprecated etcd_db_total_size_in_bytes.
+        assert_eq!(
+            at(EtcdDbSize),
+            "max(apiserver_storage_size_bytes) or max(etcd_db_total_size_in_bytes)"
+        );
+        // The rate window follows the step, as for CPU.
+        assert_eq!(
+            query(&Scope::ControlPlane, 3_600, ApiRequests),
+            "sum(rate(apiserver_request_total[3600s]))"
+        );
+
+        let prod = cluster_label("prod");
+        assert_eq!(
+            matched(&Scope::ControlPlane, 60, ApiErrors, Some(&prod)),
+            r#"sum(rate(apiserver_request_total{code=~"5..", cluster="prod"}[120s]))"#
+        );
+        assert_eq!(
+            matched(&Scope::ControlPlane, 60, EtcdDbSize, Some(&prod)),
+            r#"max(apiserver_storage_size_bytes{cluster="prod"}) or max(etcd_db_total_size_in_bytes{cluster="prod"})"#
+        );
+    }
+
+    #[test]
+    fn with_a_matcher_every_control_plane_selector_holds_it_once() {
+        let extra = cluster_label(r#"eu "west" \1"#);
+        for step in [60, 300, 900, 3_600] {
+            for (metric, query) in queries(&Scope::ControlPlane, step, Some(&extra)) {
+                let (seen, wrong) = selectors(&extra, &query);
+                assert!(seen > 0, "{step} {metric:?}: {query}");
+                assert!(wrong.is_empty(), "{step} {metric:?}: {query}: {wrong:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_control_plane_queries_are_the_golden_ones() {
+        let mut now = Vec::new();
+        for step in [60, 300, 900, 3_600] {
+            for (metric, query) in queries(&Scope::ControlPlane, step, None) {
+                now.push(format!("controlPlane {step} {metric:?} {query}"));
+            }
+        }
+        let golden: Vec<&str> = include_str!("testdata/queries-control-plane.txt")
+            .lines()
+            .collect();
+        assert_eq!(now, golden);
     }
 }

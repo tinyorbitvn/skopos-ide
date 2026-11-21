@@ -2,6 +2,7 @@
 
 /**
  * Units: CPU in cores; memory and disk in bytes; network and filesystem reads and writes in
- * bytes per second; pods as counts.
+ * bytes per second; pods as counts; API requests and errors in requests per second; latency in
+ * seconds; the etcd database in bytes.
  */
-export type MetricName = "cpuUsage" | "cpuRequests" | "cpuLimits" | "cpuAllocatable" | "cpuCapacity" | "memoryUsage" | "memoryRequests" | "memoryLimits" | "memoryAllocatable" | "memoryCapacity" | "podUsage" | "podAllocatable" | "podCapacity" | "diskUsage" | "diskCapacity" | "networkReceive" | "networkTransmit" | "fsReads" | "fsWrites" | "fsUsage";
+export type MetricName = "cpuUsage" | "cpuRequests" | "cpuLimits" | "cpuAllocatable" | "cpuCapacity" | "memoryUsage" | "memoryRequests" | "memoryLimits" | "memoryAllocatable" | "memoryCapacity" | "podUsage" | "podAllocatable" | "podCapacity" | "diskUsage" | "diskCapacity" | "networkReceive" | "networkTransmit" | "fsReads" | "fsWrites" | "fsUsage" | "apiRequests" | "apiErrors" | "apiLatencyP99" | "etcdLatencyP99" | "etcdDbSize";
