@@ -9,6 +9,7 @@ import {
   Replica,
 } from "../../design/icons";
 import type { KubeObject } from "../../kinds/objects";
+import { EVENT_ROW, WHOLE_EVENT } from "../../test/trimmedRows";
 import { type ListView, WORKLOAD_KINDS } from "./counts";
 import {
   EVENT_LIMIT,
@@ -469,4 +470,13 @@ test("an event's object is a target only with its apiVersion, kind and name, and
       event("q", 1, { involvedObject: { apiVersion: "v1", kind: "Pod" } }),
     ),
   ).toBeNull();
+});
+
+test("a watched Event row names the object it opens as the whole Event does", () => {
+  expect(eventSubject(EVENT_ROW)).toEqual(eventSubject(WHOLE_EVENT));
+  expect(eventSubject(EVENT_ROW)).toEqual({
+    apiVersion: "v1",
+    kind: "Pod",
+    key: "shop/web-1",
+  });
 });
