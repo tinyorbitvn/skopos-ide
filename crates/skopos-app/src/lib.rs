@@ -241,6 +241,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::metrics::metrics_query,
             commands::metrics::metrics_usage,
             commands::metrics::nodes_disk_usage,
+            commands::metrics::volumes_usage,
             commands::metrics::metrics_secret_set,
             commands::metrics::metrics_secret_saved,
             commands::windows::window_layout_get,
