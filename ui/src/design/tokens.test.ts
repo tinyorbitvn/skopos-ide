@@ -71,14 +71,18 @@ test.each(Object.entries(CSS_FILES))(
   },
 );
 
+// The board frosts its wallpaper under the column; the app has none, so --glass-backdrop is that
+// frosted wallpaper averaged over the column, and the tint is the board's own 84% of sunken over it.
 test("the glass tokens hold the design's values in both themes (spec Q §1)", () => {
   const expected = {
     light: {
+      "--glass-backdrop": "#b2ceff",
       "--side-selected": "rgba(11, 14, 18, 0.08)",
       "--glass-field": "rgba(255, 255, 255, 0.55)",
       "--tree-line": "#b4bdc8",
     },
     dark: {
+      "--glass-backdrop": "#011b59",
       "--side-selected": "rgba(255, 255, 255, 0.13)",
       "--glass-field": "rgba(255, 255, 255, 0.06)",
       "--tree-line": "rgba(255, 255, 255, 0.22)",
@@ -88,7 +92,7 @@ test("the glass tokens hold the design's values in both themes (spec Q §1)", ()
     const tokens = themeTokens(theme);
     expect([theme, tokens.get("--glass-tint")]).toEqual([
       theme,
-      `color-mix(in srgb, ${tokens.get("--surface-sunken")} 84%, ${tokens.get("--surface-page")})`,
+      `color-mix(in srgb, ${tokens.get("--surface-sunken")} 84%, ${tokens.get("--glass-backdrop")})`,
     ]);
     for (const [name, value] of Object.entries(expected[theme])) {
       expect([theme, name, tokens.get(name)]).toEqual([theme, name, value]);
