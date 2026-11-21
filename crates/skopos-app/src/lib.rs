@@ -275,11 +275,13 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
                 // `sessions_stop_owned`, `node_drain_cancel_owned` and
                 // `subscriptions_stop_owned` have their own tests.
                 PageLoadEvent::Started => {
+                    tracing::info!("window {} started loading its page", webview.label());
                     state.core.node_drain_cancel_owned(webview.label());
                     state.core.sessions_stop_owned(webview.label());
                     state.core.subscriptions_stop_owned(webview.label());
                 }
                 PageLoadEvent::Finished => {
+                    tracing::info!("window {} finished loading its page", webview.label());
                     events::send_startup_warnings(webview.app_handle(), &state.core);
                 }
             }
@@ -295,10 +297,13 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
     };
     app.run(move |app, event| match event {
         // Windows that close from here on keep their layouts for the next start (P34).
-        RunEvent::ExitRequested { .. } => windows::quitting(app),
+        RunEvent::ExitRequested { code, .. } => {
+            windows::quitting(app, &format!("exit requested with code {code:?}"));
+        }
         RunEvent::Exit => {
-            windows::quitting(app);
+            windows::quitting(app, "event loop ended; the core shuts down");
             tauri::async_runtime::block_on(core.shutdown());
+            core.quit().step("core shut down; the process ends");
             log_guard.take();
         }
         _ => {}

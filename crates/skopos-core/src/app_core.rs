@@ -28,6 +28,7 @@ use crate::openapi::ApiDocs;
 use crate::paths::AppPaths;
 use crate::portforward::{PortForward, PortForwards};
 use crate::prefs::{ClusterSettings, Prefs};
+use crate::quit::QuitWatch;
 use crate::resources::{ApiResourceInfo, RunningDrain, SingleFlight, WatchHub};
 use crate::secrets::{MemorySecretStore, SecretStore, Secrets};
 use crate::sessions::SessionRegistry;
@@ -129,6 +130,8 @@ struct Inner {
     startup_warnings: Mutex<Vec<StoreWarning>>,
     /// The in-app updates (in-app update spec §5.1).
     updates: Updates,
+    /// The steps of the app's quit, once it has begun.
+    quit: QuitWatch,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -314,6 +317,7 @@ impl AppCore {
                 events,
                 startup_warnings: Mutex::new(warnings),
                 updates,
+                quit: QuitWatch::default(),
             }),
         })
     }
@@ -325,6 +329,11 @@ impl AppCore {
 
     pub fn subscribe(&self) -> broadcast::Receiver<CoreEvent> {
         self.inner.events.subscribe()
+    }
+
+    /// The steps of the app's quit, and its watch.
+    pub fn quit(&self) -> &QuitWatch {
+        &self.inner.quit
     }
 
     /// Store problems found while starting. They cannot be sent as events,
@@ -669,12 +678,16 @@ impl AppCore {
     /// network for. Then disconnects every cluster and stops background work. The last
     /// snapshot stays readable.
     pub async fn shutdown(&self) {
+        let quit = &self.inner.quit;
         self.inner.updates.stop();
         self.sessions_stop_all();
+        quit.step("updates and sessions asked to stop");
         if !self.sessions_wait_idle(SHUTDOWN_LIMIT).await {
             tracing::warn!("some sessions did not stop within {SHUTDOWN_LIMIT:?}");
         }
+        quit.step("sessions idle");
         self.inner.connections.disconnect_all();
+        quit.step("clusters disconnected");
         let sync = lock(&self.inner.sync).take();
         let sync_events = lock(&self.inner.sync_events).take();
         let stopped = async {
@@ -689,5 +702,6 @@ impl AppCore {
         if tokio::time::timeout(SHUTDOWN_LIMIT, stopped).await.is_err() {
             tracing::warn!("the kubeconfig sync did not stop within {SHUTDOWN_LIMIT:?}");
         }
+        quit.step("kubeconfig sync stopped");
     }
 }

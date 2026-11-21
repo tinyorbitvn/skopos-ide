@@ -156,7 +156,10 @@ impl PluginSource {
             // The NSIS installer replaces the app: the process ends right after this hook.
             let app = self.app.clone();
             builder = builder.on_before_exit(move || {
-                crate::windows::quitting(&app);
+                crate::windows::quitting(
+                    &app,
+                    "the installer replaces the app; the core shuts down",
+                );
                 let core = app.state::<AppState>().core.clone();
                 tauri::async_runtime::block_on(core.shutdown());
             });
