@@ -1,0 +1,25 @@
+/* The cluster Overview's cards (cluster overview spec §3.2 to §3.5). */
+.caption {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* The two top tables sit side by side from 640 px of the card's content, stacked below. */
+.topsFrame {
+  container: tops / inline-size;
+  min-width: 0;
+}
+
+.tops {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-8) var(--space-10);
+}
+
+@container tops (min-width: 640px) {
+  .tops {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
