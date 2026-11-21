@@ -673,6 +673,14 @@ export function ClusterSettingsScreen(props: { clusterId: string }) {
   const name = cluster?.name ?? clusterId;
   const connected = state.status === "connected";
 
+  async function stopAllowing(): Promise<void> {
+    try {
+      await api.clusterExecForget(clusterId);
+    } catch (error) {
+      toast.error("Could not stop allowing", failureMessage(error));
+    }
+  }
+
   let body: ReactNode;
   if (settings.error) {
     body = (
@@ -722,6 +730,21 @@ export function ClusterSettingsScreen(props: { clusterId: string }) {
                   </p>
                 ))
               : null}
+            {cluster?.execAllowed && cluster.execCommand !== null ? (
+              <p
+                className={`${styles.note} ${styles.allowed}`}
+                data-testid="settings-exec-allowed"
+              >
+                <span>Allowed to run when you connect.</span>
+                <Button
+                  size="sm"
+                  data-testid="settings-exec-forget"
+                  onClick={() => void stopAllowing()}
+                >
+                  Stop allowing
+                </Button>
+              </p>
+            ) : null}
           </div>
           <Button
             size="sm"

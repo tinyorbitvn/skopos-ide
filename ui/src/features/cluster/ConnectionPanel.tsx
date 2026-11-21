@@ -66,6 +66,18 @@ export function ConnectionPanel(props: {
   const { state } = props;
   const log = useConnectionLog(props.id, state);
   const again = state.status === "failed" || props.reconnect;
+  // The kubeconfig waits for permission to run a program: connecting again asks.
+  const review = state.status === "failed" && state.kind === "execNotAllowed";
+  const connectId = review
+    ? "cluster-review-exec"
+    : again
+      ? "cluster-reconnect"
+      : "cluster-connect";
+  const connectLabel = review
+    ? "Review and allow"
+    : again
+      ? "Reconnect"
+      : "Connect";
 
   return (
     <section className={styles.panel} aria-label="Connection">
@@ -95,10 +107,10 @@ export function ConnectionPanel(props: {
           <Button
             variant="primary"
             disabled={props.busy}
-            data-testid={again ? "cluster-reconnect" : "cluster-connect"}
+            data-testid={connectId}
             onClick={props.onConnect}
           >
-            {again ? "Reconnect" : "Connect"}
+            {connectLabel}
           </Button>
         </div>
       ) : null}

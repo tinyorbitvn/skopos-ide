@@ -58,6 +58,11 @@
   min-width: 0;
 }
 
+/* A note with a button: the text sits on the button's middle line. */
+.allowed {
+  align-items: center;
+}
+
 .form {
   display: flex;
   flex-direction: column;

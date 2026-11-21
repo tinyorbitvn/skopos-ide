@@ -1205,3 +1205,26 @@ test("a keychain that cannot be read asks for the password, without a toast", as
   ]);
   expect(error).not.toHaveBeenCalled();
 });
+
+test("an allowed exec command can be stopped from the head", async () => {
+  const backend = await show({
+    cluster: { execCommand: "aws", execAllowed: true },
+    handlers: { cluster_exec_forget: () => null },
+  });
+
+  const allowed = within(screen.getByTestId("settings-exec-allowed"));
+  expect(allowed.getByText("Allowed to run when you connect.")).toBeTruthy();
+
+  fireEvent.click(screen.getByTestId("settings-exec-forget"));
+
+  await waitFor(() =>
+    expect(backend.callsTo("cluster_exec_forget")).toEqual([{ id: "id-x" }]),
+  );
+});
+
+test("the head offers nothing to stop for an exec command that is not allowed", async () => {
+  await show({ cluster: { execCommand: "aws", execAllowed: false } });
+
+  expect(screen.getByTestId("settings-note-exec")).toBeTruthy();
+  expect(screen.queryByTestId("settings-exec-allowed")).toBeNull();
+});
