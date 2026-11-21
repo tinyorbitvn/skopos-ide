@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -6,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "../../design";
 import type { Prefs } from "../../ipc/generated/Prefs";
 import { resetHelmForTest } from "../../stores/helm";
@@ -14,7 +15,7 @@ import { resetPrefsForTest, usePrefs } from "../../stores/prefs";
 import { toolStatus } from "../../test/helm";
 import { mockBackend } from "../../test/ipc";
 import { updateState } from "../../test/updates";
-import { resetUpdatesForTest } from "../updates/updateStore";
+import { resetUpdatesForTest, useUpdates } from "../updates/updateStore";
 import { PreferencesScreen } from "./PreferencesScreen";
 
 const saved: Prefs = {
@@ -314,6 +315,29 @@ test("Updates: the switch saves updateCheck, and Check Now checks and shows when
       "Last checked just now",
     ),
   );
+});
+
+test("Last checked moves on while Preferences stays open", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    show(saved);
+    await screen.findByRole("switch", {
+      name: "Check for updates automatically",
+    });
+    act(() =>
+      useUpdates.setState({
+        state: updateState({ lastCheckedAt: Math.floor(Date.now() / 1000) }),
+      }),
+    );
+    const text = () => screen.getByTestId("prefs-last-checked").textContent;
+    expect(text()).toBe("Last checked just now");
+    await act(async () => {
+      vi.advanceTimersByTime(2 * 60_000);
+    });
+    expect(text()).toBe("Last checked 2 minutes ago");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("a saved updateCheck of false shows the switch off", async () => {

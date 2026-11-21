@@ -11,6 +11,7 @@ import {
   Spinner,
   Switch,
   toast,
+  useNow,
 } from "../../design";
 import { X } from "../../design/icons";
 import { failureMessage } from "../../ipc/client";
@@ -124,6 +125,8 @@ function UpdatesSection({ enabled }: { enabled: boolean }) {
   const setUpdateCheck = usePrefs((s) => s.setUpdateCheck);
   const lastCheckedAt = useUpdates((s) => s.state?.lastCheckedAt ?? null);
   const checking = useUpdates((s) => s.state?.phase.type === "checking");
+  // The shared clock moves "Last checked" on while Preferences stays open.
+  const now = useNow();
   return (
     <section className={styles.section}>
       <h3 className={styles.heading}>Updates</h3>
@@ -135,7 +138,7 @@ function UpdatesSection({ enabled }: { enabled: boolean }) {
       />
       <div className={styles.updatesRow}>
         <span className={styles.muted} data-testid="prefs-last-checked">
-          {lastCheckedText(lastCheckedAt, Date.now())}
+          {lastCheckedText(lastCheckedAt, now)}
         </span>
         <Button
           size="sm"

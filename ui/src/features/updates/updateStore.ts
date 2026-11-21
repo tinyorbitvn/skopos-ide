@@ -19,12 +19,15 @@ interface UpdatesState {
 export const useUpdates = create<UpdatesState>(() => ({ state: null }));
 
 let started: Promise<void> | null = null;
+/** How many `update://state` events came, so a reply can tell whether one came meanwhile. */
+let stateEvents = 0;
 
 export function openUpdates(): void {
   useShell.getState().open("updates");
 }
 
 function received(state: UpdateState): void {
+  stateEvents += 1;
   useUpdates.setState({ state });
   // The core names one window for a release's first announcement (R3).
   if (state.toastWindow === windowLabel() && state.phase.type === "available") {
@@ -60,8 +63,12 @@ export function initUpdates(): Promise<void> {
 /** Check for Updates: opens the dialog, which shows the check and its result (spec §5.4). */
 export async function checkForUpdates(): Promise<void> {
   openUpdates();
+  const seen = stateEvents;
   try {
-    useUpdates.setState({ state: await api.updateCheck() });
+    const state = await api.updateCheck();
+    // The core also sends every change as update://state, and an event that came while the
+    // check ran may be newer than this reply. The reply counts only when no event came.
+    if (stateEvents === seen) useUpdates.setState({ state });
   } catch (error) {
     // No state came with the failure, so the dialog would show "checking" forever.
     const phase = useUpdates.getState().state?.phase.type;
@@ -100,5 +107,6 @@ export async function skipUpdate(version: string): Promise<void> {
 
 export function resetUpdatesForTest(): void {
   started = null;
+  stateEvents = 0;
   useUpdates.setState({ state: null });
 }

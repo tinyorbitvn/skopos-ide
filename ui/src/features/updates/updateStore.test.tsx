@@ -1,3 +1,4 @@
+import { emit } from "@tauri-apps/api/event";
 import {
   act,
   fireEvent,
@@ -71,6 +72,22 @@ test("Check for Updates opens the dialog and keeps the state the check ended in"
   expect(useShell.getState().dialog).toBe("updates");
   expect(backend.callsTo("update_check")).toHaveLength(1);
   expect(useUpdates.getState().state?.phase).toEqual({ type: "upToDate" });
+});
+
+test("an event that comes while the check runs wins over its older reply", async () => {
+  const downloading = updateState({
+    phase: { type: "downloading", version: "0.10.0", received: 0, total: null },
+  });
+  mockBackend({
+    update_state_get: () => updateState(),
+    update_check: async () => {
+      await emit("update://state", downloading);
+      return updateState({ phase: { type: "upToDate" } });
+    },
+  });
+  await act(initUpdates);
+  await act(checkForUpdates);
+  expect(useUpdates.getState().state?.phase.type).toBe("downloading");
 });
 
 test("a rejected check closes the dialog instead of leaving it on checking", async () => {
