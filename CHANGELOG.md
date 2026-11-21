@@ -6,7 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
-- **The catalog says what a kubeconfig does on connect:** a cluster whose kubeconfig runs an exec plugin for credentials now shows an Exec plugin label that names the command, and one whose kubeconfig turns off TLS verification shows a TLS not verified label, both in the catalog and on the cluster's settings page. Before, the first was shown nowhere and the second only as a line in the connection log once a connect had started. A plugin's arguments and environment stay in the file and are not sent to the window.
+- **The catalog says what a kubeconfig does on connect:** a cluster whose kubeconfig runs an exec plugin or a `gcp` auth provider's command for credentials now shows an Exec plugin label that names the command, and one whose kubeconfig turns off TLS verification shows a TLS not verified label, both in the catalog and on the cluster's settings page. Before, the first was shown nowhere and the second only as a line in the connection log once a connect had started. A plugin's arguments and environment are not sent with the catalog.
+- **The app asks before a kubeconfig runs a program:** a kubeconfig can name a program to run for credentials (an exec plugin, or a `gcp` auth provider's command), and until now connecting ran it at once. The first connect to such a cluster now shows the program, the cluster address and, on request, its arguments and environment, and runs it only after you allow it. The answer is remembered for that cluster until the program, its arguments, its environment or the address change, and Cluster settings has Stop allowing. After this update each cluster that uses such a program asks once.
 
 ## [0.12.0-rc.1] - 2026-11-22
 
