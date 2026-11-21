@@ -21,13 +21,16 @@ const TRIMMED = new Set([
   "/pods",
   "/nodes",
   "/configmaps",
+  "/events",
   "apps/replicasets",
   "apiextensions.k8s.io/customresourcedefinitions",
+  "argoproj.io/applications",
 ]);
 
 /**
  * Whether the list watch sends this resource's rows with only some of their fields:
- * core Pods, Nodes and ConfigMaps, `apps` ReplicaSets and CustomResourceDefinitions.
+ * core Pods, Nodes, ConfigMaps and Events, `apps` ReplicaSets,
+ * CustomResourceDefinitions and Argo CD Applications.
  * "Watched Pod rows" and "Watched rows of other trimmed kinds" in the backend IPC
  * contract list what a row keeps. Read only those fields from a row, or read the
  * object with `resourceGet` or a single-object watch, whose rows are whole.

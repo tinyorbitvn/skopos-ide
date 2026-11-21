@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { APPLICATION_ROW, WHOLE_APPLICATION } from "../../test/trimmedRows";
 import {
   appHistory,
   appResources,
@@ -435,4 +436,34 @@ it("never throws on junk", () => {
     expect(() => read(junk)).not.toThrow();
   }
   expect(() => operationNote(junk, NOW)).not.toThrow();
+});
+
+describe("a watched row, which keeps only some of an Application", () => {
+  const whole: Obj = WHOLE_APPLICATION;
+  const row: Obj = APPLICATION_ROW;
+
+  it.each([
+    ["the sync status", syncStatus],
+    ["the health status", healthStatus],
+    ["the revision", revisionText],
+    ["the revision's title", revisionTitle],
+    ["whether it has several sources", isMultiSource],
+    ["auto-sync", autoSync],
+    ["where its project is", projectLocation],
+    ["whether it is being deleted", isDeleting],
+    ["whether its operation can be terminated", canTerminate],
+    ["what a roll back can deploy", rollbackTargets],
+    ["why a roll back is refused", rollbackRefusal],
+  ] as [string, (o: Obj) => unknown][])(
+    "reads %s as the whole object does",
+    (_, read) => {
+      expect(read(row)).toEqual(read(whole));
+    },
+  );
+
+  it("still tells an operation that can be terminated, and an earlier deployment", () => {
+    expect(canTerminate(row)).toBe(true);
+    expect(rollbackTargets(row).map((t) => t.id)).toEqual([1]);
+    expect(isMultiSource(row)).toBe(true);
+  });
 });
