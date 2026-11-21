@@ -1,0 +1,149 @@
+# The objects of the Workloads overview and section overviews specs (section overviews
+# spec §8). Each spec creates the namespace first, applies this file and deletes the
+# namespace when it ends.
+#
+# The quota sets cpu and memory, so every Pod here sets its requests (the API refuses a
+# Pod without them in a namespace with such a quota).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute
+  namespace: skopos-test-sections
+spec:
+  hard:
+    cpu: "2"
+    memory: 2Gi
+    pods: "10"
+---
+# Its image never pulls, so its Pod is failing; the long deadline keeps the Deployment
+# and its ReplicaSet Updating, which the overviews count as pending.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken
+  namespace: skopos-test-sections
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 3600
+  selector:
+    matchLabels:
+      app: broken
+  template:
+    metadata:
+      labels:
+        app: broken
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.invalid/none:1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+---
+# kind's default class binds it once the Pod of mounted uses it (WaitForFirstConsumer).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+  namespace: skopos-test-sections
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Mi
+---
+# No such class exists, so the claim stays Pending, waiting for a matching volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: unbound
+  namespace: skopos-test-sections
+spec:
+  storageClassName: skopos-e2e-missing
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mounted
+  namespace: skopos-test-sections
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mounted
+  template:
+    metadata:
+      labels:
+        app: mounted
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: data
+---
+# No Pod carries this label, so the Service has no endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dark
+  namespace: skopos-test-sections
+spec:
+  type: ClusterIP
+  selector:
+    app: skopos-e2e-nothing
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# kind has no load balancer provider, so the address stays Pending.
+apiVersion: v1
+kind: Service
+metadata:
+  name: lb
+  namespace: skopos-test-sections
+spec:
+  type: LoadBalancer
+  selector:
+    app: mounted
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# kind has no ingress controller, so the Ingress gets no address.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site
+  namespace: skopos-test-sections
+spec:
+  rules:
+    - host: sections.skopos.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dark
+                port:
+                  number: 80

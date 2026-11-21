@@ -305,6 +305,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   drawer: { kubeconfigs: {}, start: startKindFixture },
   "config-kinds": { kubeconfigs: {}, start: startKindFixture },
   "workloads-overview": { kubeconfigs: {}, start: startKindFixture },
+  "section-overviews": { kubeconfigs: {}, start: startKindFixture },
   drain: { kubeconfigs: {}, start: startKindFixture },
   actions: { kubeconfigs: {}, start: startKindFixture },
   argocd: { kubeconfigs: {}, start: startKindFixture },
