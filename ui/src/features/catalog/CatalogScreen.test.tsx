@@ -58,6 +58,31 @@ test("empty catalog explains how to add a cluster", async () => {
   expect(screen.queryByRole("table")).toBeNull();
 });
 
+test("a row says what its kubeconfig runs and that TLS is not verified", async () => {
+  await show([
+    clusterEntry({ contextName: "plain" }),
+    clusterEntry({
+      contextName: "risky",
+      execCommand: "aws",
+      insecureTls: true,
+    }),
+  ]);
+
+  const risky = within(screen.getByTestId("catalog-row-risky"));
+  const exec = risky.getByTestId("catalog-note-exec");
+  expect(exec.textContent).toBe("Exec plugin");
+  expect(exec.getAttribute("title")).toBe(
+    'Connecting runs "aws" from this kubeconfig to get credentials.',
+  );
+  const tls = risky.getByTestId("catalog-note-tls");
+  expect(tls.textContent).toBe("TLS not verified");
+  expect(tls.getAttribute("title")).toContain("insecure-skip-tls-verify");
+
+  const plain = within(screen.getByTestId("catalog-row-plain"));
+  expect(plain.queryByTestId("catalog-note-exec")).toBeNull();
+  expect(plain.queryByTestId("catalog-note-tls")).toBeNull();
+});
+
 test("lists clusters and filters by search", async () => {
   await show([
     clusterEntry({ contextName: "alpha" }),

@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **The catalog says what a kubeconfig does on connect:** a cluster whose kubeconfig runs an exec plugin for credentials now shows an Exec plugin label that names the command, and one whose kubeconfig turns off TLS verification shows a TLS not verified label, both in the catalog and on the cluster's settings page. Before, the first was shown nowhere and the second only as a line in the connection log once a connect had started. A plugin's arguments and environment stay in the file and are not sent to the window.
+
 ## [0.12.0-rc.1] - 2026-11-22
 
 - **Signed and notarized on macOS:** the macOS app and disk image are signed with a Developer ID certificate and notarized by Apple, so they open without Open Anyway or `xattr`. After this update macOS may ask once more for the passwords SkoposIDE keeps in the Keychain; choose Always Allow. Later updates keep access.

@@ -43,6 +43,10 @@ pub struct ClusterEntry {
     pub server: Option<String>,
     pub icon: Option<String>,
     pub source: ClusterSource,
+    /// The command a connect runs for credentials, when the kubeconfig names an exec plugin.
+    pub exec_command: Option<String>,
+    /// Whether the kubeconfig turns off TLS verification for this cluster.
+    pub insecure_tls: bool,
     pub problem: Option<String>,
     pub state: ConnectionState,
 }
@@ -235,6 +239,8 @@ pub(crate) fn build_entries(
                 context_name: context.context_name,
                 server: context.server,
                 source,
+                exec_command: context.exec_command,
+                insecure_tls: context.insecure_tls,
                 problem: context.problem,
             }
         })
@@ -263,6 +269,8 @@ mod tests {
             server: Some("https://x".to_owned()),
             source_path: source_path.to_owned(),
             uses_exec: false,
+            exec_command: None,
+            insecure_tls: false,
             problem: None,
         }
     }
@@ -319,6 +327,31 @@ mod tests {
         assert_eq!(v["source"]["kind"], "synced");
         assert_eq!(v["source"]["path"], "/h/.kube/config");
         assert_eq!(v["state"]["status"], "disconnected");
+    }
+
+    #[test]
+    fn an_entry_says_what_its_kubeconfig_runs_and_whether_tls_is_checked() {
+        let data = tempfile::tempdir().unwrap();
+        let pasted = PastedConfigs::open(data.path()).unwrap();
+        let risky = ContextEntry {
+            uses_exec: true,
+            exec_command: Some("aws".to_owned()),
+            insecure_tls: true,
+            ..context("a", "/h/.kube/config")
+        };
+        let entries = build_entries(
+            vec![risky, context("b", "/h/.kube/config")],
+            &HashMap::new(),
+            &pasted,
+            |_| ConnectionState::Disconnected,
+        );
+
+        let v = serde_json::to_value(&entries).unwrap();
+
+        assert_eq!(v[0]["execCommand"], "aws");
+        assert_eq!(v[0]["insecureTls"], true);
+        assert_eq!(v[1]["execCommand"], serde_json::Value::Null);
+        assert_eq!(v[1]["insecureTls"], false);
     }
 
     #[test]

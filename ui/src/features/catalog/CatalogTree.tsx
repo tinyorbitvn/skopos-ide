@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { clusterStatus } from "../../app/clusterStatus";
+import { connectionNotes } from "../../app/connectionNotes";
 import {
   Badge,
   Button,
@@ -469,6 +470,15 @@ function ClusterRow(props: {
           {c.source.kind === "pasted" ? (
             <Badge tone="info">Pasted</Badge>
           ) : null}
+          {connectionNotes(c).map((note) => (
+            <span
+              key={note.id}
+              title={note.detail}
+              data-testid={`catalog-note-${note.id}`}
+            >
+              <Badge tone={note.tone}>{note.label}</Badge>
+            </span>
+          ))}
         </span>
       </td>
       <td>

@@ -7,7 +7,9 @@ import {
   useState,
 } from "react";
 import { useNavigate, useParams } from "react-router";
+import { connectionNotes } from "../../app/connectionNotes";
 import {
+  Badge,
   Button,
   ErrorNotice,
   Input,
@@ -708,6 +710,18 @@ export function ClusterSettingsScreen(props: { clusterId: string }) {
                 settings stay in SkoposIDE; the kubeconfig file is not changed.
               </p>
             ) : null}
+            {cluster
+              ? connectionNotes(cluster).map((note) => (
+                  <p
+                    key={note.id}
+                    className={styles.note}
+                    data-testid={`settings-note-${note.id}`}
+                  >
+                    <Badge tone={note.tone}>{note.label}</Badge>
+                    <span>{note.detail}</span>
+                  </p>
+                ))
+              : null}
           </div>
           <Button
             size="sm"
