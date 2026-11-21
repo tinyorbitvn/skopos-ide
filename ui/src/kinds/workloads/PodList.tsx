@@ -26,7 +26,11 @@ export function PodList(props: {
   namespace?: string;
 }) {
   const { clusterId, match, namespace } = props;
-  const list = useResourceList(clusterId, PODS);
+  const list = useResourceList(
+    clusterId,
+    PODS,
+    namespace ? [namespace] : undefined,
+  );
   const drawer = useContext(DrawerLinkContext);
 
   if (list.status === "forbidden" || list.status === "notServed") {

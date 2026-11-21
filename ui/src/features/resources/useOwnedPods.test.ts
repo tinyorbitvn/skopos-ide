@@ -87,8 +87,13 @@ const WEB: KubeObject = {
   metadata: { name: "web", namespace: "ns", uid: "d1" },
 };
 
-async function mount(kind: ApiResourceInfo | undefined) {
-  const hook = renderHook(() => useOwnedPods("c1", kind));
+const NO_NAMESPACES: string[] = [];
+
+async function mount(
+  kind: ApiResourceInfo | undefined,
+  namespaces: readonly string[] = NO_NAMESPACES,
+) {
+  const hook = renderHook(() => useOwnedPods("c1", kind, namespaces));
   await act(flush);
   return hook;
 }
@@ -161,5 +166,20 @@ test("a reconnecting watch keeps answering from its last items", async () => {
   await send("pods", status("reconnecting"));
   expect(result.current?.podsOf(WEB)?.map((p) => p.metadata.name)).toEqual([
     "web-0",
+  ]);
+});
+
+test("every list it opens is asked with the given namespaces", async () => {
+  const { backend } = setup();
+  await mount(info(DEPLOYMENTS), ["b", "a"]);
+  await mount(info(CRONJOBS), ["b", "a"]);
+  // The Pods watch is shared by both lists.
+  const asked = backend
+    .callsTo("resources_subscribe")
+    .map((a) => [(a.resource as ResourceRef).plural, a.namespaces]);
+  expect(asked.sort()).toEqual([
+    ["jobs", ["a", "b"]],
+    ["pods", ["a", "b"]],
+    ["replicasets", ["a", "b"]],
   ]);
 });

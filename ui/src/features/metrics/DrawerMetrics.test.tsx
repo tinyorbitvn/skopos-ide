@@ -190,6 +190,22 @@ test("a workload under metrics-server sums the Pods its selector matches in its 
   expect(screen.getByTestId("metrics-chart-cpu-now").textContent).toBe("750m");
 });
 
+test("a workload under metrics-server asks for the Pods of its own namespace only", async () => {
+  const b = backend({
+    metrics_provider: () => metricsServer(),
+    metrics_usage: () => usageSnapshot([]),
+  });
+  await show(DEPLOYMENTS, {
+    metadata: { name: "web", namespace: "shop" },
+    spec: { selector: { matchLabels: { app: "web" } } },
+    status: {},
+  });
+  const asked = b.calls
+    .callsTo("resources_subscribe")
+    .filter((a) => (a.resource as ResourceRef).plural === "pods");
+  expect(asked.map((a) => a.namespaces)).toEqual([["shop"]]);
+});
+
 test("a workload under metrics-server with no matching Pod says it has none", async () => {
   const b = backend({
     metrics_provider: () => metricsServer(),

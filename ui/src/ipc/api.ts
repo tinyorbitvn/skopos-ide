@@ -109,15 +109,20 @@ export const api = {
   /** The names of 14 kinds for the palette; the backend keeps them for 30 s. */
   resourcesNames: (clusterId: string) =>
     call<ObjectNames>("resources_names", { clusterId }),
-  /** Returns the subscription id. Events go to `onEvent` until unsubscribed. */
+  /**
+   * Returns the subscription id. Events go to `onEvent` until unsubscribed. With
+   * `namespaces`, only the objects of those namespaces are sent; with none, all are.
+   */
   resourcesSubscribe: (
     clusterId: string,
     resource: ResourceRef,
+    namespaces: string[],
     onEvent: (event: WatchEvent) => void,
   ) =>
     call<string>("resources_subscribe", {
       clusterId,
       resource,
+      namespaces,
       onEvent: new Channel<WatchEvent>(onEvent),
     }),
   resourcesUnsubscribe: (subscriptionId: string) =>

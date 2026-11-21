@@ -72,6 +72,8 @@ export const LINGER_MS = 20_000;
 interface Entry {
   key: string;
   clusterId: string;
+  /** Set for a list of some namespaces, and null for a whole list or one object. */
+  scope: Scope | null;
   /** Always up to date. `state.items` lags behind it while the window is hidden. */
   rows: Map<string, KubeObject>;
   /** Set when `rows` changed after `state.items` was built from them. */
@@ -103,11 +105,41 @@ function notifyStore(): void {
   for (const listener of [...storeListeners]) listener();
 }
 
-function entryKey(clusterId: string, r: ResourceRef): string {
-  return JSON.stringify([clusterId, r.group, r.plural]);
+/** A list of some namespaces: the key of the whole list, and those namespaces. */
+interface Scope {
+  list: string;
+  namespaces: readonly string[];
 }
 
-/** Never equal to a list's key, which has three parts. */
+/** No namespace named, which asks for every one. The same array on every render. */
+const EVERY_NAMESPACE: readonly string[] = [];
+
+/**
+ * `namespaces` each once and in one order, so the same choice is the same list. A
+ * cluster-scoped resource has none.
+ */
+function namespacesOf(
+  resource: ResourceRef,
+  namespaces: readonly string[] | undefined,
+): readonly string[] {
+  if (!resource.namespaced || !namespaces || namespaces.length === 0)
+    return EVERY_NAMESPACE;
+  return [...new Set(namespaces)].sort();
+}
+
+function entryKey(
+  clusterId: string,
+  r: ResourceRef,
+  namespaces: readonly string[] = EVERY_NAMESPACE,
+): string {
+  const whole = [clusterId, r.group, r.plural];
+  return JSON.stringify(namespaces.length > 0 ? [...whole, namespaces] : whole);
+}
+
+/**
+ * Never equal to a list's key, which has three parts, or four when it names its
+ * namespaces.
+ */
 function objectEntryKey(
   clusterId: string,
   r: ResourceRef,
@@ -252,11 +284,17 @@ function listen(): void {
   });
 }
 
-function open(key: string, clusterId: string, start: Start): Entry {
+function open(
+  key: string,
+  clusterId: string,
+  start: Start,
+  scope: Scope | null,
+): Entry {
   listen();
   const entry: Entry = {
     key,
     clusterId,
+    scope,
     rows: new Map(),
     changed: false,
     added: new Set(),
@@ -313,10 +351,15 @@ function end(entry: Entry): void {
   if (entry.refs === 0 && !entry.closed) drop(entry);
 }
 
-function acquire(key: string, clusterId: string, start: Start): Entry {
+function acquire(
+  key: string,
+  clusterId: string,
+  start: Start,
+  scope: Scope | null,
+): Entry {
   let entry = entries.get(key);
   if (!entry) {
-    entry = open(key, clusterId, start);
+    entry = open(key, clusterId, start, scope);
     entries.set(key, entry);
     notifyStore();
   }
@@ -353,19 +396,20 @@ function useEntry(
   key: string | null,
   clusterId: string,
   start: Start | null,
+  scope: Scope | null = null,
 ): ResourceListState {
   // The effect depends on the identity in `key`, so it reads the latest props from a ref.
-  const latest = useRef({ clusterId, start });
-  latest.current = { clusterId, start };
+  const latest = useRef({ clusterId, start, scope });
+  latest.current = { clusterId, start, scope };
   const [entry, setEntry] = useState<Entry | null>(null);
 
   useEffect(() => {
-    const { clusterId: cluster, start: begin } = latest.current;
+    const { clusterId: cluster, start: begin, scope: within } = latest.current;
     if (key === null || begin === null) {
       setEntry(null);
       return;
     }
-    const acquired = acquire(key, cluster, begin);
+    const acquired = acquire(key, cluster, begin, within);
     setEntry(acquired);
     return () => release(acquired);
   }, [key]);
@@ -388,18 +432,29 @@ function useEntry(
 }
 
 /**
- * The live objects of a resource. One subscription is kept per cluster, group and
- * plural, and ended `LINGER_MS` after the last component using it goes away.
+ * The live objects of a resource: those of `namespaces`, or of every namespace when
+ * none is named. A component that shows the objects of a few namespaces names them, so
+ * the backend sends only those rows. One subscription is kept per cluster, group,
+ * plural and namespaces, and ended `LINGER_MS` after the last component using it goes
+ * away.
  */
 export function useResourceList(
   clusterId: string,
   resource: ResourceRef | null,
+  namespaces?: readonly string[],
 ): ResourceListState {
+  const within = resource
+    ? namespacesOf(resource, namespaces)
+    : EVERY_NAMESPACE;
   return useEntry(
-    resource ? entryKey(clusterId, resource) : null,
+    resource ? entryKey(clusterId, resource, within) : null,
     clusterId,
     resource
-      ? (onEvent) => api.resourcesSubscribe(clusterId, resource, onEvent)
+      ? (onEvent) =>
+          api.resourcesSubscribe(clusterId, resource, [...within], onEvent)
+      : null,
+    resource && within.length > 0
+      ? { list: entryKey(clusterId, resource), namespaces: within }
       : null,
   );
 }
@@ -437,22 +492,38 @@ export function useObjectWatch(
 }
 
 /**
+ * The list with the key `whole`, or else a list of some namespaces of the same
+ * resource that names `namespace`, so it holds every object of that namespace.
+ */
+function heldEntry(whole: string, namespace: string | null): Entry | undefined {
+  const entry = entries.get(whole);
+  if (entry || namespace === null) return entry;
+  for (const other of entries.values()) {
+    if (other.scope?.list !== whole) continue;
+    if (other.scope.namespaces.includes(namespace)) return other;
+  }
+  return undefined;
+}
+
+/**
  * The state of the list of a resource that the store already has, because a
  * component uses it or it lingers, read without holding it: null when there is none,
- * and again once it is dropped. It never starts a subscription.
+ * and again once it is dropped. It never starts a subscription. With `namespace`, a
+ * list of some namespaces that names it counts too, when there is no whole list.
  */
 export function useHeldList(
   clusterId: string,
   resource: ResourceRef | null,
+  namespace: string | null = null,
 ): ResourceListState | null {
   const key = resource ? entryKey(clusterId, resource) : null;
   const subscribe = useCallback(
     (listener: () => void) => {
       if (key === null) return () => {};
-      // Follows the entry of `key` as the store adds and drops it.
+      // Follows the entry for `key` as the store adds and drops it.
       let followed: Entry | undefined;
       const follow = () => {
-        const next = entries.get(key);
+        const next = heldEntry(key, namespace);
         if (next === followed) return;
         followed?.listeners.delete(listener);
         followed = next;
@@ -469,11 +540,11 @@ export function useHeldList(
         followed?.listeners.delete(listener);
       };
     },
-    [key],
+    [key, namespace],
   );
   const snapshot = useCallback(
-    () => (key === null ? null : (entries.get(key)?.state ?? null)),
-    [key],
+    () => (key === null ? null : (heldEntry(key, namespace)?.state ?? null)),
+    [key, namespace],
   );
   return useSyncExternalStore(subscribe, snapshot);
 }

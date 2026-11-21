@@ -22,7 +22,7 @@ use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
-use crate::resources::{state_name, RowShape};
+use crate::resources::{state_name, RowShape, Scope};
 use crate::subscriptions::Subscriptions;
 
 /// Spec E §4.3: later snapshots at most once every 2 s.
@@ -306,7 +306,14 @@ async fn build_loop(
     for kind in kinds {
         let (tx, rx) = mpsc::channel(EVENT_BACKLOG);
         let watch = core
-            .subscribe_rows(id, kind.resource(), RowShape::Graph, tx, None)
+            .subscribe_rows(
+                id,
+                kind.resource(),
+                RowShape::Graph,
+                Scope::default(),
+                tx,
+                None,
+            )
             .map_err(|e| e.message)?;
         watches.push(watch);
         let events = stream::unfold(rx, move |mut rx| async move {

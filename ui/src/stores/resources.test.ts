@@ -936,3 +936,47 @@ test("a held list is read without holding it, and is null once dropped", async (
   await mountObject(pods, "default", "web");
   expect(peek.result.current).toBeNull();
 });
+
+const SOME_NODES: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "nodes",
+  kind: "Node",
+  namespaced: false,
+};
+
+async function mountIn(namespaces: string[], resource: ResourceRef = pods) {
+  const hook = renderHook(() => useResourceList("a", resource, namespaces));
+  await act(flush);
+  return hook;
+}
+
+test("a list of some namespaces asks for those, each once and in one order", async () => {
+  const { backend } = setup();
+  await mountIn(["b", "a", "b"]);
+  await mount();
+
+  const asked = backend.callsTo("resources_subscribe").map((c) => c.namespaces);
+  expect(asked).toEqual([["a", "b"], []]);
+});
+
+test("lists of the same namespaces share a subscription, and others have their own", async () => {
+  const { subs } = setup();
+  await mountIn(["a", "b"]);
+  const same = await mountIn(["b", "a"]);
+  const other = await mountIn(["a"]);
+  const whole = await mount();
+  expect(subs).toHaveLength(3);
+
+  await subs[0].send(snapshot(pod("x", "a")));
+  expect(same.result.current.items).toHaveLength(1);
+  expect(other.result.current.items).toHaveLength(0);
+  expect(whole.result.current.items).toHaveLength(0);
+});
+
+test("a cluster-scoped list is never asked for by namespace", async () => {
+  const { backend } = setup();
+  await mountIn(["a"], SOME_NODES);
+
+  expect(backend.callsTo("resources_subscribe")[0].namespaces).toEqual([]);
+});

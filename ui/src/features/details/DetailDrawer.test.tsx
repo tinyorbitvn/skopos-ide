@@ -176,8 +176,16 @@ function fake(
   const backend = mockBackend({
     resources_subscribe: (a: {
       resource: ResourceRef;
+      namespaces: string[];
       onEvent: { onmessage: (e: WatchEvent) => void };
     }) => {
+      // A list of some namespaces, as a linked workload's Summary asks for, is named
+      // with them, so the plural alone stays the whole list the screen holds.
+      if (a.namespaces.length > 0) {
+        const name = `${a.resource.plural}@${a.namespaces.join(",")}`;
+        byPlural.set(name, a.onEvent.onmessage);
+        return "sub";
+      }
       send = a.onEvent.onmessage;
       byPlural.set(a.resource.plural, send);
       return "sub";

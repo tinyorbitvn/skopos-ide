@@ -120,7 +120,7 @@ struct Table {
 impl Table {
     async fn subscribe(core: &AppCore, id: &ClusterId, resource: ResourceRef) -> Table {
         let (tx, rx) = mpsc::channel(64);
-        core.resources_subscribe(id, resource, tx, "main")
+        core.resources_subscribe(id, resource, Vec::new(), tx, "main")
             .await
             .unwrap();
         Table {

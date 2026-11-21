@@ -107,3 +107,26 @@ test("inside a drawer a pod's name opens the Pod in that drawer", async () => {
     name: "a",
   });
 });
+
+function askedNamespaces(namespace?: string) {
+  const backend = mockBackend({
+    resources_subscribe: () => "sub",
+    resources_unsubscribe: () => null,
+  });
+  show(() => true, namespace);
+  return backend;
+}
+
+test("asks for the pods of the given namespace only", async () => {
+  const backend = askedNamespaces("n");
+  await act(flush);
+  const asked = backend.callsTo("resources_subscribe");
+  expect(asked.map((a) => a.namespaces)).toEqual([["n"]]);
+});
+
+test("without a namespace it asks for the pods of every namespace", async () => {
+  const backend = askedNamespaces();
+  await act(flush);
+  const asked = backend.callsTo("resources_subscribe");
+  expect(asked.map((a) => a.namespaces)).toEqual([[]]);
+});
