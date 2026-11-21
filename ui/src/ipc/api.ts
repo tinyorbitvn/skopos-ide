@@ -62,6 +62,7 @@ import type { TopologyEvent } from "./generated/TopologyEvent";
 import type { UpdateState } from "./generated/UpdateState";
 import type { UsageOf } from "./generated/UsageOf";
 import type { UsageSnapshot } from "./generated/UsageSnapshot";
+import type { VolumeUsageSnapshot } from "./generated/VolumeUsageSnapshot";
 import type { WatchEvent } from "./generated/WatchEvent";
 import type { WindowLayout } from "./generated/WindowLayout";
 
@@ -684,6 +685,13 @@ export const api = {
    */
   nodesDiskUsage: (id: string, names: string[]) =>
     call<NodeDiskSnapshot>("nodes_disk_usage", { id, names }),
+  /**
+   * The used and total bytes of each claim that Pods on the named nodes mount, from each
+   * kubelet through the node proxy: one item per claim, with its largest used bytes. A node
+   * that cannot be read is left out; Forbidden when every node answered 403.
+   */
+  volumesUsage: (clusterId: string, nodes: string[]) =>
+    call<VolumeUsageSnapshot>("volumes_usage", { id: clusterId, nodes }),
   /**
    * Saves the metrics URL's password or token in the keychain, replacing the saved one. The
    * core validates `provider`, the setting about to be saved, first and refuses the secret

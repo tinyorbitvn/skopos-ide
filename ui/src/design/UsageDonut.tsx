@@ -45,6 +45,11 @@ export interface UsageDonutProps {
   label?: string;
   /** Leaves out the caption, for a caller that draws its own text or none. */
   bare?: boolean;
+  /**
+   * The arc's level in place of `usageTone(pct)`, such as the worst state's on a health
+   * donut (section overviews spec §4.3). It applies only while the share is known.
+   */
+  tone?: UsageTone;
 }
 
 /** The share and its amounts, or null when any of them is unknown or not a number. */
@@ -79,7 +84,9 @@ export function UsageDonut(props: UsageDonutProps) {
     <div
       className={styles.donut}
       data-testid={props.testId}
-      data-tone={share === null ? undefined : usageTone(share.pct)}
+      data-tone={
+        share === null ? undefined : (props.tone ?? usageTone(share.pct))
+      }
     >
       <svg
         className={styles.chart}

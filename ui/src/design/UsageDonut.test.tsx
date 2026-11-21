@@ -149,3 +149,16 @@ test("a label replaces the accessible name, and a bare donut has no caption", ()
   );
   expect(root.textContent).toBe("62%");
 });
+
+test.each<[string, Partial<UsageDonutProps>, string]>([
+  ["critical at 30 %", { pct: 30, tone: "critical" }, "critical"],
+  ["nominal at 99 %", { pct: 99, used: "3.96", tone: "nominal" }, "nominal"],
+  ["warning at 10 %", { pct: 10, used: "0.4", tone: "warning" }, "warning"],
+])("a fixed tone draws the arc %s, whatever the share", (_, props, tone) => {
+  expect(draw(props).root.getAttribute("data-tone")).toBe(tone);
+});
+
+test("a fixed tone draws nothing while the share is unknown", () => {
+  const { root, circles } = draw({ pct: null, tone: "critical" });
+  expect([root.hasAttribute("data-tone"), circles.length]).toEqual([false, 1]);
+});

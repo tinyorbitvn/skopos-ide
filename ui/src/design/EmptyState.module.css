@@ -25,3 +25,8 @@
 .action {
   margin-top: var(--space-5);
 }
+
+.glyph {
+  display: inline-flex;
+  color: var(--text-tertiary);
+}

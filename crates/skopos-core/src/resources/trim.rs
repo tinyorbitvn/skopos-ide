@@ -20,6 +20,9 @@ enum Keep {
     Fields(&'static [(&'static str, Keep)]),
     /// An array's items each follow the rule.
     Each(&'static Keep),
+    /// An array keeps only its items that are objects holding this field, each under the
+    /// rule. Its object drops the array when no item stays.
+    EachHaving(&'static str, &'static Keep),
     /// An object's string values, each cut to its first this many characters on a `char`
     /// boundary. A value that is not a string is dropped.
     Strings(usize),
@@ -31,12 +34,18 @@ enum Keep {
     Blank,
 }
 
-use Keep::{All, Blank, Each, Fields, Strings, Text};
+use Keep::{All, Blank, Each, EachHaving, Fields, Strings, Text};
 
 impl Keep {
     /// Whether an object keeps `value` under this rule at all.
     fn admits(&self, value: &Value) -> bool {
         !matches!(self, Text(_)) || value.is_string()
+    }
+
+    /// Whether an object drops `value` once it is trimmed under this rule: an array of
+    /// which no item stayed.
+    fn leaves_nothing(&self, value: &Value) -> bool {
+        matches!(self, EachHaving(..)) && value.as_array().is_some_and(Vec::is_empty)
     }
 }
 
@@ -182,10 +191,22 @@ const ROW_METADATA: Keep = Fields(&[
     ("ownerReferences", All),
 ]);
 
+/// The volumes a Pod row keeps: those that mount a PersistentVolumeClaim, each with its name
+/// and the claim's name only. The Storage overview asks the kubelets of the nodes that run
+/// these Pods for the claims' used bytes (spec §4.1).
+const CLAIM_VOLUMES: Keep = EachHaving(
+    "persistentVolumeClaim",
+    &Fields(&[
+        ("name", All),
+        ("persistentVolumeClaim", Fields(&[("claimName", All)])),
+    ]),
+);
+
 /// The Pods table, its filter and sort, the pod lists of the Node, Job and Rollout
-/// drawers and the Pods row-menu Port forward action (which reads the container ports) read
-/// these. `uid` and `resourceVersion` let an action or a fetch name the object. The filter
-/// matches annotations, so they stay, cut.
+/// drawers, the Pods row-menu Port forward action (which reads the container ports) and the
+/// Storage overview (which reads the claims a Pod mounts and its node) read these. `uid` and
+/// `resourceVersion` let an action or a fetch name the object. The filter matches
+/// annotations, so they stay, cut.
 const POD_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -194,6 +215,7 @@ const POD_ROW: Keep = Fields(&[
         "spec",
         Fields(&[
             ("nodeName", All),
+            ("volumes", CLAIM_VOLUMES),
             (
                 "containers",
                 Each(&Fields(&[
@@ -284,8 +306,9 @@ const REPLICA_SET_ROW: Keep = Fields(&[
     ),
 ]);
 
-/// The Nodes table, the cordon and node-shell actions and the Overview gauges
-/// (`status.allocatable`) read these. The images, the capacity and the volumes stay out.
+/// The Nodes table, the cordon and node-shell actions, the Overview gauges
+/// (`status.allocatable`) and the Nodes overview's Versions (`status.nodeInfo`) read these.
+/// The images, the capacity and the volumes stay out.
 const NODE_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -312,6 +335,7 @@ const NODE_ROW: Keep = Fields(&[
                     ("kubeletVersion", All),
                     ("operatingSystem", All),
                     ("architecture", All),
+                    ("osImage", All),
                 ]),
             ),
         ]),
@@ -432,12 +456,23 @@ fn keep(value: &mut Value, rule: &Keep) {
                 for (name, rule) in *fields {
                     if let Some(child) = object.get_mut(*name) {
                         keep(child, rule);
+                        if rule.leaves_nothing(child) {
+                            object.remove(*name);
+                        }
                     }
                 }
             }
         }
         Each(rule) => {
             if let Some(items) = value.as_array_mut() {
+                for item in items {
+                    keep(item, rule);
+                }
+            }
+        }
+        EachHaving(field, rule) => {
+            if let Some(items) = value.as_array_mut() {
+                items.retain(|item| item.get(*field).is_some());
                 for item in items {
                     keep(item, rule);
                 }
@@ -537,12 +572,18 @@ const APPLICATION_ROW: Keep = Fields(&[
     ),
 ]);
 
-/// The kind and name the Events tables show of the object an Event is about.
-const EVENT_OBJECT: Keep = Fields(&[("kind", All), ("name", All)]);
+/// The object an Event is about: the kind and name the Events tables show, and the
+/// apiVersion and namespace that resolve it, so a recent event opens its object.
+const EVENT_OBJECT: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("name", All),
+    ("namespace", All),
+]);
 
 /// The Events table and the Overview's recent events read these: the type, the reason,
 /// the whole message, the count and the times an Event was seen, in both API shapes. Who
-/// reported it and the rest of the object's reference stay out.
+/// reported it and the object's uid, resourceVersion and fieldPath stay out.
 const EVENT_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -655,7 +696,10 @@ mod tests {
             "spec": {
                 "nodeName": "node-1",
                 "serviceAccountName": "web",
-                "volumes": [{ "name": "data", "emptyDir": {} }],
+                "volumes": [
+                    { "name": "data", "persistentVolumeClaim": { "claimName": "web-data", "readOnly": true } },
+                    { "name": "scratch", "emptyDir": {} },
+                ],
                 "initContainers": [{
                     "name": "setup",
                     "image": "registry.example.com/setup:1",
@@ -730,6 +774,7 @@ mod tests {
                 },
                 "spec": {
                     "nodeName": "node-1",
+                    "volumes": [{ "name": "data", "persistentVolumeClaim": { "claimName": "web-data" } }],
                     "initContainers": [{ "name": "setup", "restartPolicy": "Always" }],
                     "containers": [{ "name": "app", "ports": [{ "name": "http", "containerPort": 8080, "protocol": "TCP" }] }],
                 },
@@ -755,6 +800,50 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn a_pod_row_keeps_only_the_volumes_that_mount_a_claim_with_the_claim_name() {
+        let mut row = full_pod();
+        row["spec"]["volumes"] = json!([
+            { "name": "cfg", "configMap": { "name": "web-config", "defaultMode": 420 } },
+            { "name": "data", "persistentVolumeClaim": { "claimName": "web-data", "readOnly": true } },
+            { "name": "kube-api-access-x7k2p", "projected": { "sources": [
+                { "serviceAccountToken": { "expirationSeconds": 3607, "path": "token" } },
+            ] } },
+            { "name": "logs", "persistentVolumeClaim": { "claimName": "web-logs" } },
+            "not an object",
+        ]);
+        trim_for_watch(&resource("", "pods", "Pod"), &mut row);
+        assert_eq!(
+            row["spec"]["volumes"],
+            json!([
+                { "name": "data", "persistentVolumeClaim": { "claimName": "web-data" } },
+                { "name": "logs", "persistentVolumeClaim": { "claimName": "web-logs" } },
+            ])
+        );
+    }
+
+    #[test]
+    fn a_pod_row_that_mounts_no_claim_keeps_no_volumes() {
+        let pods = resource("", "pods", "Pod");
+        for volumes in [
+            json!([
+                { "name": "scratch", "emptyDir": {} },
+                { "name": "cfg", "configMap": { "name": "web-config" } },
+            ]),
+            json!([]),
+        ] {
+            let mut row = full_pod();
+            row["spec"]["volumes"] = volumes;
+            trim_for_watch(&pods, &mut row);
+            assert!(row["spec"].get("volumes").is_none(), "{}", row["spec"]);
+        }
+        // A value of another shape is kept as it is, as under every other rule.
+        let mut row = full_pod();
+        row["spec"]["volumes"] = json!("not a list");
+        trim_for_watch(&pods, &mut row);
+        assert_eq!(row["spec"]["volumes"], "not a list");
     }
 
     #[test]
@@ -1180,7 +1269,12 @@ mod tests {
                     "message": "kubelet is posting ready status",
                     "lastTransitionTime": "2026-11-01T08:00:06Z",
                 }],
-                "nodeInfo": { "kubeletVersion": "v1.31.2", "operatingSystem": "linux", "architecture": "arm64" },
+                "nodeInfo": {
+                    "kubeletVersion": "v1.31.2",
+                    "operatingSystem": "linux",
+                    "architecture": "arm64",
+                    "osImage": "Debian GNU/Linux 12",
+                },
             },
         })
     }
@@ -1356,8 +1450,13 @@ mod tests {
             "firstTimestamp": "2026-11-01T10:00:00Z",
             "lastTimestamp": "2026-11-01T10:04:00Z",
             "eventTime": "2026-11-01T10:00:00.000000Z",
-            "involvedObject": { "kind": "Pod", "name": "web-1" },
-            "regarding": { "kind": "Pod", "name": "web-1" },
+            "involvedObject": {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "name": "web-1",
+                "namespace": "default",
+            },
+            "regarding": { "apiVersion": "v1", "kind": "Pod", "name": "web-1", "namespace": "default" },
         })
     }
 
@@ -1428,7 +1527,7 @@ mod tests {
     }
 
     #[test]
-    fn an_event_row_keeps_what_the_events_tables_read() {
+    fn an_event_row_keeps_what_the_events_tables_and_recent_events_read() {
         let mut row = full_event();
         trim_for_watch(&resource("", "events", "Event"), &mut row);
         assert_eq!(row, trimmed_event());

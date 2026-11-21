@@ -106,7 +106,7 @@ test("shows the visible sections and items", async () => {
     within(network)
       .getAllByRole("link")
       .map((a) => a.getAttribute("data-testid")),
-  ).toEqual(["nav-port-forwards"]);
+  ).toEqual(["nav-overview-network", "nav-port-forwards"]);
   expect(screen.queryByTestId("nav-item-batch-jobs")).toBeNull();
   fireEvent.click(screen.getByTestId("nav-crd-toggle-acme.io"));
   await act(flush);
@@ -500,30 +500,23 @@ test("the screens come first, then Apps, Cluster and Resources under their capti
   ]);
 });
 
-test("Overview, Resource map, Namespaces and Events are direct links with their icons", async () => {
-  await show({ resources: WIDE }, "/cluster/c1/r/core/namespaces");
-  const namespaces = screen.getByTestId("nav-item-core-namespaces");
+test("Overview, Resource map and Events are direct links with their icons", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/core/events");
+  const events = screen.getByTestId("nav-item-core-events");
   expect([
-    namespaces.tagName,
-    namespaces.getAttribute("href"),
-    namespaces.textContent,
-    namespaces.getAttribute("aria-current"),
-    namespaces.classList.contains("row"),
-  ]).toEqual([
-    "A",
-    "/cluster/c1/r/core/namespaces",
-    "Namespaces",
-    "page",
-    true,
-  ]);
+    events.tagName,
+    events.getAttribute("href"),
+    events.textContent,
+    events.getAttribute("aria-current"),
+    events.classList.contains("row"),
+  ]).toEqual(["A", "/cluster/c1/r/core/events", "Events", "page", true]);
+  expect(events.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe(
+    SECTION_ICONS.events?.iconName,
+  );
   expect(
-    namespaces.querySelector("[data-icon]")?.getAttribute("data-icon"),
-  ).toBe(SECTION_ICONS.namespaces?.iconName);
-  expect(
-    within(screen.getByTestId("nav-section-namespaces")).queryByRole("button"),
+    within(screen.getByTestId("nav-section-events")).queryByRole("button"),
   ).toBeNull();
   for (const [id, href] of [
-    ["nav-item-core-events", "/cluster/c1/r/core/events"],
     ["nav-overview", "/cluster/c1"],
     ["nav-map", "/cluster/c1/map"],
   ]) {
@@ -543,29 +536,59 @@ test("Overview, Resource map, Namespaces and Events are direct links with their 
   expect(icon("nav-map")).toBe(MAP_ICON.iconName);
 });
 
-test("Nodes is a section of List and Topology, open while the Nodes list is shown", async () => {
-  await show({ resources: WIDE }, "/cluster/c1/r/core/nodes");
-  const toggle = within(screen.getByTestId("nav-section-nodes")).getByRole(
-    "button",
-    { name: "Nodes" },
+test("Namespaces is a section of Overview and List, open while the Namespaces list is shown", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/core/namespaces");
+  const section = screen.getByTestId("nav-section-namespaces");
+  const toggle = within(section).getByRole("button", { name: "Namespaces" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe(
+    SECTION_ICONS.namespaces?.iconName,
   );
+  expect(
+    within(section)
+      .getAllByRole("link")
+      .map((a) => [
+        a.getAttribute("data-testid"),
+        a.getAttribute("href"),
+        a.textContent,
+        a.getAttribute("aria-current"),
+      ]),
+  ).toEqual([
+    ["nav-overview-namespaces", "/cluster/c1/namespaces", "Overview", null],
+    [
+      "nav-item-core-namespaces",
+      "/cluster/c1/r/core/namespaces",
+      "List",
+      "page",
+    ],
+  ]);
+});
+
+test("Nodes is a section of Overview, List and Topology, open while the Nodes list is shown", async () => {
+  await show({ resources: WIDE }, "/cluster/c1/r/core/nodes");
+  const section = screen.getByTestId("nav-section-nodes");
+  const toggle = within(section).getByRole("button", { name: "Nodes" });
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(toggle.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe(
     SECTION_ICONS.nodes?.iconName,
   );
-  const list = screen.getByTestId("nav-item-core-nodes");
-  expect([
-    list.getAttribute("href"),
-    list.textContent,
-    list.getAttribute("title"),
-    list.getAttribute("aria-current"),
-  ]).toEqual(["/cluster/c1/r/core/nodes", "List", "List", "page"]);
-  const topology = screen.getByTestId("nav-node-topology");
-  expect([
-    topology.getAttribute("href"),
-    topology.textContent,
-    topology.getAttribute("aria-current"),
-  ]).toEqual(["/cluster/c1/node-topology", "Topology", null]);
+  expect(
+    within(section)
+      .getAllByRole("link")
+      .map((a) => [
+        a.getAttribute("data-testid"),
+        a.getAttribute("href"),
+        a.textContent,
+        a.getAttribute("aria-current"),
+      ]),
+  ).toEqual([
+    ["nav-overview-nodes", "/cluster/c1/nodes", "Overview", null],
+    ["nav-item-core-nodes", "/cluster/c1/r/core/nodes", "List", "page"],
+    ["nav-node-topology", "/cluster/c1/node-topology", "Topology", null],
+  ]);
+  expect(screen.getByTestId("nav-item-core-nodes").getAttribute("title")).toBe(
+    "List",
+  );
 });
 
 test("the Topology page opens Nodes too", async () => {
@@ -580,10 +603,62 @@ test("the Topology page opens Nodes too", async () => {
   ).toBe("page");
 });
 
-test("a cluster that cannot list nodes has no Nodes item", async () => {
-  await show({ resources: [...SERVED, info("", "nodes", "Node", false)] });
-  expect(screen.queryByTestId("nav-section-nodes")).toBeNull();
-  expect(screen.queryByTestId("nav-node-topology")).toBeNull();
+/** WIDE and a Storage kind: every section with an Overview shows. */
+const OVERVIEWS = [
+  ...WIDE,
+  info("", "persistentvolumeclaims", "PersistentVolumeClaim"),
+];
+
+test.each(["nodes", "namespaces", "workloads", "network", "storage"])(
+  "the %s overview is its section's first entry, and the current one on its page",
+  async (page) => {
+    await show({ resources: OVERVIEWS }, `/cluster/c1/${page}`);
+    const section = screen.getByTestId(`nav-section-${page}`);
+    expect(
+      section
+        .querySelector("button[aria-expanded]")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("true");
+    const [first] = within(section).getAllByRole("link");
+    expect([
+      first?.getAttribute("data-testid"),
+      first?.getAttribute("href"),
+      first?.textContent,
+      first?.getAttribute("aria-current"),
+    ]).toEqual([
+      `nav-overview-${page}`,
+      `/cluster/c1/${page}`,
+      "Overview",
+      "page",
+    ]);
+    // The cluster's Overview is current on its own path only, so nothing else is.
+    expect(
+      [...document.querySelectorAll('[aria-current="page"]')].map((el) =>
+        el.getAttribute("data-testid"),
+      ),
+    ).toEqual([`nav-overview-${page}`]);
+  },
+);
+
+test("a cluster that cannot list nodes or namespaces has neither section, nor their overviews", async () => {
+  await show({
+    resources: [
+      ...SERVED,
+      info("", "nodes", "Node", false),
+      info("", "namespaces", "Namespace", false),
+    ],
+  });
+  for (const id of [
+    "nav-section-nodes",
+    "nav-node-topology",
+    "nav-overview-nodes",
+    "nav-section-namespaces",
+    "nav-overview-namespaces",
+  ]) {
+    expect([id, screen.queryByTestId(id)]).toEqual([id, null]);
+  }
+  // Network keeps its Overview: Port Forwarding needs no right.
+  expect(screen.getByTestId("nav-overview-network")).toBeTruthy();
 });
 
 test("Helm and Argo show their logos, Workloads its icon, and Argo holds the Argo CD branch", async () => {
