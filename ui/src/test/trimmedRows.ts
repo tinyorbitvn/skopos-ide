@@ -142,5 +142,10 @@ export const EVENT_ROW = {
   firstTimestamp: "2026-11-01T10:00:00Z",
   lastTimestamp: "2026-11-01T10:04:00Z",
   eventTime: "2026-11-01T10:00:00.000000Z",
-  involvedObject: { kind: "Pod", name: "web-1" },
+  involvedObject: {
+    apiVersion: "v1",
+    kind: "Pod",
+    name: "web-1",
+    namespace: "shop",
+  },
 } satisfies KubeObject;

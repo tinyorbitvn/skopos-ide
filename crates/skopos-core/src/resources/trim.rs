@@ -572,12 +572,18 @@ const APPLICATION_ROW: Keep = Fields(&[
     ),
 ]);
 
-/// The kind and name the Events tables show of the object an Event is about.
-const EVENT_OBJECT: Keep = Fields(&[("kind", All), ("name", All)]);
+/// The object an Event is about: the kind and name the Events tables show, and the
+/// apiVersion and namespace that resolve it, so a recent event opens its object.
+const EVENT_OBJECT: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("name", All),
+    ("namespace", All),
+]);
 
 /// The Events table and the Overview's recent events read these: the type, the reason,
 /// the whole message, the count and the times an Event was seen, in both API shapes. Who
-/// reported it and the rest of the object's reference stay out.
+/// reported it and the object's uid, resourceVersion and fieldPath stay out.
 const EVENT_ROW: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -1444,8 +1450,13 @@ mod tests {
             "firstTimestamp": "2026-11-01T10:00:00Z",
             "lastTimestamp": "2026-11-01T10:04:00Z",
             "eventTime": "2026-11-01T10:00:00.000000Z",
-            "involvedObject": { "kind": "Pod", "name": "web-1" },
-            "regarding": { "kind": "Pod", "name": "web-1" },
+            "involvedObject": {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "name": "web-1",
+                "namespace": "default",
+            },
+            "regarding": { "apiVersion": "v1", "kind": "Pod", "name": "web-1", "namespace": "default" },
         })
     }
 
@@ -1516,7 +1527,7 @@ mod tests {
     }
 
     #[test]
-    fn an_event_row_keeps_what_the_events_tables_read() {
+    fn an_event_row_keeps_what_the_events_tables_and_recent_events_read() {
         let mut row = full_event();
         trim_for_watch(&resource("", "events", "Event"), &mut row);
         assert_eq!(row, trimmed_event());
