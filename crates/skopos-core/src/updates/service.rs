@@ -176,6 +176,25 @@ impl Updates {
         true
     }
 
+    /// Sets an automatic check's result. It leaves a running manual check alone, which shows
+    /// its own result, and keeps a failed install's release, the Try Again target, unless the
+    /// check found a release to offer instead.
+    fn apply_automatic(&self, next: UpdatePhase) -> bool {
+        let mut phase = lock(&self.inner.phase);
+        let keep = match &*phase {
+            UpdatePhase::Checking => true,
+            UpdatePhase::Failed {
+                release: Some(_), ..
+            } => !matches!(next, UpdatePhase::Available { .. }),
+            current => busy(current),
+        };
+        if keep {
+            return false;
+        }
+        *phase = next;
+        true
+    }
+
     /// A check the user asked for: the dialog shows Checking, then the result or why it
     /// failed. A skipped version is still shown. Does nothing while an update installs.
     pub async fn check_now(&self) -> UpdateState {
@@ -218,7 +237,10 @@ impl Updates {
             return;
         };
         // No guard may live across the await below.
-        let free = !busy(&lock(&self.inner.phase));
+        let free = {
+            let phase = lock(&self.inner.phase);
+            !busy(&phase) && *phase != UpdatePhase::Checking
+        };
         if !free {
             return;
         }
@@ -236,7 +258,7 @@ impl Updates {
             UpdatePhase::Available { release } => Some(release.version.clone()),
             _ => None,
         };
-        if !self.apply_check(next) {
+        if !self.apply_automatic(next) {
             return;
         }
         let toast = found.is_some_and(|version| self.first_notice(&version));
@@ -402,7 +424,11 @@ async fn schedule(updates: Updates, mut prefs: watch::Receiver<Prefs>) {
         tokio::select! {
             () = stop.cancelled() => return,
             () = tokio::time::sleep_until(next), if enabled => {
-                updates.check_automatic().await;
+                // Stopping must not wait for a slow update server.
+                tokio::select! {
+                    () = stop.cancelled() => return,
+                    () = updates.check_automatic() => {}
+                }
                 next = Instant::now() + CHECK_EVERY;
             }
             changed = prefs.changed() => {
@@ -437,6 +463,8 @@ mod tests {
         /// While set, a download waits for `let_download_finish`.
         hold_download: AtomicBool,
         download_gate: tokio::sync::Notify,
+        /// While set, a check waits forever, like an update server that never answers.
+        hold_check: AtomicBool,
         installs: Mutex<Vec<String>>,
         blocker: Mutex<Option<String>>,
     }
@@ -457,6 +485,9 @@ mod tests {
         fn check(&self) -> BoxFuture<'_, CoreResult<Option<Release>>> {
             Box::pin(async move {
                 self.checks.fetch_add(1, Ordering::SeqCst);
+                if self.hold_check.load(Ordering::SeqCst) {
+                    std::future::pending::<()>().await;
+                }
                 let answer = lock(&self.answers).pop_front();
                 answer.unwrap_or(Ok(None))
             })
@@ -885,6 +916,67 @@ mod tests {
         assert_eq!(
             s.updates.install().await.unwrap_err().code,
             ErrorCode::Conflict
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stopping_does_not_wait_for_a_check_that_hangs() {
+        let fake = Fake::default();
+        fake.hold_check.store(true, Ordering::SeqCst);
+        let s = setup(fake, true);
+        tokio::time::sleep(Duration::from_secs(11)).await;
+        settle().await;
+        assert_eq!(s.fake.checks(), 1);
+        assert_eq!(
+            Arc::strong_count(&s.updates.inner),
+            2,
+            "the scheduler holds a clone"
+        );
+        s.updates.stop();
+        settle().await;
+        assert_eq!(
+            Arc::strong_count(&s.updates.inner),
+            1,
+            "the scheduler ended without the check's answer"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_automatic_check_leaves_a_running_manual_check_alone() {
+        let mut s = setup(Fake::default(), false);
+        *lock(&s.updates.inner.phase) = UpdatePhase::Checking;
+        states(&mut s.events);
+        s.updates.check_automatic().await;
+        assert_eq!(s.fake.checks(), 0, "no second request while one runs");
+        assert_eq!(s.updates.state().phase, UpdatePhase::Checking);
+        assert!(states(&mut s.events).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_automatic_check_keeps_a_failed_install_until_it_finds_a_release() {
+        let fake = Fake::default();
+        fake.answer(Ok(None));
+        fake.answer(Ok(Some(release("0.11.0"))));
+        let s = setup(fake, false);
+        let failed = UpdatePhase::Failed {
+            message: "the signature does not match".into(),
+            release: Some(release("0.10.0")),
+        };
+        *lock(&s.updates.inner.phase) = failed.clone();
+
+        s.updates.check_automatic().await;
+        assert_eq!(
+            s.updates.state().phase,
+            failed,
+            "Try Again still has its release"
+        );
+
+        s.updates.check_automatic().await;
+        assert_eq!(
+            s.updates.state().phase,
+            UpdatePhase::Available {
+                release: release("0.11.0")
+            }
         );
     }
 }
