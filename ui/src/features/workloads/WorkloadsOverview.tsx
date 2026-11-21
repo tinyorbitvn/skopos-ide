@@ -1,40 +1,49 @@
-import { type ReactNode, useMemo } from "react";
-import { Link } from "react-router";
-import { Badge, type Column, DataTable, Spinner, useNow } from "../../design";
+import { useMemo } from "react";
+import { useNow } from "../../design";
+import {
+  EventStream,
+  ShieldCheck,
+  ShieldOff,
+  TriangleAlert,
+} from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
-import {
-  eventLastSeen,
-  eventObjectText,
-  eventStatus,
-} from "../../kinds/cluster/cluster";
-import { resourcePath } from "../../kinds/nav";
-import { formatAge, type KubeObject, objectKey } from "../../kinds/objects";
-import { useClusterState } from "../../stores/clusters";
+import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { findResource } from "../../stores/resources";
-import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
+import { servedResourceOf } from "../details/ownerLinks";
 import {
-  NamespaceFilter,
-  namespaceFilterKey,
-} from "../resources/NamespaceFilter";
+  CapacityRow,
+  OverviewCard,
+  OverviewCell,
+  OverviewGrid,
+} from "../overview";
+import { OverviewPage } from "../overview/OverviewPage";
 import {
-  type Discovery,
-  type KindRow,
-  kindRow,
-  latestEvents,
-  listView,
-  WORKLOAD_KINDS,
-  type WorkloadCounts,
-  type WorkloadKind,
-} from "./counts";
-import { useListIn } from "./useListIn";
-import styles from "./WorkloadsOverview.module.css";
+  type OverviewColumn,
+  type OverviewRow,
+  OverviewTable,
+  type OverviewTableProps,
+} from "../overview/OverviewTable";
+import {
+  type SectionShared,
+  useSectionShared,
+  useSectionView,
+} from "../sections/sectionLists";
+import { formatCount, objectKey, openKeyOf } from "../sections/text";
+import { TileGrid } from "../sections/tiles";
+import { useOverviewDrawer } from "../sections/useOverviewDrawer";
+import { type ListView, WORKLOAD_KINDS, type WorkloadKind } from "./counts";
+import {
+  eventSubject,
+  kindName,
+  kindRowOf,
+  kindTiles,
+  problemWorkloads,
+  recentEventRows,
+  workloadHealth,
+} from "./workloadsModel";
 
-/** What the app shows for a value it cannot know. */
-const UNAVAILABLE = "—";
-
-/** As many as a compact event list shows; the Events screen has the rest. */
-const RECENT_EVENTS = 10;
+type Empty = OverviewTableProps["empty"];
 
 const [
   PODS,
@@ -46,263 +55,276 @@ const [
   CRONJOBS,
 ] = WORKLOAD_KINDS;
 
-/** A kind's row, recounted only when its list, discovery or the namespaces change. */
-function useKindRow(
-  clusterId: string,
-  resources: ApiResourceInfo[],
-  discovery: Discovery,
-  namespaces: string[],
-  ready: boolean,
-  kind: WorkloadKind,
-): { row: KindRow; namespaces: string[] } {
-  const info = findResource(resources, kind.group, kind.plural);
-  const list = useListIn(clusterId, info, namespaces, ready);
-  const row = useMemo(
-    () => kindRow(kind, info, discovery, list, namespaces),
-    [kind, info, discovery, list, namespaces],
-  );
-  const found = useMemo(() => namespacesOf(list.items), [list.items]);
-  return { row, namespaces: found };
-}
+const HEALTH_COLUMNS: OverviewColumn[] = [
+  { head: "Kind", width: "minmax(0, 1fr)" },
+  { head: "Healthy", width: "64px", align: "end" },
+  { head: "Pending", width: "64px", align: "end" },
+  { head: "Failing", width: "64px", align: "end" },
+];
 
-function namespacesOf(objects: KubeObject[]): string[] {
-  const found = new Set<string>();
-  for (const o of objects) {
-    if (o.metadata.namespace) found.add(o.metadata.namespace);
+const PROBLEM_COLUMNS: OverviewColumn[] = [
+  { head: "Workload", width: "minmax(0, 1.2fr)" },
+  { head: "Kind", width: "88px" },
+  { head: "Status", width: "minmax(0, 1fr)" },
+];
+
+const EVENT_COLUMNS: OverviewColumn[] = [
+  { head: "Object", width: "minmax(140px, 1fr)" },
+  { head: "Type", width: "80px" },
+  { head: "Message", width: "minmax(0, 2.4fr)" },
+  { head: "Age", width: "56px", align: "end" },
+];
+
+const NO_WORKLOADS: Empty = {
+  icon: ShieldOff,
+  title: "You may not list workloads",
+  text: "",
+};
+const ALL_HEALTHY: Empty = {
+  icon: ShieldCheck,
+  title: "Every workload is healthy",
+  text: "",
+};
+const NO_EVENTS: Empty = {
+  icon: EventStream,
+  title: "No recent events",
+  text: "Events of the selected namespaces show here.",
+};
+
+/** What Recent events says without rows: none yet, or why its list is not there (spec §3.1, §3.2). */
+function eventsEmpty(view: ListView): Empty {
+  if (view.state !== "unavailable") return NO_EVENTS;
+  if (view.cause === "forbidden") {
+    return { icon: ShieldOff, title: "You may not list events", text: "" };
   }
-  return [...found];
-}
-
-/** A count in the secondary colour, or the loading and unavailable states. */
-function countCell(
-  row: KindRow,
-  value: (counts: WorkloadCounts) => ReactNode,
-): ReactNode {
-  if (row.state === "loading") return null;
-  if (row.state === "unavailable") {
-    return (
-      <span className={styles.muted} title={row.reason}>
-        {UNAVAILABLE}
-      </span>
-    );
+  if (view.cause === "notServed") {
+    return {
+      icon: EventStream,
+      title: "This cluster does not serve events",
+      text: "",
+    };
   }
-  return value(row.counts);
+  return {
+    icon: TriangleAlert,
+    title: "Could not list events",
+    text: view.reason,
+  };
 }
 
-function kindColumns(clusterId: string): Column<KindRow>[] {
-  const muted = (n: number) => <span className={styles.muted}>{n}</span>;
-  return [
-    {
-      id: "kind",
-      header: "Kind",
-      render: (row) =>
-        row.state === "unavailable" ? (
-          row.kind.label
-        ) : (
-          <Link
-            className={styles.link}
-            to={resourcePath(clusterId, row.kind.group, row.kind.plural)}
-          >
-            {row.kind.label}
-          </Link>
-        ),
-    },
-    {
-      id: "total",
-      header: "Total",
-      width: "88px",
-      align: "end",
-      render: (row) =>
-        row.state === "loading" ? <Spinner /> : countCell(row, (c) => c.total),
-    },
-    {
-      id: "healthy",
-      header: "Healthy",
-      width: "88px",
-      align: "end",
-      render: (row) => countCell(row, (c) => muted(c.healthy)),
-    },
-    {
-      id: "pending",
-      header: "Pending",
-      width: "88px",
-      align: "end",
-      render: (row) => countCell(row, (c) => muted(c.pending)),
-    },
-    {
-      id: "failing",
-      header: "Failing",
-      width: "88px",
-      align: "end",
-      render: (row) =>
-        countCell(row, (c) =>
-          c.failing > 0 ? <Badge tone="danger">{c.failing}</Badge> : muted(0),
-        ),
-    },
-  ];
-}
-
-function eventColumns(now: number): Column<KubeObject>[] {
-  const truncated = (text: string) => (
-    <span className={styles.truncated} title={text}>
-      {text}
-    </span>
-  );
-  return [
-    {
-      id: "age",
-      header: "Age",
-      width: "72px",
-      render: (e) => formatAge(eventLastSeen(e), now),
-    },
-    {
-      id: "type",
-      header: "Type",
-      width: "96px",
-      render: (e) => {
-        const { label } = eventStatus(e);
-        return (
-          <Badge tone={label === "Warning" ? "warn" : "neutral"}>{label}</Badge>
-        );
-      },
-    },
-    {
-      id: "object",
-      header: "Object",
-      width: "34%",
-      render: (e) => truncated(eventObjectText(e)),
-    },
-    {
-      id: "message",
-      header: "Message",
-      render: (e) => truncated(e.message ?? e.note ?? ""),
-    },
-  ];
-}
-
-function noEventsText(namespaces: string[]): string {
-  if (namespaces.length === 0) return "No recent events.";
-  const plural = namespaces.length > 1 ? "s" : "";
-  return `No recent events in namespace${plural} ${namespaces.join(", ")}.`;
+/** A workload kind's list under the namespace selection. */
+function useKindView(shared: SectionShared, kind: WorkloadKind): ListView {
+  return useSectionView(shared, kind.label, kind.group, kind.plural);
 }
 
 /**
- * The newest events in the chosen namespaces. It is a component of its own, so the
- * clock that ages the events re-renders only this table.
+ * The kinds the drawer may open (spec §3.2, R5): the workload kinds, and the kinds the events
+ * name that discovery lists and the account may list.
+ */
+function openableOf(
+  resources: ApiResourceInfo[],
+  events: ListView,
+): ResourceRef[] {
+  const refs = new Map<string, ResourceRef>();
+  const add = (info: ApiResourceInfo | undefined) => {
+    if (info?.canList) refs.set(openKeyOf(info.resource), info.resource);
+  };
+  for (const kind of WORKLOAD_KINDS) {
+    add(findResource(resources, kind.group, kind.plural));
+  }
+  if (events.state === "ready") {
+    for (const event of events.items) {
+      const subject = eventSubject(event);
+      if (subject !== null) add(servedResourceOf(subject, resources));
+    }
+  }
+  return [...refs.values()];
+}
+
+/**
+ * Recent events (spec §3.2). A component of its own, so the clock that ages the events
+ * re-renders only this table.
  */
 function RecentEvents(props: {
-  clusterId: string;
-  info: ApiResourceInfo | undefined;
-  discovery: Discovery;
-  namespaces: string[];
-  ready: boolean;
+  view: ListView;
+  resources: ApiResourceInfo[];
+  onOpen(ref: ResourceRef, key: string): void;
 }) {
-  const { clusterId, info, discovery, namespaces, ready } = props;
-  const list = useListIn(clusterId, info, namespaces, ready);
+  const { view, resources, onOpen } = props;
   const now = useNow();
-  const view = useMemo(
-    () => listView("Events", info, discovery, list, namespaces),
-    [info, discovery, list, namespaces],
+  // The shared clock moves every 30 s; a list that just arrived is aged from now.
+  const rows = useMemo(
+    () => recentEventRows(view, Math.max(now, Date.now())),
+    [view, now],
   );
-  const events = useMemo(
-    () =>
-      view.state === "ready" ? latestEvents(view.items, RECENT_EVENTS) : [],
-    [view],
-  );
-  if (view.state === "loading") return <Spinner label="Loading events" />;
-  if (view.state === "unavailable") {
-    return (
-      <p className={styles.muted} data-testid="workloads-events-status">
-        {view.reason}
-      </p>
-    );
-  }
+  const tableRows = (rows ?? []).map((row): OverviewRow => {
+    const { target } = row;
+    const info =
+      target === null ? undefined : servedResourceOf(target, resources);
+    return {
+      key: row.event.metadata.uid ?? objectKey(row.event),
+      name: row.name,
+      sub: row.sub,
+      onOpen:
+        target !== null && info?.canList
+          ? () => onOpen(info.resource, target.key)
+          : undefined,
+      cells: [
+        row.type === "Warning"
+          ? { text: row.type, tone: "warn" }
+          : { text: row.type },
+        { text: row.message, title: row.message },
+        { text: row.age },
+      ],
+    };
+  });
   return (
-    <div className={styles.table}>
-      <DataTable
-        rows={events}
-        columns={eventColumns(now)}
-        rowKey={objectKey}
-        rowTestId={() => "workload-event"}
-        label="Recent events"
-        empty={<p className={styles.muted}>{noEventsText(namespaces)}</p>}
-        testId="workloads-events"
-      />
-    </div>
+    <OverviewTable
+      id="workloads-events"
+      label="Recent events"
+      columns={EVENT_COLUMNS}
+      rows={tableRows}
+      minWidth={560}
+      loading={view.state === "loading"}
+      empty={eventsEmpty(view)}
+    />
   );
 }
 
 /**
- * The Workloads overview (F17): each workload kind counted by the status its list
- * shows, then the recent events, in the namespaces the lists are filtered to.
+ * The Workloads overview (section overviews spec §3.2): the workload kinds as tiles, their
+ * health, the workloads with problems and the recent events, under the lists' namespace
+ * selection, with the drawer over the page.
  */
 export function WorkloadsOverview() {
   const { clusterId, resources, resourcesLoading, resourcesError } =
     useClusterContext();
-  const [namespaces, setNamespaces, namespacesRead] = useUiState<string[]>(
-    namespaceFilterKey(clusterId),
-    [],
-  );
   const discovery = useMemo(
     () => ({ loading: resourcesLoading, error: resourcesError }),
     [resourcesLoading, resourcesError],
   );
-  const shared = [
-    clusterId,
-    resources,
-    discovery,
-    namespaces,
-    namespacesRead,
-  ] as const;
-  // One call per kind of the Workloads section, in its order: hooks may not loop.
-  const kinds = [
-    useKindRow(...shared, PODS),
-    useKindRow(...shared, DEPLOYMENTS),
-    useKindRow(...shared, DAEMONSETS),
-    useKindRow(...shared, STATEFULSETS),
-    useKindRow(...shared, REPLICASETS),
-    useKindRow(...shared, JOBS),
-    useKindRow(...shared, CRONJOBS),
-  ];
+  const shared = useSectionShared(clusterId, resources, discovery);
+  const namespaces = shared[3];
+  // One call per kind of the Workloads section, in its order: hooks may not loop (R2).
+  const pods = useKindView(shared, PODS);
+  const deployments = useKindView(shared, DEPLOYMENTS);
+  const daemonSets = useKindView(shared, DAEMONSETS);
+  const statefulSets = useKindView(shared, STATEFULSETS);
+  const replicaSets = useKindView(shared, REPLICASETS);
+  const jobs = useKindView(shared, JOBS);
+  const cronJobs = useKindView(shared, CRONJOBS);
+  const events = useSectionView(shared, "Events", "", "events");
 
-  const cluster = useClusterState(clusterId);
-  const options = [
-    ...new Set([
-      ...(cluster.status === "connected" ? cluster.info.namespaces : []),
-      ...kinds.flatMap((k) => k.namespaces),
-    ]),
-  ];
+  const views = useMemo(
+    () => [
+      { kind: PODS, view: pods },
+      { kind: DEPLOYMENTS, view: deployments },
+      { kind: DAEMONSETS, view: daemonSets },
+      { kind: STATEFULSETS, view: statefulSets },
+      { kind: REPLICASETS, view: replicaSets },
+      { kind: JOBS, view: jobs },
+      { kind: CRONJOBS, view: cronJobs },
+    ],
+    [pods, deployments, daemonSets, statefulSets, replicaSets, jobs, cronJobs],
+  );
+  const rows = useMemo(
+    () => views.map(({ kind, view }) => kindRowOf(kind, view)),
+    [views],
+  );
+  const tiles = useMemo(() => kindTiles(rows, clusterId), [rows, clusterId]);
+  const health = useMemo(() => workloadHealth(rows), [rows]);
+  const problems = useMemo(() => problemWorkloads(views), [views]);
+  // Health and problems wait for every kind, so their numbers do not jump.
+  const loading = rows.some((row) => row.state === "loading");
+  const openable = useMemo(
+    () => openableOf(resources, events),
+    [resources, events],
+  );
+  const drawer = useOverviewDrawer(clusterId, resources, openable);
+
+  const problemRows = problems.items.map(
+    ({ object, kind, status, failing }): OverviewRow => {
+      const info = findResource(resources, kind.group, kind.plural);
+      const key = objectKey(object);
+      return {
+        key: `${kind.plural}/${key}`,
+        name: object.metadata.name,
+        sub: object.metadata.namespace ?? "",
+        title: key,
+        onOpen: info ? () => drawer.open(info.resource, key) : undefined,
+        cells: [
+          { text: kindName(kind) },
+          { text: status.label, tone: failing ? "bad" : "warn" },
+        ],
+      };
+    },
+  );
+  const footer =
+    problems.total > problems.items.length
+      ? `Showing ${formatCount(problems.items.length)} of ${formatCount(problems.total)}. The lists show them all.`
+      : undefined;
 
   return (
-    <section className={styles.panel} aria-label="Workloads">
-      <div className={styles.toolbar}>
-        <h2 className={styles.title} data-testid="workloads-overview-title">
-          Workloads
-        </h2>
-        <NamespaceFilter
-          namespaces={options}
-          selected={namespaces}
-          onChange={setNamespaces}
-        />
-      </div>
-      <div className={styles.table}>
-        <DataTable
-          rows={kinds.map((k) => k.row)}
-          columns={kindColumns(clusterId)}
-          rowKey={(row) => row.kind.plural}
-          rowTestId={(row) => `workload-kind-${row.kind.plural}`}
-          label="Workload kinds"
-          testId="workloads-kinds"
-        />
-      </div>
-      <h3 className={styles.heading}>Recent events</h3>
-      <RecentEvents
-        clusterId={clusterId}
-        info={findResource(resources, "", "events")}
-        discovery={discovery}
-        namespaces={namespaces}
-        ready={namespacesRead}
-      />
-    </section>
+    <OverviewPage
+      title="Workloads overview"
+      testId="workloads-overview"
+      namespaces={namespaces}
+      onKeyDown={drawer.onKeyDown}
+    >
+      <OverviewGrid>
+        <OverviewCell span={12}>
+          <OverviewCard
+            title="Workloads by kind"
+            testId="workloads-overview-card-kinds"
+          >
+            <TileGrid tiles={tiles} />
+          </OverviewCard>
+        </OverviewCell>
+        <OverviewCell span={5}>
+          <OverviewCard title="Health" testId="workloads-overview-card-health">
+            {!loading && health !== null ? (
+              <CapacityRow items={[health.donut]} />
+            ) : null}
+            <OverviewTable
+              id="workloads-health"
+              title="Health by kind"
+              label="Health by kind"
+              columns={HEALTH_COLUMNS}
+              rows={health === null ? [] : health.rows}
+              loading={loading}
+              empty={NO_WORKLOADS}
+            />
+          </OverviewCard>
+        </OverviewCell>
+        <OverviewCell span={7}>
+          <OverviewCard
+            title="Workloads with problems"
+            testId="workloads-overview-card-problems"
+          >
+            <OverviewTable
+              id="workloads-problems"
+              label="Workloads with problems"
+              columns={PROBLEM_COLUMNS}
+              rows={problemRows}
+              loading={loading}
+              empty={health === null ? NO_WORKLOADS : ALL_HEALTHY}
+              footer={footer}
+            />
+          </OverviewCard>
+        </OverviewCell>
+        <OverviewCell span={12}>
+          <OverviewCard
+            title="Recent events"
+            testId="workloads-overview-card-events"
+          >
+            <RecentEvents
+              view={events}
+              resources={resources}
+              onOpen={(ref, key) => drawer.open(ref, key)}
+            />
+          </OverviewCard>
+        </OverviewCell>
+      </OverviewGrid>
+      {drawer.drawer}
+    </OverviewPage>
   );
 }
