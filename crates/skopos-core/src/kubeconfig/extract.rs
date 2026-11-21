@@ -41,10 +41,24 @@ fn make_absolute(path: &mut String, base: &Path) {
 /// A command with a separator is a file relative to the kubeconfig, which the
 /// extracted copy no longer sits beside. A bare name stays a `PATH` lookup.
 fn make_exec_command_absolute(user: &mut Value, base: &Path) {
-    let command = user
-        .get_mut("user")
-        .and_then(|body| body.get_mut("exec"))
-        .and_then(|exec| exec.get_mut("command"));
+    let Some(body) = user.get_mut("user") else {
+        return;
+    };
+    make_command_absolute(
+        body.get_mut("exec")
+            .and_then(|exec| exec.get_mut("command")),
+        base,
+    );
+    // A `gcp` auth provider's command is a file in the same way.
+    make_command_absolute(
+        body.get_mut("auth-provider")
+            .and_then(|provider| provider.get_mut("config"))
+            .and_then(|config| config.get_mut("cmd-path")),
+        base,
+    );
+}
+
+fn make_command_absolute(command: Option<&mut Value>, base: &Path) {
     if let Some(Value::String(command)) = command {
         if command.contains(std::path::is_separator) {
             make_absolute(command, base);
@@ -287,6 +301,49 @@ contexts:
         assert_eq!(extracted_exec_command(dir.path(), "aws"), "aws");
         let abs = dir.path().join("plugin").display().to_string();
         assert_eq!(extracted_exec_command(dir.path(), &abs), abs);
+    }
+
+    fn extracted_cmd_path(dir: &Path, command: &str) -> String {
+        let src = dir.join("config");
+        std::fs::write(
+            &src,
+            format!(
+                r#"
+clusters:
+- {{ name: c1, cluster: {{ server: "https://x" }} }}
+users:
+- name: u1
+  user:
+    auth-provider: {{ name: gcp, config: {{ cmd-path: '{command}', cmd-args: "config config-helper" }} }}
+contexts:
+- {{ name: one, context: {{ cluster: c1, user: u1 }} }}
+"#
+            ),
+        )
+        .unwrap();
+        let dest = dir.join("out.yaml");
+        extract_context(&src, "one", &dest).unwrap();
+        read_yaml(&dest)["users"][0]["user"]["auth-provider"]["config"]["cmd-path"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn extract_resolves_a_gcp_command_with_a_separator_against_the_source_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        for command in ["./bin/helper", "bin/helper"] {
+            let out = extracted_cmd_path(dir.path(), command);
+            assert_eq!(Path::new(&out), dir.path().join("bin/helper"), "{command}");
+        }
+    }
+
+    #[test]
+    fn extract_leaves_a_bare_or_absolute_gcp_command_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        for command in ["gcloud", "/usr/bin/gcloud"] {
+            assert_eq!(extracted_cmd_path(dir.path(), command), command);
+        }
     }
 
     #[test]
