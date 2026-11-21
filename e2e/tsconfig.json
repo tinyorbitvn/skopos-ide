@@ -6,6 +6,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["@wdio/globals/types", "node", "mocha", "@wdio/mocha-framework", "@wdio/tauri-service"]
   },
   "include": ["**/*.ts"]
