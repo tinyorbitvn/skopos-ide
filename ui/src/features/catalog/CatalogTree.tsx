@@ -29,6 +29,7 @@ import { failureMessage } from "../../ipc/client";
 import type { CatalogFolder } from "../../ipc/generated/CatalogFolder";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import { useCatalog } from "../../stores/catalog";
+import { connectAndAsk } from "../../stores/clusters";
 import { useFolders } from "../../stores/folders";
 import { settingsPath } from "../settings/paths";
 import styles from "./CatalogScreen.module.css";
@@ -85,7 +86,7 @@ function ConnectButton({ cluster }: { cluster: ClusterEntry }) {
     setBusy(true);
     try {
       if (live) await api.clusterDisconnect(cluster.id);
-      else await api.clusterConnect(cluster.id);
+      else await connectAndAsk(cluster.id);
     } catch (error) {
       const action = live ? "disconnect from" : "connect to";
       toast.error(`Could not ${action} ${cluster.name}`, failureMessage(error));

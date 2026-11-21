@@ -10,6 +10,10 @@ import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, expect, test } from "vitest";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
+import {
+  resetExecConsentForTest,
+  useExecConsent,
+} from "../../stores/execConsent";
 import { resetShellForTest, useShell } from "../../stores/shell";
 import { clusterEntry, emitEvent, mockBackend } from "../../test/ipc";
 import { CatalogScreen } from "./CatalogScreen";
@@ -48,6 +52,7 @@ function openRowMenu(context: string) {
 beforeEach(() => {
   resetCatalogForTest();
   resetShellForTest();
+  resetExecConsentForTest();
 });
 
 test("empty catalog explains how to add a cluster", async () => {
@@ -422,4 +427,22 @@ test("shows loading and error states", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByTestId("catalog-row-alpha")).toBeTruthy();
   view.unmount();
+});
+
+test("a row's Connect asks before the kubeconfig runs a program", async () => {
+  await show([clusterEntry({ id: "a", contextName: "alpha" })], {
+    cluster_connect: () => ({
+      status: "failed",
+      kind: "execNotAllowed",
+      message: "not allowed yet",
+    }),
+  });
+
+  fireEvent.click(
+    within(screen.getByTestId("catalog-row-alpha")).getByRole("button", {
+      name: "Connect",
+    }),
+  );
+
+  await waitFor(() => expect(useExecConsent.getState().clusterId).toBe("a"));
 });

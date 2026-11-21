@@ -4,6 +4,7 @@ import { api } from "../ipc/api";
 import { failureMessage } from "../ipc/client";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { useCatalog } from "./catalog";
+import { useExecConsent } from "./execConsent";
 
 const DISCONNECTED: ConnectionState = { status: "disconnected" };
 
@@ -25,6 +26,19 @@ export function useClusterNamespaces(clusterId: string): string[] {
   return state.status === "connected" ? state.info.namespaces : NO_NAMESPACES;
 }
 
+/**
+ * Starts a connect. Every connect in the interface goes through here: when the
+ * kubeconfig would run a program the user has not allowed, this opens the consent
+ * dialog for the cluster.
+ */
+export async function connectAndAsk(id: string): Promise<ConnectionState> {
+  const state = await api.clusterConnect(id);
+  if (state.status === "failed" && state.kind === "execNotAllowed") {
+    useExecConsent.getState().ask(id);
+  }
+  return state;
+}
+
 /** Connect and disconnect for one cluster, with a flag for a call in flight. */
 export function useConnect(id: string): {
   connect(): Promise<void>;
@@ -37,7 +51,7 @@ export function useConnect(id: string): {
     async (action: "connect" | "disconnect"): Promise<void> => {
       setBusy(true);
       try {
-        if (action === "connect") await api.clusterConnect(id);
+        if (action === "connect") await connectAndAsk(id);
         else await api.clusterDisconnect(id);
       } catch (error) {
         toast.error(`Could not ${action}`, failureMessage(error));
@@ -56,7 +70,7 @@ export function useConnect(id: string): {
 /** Connects from outside a cluster screen (the palette); a failure toasts as `useConnect` does. */
 export async function connectCluster(id: string): Promise<void> {
   try {
-    await api.clusterConnect(id);
+    await connectAndAsk(id);
   } catch (error) {
     toast.error("Could not connect", failureMessage(error));
   }
