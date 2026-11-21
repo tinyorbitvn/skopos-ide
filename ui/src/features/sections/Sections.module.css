@@ -33,3 +33,11 @@
     --cols: 4;
   }
 }
+
+/* Storage overview (spec §3.6): the source caption under Largest claims. */
+.storageCaption {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
