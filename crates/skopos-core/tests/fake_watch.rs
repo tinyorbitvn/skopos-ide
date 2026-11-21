@@ -202,6 +202,9 @@ impl Consumer {
                 }
             }
             WatchEvent::Status { .. } => {}
+            WatchEvent::SnapshotPart { .. } => {
+                panic!("only the forwarder to the webview cuts a snapshot")
+            }
         }
         self.seen.push(event);
     }
@@ -297,6 +300,7 @@ impl Consumer {
             .seen
             .iter()
             .map(|event| match event {
+                WatchEvent::SnapshotPart { items } => format!("part({})", items.len()),
                 WatchEvent::Snapshot { items } => format!("snapshot({})", items.len()),
                 WatchEvent::Batch { upserts, deletes } => {
                     format!("batch(+{} -{})", upserts.len(), deletes.len())

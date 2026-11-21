@@ -76,6 +76,8 @@ interface Entry {
   scope: Scope | null;
   /** Always up to date. `state.items` lags behind it while the window is hidden. */
   rows: Map<string, KubeObject>;
+  /** The rows of a snapshot that is arriving in parts, until its last part. */
+  incoming: Map<string, KubeObject> | null;
   /** Set when `rows` changed after `state.items` was built from them. */
   changed: boolean;
   /** The keys batches added at the end of `rows`, out of the listed order. */
@@ -201,13 +203,25 @@ function publish(entry: Entry): void {
  * hidden, a batch only changes the rows, and they are published when the window
  * shows. A snapshot or a status is published at once: either is rare, a snapshot
  * ends the loading that other code waits for, and a status may report an error.
+ * A large snapshot arrives in parts, each parsed on its own, and is published once,
+ * with its last part, so a list is never shown half replaced.
  */
 function apply(entry: Entry, event: WatchEvent): void {
   switch (event.type) {
+    case "snapshotPart": {
+      entry.incoming ??= new Map();
+      for (const o of event.items as unknown as KubeObject[]) {
+        entry.incoming.set(objectKey(o), o);
+      }
+      return;
+    }
     case "snapshot": {
-      entry.rows = new Map(
-        (event.items as unknown as KubeObject[]).map((o) => [objectKey(o), o]),
-      );
+      const rows = entry.incoming ?? new Map<string, KubeObject>();
+      entry.incoming = null;
+      for (const o of event.items as unknown as KubeObject[]) {
+        rows.set(objectKey(o), o);
+      }
+      entry.rows = rows;
       entry.changed = true;
       entry.added.clear();
       entry.state = { ...entry.state, loading: false };
@@ -296,6 +310,7 @@ function open(
     clusterId,
     scope,
     rows: new Map(),
+    incoming: null,
     changed: false,
     added: new Set(),
     state: LOADING,
