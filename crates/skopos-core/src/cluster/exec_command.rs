@@ -1,7 +1,7 @@
 //! The program a kubeconfig runs for credentials, and the fingerprint a consent is tied to.
 
 use kube::config::{AuthProviderConfig, ExecConfig, Kubeconfig};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
@@ -19,8 +19,6 @@ pub enum ExecCommandKind {
 }
 
 /// What `kube` would run for the one user of an extracted kubeconfig.
-// The connect attempt reads every field from Task 3 on; until then only tests do.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExecCommand {
     pub(crate) kind: ExecCommandKind,
@@ -30,6 +28,31 @@ pub(crate) struct ExecCommand {
     pub(crate) server: String,
     /// Hex SHA-256 of everything that decides what runs and where its credentials go.
     pub(crate) fingerprint: String,
+}
+
+/// One cluster's consent. It holds a digest, never an argument or a value.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ExecConsent {
+    pub(crate) fingerprint: String,
+}
+
+/// What a blocked connect refused to run, without its arguments or environment values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecRequest {
+    /// Names this request to the calls that act on it.
+    pub request_id: u32,
+    pub kind: ExecCommandKind,
+    pub command: String,
+    pub arg_count: u32,
+    pub env_names: Vec<String>,
+    pub server: String,
+    pub source_path: String,
+    pub context_name: String,
+    /// The user allowed something else for this cluster before.
+    pub changed: bool,
 }
 
 /// One section's program, before the two are told apart.

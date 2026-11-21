@@ -17,7 +17,10 @@ use ts_rs::TS;
 use crate::agents::registry::AgentProbes;
 use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
-use crate::cluster::{ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState};
+use crate::cluster::{
+    ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState, ExecConsent, ExecRequest,
+    HeldExec,
+};
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::graph::GraphHub;
 use crate::helm::Helm;
@@ -49,6 +52,7 @@ const UI_STATE_FILE: &str = "ui-state.json";
 const CATALOG_FOLDERS_FILE: &str = "catalog-folders.json";
 const WINDOWS_FILE: &str = "windows.json";
 const UPDATES_FILE: &str = "updates.json";
+const EXEC_CONSENTS_FILE: &str = "exec-consents.json";
 /// The safety net under file events, which some filesystems never deliver.
 const SYNC_POLL: Duration = Duration::from_secs(10);
 const EVENT_BACKLOG: usize = 64;
@@ -100,6 +104,9 @@ struct Inner {
     prefs: JsonStore<Prefs>,
     clusters: JsonStore<HashMap<ClusterId, ClusterSettings>>,
     hotbar: JsonStore<Vec<ClusterId>>,
+    /// The exec commands the user allowed, by cluster. Changed only by its own calls,
+    /// never with a cluster's settings, which the window replaces whole.
+    exec_consents: JsonStore<HashMap<ClusterId, ExecConsent>>,
     folders: JsonStore<CatalogFolders>,
     windows: Windows,
     ui_state: UiState,
@@ -275,6 +282,7 @@ impl AppCore {
         let (prefs, sources) = open_prefs(&paths, kubeconfig_env.as_deref(), &mut warnings);
         let clusters = open_store(&paths, CLUSTERS_FILE, &mut warnings);
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
+        let exec_consents = open_store(&paths, EXEC_CONSENTS_FILE, &mut warnings);
         let folders = open_folders(&paths, &mut warnings);
         let (windows, windows_warning) = Windows::open(
             paths.config.join(WINDOWS_FILE),
@@ -302,6 +310,7 @@ impl AppCore {
                 prefs,
                 clusters,
                 hotbar,
+                exec_consents,
                 folders,
                 windows,
                 ui_state,
@@ -536,7 +545,56 @@ impl AppCore {
             .cloned()
             .ok_or_else(|| IpcError::new(ErrorCode::NotFound, format!("no cluster {id}")))?;
         let settings = self.cluster_settings_get(id);
-        Ok(self.inner.connections.connect(entry, settings).await)
+        let allowed = self
+            .inner
+            .exec_consents
+            .get()
+            .get(id)
+            .map(|consent| consent.fingerprint.clone());
+        Ok(self
+            .inner
+            .connections
+            .connect(entry, settings, allowed)
+            .await)
+    }
+
+    /// What the last blocked connect refused to run, for the consent dialog.
+    pub fn cluster_exec_request(&self, id: &ClusterId) -> CoreResult<ExecRequest> {
+        self.inner
+            .connections
+            .held_exec(id)
+            .map(|held| held.summary())
+            .ok_or_else(|| {
+                IpcError::new(
+                    ErrorCode::NotFound,
+                    format!("no exec command is waiting for cluster {id}"),
+                )
+            })
+    }
+
+    /// The held request `request_id`. Another attempt since then makes it a `Conflict`,
+    /// so nobody acts on something other than what they were shown.
+    fn held_exec(&self, id: &ClusterId, request_id: u32) -> CoreResult<HeldExec> {
+        self.inner
+            .connections
+            .held_exec(id)
+            .filter(|held| held.request_id == request_id)
+            .ok_or_else(|| {
+                IpcError::new(
+                    ErrorCode::Conflict,
+                    "the kubeconfig was read again since this was shown; review it again",
+                )
+            })
+    }
+
+    /// Remembers the held request's fingerprint for the cluster. It does not connect.
+    pub fn cluster_exec_allow(&self, id: &ClusterId, request_id: u32) -> CoreResult<()> {
+        let held = self.held_exec(id, request_id)?;
+        let fingerprint = held.command.fingerprint;
+        self.inner.exec_consents.update(|all| {
+            all.insert(id.clone(), ExecConsent { fingerprint });
+        })?;
+        Ok(())
     }
 
     pub async fn cluster_disconnect(&self, id: &ClusterId) -> CoreResult<()> {

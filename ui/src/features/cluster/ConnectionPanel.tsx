@@ -11,6 +11,7 @@ const HEADINGS: Record<FailureKind, string> = {
   unauthorized: "Not authorized",
   forbidden: "Access forbidden",
   configInvalid: "Kubeconfig problem",
+  execNotAllowed: "Permission needed",
   other: "Connection failed",
 };
 

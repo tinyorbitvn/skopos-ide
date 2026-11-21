@@ -112,6 +112,14 @@ fn failure(state: &ConnectionState) -> (FailureKind, &str) {
     }
 }
 
+/// Allows the context's exec plugin, as the consent dialog would.
+async fn allow_exec(core: &AppCore, id: &ClusterId) {
+    let state = core.cluster_connect(id).await.unwrap();
+    assert_eq!(failure(&state).0, FailureKind::ExecNotAllowed);
+    let request = core.cluster_exec_request(id).unwrap();
+    core.cluster_exec_allow(id, request.request_id).unwrap();
+}
+
 fn namespaces(state: &ConnectionState) -> (&[String], bool) {
     match state {
         ConnectionState::Connected { info } => (&info.namespaces, info.namespaces_restricted),
@@ -273,6 +281,7 @@ async fn missing_exec_plugin_fails_and_names_the_command() {
         None,
     );
     let (core, id, _root) = core_with_kubeconfig(&text).await;
+    allow_exec(&core, &id).await;
 
     let state = tokio::time::timeout(Duration::from_secs(10), core.cluster_connect(&id))
         .await
@@ -293,6 +302,7 @@ async fn failing_exec_plugin_reports_the_command_and_its_stderr() {
         None,
     );
     let (core, id, _root) = core_with_kubeconfig(&text).await;
+    allow_exec(&core, &id).await;
 
     let state = core.cluster_connect(&id).await.unwrap();
 
@@ -327,6 +337,7 @@ async fn failing_exec_plugin_does_not_leak_secrets_to_state_or_log() {
     );
     let text = config_text("http://127.0.0.1:9", &user, None);
     let (core, id, _root) = core_with_kubeconfig(&text).await;
+    allow_exec(&core, &id).await;
 
     let state = core.cluster_connect(&id).await.unwrap();
 
@@ -353,6 +364,7 @@ async fn exec_plugin_printing_garbage_does_not_leak_it() {
         None,
     );
     let (core, id, _root) = core_with_kubeconfig(&text).await;
+    allow_exec(&core, &id).await;
 
     let state = core.cluster_connect(&id).await.unwrap();
 
@@ -373,6 +385,7 @@ async fn hanging_exec_plugin_times_out_and_names_the_command() {
         None,
     );
     let (core, id, _root) = core_with_kubeconfig(&text).await;
+    allow_exec(&core, &id).await;
     core.set_connect_timeouts_for_test(ConnectTimeouts {
         version_exec: Duration::from_millis(200),
         ..Default::default()
@@ -400,6 +413,7 @@ async fn working_exec_plugin_connects() {
         None,
     );
     let (core, id, _root) = core_with_kubeconfig(&text).await;
+    allow_exec(&core, &id).await;
 
     let state = core.cluster_connect(&id).await.unwrap();
 

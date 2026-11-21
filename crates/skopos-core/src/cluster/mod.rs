@@ -13,8 +13,9 @@ pub use control_plane::{
     ApiServer, ControlPlane, ControlPlaneComponent, HealthCheck, HealthState, Leader, PodCounts,
 };
 pub use distribution::detect_distribution;
-pub use exec_command::ExecCommandKind;
-pub(crate) use manager::ClusterManager;
+pub(crate) use exec_command::ExecConsent;
+pub use exec_command::{ExecCommandKind, ExecRequest};
+pub(crate) use manager::{ClusterManager, HeldExec};
 pub use manager::{ConnectionLogEntry, LogLevel};
 pub(crate) use raw::get_raw;
 pub use state::{ClusterInfo, ConnectionState, FailureKind};
