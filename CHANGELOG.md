@@ -27,6 +27,7 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 - **The resource map asks how large the cluster is first:** a map with no saved namespaces first reads only how many resources each namespace holds. It then loads the whole map when that is at most 1,500 resources, and otherwise only the namespace it keeps, where it loaded every resource of the cluster and then dropped most of them.
 - **The Workloads overview loads only the namespaces it shows:** with namespaces chosen, the overview now receives only their workloads and events, and waits for the saved choice before it asks, where it loaded every workload and event of the cluster and then filtered them.
 - **A Node's Pods no longer load the whole cluster:** the Pods part of a Node's detail panel now asks the cluster for the Pods on that node only, where it loaded every Pod of the cluster to show a few. In a large cluster it opens at once and uses far less memory.
+- **Closing the window always quits:** if quitting stalls for 20 seconds after the main window closes, the app now ends itself, where it could stay running with no window. Each step of the quit is written to the app's log, so a stall shows how far it got.
 - **Hardening:** the app's settings, data, log and cache folders are kept to your user account, a failed access review no longer logs text the server sent, the connection log warns when a kubeconfig turns off TLS verification, and the content security policy forbids frames, plugins, form posts and a changed base address.
 
 ## [0.9.0] - 2026-11-20

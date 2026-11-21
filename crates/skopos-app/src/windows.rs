@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use skopos_core::app_core::AppCore;
 use skopos_core::error::{ErrorCode, IpcError};
+use skopos_core::quit::{exit_now, QUIT_LIMIT};
 use skopos_core::windows::{
     clamp_bounds, MoveOutcome, MoveTarget, ScreenRect, WindowBounds, WindowLayout, MAIN_WINDOW,
 };
@@ -157,11 +158,15 @@ impl WindowTracker {
     }
 }
 
-/// Marks the app as quitting: from now on a closed window keeps its layout.
-pub fn quitting<R: Runtime>(app: &AppHandle<R>) {
+/// Marks the app as quitting: from now on a closed window keeps its layout. The quit's
+/// steps are logged from the first one, `step`, and a quit that stalls ends the process,
+/// which would otherwise run on with no window (P34).
+pub fn quitting<R: Runtime>(app: &AppHandle<R>, step: &str) {
     app.state::<WindowTracker>()
         .quitting
         .store(true, Ordering::SeqCst);
+    let core = &app.state::<AppState>().core;
+    core.quit().begin(step, QUIT_LIMIT, || exit_now(0));
 }
 
 /// A window's UI has sent its last layout before the app quits.
@@ -201,9 +206,12 @@ fn close_main_after_flush<R: Runtime>(app: &AppHandle<R>) {
         app.state::<WindowTracker>()
             .flushed
             .store(true, Ordering::SeqCst);
+        let quit = app.state::<AppState>().core.quit().clone();
+        quit.step("the windows saved their layout; main closes again");
         let closed = app.get_webview_window(MAIN_WINDOW).map(|main| main.close());
         if !matches!(closed, Some(Ok(()))) {
             tracing::warn!("cannot close the main window after the windows saved; quitting");
+            quit.step("main could not close again; the app exits");
             app.exit(0);
         }
     });
@@ -432,12 +440,16 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         WindowEvent::Focused(true) => core.window_focused(label),
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => report_bounds_later(window),
         WindowEvent::CloseRequested { api, .. } if label == MAIN_WINDOW => {
-            quitting(app);
             if !app.state::<WindowTracker>().flushed.load(Ordering::SeqCst) {
+                quitting(
+                    app,
+                    "main asked to close; the windows save their layout first",
+                );
                 api.prevent_close();
                 close_main_after_flush(app);
                 return;
             }
+            quitting(app, "main closes");
             for other in app.webview_windows().values() {
                 report_bounds(core, other);
             }
@@ -447,7 +459,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
             tracker.moves().remove(label);
             match on_destroyed(label, tracker.quitting()) {
                 Destroyed::Quit => {
-                    quitting(app);
+                    quitting(app, "main destroyed; the app exits");
                     app.exit(0);
                 }
                 Destroyed::Forget => {
@@ -458,7 +470,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
                         tracing::warn!("cannot drop the layout of window {label}: {e}");
                     }
                 }
-                Destroyed::Keep => {}
+                Destroyed::Keep => core.quit().step(&format!("window {label} destroyed")),
             }
         }
         _ => {}

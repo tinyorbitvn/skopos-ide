@@ -16,6 +16,7 @@ pub mod paths;
 pub mod portforward;
 pub mod prefs;
 pub mod process;
+pub mod quit;
 pub mod resources;
 pub mod save_file;
 pub mod secrets;
