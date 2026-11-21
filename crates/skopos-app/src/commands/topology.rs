@@ -7,7 +7,7 @@ use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::topology::TopologyEvent;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
@@ -25,16 +25,20 @@ impl Serialize for SharedTopologyEvent {
     }
 }
 
-/// Streams the cluster's node topology to `on_event` and returns the subscription id. When
-/// the channel can no longer be written, as after a webview reload, the subscription ends.
+/// Streams the cluster's node topology to `on_event` and returns the subscription id. The
+/// subscription belongs to the window that asks and ends when its page loads again or it
+/// closes; so does one whose channel can no longer be written.
 #[tauri::command]
 pub async fn node_topology_subscribe(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     on_event: Channel<SharedTopologyEvent>,
 ) -> Result<String, IpcError> {
     let (tx, mut rx) = mpsc::channel(FORWARD_BACKLOG);
-    let id = state.core.node_topology_subscribe(&cluster_id, tx)?;
+    let id = state
+        .core
+        .node_topology_subscribe(&cluster_id, tx, window.label())?;
     let core = state.core.clone();
     let subscription = id.clone();
     tauri::async_runtime::spawn(async move {
