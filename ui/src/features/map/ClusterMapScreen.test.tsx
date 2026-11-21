@@ -17,6 +17,7 @@ import {
   type GraphBackend,
   gnode,
   graphBackend,
+  type SnapshotEvent,
   servedResource,
   snapshotOf,
 } from "../../test/graph";
@@ -81,6 +82,15 @@ async function show(
 const subscribed = () =>
   g.backend.callsTo("resource_graph_subscribe").map((a) => a.namespaces);
 
+/**
+ * Sends what a map with no saved namespaces takes to draw: the counts, which it asks for
+ * alone, and then the graph they call for.
+ */
+async function load(snapshot: SnapshotEvent = demoSnapshot()) {
+  await g.send(snapshot);
+  await g.send(snapshot);
+}
+
 const box = (testId: string) => screen.getByTestId(testId) as HTMLInputElement;
 
 const radio = (value: string) =>
@@ -111,7 +121,11 @@ describe("ClusterMapScreen", () => {
       "Reading resources…",
     );
     expect(screen.queryByTestId("map-filters")).toBeNull();
-    expect(subscribed()).toEqual([null]);
+    expect(subscribed()).toEqual([[]]);
+    await g.send(demoSnapshot());
+    expect(subscribed()).toEqual([[], null]);
+    expect(screen.getByTestId("map-loading")).toBeTruthy();
+    expect(screen.queryByTestId("map-empty")).toBeNull();
     await g.send(demoSnapshot());
     const title = screen.getByRole("heading", { level: 1 });
     expect(title.textContent).toBe("Resource map");
@@ -142,7 +156,7 @@ describe("ClusterMapScreen", () => {
 
   it("hides a namespace from the Namespaces dropdown, saves it and subscribes with the rest", async () => {
     await show();
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     fireEvent.click(screen.getByTestId("map-ns-filter"));
     fireEvent.click(box("map-ns-option-shop"));
     await act(flush);
@@ -151,8 +165,8 @@ describe("ClusterMapScreen", () => {
       "2 namespaces",
     );
     expect(screen.getByTestId("map-clear-filters")).toBeTruthy();
-    expect(subscribed()).toEqual([null, ["edge", "jobs"]]);
-    expect(g.open()).toEqual(["g2"]);
+    expect(subscribed()).toEqual([[], null, ["edge", "jobs"]]);
+    expect(g.open()).toEqual(["g3"]);
     await waitFor(() => expect(store["map.hidden.c1"]).toEqual(["shop"]));
   });
 
@@ -178,7 +192,15 @@ describe("ClusterMapScreen", () => {
     expect(subscribed()).toEqual([[]]);
   });
 
-  it("hides all but the default namespace on a large cluster with no saved choice", async () => {
+  it("asks for the whole graph at once when the saved choice hides nothing", async () => {
+    await show({ "map.hidden.c1": [] });
+    expect(subscribed()).toEqual([null]);
+    await g.send(demoSnapshot());
+    expect(screen.getByTestId("map-canvas")).toBeTruthy();
+    expect(subscribed()).toEqual([null]);
+  });
+
+  it("keeps the default namespace of a large cluster with no saved choice, and never asks for all of it", async () => {
     await show({}, "jobs");
     await g.send(
       demoSnapshot({
@@ -190,7 +212,8 @@ describe("ClusterMapScreen", () => {
       }),
     );
     await act(flush);
-    expect(subscribed()).toEqual([null, ["jobs"]]);
+    expect(subscribed()).toEqual([[], ["jobs"]]);
+    expect(screen.queryByTestId("map-empty")).toBeNull();
     await waitFor(() =>
       expect(store["map.hidden.c1"]).toEqual(["edge", "shop"]),
     );
@@ -207,12 +230,12 @@ describe("ClusterMapScreen", () => {
       }),
     );
     await act(flush);
-    expect(subscribed()).toEqual([null, ["edge"]]);
+    expect(subscribed()).toEqual([[], ["edge"]]);
   });
 
   it("hides a kind from the Kinds dropdown, saves it and draws its bridges", async () => {
     await show({ "map.layout.c1": "layered" });
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     fireEvent.click(screen.getByTestId("map-kind-filter"));
     fireEvent.click(box("map-kind-option-ReplicaSet"));
     expect(screen.getByTestId("map-kind-filter").textContent).toBe(
@@ -220,7 +243,7 @@ describe("ClusterMapScreen", () => {
     );
     expect(screen.getByTestId("map-clear-filters")).toBeTruthy();
     // The Kinds filter is the client's: the subscription stays.
-    expect(subscribed()).toEqual([null]);
+    expect(subscribed()).toEqual([[], null]);
     const edges = screen.getAllByTestId("map-edge");
     const bridge = edges.find(
       (el) =>
@@ -250,7 +273,7 @@ describe("ClusterMapScreen", () => {
 
   it("keeps the Kinds dropdown while a new namespace filter loads", async () => {
     await show({ "map.hiddenKinds.c1": ["ReplicaSet"] });
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     expect(screen.getByTestId("map-kind-filter").textContent).toBe(
       "15 of 16 kinds",
     );
@@ -266,7 +289,7 @@ describe("ClusterMapScreen", () => {
 
   it("says when every present kind is hidden, and Clear filters empties both lists", async () => {
     await show({ "map.hiddenKinds.c1": ["Pod", "Widget"] });
-    await g.send(snapshotOf(pods(3), []));
+    await load(snapshotOf(pods(3), []));
     expect(screen.queryByTestId("map-canvas")).toBeNull();
     expect(screen.getByTestId("map-empty").textContent).toBe(
       "All kinds are hidden. Pick one in Kinds to draw the map.",
@@ -283,12 +306,12 @@ describe("ClusterMapScreen", () => {
     );
     await waitFor(() => expect(store["map.hiddenKinds.c1"]).toEqual([]));
     await waitFor(() => expect(store["map.hidden.c1"]).toEqual([]));
-    expect(subscribed()).toEqual([null]);
+    expect(subscribed()).toEqual([[], null]);
   });
 
   it("a saved kind that is not present does not filter", async () => {
     await show({ "map.hiddenKinds.c1": ["Widget"] });
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     expect(screen.getByTestId("map-kind-filter").textContent).toBe("All kinds");
     expect(screen.queryByTestId("map-clear-filters")).toBeNull();
     expect(screen.getByTestId("map-summary").textContent).toBe(
@@ -298,7 +321,7 @@ describe("ClusterMapScreen", () => {
 
   it("offers Force only up to 400 drawn nodes and falls back to Grouped", async () => {
     await show({ "map.layout.c1": "force" });
-    await g.send(snapshotOf(pods(400), []));
+    await load(snapshotOf(pods(400), []));
     expect(radio("force").checked).toBe(true);
     expect(radio("force").disabled).toBe(false);
     await g.send(snapshotOf(pods(401), []));
@@ -317,7 +340,7 @@ describe("ClusterMapScreen", () => {
 
   it("draws nothing above 1,500 nodes and says so", async () => {
     await show();
-    await g.send(snapshotOf(pods(1501), []));
+    await load(snapshotOf(pods(1501), []));
     expect(screen.queryByTestId("map-canvas")).toBeNull();
     const note = screen.getByTestId("map-note");
     expect(note.getAttribute("role")).toBe("note");
@@ -328,7 +351,7 @@ describe("ClusterMapScreen", () => {
 
   it("counts the drawn nodes for both caps, after the Kinds filter", async () => {
     await show({ "map.layout.c1": "force", "map.hiddenKinds.c1": ["Secret"] });
-    await g.send(snapshotOf([...pods(1501), ...secrets(10)], []));
+    await load(snapshotOf([...pods(1501), ...secrets(10)], []));
     expect(screen.getByTestId("map-note").textContent).toBe(
       "1,501 resources in the selected namespaces and kinds. Hide some namespaces or kinds to draw the map.",
     );
@@ -344,7 +367,7 @@ describe("ClusterMapScreen", () => {
 
   it("says when there is nothing to draw", async () => {
     await show();
-    await g.send(snapshotOf([], []));
+    await load(snapshotOf([], []));
     expect(screen.getByTestId("map-empty").textContent).toBe(
       "No resources in the selected namespaces.",
     );
@@ -352,7 +375,7 @@ describe("ClusterMapScreen", () => {
 
   it("shows a failure and subscribes again on Retry", async () => {
     await show();
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     await g.send({ type: "failure", message: "discovery failed" });
     const error = screen.getByTestId("map-error");
     expect(error.getAttribute("role")).toBe("alert");
@@ -361,14 +384,14 @@ describe("ClusterMapScreen", () => {
     );
     fireEvent.click(screen.getByTestId("map-retry"));
     await act(flush);
-    expect(subscribed()).toEqual([null, null]);
+    expect(subscribed()).toEqual([[], null, null]);
     await g.send(demoSnapshot());
     expect(screen.getByTestId("map-canvas")).toBeTruthy();
   });
 
   it("notes the kinds the user cannot list above the drawn canvas", async () => {
     await show();
-    await g.send(demoSnapshot({ missing: ["secrets", "serviceaccounts"] }));
+    await load(demoSnapshot({ missing: ["secrets", "serviceaccounts"] }));
     expect(screen.getByTestId("map-note").textContent).toBe(
       "Not shown: you cannot list Secrets, ServiceAccounts.",
     );
@@ -377,7 +400,7 @@ describe("ClusterMapScreen", () => {
 
   it("notes a search that matches nothing, and Enter selects the first match", async () => {
     await show();
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     const search = screen.getByTestId("map-search");
     fireEvent.change(search, { target: { value: "zzz" } });
     expect(screen.getByTestId("map-note").textContent).toBe(
@@ -395,7 +418,7 @@ describe("ClusterMapScreen", () => {
 
   it("clears a selection whose kind gets hidden, and searches drawn nodes only", async () => {
     await show();
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     const search = screen.getByTestId("map-search");
     fireEvent.change(search, { target: { value: "nightly" } });
     fireEvent.keyDown(search, { key: "Enter" });
@@ -419,7 +442,7 @@ describe("ClusterMapScreen", () => {
 
   it("opens the object map from the details pane", async () => {
     await show();
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     fireEvent.change(screen.getByTestId("map-search"), {
       target: { value: "nightly" },
     });
@@ -432,7 +455,7 @@ describe("ClusterMapScreen", () => {
 
   it("saves the layout per cluster", async () => {
     await show();
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     fireEvent.click(screen.getByTestId("map-layout-layered"));
     expect(radio("layered").checked).toBe(true);
     await waitFor(() => expect(store["map.layout.c1"]).toBe("layered"));
@@ -465,7 +488,7 @@ describe("ClusterMapScreen Export", () => {
       "map-reset",
     );
     expect(button.disabled).toBe(true);
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     expect(exportButton().disabled).toBe(false);
     await g.send({ type: "failure", message: "discovery failed" });
     expect(exportButton().disabled).toBe(true);
@@ -473,7 +496,7 @@ describe("ClusterMapScreen Export", () => {
 
   it("is disabled while too many resources or none are shown", async () => {
     await show();
-    await g.send(snapshotOf(pods(1501), []));
+    await load(snapshotOf(pods(1501), []));
     expect(exportButton().disabled).toBe(true);
     await g.send(snapshotOf([], []));
     expect(exportButton().disabled).toBe(true);
@@ -497,7 +520,7 @@ describe("ClusterMapScreen Export", () => {
       await show({}, null, {
         map_export: () => `/home/me/maps/prod.${format}`,
       });
-      await g.send(demoSnapshot());
+      await load(demoSnapshot());
       await pickExport(format);
       expect(renderMapPng).toHaveBeenCalledWith(
         screen.getByTestId("map-canvas"),
@@ -516,7 +539,7 @@ describe("ClusterMapScreen Export", () => {
     const success = vi.spyOn(toast, "success");
     const error = vi.spyOn(toast, "error");
     await show({}, null, { map_export: () => null });
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     await pickExport("png");
     expect(g.backend.callsTo("map_export")).toHaveLength(1);
     expect(success).not.toHaveBeenCalled();
@@ -532,7 +555,7 @@ describe("ClusterMapScreen Export", () => {
           finish = resolve;
         }),
     });
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     await pickExport("png");
     expect(exportButton().disabled).toBe(true);
     await pickExport("pdf");
@@ -551,7 +574,7 @@ describe("ClusterMapScreen Export", () => {
         throw { code: "Forbidden", message: "Permission denied (os error 13)" };
       },
     });
-    await g.send(demoSnapshot());
+    await load(demoSnapshot());
     await pickExport("png");
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",

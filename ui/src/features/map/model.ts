@@ -157,6 +157,40 @@ export function subscribedNamespaces(
   return namespaces.filter((ns) => !hidden.has(ns));
 }
 
+/** How many nodes the whole graph holds, by its counts. */
+function totalNodes(counts: GraphNamespaceCount[]): number {
+  return counts.reduce((sum, c) => sum + c.nodes, 0);
+}
+
+/**
+ * True while the map asks for the counts alone, ahead of what they call for. With no
+ * saved choice that is until they show that the whole graph can be drawn, or a namespace
+ * is kept in its place (`autoHidden`). A saved choice needs them to name the namespaces.
+ */
+export function countsFirst(
+  savedHidden: readonly string[] | null,
+  counts: GraphNamespaceCount[] | null,
+): boolean {
+  if (savedHidden === null) {
+    return counts === null || totalNodes(counts) > MAX_NODES;
+  }
+  return counts === null && savedHidden.length > 0;
+}
+
+/**
+ * What the map subscribes with: null for the whole graph, else the namespaces to load,
+ * where none loads the counts alone. So a cluster's whole graph is not loaded only to
+ * find that it is too large to draw (spec E §9.2).
+ */
+export function graphFilter(
+  savedHidden: readonly string[] | null,
+  counts: GraphNamespaceCount[] | null,
+): string[] | null {
+  if (countsFirst(savedHidden, counts)) return [];
+  if (savedHidden === null || counts === null) return null;
+  return subscribedNamespaces(chipNamespaces(counts), new Set(savedHidden));
+}
+
 /**
  * The namespaces to hide on a cluster whose whole graph holds more than `MAX_NODES`
  * nodes, or null when it does not. The one kept is the default namespace when it has
@@ -166,8 +200,7 @@ export function autoHidden(
   counts: GraphNamespaceCount[],
   defaultNamespace: string | null,
 ): string[] | null {
-  const total = counts.reduce((sum, c) => sum + c.nodes, 0);
-  if (total <= MAX_NODES) return null;
+  if (totalNodes(counts) <= MAX_NODES) return null;
   const names = chipNamespaces(counts);
   const keep =
     defaultNamespace !== null &&
