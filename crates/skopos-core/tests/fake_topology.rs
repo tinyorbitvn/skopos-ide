@@ -103,8 +103,13 @@ struct Subscription {
 
 impl Subscription {
     fn start(core: &AppCore, cluster: &ClusterId) -> Self {
+        Self::start_as(core, cluster, "main")
+    }
+
+    /// Subscribes as the window `owner`.
+    fn start_as(core: &AppCore, cluster: &ClusterId, owner: &str) -> Self {
         let (tx, rx) = mpsc::channel(16);
-        let id = core.node_topology_subscribe(cluster, tx).unwrap();
+        let id = core.node_topology_subscribe(cluster, tx, owner).unwrap();
         Self { id, rx }
     }
 
@@ -260,6 +265,25 @@ async fn subscribers_share_one_topology_and_it_stops_after_the_last() {
 }
 
 #[tokio::test]
+async fn a_window_s_topology_ends_with_it_and_another_window_s_goes_on() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    seed(&fake);
+    let mut kept = Subscription::start_as(&core, &id, "main");
+    let mut ended = Subscription::start_as(&core, &id, "window-2");
+    kept.snapshot().await;
+    ended.snapshot().await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    ended.ended().await;
+    // The topology and the rows it reads belong to no window: the other one still follows
+    // them.
+    fake.upsert("nodes", node("worker-3", "a"));
+    assert_eq!(kept.snapshot().await.node_count, 3);
+    assert_eq!(core.running_topologies_for_test(), 1);
+}
+
+#[tokio::test]
 async fn forbidden_pods_hide_the_pods_and_keep_the_nodes() {
     let cfg = FakeKubeConfig {
         deny: vec![DenyRule {
@@ -370,6 +394,6 @@ async fn a_disconnect_ends_the_subscription_and_refuses_new_ones() {
     sub.ended().await;
     assert_eq!(core.running_topologies_for_test(), 0);
     let (tx, _rx) = mpsc::channel(1);
-    let refused = core.node_topology_subscribe(&id, tx).unwrap_err();
+    let refused = core.node_topology_subscribe(&id, tx, "main").unwrap_err();
     assert_eq!(refused.code, ErrorCode::InvalidInput);
 }

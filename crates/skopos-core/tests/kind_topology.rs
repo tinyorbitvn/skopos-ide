@@ -86,7 +86,7 @@ async fn the_topology_places_the_kind_nodes_by_zone_with_their_pods() {
             .await
             .unwrap();
         let (tx, mut rx) = mpsc::channel(16);
-        let subscription = core.node_topology_subscribe(&id, tx).unwrap();
+        let subscription = core.node_topology_subscribe(&id, tx, "main").unwrap();
         let snapshot = snapshot_where(&mut rx, |s| {
             find(s, WORKER).is_some_and(|(zone, _)| zone == Some(ZONE))
         })

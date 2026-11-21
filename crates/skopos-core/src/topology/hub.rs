@@ -23,6 +23,7 @@ use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::resources::{state_name, ResourceRef, RowShape, Scope};
+use crate::subscriptions::Subscriptions;
 
 /// As the graph's: later snapshots at most once every 2 s.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(2);
@@ -163,8 +164,8 @@ impl Topology {
 /// The topologies of every cluster.
 pub(crate) struct TopologyHub {
     topologies: DashMap<ClusterId, Arc<Topology>>,
-    /// What stops each subscription's task.
-    subscriptions: DashMap<String, CancellationToken>,
+    /// What stops each subscription's task, and the window that asked for it.
+    subscriptions: Subscriptions,
     next_subscription: AtomicU64,
     interval: Mutex<Duration>,
 }
@@ -173,7 +174,7 @@ impl Default for TopologyHub {
     fn default() -> Self {
         Self {
             topologies: DashMap::new(),
-            subscriptions: DashMap::new(),
+            subscriptions: Subscriptions::default(),
             next_subscription: AtomicU64::new(1),
             interval: Mutex::new(DEFAULT_INTERVAL),
         }
@@ -234,13 +235,14 @@ impl TopologyHub {
         id: &ClusterId,
         tx: mpsc::Sender<Arc<TopologyEvent>>,
         cluster: &CancellationToken,
+        owner: &str,
     ) -> CoreResult<String> {
         let topology = self.join(core, id, cluster)?;
         let number = self.next_subscription.fetch_add(1, Ordering::Relaxed);
         let subscription = format!("topology-{number}");
         let stop = topology.token.child_token();
         self.subscriptions
-            .insert(subscription.clone(), stop.clone());
+            .insert(subscription.clone(), stop.clone(), Some(owner));
         let linger = core.watches().linger();
         tokio::spawn(serve(
             self.clone(),
@@ -254,9 +256,12 @@ impl TopologyHub {
     }
 
     fn unsubscribe(&self, subscription: &str) {
-        if let Some((_, stop)) = self.subscriptions.remove(subscription) {
-            stop.cancel();
-        }
+        self.subscriptions.stop(subscription);
+    }
+
+    /// Ends the subscriptions the window `owner` asked for.
+    pub(crate) fn stop_owned(&self, owner: &str) {
+        self.subscriptions.stop_owned(owner);
     }
 
     fn running(&self) -> usize {
@@ -414,18 +419,19 @@ async fn serve(
             () = tx.closed() => break,
         }
     }
-    hub.subscriptions.remove(&subscription);
+    hub.subscriptions.forget(&subscription);
     topology.detach(linger);
 }
 
 impl AppCore {
     /// Sends the cluster's node topology to `tx` until unsubscribed, the cluster disconnects,
     /// the receiver closes or the topology fails (topology spec §4.1). Returns the
-    /// subscription id.
+    /// subscription id. `owner` is the label of the window that asks.
     pub fn node_topology_subscribe(
         &self,
         id: &ClusterId,
         tx: mpsc::Sender<Arc<TopologyEvent>>,
+        owner: &str,
     ) -> CoreResult<String> {
         let state = self.cluster_state(id);
         if !matches!(state, ConnectionState::Connected { .. }) {
@@ -435,7 +441,7 @@ impl AppCore {
             ));
         }
         let cluster = self.cluster_cancel_token(id)?;
-        self.topologies().subscribe(self, id, tx, &cluster)
+        self.topologies().subscribe(self, id, tx, &cluster, owner)
     }
 
     /// An id that is unknown or already ended is ignored.
