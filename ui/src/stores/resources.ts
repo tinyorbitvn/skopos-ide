@@ -14,6 +14,7 @@ import type { WatchEvent } from "../ipc/generated/WatchEvent";
 import type { WatchStatus } from "../ipc/generated/WatchStatus";
 import { type KubeObject, objectKey } from "../kinds/objects";
 import { useCatalog } from "./catalog";
+import { mergeAdded } from "./mergeRows";
 
 /** The kinds whose watched rows are trimmed, as `<group>/<plural>`. */
 const TRIMMED = new Set([
@@ -75,8 +76,8 @@ interface Entry {
   rows: Map<string, KubeObject>;
   /** Set when `rows` changed after `state.items` was built from them. */
   changed: boolean;
-  /** Set when a batch added a key at the end of `rows`, out of the listed order. */
-  unsorted: boolean;
+  /** The keys batches added at the end of `rows`, out of the listed order. */
+  added: Set<string>;
   state: ResourceListState;
   listeners: Set<() => void>;
   refs: number;
@@ -147,15 +148,14 @@ function compareListed(a: KubeObject, b: KubeObject): number {
 }
 
 /**
- * Builds `state.items` from `rows` if they changed, and tells the components. The
- * rows are sorted here, so batches that arrive while the window is hidden sort once.
+ * Builds `state.items` from `rows` if they changed, and tells the components. New
+ * rows are put in their place here, so batches that arrive while the window is hidden
+ * are placed once. Only the new rows are sorted: the others are in order already.
  */
 function publish(entry: Entry): void {
-  if (entry.unsorted) {
-    entry.rows = new Map(
-      [...entry.rows].sort(([, a], [, b]) => compareListed(a, b)),
-    );
-    entry.unsorted = false;
+  if (entry.added.size > 0) {
+    entry.rows = mergeAdded(entry.rows, entry.added, compareListed);
+    entry.added.clear();
   }
   if (entry.changed) {
     entry.state = { ...entry.state, items: [...entry.rows.values()] };
@@ -177,7 +177,7 @@ function apply(entry: Entry, event: WatchEvent): void {
         (event.items as unknown as KubeObject[]).map((o) => [objectKey(o), o]),
       );
       entry.changed = true;
-      entry.unsorted = false;
+      entry.added.clear();
       entry.state = { ...entry.state, loading: false };
       break;
     }
@@ -187,7 +187,7 @@ function apply(entry: Entry, event: WatchEvent): void {
       // a batch in no order, so new objects are put in the snapshot's order.
       for (const o of event.upserts as unknown as KubeObject[]) {
         const key = objectKey(o);
-        if (!entry.rows.has(key)) entry.unsorted = true;
+        if (!entry.rows.has(key)) entry.added.add(key);
         entry.rows.set(key, o);
       }
       entry.changed = true;
@@ -259,7 +259,7 @@ function open(key: string, clusterId: string, start: Start): Entry {
     clusterId,
     rows: new Map(),
     changed: false,
-    unsorted: false,
+    added: new Set(),
     state: LOADING,
     listeners: new Set(),
     refs: 0,

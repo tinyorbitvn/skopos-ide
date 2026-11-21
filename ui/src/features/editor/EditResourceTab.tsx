@@ -15,7 +15,8 @@ import {
 import { editTarget } from "./apiDocsKind";
 import type { CreateDraft } from "./CreateResourceTab";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
-import { stripServerFields, validateYaml, yamlProblem } from "./validate";
+import { useYamlCheck } from "./useYamlCheck";
+import { stripServerFields, yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
 import styles from "./YamlEditor.module.css";
 
@@ -67,7 +68,8 @@ export function EditResourceTab(props: {
   } | null>(null);
 
   const dirty = text !== loaded;
-  const check = useMemo(() => validateYaml(text), [text]);
+  // `unchecked` while a long text waits for its check: it is not sent before.
+  const { check, pending: unchecked } = useYamlCheck(text);
   const target = useMemo(() => editTarget(resource), [resource]);
   let problem: string | null = null;
   if (!check.ok) problem = yamlProblem(check);
@@ -212,7 +214,7 @@ export function EditResourceTab(props: {
             variant="primary"
             size="sm"
             loading={busy}
-            disabled={!dirty || problem !== null}
+            disabled={!dirty || problem !== null || unchecked}
             onClick={() => void save(false)}
             data-testid="yaml-save"
           >
@@ -268,6 +270,7 @@ export function EditResourceTab(props: {
               </Button>
               <Button
                 variant="danger"
+                disabled={problem !== null || unchecked}
                 onClick={() => void save(true)}
                 data-testid="conflict-overwrite"
               >

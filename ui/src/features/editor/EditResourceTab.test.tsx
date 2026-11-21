@@ -14,6 +14,7 @@ import { flush, mockBackend } from "../../test/ipc";
 import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { EditResourceTab } from "./EditResourceTab";
+import { CHECK_AT_ONCE_CHARS } from "./useYamlCheck";
 
 vi.mock("./YamlEditor", () => ({
   YamlEditor: (props: {
@@ -92,6 +93,17 @@ function dirty() {
   return useDock.getState().tabs.find((t) => t.id === TAB.id)?.dirty;
 }
 
+/** Valid YAML lines that make a document longer than the editor checks as it is typed. */
+function longData(): string {
+  const lines: string[] = [];
+  for (let size = 0; size <= CHECK_AT_ONCE_CHARS; ) {
+    const line = `  key-${lines.length}: value\n`;
+    lines.push(line);
+    size += line.length;
+  }
+  return `data:\n${lines.join("")}`;
+}
+
 afterEach(() => {
   // Unmount before the resets, so no mounted panel asks for API docs again and fills
   // the cache the next test starts from.
@@ -151,6 +163,25 @@ test("invalid YAML blocks saving and shows the line", async () => {
   edit(EDITED);
   expect(screen.queryByTestId("yaml-error")).toBeNull();
   expect(save().disabled).toBe(false);
+});
+
+test("long text is checked once the typing pauses, and cannot be saved before", async () => {
+  const calls = backend();
+  await show();
+  const long = `${YAML}${longData()}`;
+
+  edit(`${long}broken: [1\n`);
+  expect(save().disabled).toBe(true);
+  expect(screen.queryByTestId("yaml-error")).toBeNull();
+  fireEvent.click(save());
+  await waitFor(() => expect(screen.getByTestId("yaml-error")).toBeTruthy());
+  expect(save().disabled).toBe(true);
+
+  edit(long);
+  expect(save().disabled).toBe(true);
+  await waitFor(() => expect(save().disabled).toBe(false));
+  expect(screen.queryByTestId("yaml-error")).toBeNull();
+  expect(calls.callsTo("resource_replace")).toEqual([]);
 });
 
 test("more or fewer than one document blocks saving", async () => {
