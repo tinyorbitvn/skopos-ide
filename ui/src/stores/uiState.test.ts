@@ -1,7 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { flush, mockBackend } from "../test/ipc";
-import { useUiState } from "./uiState";
+import { resetUiStateForTest, useUiState } from "./uiState";
+
+afterEach(resetUiStateForTest);
 
 test("loads the saved value and saves changes after a pause", async () => {
   const backend = mockBackend({
@@ -68,4 +70,84 @@ test("reports loaded once the saved value was read, also when the read fails", a
   const failed = renderHook(() => useUiState("other", 5));
   await act(flush);
   expect(failed.result.current[2]).toBe(true);
+});
+
+/**
+ * A backend that, like the real one, answers a read with the value from before until
+ * a write is done. `finish` ends the writes under way.
+ */
+function slowToSave(first: unknown) {
+  let saved = first;
+  let waiting: (() => void)[] = [];
+  const backend = mockBackend({
+    ui_state_get: () => saved,
+    ui_state_set: (a: { value: unknown }) =>
+      new Promise((resolve) => {
+        waiting.push(() => {
+          saved = a.value;
+          resolve(null);
+        });
+      }),
+  });
+  return {
+    backend,
+    finish: async () => {
+      const done = waiting;
+      waiting = [];
+      await act(async () => {
+        for (const end of done) end();
+        await flush();
+      });
+    },
+  };
+}
+
+test("the next reader of a key gets the value this window is still saving", async () => {
+  const { finish } = slowToSave(["a"]);
+  const first = renderHook(() => useUiState<string[]>("k", []));
+  await act(flush);
+  act(() => first.result.current[1](["b"]));
+  first.unmount();
+
+  const second = renderHook(() => useUiState<string[]>("k", []));
+  await act(flush);
+  expect(second.result.current).toEqual([["b"], expect.any(Function), true]);
+
+  await finish();
+  expect(second.result.current[0]).toEqual(["b"]);
+  const third = renderHook(() => useUiState<string[]>("k", []));
+  await act(flush);
+  expect(third.result.current[0]).toEqual(["b"]);
+});
+
+test("a value saved while a read is under way wins over what the read answers", async () => {
+  const reads: ((value: unknown) => void)[] = [];
+  mockBackend({
+    ui_state_get: () => new Promise((resolve) => reads.push(resolve)),
+    ui_state_set: () => null,
+  });
+  const reader = renderHook(() => useUiState<string[]>("k", []));
+  const writer = renderHook(() => useUiState<string[]>("k", []));
+  act(() => writer.result.current[1](["b"]));
+  writer.unmount();
+  await act(flush);
+
+  await act(async () => {
+    for (const answer of reads) answer(["a"]);
+    await flush();
+  });
+  expect(reader.result.current).toEqual([["b"], expect.any(Function), true]);
+});
+
+test("a saved value of another key is not taken", async () => {
+  const { finish } = slowToSave(["a"]);
+  const first = renderHook(() => useUiState<string[]>("k", []));
+  await act(flush);
+  act(() => first.result.current[1](["b"]));
+  first.unmount();
+
+  const other = renderHook(() => useUiState<string[]>("other", []));
+  await act(flush);
+  expect(other.result.current[0]).toEqual(["a"]);
+  await finish();
 });
