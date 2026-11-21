@@ -1,0 +1,25 @@
+/* Styles the section overviews share (section overviews spec §3.1, §3.3). */
+
+/* A card's source caption, as the cluster Overview's Capacity card sets it. */
+.caption {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* Why a card has nothing to show: its list or the topology could not be read. */
+.problem {
+  margin: 0;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Tables side by side, each at least 280 px wide, one under another below that. */
+.sideBySide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: var(--space-8) var(--space-10);
+  min-width: 0;
+}
