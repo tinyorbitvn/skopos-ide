@@ -1,4 +1,5 @@
 import { UsageDonut } from "../../design";
+import type { UsageTone } from "../../design/UsageDonut";
 import styles from "./CapacityRow.module.css";
 
 /** One donut of the Capacity card (spec §3.2). */
@@ -17,10 +18,19 @@ export interface CapacityItem {
   unit: string;
   /** "Requests N%", or null. */
   note: string | null;
+  /**
+   * The donut's level in place of the 80 % / 95 % rule (section overviews spec §4.3): the
+   * worst state's on the Health and Endpoints ready donuts.
+   */
+  level?: UsageTone;
 }
 
 const known = (item: CapacityItem) =>
   item.pct !== null && item.used !== null && item.total !== null;
+
+/** "4 of 6 cores", or "4 of 6" for a count without a unit (Health, Endpoints ready). */
+const withUnit = (text: string, unit: string) =>
+  unit === "" ? text : `${text} ${unit}`;
 
 /**
  * The Capacity card's 96 px donuts (spec §3.2), in columns of at least 120 px. Their text sits
@@ -38,7 +48,10 @@ export function CapacityRow(props: { items: CapacityItem[] }) {
               name={item.name}
               label={
                 ok
-                  ? `${item.label} ${item.pct}%, ${item.used} of ${item.total} ${item.unit}`
+                  ? withUnit(
+                      `${item.label} ${item.pct}%, ${item.used} of ${item.total}`,
+                      item.unit,
+                    )
                   : `${item.label}: no data`
               }
               pct={item.pct}
@@ -47,11 +60,14 @@ export function CapacityRow(props: { items: CapacityItem[] }) {
               unit={item.unit}
               size={96}
               bare
+              tone={item.level}
             />
             <div className={styles.text} aria-hidden="true">
               <span className={styles.name}>{item.name}</span>
               <span className={styles.values} data-testid={`${testId}-values`}>
-                {ok ? `${item.used} / ${item.total} ${item.unit}` : "No data"}
+                {ok
+                  ? withUnit(`${item.used} / ${item.total}`, item.unit)
+                  : "No data"}
               </span>
               {item.note ? (
                 <span className={styles.note} data-testid={`${testId}-note`}>

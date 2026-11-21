@@ -1,4 +1,5 @@
 import { useId } from "react";
+import type { UsageTone } from "../../design/UsageDonut";
 import { ShareDonut, sharePct } from "./ShareDonut";
 import styles from "./TopTable.module.css";
 
@@ -13,6 +14,11 @@ export interface TopRow {
   amount: number;
   /** The amount as the Pods list shows it: "994m", "1.2 cores", "870Mi", "3.4Gi". */
   amountText: string;
+  /**
+   * The row's own usage, drawn in place of its share of `total` (section overviews spec
+   * §4.3): a node's use of its allocatable, a claim's of its volume. `label` names the donut.
+   */
+  own?: { pct: number | null; label: string; level?: UsageTone };
   /** Opens the row's object in the drawer. */
   onOpen(): void;
 }
@@ -29,10 +35,12 @@ export interface TopTableProps {
   total: number | null;
   /** What the share is of, in the donut's name: "CPU" or "memory". */
   what: string;
+  /** The donut column's head: "Share" when left out, "Usage" for rows' own usage. */
+  shareHead?: string;
   rows: TopRow[];
 }
 
-/** The largest consumers with their share of the cluster (spec §3.5). */
+/** The largest consumers with their share of the cluster, or their own usage (spec §3.5). */
 export function TopTable(props: TopTableProps) {
   const titleId = useId();
   return (
@@ -54,7 +62,7 @@ export function TopTable(props: TopTableProps) {
               {props.valueHead}
             </th>
             <th scope="col" className={styles.share}>
-              Share
+              {props.shareHead ?? "Share"}
             </th>
           </tr>
         </thead>
@@ -65,7 +73,14 @@ export function TopTable(props: TopTableProps) {
             </tr>
           ) : (
             props.rows.map((row) => {
-              const pct = sharePct(row.amount, props.total);
+              const pct = row.own
+                ? row.own.pct
+                : sharePct(row.amount, props.total);
+              const label = row.own
+                ? row.own.label
+                : pct === null
+                  ? `${row.name}: share unknown`
+                  : `${row.name} ${pct}% of the cluster's ${props.what}`;
               return (
                 <tr
                   key={row.key}
@@ -87,11 +102,8 @@ export function TopTable(props: TopTableProps) {
                   <td className={styles.share}>
                     <ShareDonut
                       pct={pct}
-                      label={
-                        pct === null
-                          ? `${row.name}: share unknown`
-                          : `${row.name} ${pct}% of the cluster's ${props.what}`
-                      }
+                      label={label}
+                      level={row.own?.level}
                     />
                   </td>
                 </tr>
