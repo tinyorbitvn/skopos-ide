@@ -8,6 +8,14 @@ export interface AppEnv {
 }
 
 /**
+ * Where the app built for these tests saves a file instead of opening the save dialog,
+ * which no spec can answer: `SKOPOS_E2E_SAVE_DIR`, under the env's home.
+ */
+export function saveDirOf(home: string): string {
+  return path.join(home, "saved");
+}
+
+/**
  * Creates temp HOME and config dirs, writes each given kubeconfig under
  * `<home>/.kube/`, and points the process environment at them before launch.
  * `prefs` fields, such as `helmPath`, are saved as the app's preferences, next to
@@ -39,6 +47,8 @@ export function prepareAppEnv(opts: {
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   process.env.SKOPOS_CONFIG_DIR = configDir;
+  fs.mkdirSync(saveDirOf(home));
+  process.env.SKOPOS_E2E_SAVE_DIR = saveDirOf(home);
   delete process.env.KUBECONFIG;
   return { home, configDir };
 }

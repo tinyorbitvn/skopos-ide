@@ -2,10 +2,13 @@ import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
 import { flush, mockBackend } from "../../test/ipc";
 import {
+  handleNativePaste,
   handleTerminalKey,
   isMacUserAgent,
   isTerminalShortcut,
   type KeyTarget,
+  openTerminalLink,
+  sanitizePaste,
   terminalKeyAction,
 } from "./terminalKeys";
 
@@ -224,4 +227,90 @@ test("the palette and Preferences keys go to the app, not the process", () => {
   ]).toEqual(["app", "app", "app", "app", null]);
   expect(handleTerminalKey(key(ctrlShiftP), target(), false)).toBe(false);
   expect(handleTerminalKey(key(cmdComma), target(), true)).toBe(false);
+});
+
+test("sanitizePaste keeps tab, line feed, carriage return and ordinary and non-ASCII text", () => {
+  const text = "a\tb\nc\rd héllo 日本語 🚀";
+  expect(sanitizePaste(text)).toBe(text);
+});
+
+test("sanitizePaste removes ESC, so a bracketed-paste end marker cannot be forged", () => {
+  expect(sanitizePaste("a\u001b[201~b")).toBe("a[201~b");
+});
+
+test("sanitizePaste removes NUL, ETX, DEL and C1 control characters", () => {
+  expect(sanitizePaste("a\u0000b\u0003c\u007fd\u009be\u0080f\u009f")).toBe(
+    "abcdef",
+  );
+});
+
+test("the keyboard paste hands xterm sanitized text, and nothing when only control characters are left", async () => {
+  mockBackend({
+    "plugin:clipboard-manager|read_text": () => "x\u001b[201~\recho pwned",
+  });
+  const into = target();
+  handleTerminalKey(key(CTRL_SHIFT_V), into, false);
+  await flush();
+  expect(into.pasted).toEqual(["x[201~\recho pwned"]);
+
+  mockBackend({ "plugin:clipboard-manager|read_text": () => "\u001b\u0003" });
+  const empty = target();
+  handleTerminalKey(key(CTRL_SHIFT_V), empty, false);
+  await flush();
+  expect(empty.pasted).toEqual([]);
+});
+
+function pasteEvent(text: string | null): Event {
+  const event = new Event("paste", { cancelable: true, bubbles: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: text === null ? null : { getData: () => text },
+  });
+  return event;
+}
+
+test("a native paste is stopped and pasted sanitized when input is on", () => {
+  const into = target();
+  const event = pasteEvent("ls\u001b[201~\rrm");
+  const stop = vi.spyOn(event, "stopPropagation");
+  handleNativePaste(event as ClipboardEvent, into);
+  expect(event.defaultPrevented).toBe(true);
+  expect(stop).toHaveBeenCalled();
+  expect(into.pasted).toEqual(["ls[201~\rrm"]);
+});
+
+test("a native paste is stopped but pastes nothing when input is off or only control characters arrive", () => {
+  const off = target({ input: false });
+  const event = pasteEvent("ls");
+  handleNativePaste(event as ClipboardEvent, off);
+  expect(event.defaultPrevented).toBe(true);
+  expect(off.pasted).toEqual([]);
+
+  const on = target();
+  handleNativePaste(pasteEvent("\u001b\u0003") as ClipboardEvent, on);
+  handleNativePaste(pasteEvent(null) as ClipboardEvent, on);
+  expect(on.pasted).toEqual([]);
+});
+
+test("a link in terminal output opens through the app's opener", async () => {
+  const backend = mockBackend({ open_external: () => null });
+  openTerminalLink("https://example.com/");
+  await flush();
+  expect(backend.callsTo("open_external")).toEqual([
+    { url: "https://example.com/" },
+  ]);
+});
+
+test("a link that cannot be opened shows a toast", async () => {
+  const error = vi.spyOn(toast, "error");
+  mockBackend({
+    open_external: () => {
+      throw new Error("scheme not allowed");
+    },
+  });
+  openTerminalLink("file:///etc/passwd");
+  await flush();
+  expect(error).toHaveBeenCalledWith(
+    "Could not open the link",
+    "scheme not allowed",
+  );
 });

@@ -153,7 +153,10 @@ impl AppCore {
                 temp_path
                     .persist(dest)
                     .map_err(|error| IpcError::from(error.error))?;
-                Ok(LogDownload { bytes })
+                Ok(LogDownload {
+                    bytes,
+                    path: dest.display().to_string(),
+                })
             }
         }
     }

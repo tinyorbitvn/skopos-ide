@@ -225,7 +225,7 @@ impl AppCore {
     /// Delivers one object to `tx` until unsubscribed with `resources_unsubscribe`, the
     /// cluster disconnects, the receiver closes or a final status has been sent. Returns the
     /// subscription id. A namespaced resource needs `namespace`, and a cluster-scoped one
-    /// takes none.
+    /// takes none. `owner` is the label of the window that asks.
     pub async fn resources_subscribe_object(
         &self,
         id: &ClusterId,
@@ -233,6 +233,7 @@ impl AppCore {
         namespace: Option<String>,
         name: String,
         tx: mpsc::Sender<WatchEvent>,
+        owner: &str,
     ) -> CoreResult<String> {
         validate(&resource)?;
         if !is_path_segment(&name) {
@@ -254,7 +255,7 @@ impl AppCore {
             ));
         }
         let stop = connection.token.child_token();
-        let subscription = self.watches().register(stop.clone());
+        let subscription = self.watches().register(stop.clone(), Some(owner));
         tokio::spawn(run(
             self.watches().clone(),
             subscription.clone(),

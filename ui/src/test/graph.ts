@@ -391,7 +391,8 @@ export interface GraphBackend {
 
 /**
  * A backend whose graph subscriptions answer `g1`, `g2`… and keep their channels,
- * so a test can send snapshots and failures. `extra` adds other handlers.
+ * so a test can send snapshots and failures. `extra` adds other handlers. A subscription
+ * for no namespace is sent a snapshot without its nodes and edges, as the backend sends it.
  */
 export function graphBackend(
   extra: Parameters<typeof mockBackend>[0] = {},
@@ -401,11 +402,19 @@ export function graphBackend(
   let seq = 0;
   const backend = mockBackend({
     resource_graph_subscribe: (a: {
+      namespaces: string[] | null;
       onEvent: { onmessage: (event: GraphEvent) => void };
     }) => {
       seq += 1;
       const id = `g${seq}`;
-      channels.set(id, a.onEvent.onmessage);
+      const countsAlone = a.namespaces?.length === 0;
+      channels.set(id, (event) =>
+        a.onEvent.onmessage(
+          countsAlone && event.type === "snapshot"
+            ? { ...event, nodes: [], edges: [] }
+            : event,
+        ),
+      );
       open.add(id);
       return id;
     },

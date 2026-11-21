@@ -1,7 +1,8 @@
 //! What a watched row keeps of its object. A table holds every row of a resource, and the
-//! webview's memory grows with what each row carries. So a row of a core Pod, Node or
-//! ConfigMap, of an apps ReplicaSet or of a CustomResourceDefinition keeps only what the UI
-//! reads outside the detail drawer, which fetches the whole object with `resource_get`.
+//! webview's memory grows with what each row carries. So a row of a core Pod, Node,
+//! ConfigMap or Event, of an apps ReplicaSet, of a CustomResourceDefinition or of an Argo CD
+//! Application keeps only what the UI reads outside the detail drawer, which fetches the
+//! whole object with `resource_get`.
 //! Annotations stay for the list's filter, each value cut short (spec M24), and so does a
 //! Pod's status message for the workload Status card, cut the same way (spec N20). The
 //! resource graph reads these same rows for every kind but Pods, so each rule keeps what the
@@ -491,9 +492,82 @@ pub(super) fn has_topology_row(resource: &ResourceRef) -> bool {
 }
 
 /// The rule a (group, plural) is trimmed by, for a table row or the Pod table's shape.
+/// An object without its fields, for a reader that only asks whether it is there.
+const PRESENT: Keep = Fields(&[]);
+
+/// What the Rollback dialog lists of one earlier deployment. Its sources stay out.
+const APPLICATION_HISTORY: Keep = Fields(&[
+    ("id", All),
+    ("revision", All),
+    ("revisions", All),
+    ("deployedAt", All),
+    ("initiatedBy", All),
+]);
+
+/// The Applications table (project, sync, health, revision), the row's Sync, Rollback and
+/// Terminate actions with their dialogs, and the AppProject's list read these. Terminate
+/// shows while `operation` and `status.operationState` are there, and Sync asks only how
+/// many `spec.sources` there are. The managed resources, the last sync's result, the
+/// conditions and what the sources hold stay out: they are most of an Application.
+const APPLICATION_ROW: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    ("operation", PRESENT),
+    (
+        "spec",
+        Fields(&[
+            ("project", All),
+            ("sources", Each(&PRESENT)),
+            ("syncPolicy", Fields(&[("automated", All)])),
+        ]),
+    ),
+    (
+        "status",
+        Fields(&[
+            ("controllerNamespace", All),
+            (
+                "sync",
+                Fields(&[("status", All), ("revision", All), ("revisions", All)]),
+            ),
+            ("health", Fields(&[("status", All)])),
+            ("history", Each(&APPLICATION_HISTORY)),
+            ("operationState", Fields(&[("phase", All)])),
+        ]),
+    ),
+]);
+
+/// The kind and name the Events tables show of the object an Event is about.
+const EVENT_OBJECT: Keep = Fields(&[("kind", All), ("name", All)]);
+
+/// The Events table and the Overview's recent events read these: the type, the reason,
+/// the whole message, the count and the times an Event was seen, in both API shapes. Who
+/// reported it and the rest of the object's reference stay out.
+const EVENT_ROW: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    ("type", All),
+    ("reason", All),
+    ("message", All),
+    ("note", All),
+    ("count", All),
+    (
+        "series",
+        Fields(&[("count", All), ("lastObservedTime", All)]),
+    ),
+    ("firstTimestamp", All),
+    ("lastTimestamp", All),
+    ("eventTime", All),
+    ("involvedObject", EVENT_OBJECT),
+    ("regarding", EVENT_OBJECT),
+]);
+
 fn row_rule(resource: &ResourceRef) -> Option<&'static Keep> {
     match (resource.group.as_str(), resource.plural.as_str()) {
         ("", "pods") => Some(&POD_ROW),
+        ("", "events") => Some(&EVENT_ROW),
+        ("argoproj.io", "applications") => Some(&APPLICATION_ROW),
         ("", "nodes") => Some(&NODE_ROW),
         ("", "configmaps") => Some(&CONFIG_MAP_ROW),
         ("apps", "replicasets") => Some(&REPLICA_SET_ROW),
@@ -1132,9 +1206,174 @@ mod tests {
         })
     }
 
+    fn full_application() -> Value {
+        json!({
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Application",
+            "metadata": row_metadata("shop", Some("argocd")),
+            "operation": {
+                "sync": { "revision": "abc", "resources": [{ "kind": "Deployment", "name": "web" }] },
+                "initiatedBy": { "username": "admin" },
+            },
+            "spec": {
+                "project": "team-a",
+                "source": {
+                    "repoURL": "https://example.com/shop.git",
+                    "path": "deploy",
+                    "targetRevision": "main",
+                    "helm": { "values": "source-values ".repeat(400) },
+                },
+                "sources": [
+                    { "repoURL": "https://example.com/shop.git", "helm": { "values": "sources-values ".repeat(400) } },
+                    { "repoURL": "https://example.com/values.git", "ref": "values" },
+                ],
+                "destination": { "server": "https://kubernetes.default.svc", "namespace": "shop" },
+                "syncPolicy": {
+                    "automated": { "prune": true, "selfHeal": false },
+                    "syncOptions": ["CreateNamespace=true"],
+                    "retry": { "limit": 5 },
+                },
+                "ignoreDifferences": [{ "group": "apps", "kind": "Deployment", "jsonPointers": ["/spec/replicas"] }],
+            },
+            "status": {
+                "controllerNamespace": "argocd",
+                "sync": {
+                    "status": "Synced",
+                    "revision": "abc",
+                    "revisions": ["abc", "def"],
+                    "comparedTo": { "source": { "repoURL": "https://example.com/shop.git" } },
+                },
+                "health": { "status": "Healthy", "message": "all good" },
+                "resources": [
+                    { "kind": "Deployment", "name": "managed-web", "namespace": "shop", "status": "Synced" },
+                    { "kind": "Service", "name": "managed-web", "namespace": "shop", "status": "Synced" },
+                ],
+                "summary": { "images": ["example.com/web:1"] },
+                "conditions": [{ "type": "SyncError", "message": "a condition" }],
+                "reconciledAt": "2026-11-01T10:00:00Z",
+                "sourceType": "Helm",
+                "history": [{
+                    "id": 3,
+                    "revision": "abc",
+                    "revisions": ["abc", "def"],
+                    "deployedAt": "2026-11-01T09:30:00Z",
+                    "deployStartedAt": "2026-11-01T09:29:00Z",
+                    "initiatedBy": { "username": "admin", "automated": false },
+                    "source": { "repoURL": "https://example.com/shop.git", "helm": { "values": "history-values ".repeat(400) } },
+                    "sources": [{ "repoURL": "https://example.com/shop.git" }],
+                }],
+                "operationState": {
+                    "phase": "Succeeded",
+                    "message": "successfully synced",
+                    "startedAt": "2026-11-01T09:29:00Z",
+                    "finishedAt": "2026-11-01T09:30:00Z",
+                    "operation": { "sync": { "revision": "abc" } },
+                    "syncResult": {
+                        "revision": "abc",
+                        "resources": [{ "kind": "Deployment", "name": "synced-web", "message": "configured" }],
+                    },
+                },
+            },
+        })
+    }
+
+    fn trimmed_application() -> Value {
+        json!({
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Application",
+            "metadata": kept_metadata("shop", Some("argocd")),
+            "operation": {},
+            "spec": {
+                "project": "team-a",
+                "sources": [{}, {}],
+                "syncPolicy": { "automated": { "prune": true, "selfHeal": false } },
+            },
+            "status": {
+                "controllerNamespace": "argocd",
+                "sync": { "status": "Synced", "revision": "abc", "revisions": ["abc", "def"] },
+                "health": { "status": "Healthy" },
+                "history": [{
+                    "id": 3,
+                    "revision": "abc",
+                    "revisions": ["abc", "def"],
+                    "deployedAt": "2026-11-01T09:30:00Z",
+                    "initiatedBy": { "username": "admin", "automated": false },
+                }],
+                "operationState": { "phase": "Succeeded" },
+            },
+        })
+    }
+
+    fn full_event() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "Event",
+            "metadata": row_metadata("web-1.17f", Some("default")),
+            "type": "Warning",
+            "reason": "BackOff",
+            "message": "Back-off restarting failed container",
+            "note": "Back-off restarting failed container",
+            "count": 4,
+            "series": {
+                "count": 9,
+                "lastObservedTime": "2026-11-01T10:05:00.000000Z",
+            },
+            "firstTimestamp": "2026-11-01T10:00:00Z",
+            "lastTimestamp": "2026-11-01T10:04:00Z",
+            "eventTime": "2026-11-01T10:00:00.000000Z",
+            "involvedObject": {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "name": "web-1",
+                "namespace": "default",
+                "uid": "u-p",
+                "resourceVersion": "9",
+                "fieldPath": "spec.containers{app}",
+            },
+            "regarding": { "apiVersion": "v1", "kind": "Pod", "name": "web-1", "namespace": "default", "uid": "u-p" },
+            "related": { "kind": "Node", "name": "node-1" },
+            "source": { "component": "kubelet", "host": "node-1" },
+            "reportingComponent": "kubelet",
+            "reportingInstance": "node-1",
+            "action": "Pulling",
+        })
+    }
+
+    fn trimmed_event() -> Value {
+        json!({
+            "apiVersion": "v1",
+            "kind": "Event",
+            "metadata": kept_metadata("web-1.17f", Some("default")),
+            "type": "Warning",
+            "reason": "BackOff",
+            "message": "Back-off restarting failed container",
+            "note": "Back-off restarting failed container",
+            "count": 4,
+            "series": {
+                "count": 9,
+                "lastObservedTime": "2026-11-01T10:05:00.000000Z",
+            },
+            "firstTimestamp": "2026-11-01T10:00:00Z",
+            "lastTimestamp": "2026-11-01T10:04:00Z",
+            "eventTime": "2026-11-01T10:00:00.000000Z",
+            "involvedObject": { "kind": "Pod", "name": "web-1" },
+            "regarding": { "kind": "Pod", "name": "web-1" },
+        })
+    }
+
     /// Each trimmed kind: its resource, a whole object and what its row keeps.
     fn trimmed_kinds() -> Vec<(ResourceRef, Value, Value)> {
         vec![
+            (
+                resource("argoproj.io", "applications", "Application"),
+                full_application(),
+                trimmed_application(),
+            ),
+            (
+                resource("", "events", "Event"),
+                full_event(),
+                trimmed_event(),
+            ),
             (
                 resource(
                     "apiextensions.k8s.io",
@@ -1156,6 +1395,50 @@ mod tests {
                 trimmed_config_map(),
             ),
         ]
+    }
+
+    #[test]
+    fn an_application_row_keeps_what_its_table_and_row_actions_read() {
+        let mut row = full_application();
+        trim_for_watch(
+            &resource("argoproj.io", "applications", "Application"),
+            &mut row,
+        );
+        assert_eq!(row, trimmed_application());
+        let text = row.to_string();
+        for gone in ["managed-web", "synced-web", "a condition", "-values"] {
+            assert!(!text.contains(gone), "{gone} is still in the row");
+        }
+    }
+
+    #[test]
+    fn an_application_with_no_operation_keeps_none() {
+        let mut row = full_application();
+        row.as_object_mut().unwrap().remove("operation");
+        row["status"]
+            .as_object_mut()
+            .unwrap()
+            .remove("operationState");
+        trim_for_watch(
+            &resource("argoproj.io", "applications", "Application"),
+            &mut row,
+        );
+        assert!(row.get("operation").is_none());
+        assert!(row["status"].get("operationState").is_none());
+    }
+
+    #[test]
+    fn an_event_row_keeps_what_the_events_tables_read() {
+        let mut row = full_event();
+        trim_for_watch(&resource("", "events", "Event"), &mut row);
+        assert_eq!(row, trimmed_event());
+    }
+
+    #[test]
+    fn an_event_of_another_group_is_left_whole() {
+        let mut row = full_event();
+        trim_for_watch(&resource("events.k8s.io", "events", "Event"), &mut row);
+        assert_eq!(row, full_event());
     }
 
     #[test]

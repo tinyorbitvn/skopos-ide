@@ -30,7 +30,12 @@ export function DrawerMetrics(props: {
   const source: MetricsSource =
     kind === "metricsServer" ? "metricsServer" : "prometheus";
   const watchPods = target?.kind === "workload" && kind === "metricsServer";
-  const pods = useResourceList(clusterId, watchPods ? PODS : null);
+  const namespace = object.metadata.namespace;
+  const pods = useResourceList(
+    clusterId,
+    watchPods ? PODS : null,
+    namespace ? [namespace] : undefined,
+  );
   const matching = useMemo(
     () =>
       watchPods && !pods.loading ? workloadPods(object, pods.items) : null,

@@ -170,6 +170,8 @@ pub enum LogEvent {
 pub struct LogDownload {
     #[ts(type = "number")]
     pub bytes: u64,
+    /// The file written, which the user chose and the page did not.
+    pub path: String,
 }
 
 /// What a stream hands to the batcher. Both kinds share one queue, so a marker stays

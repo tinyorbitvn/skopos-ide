@@ -22,9 +22,8 @@ test.each<[number, string]>([
   expect(formatSize(bytes)).toBe(text);
 });
 
-test("a second press before the dialog answers asks once and writes once", async () => {
+test("a second press while the download runs calls the command once", async () => {
   const b = mockBackend({
-    "plugin:dialog|save": () => "/home/me/web-1.log",
     // Never answers: the download is still running.
     logs_download: () => new Promise(() => {}),
   });
@@ -35,7 +34,6 @@ test("a second press before the dialog answers asks once and writes once", async
     void result.current.download();
     await flush();
   });
-  expect(b.callsTo("plugin:dialog|save")).toHaveLength(1);
   expect(b.callsTo("logs_download")).toHaveLength(1);
   expect(result.current.saving).toBe(true);
 
@@ -43,12 +41,41 @@ test("a second press before the dialog answers asks once and writes once", async
     void result.current.download();
     await flush();
   });
-  expect(b.callsTo("plugin:dialog|save")).toHaveLength(1);
+  expect(b.callsTo("logs_download")).toHaveLength(1);
 });
 
-test("a dialog that fails is reported, and download works again", async () => {
+test("the command gets the suggested name and no path, and the note names the path it wrote", async () => {
   const b = mockBackend({
-    "plugin:dialog|save": () => {
+    logs_download: () => ({ bytes: 1536, path: "/home/me/chosen.log" }),
+  });
+  const { result } = renderHook(() => useLogDownload(TAB));
+
+  await act(() => result.current.download());
+  const [call] = b.callsTo("logs_download");
+  expect(call).toMatchObject({ clusterId: "c1", suggestedName: "web-1.log" });
+  expect(call).not.toHaveProperty("destPath");
+  expect(call).not.toHaveProperty("path");
+  expect(result.current.note).toEqual({
+    text: "Saved 1.5 KiB to /home/me/chosen.log",
+    failed: false,
+  });
+});
+
+test("a cancelled dialog ends quietly and download works again", async () => {
+  const b = mockBackend({ logs_download: () => null });
+  const { result } = renderHook(() => useLogDownload(TAB));
+
+  await act(() => result.current.download());
+  expect(result.current.note).toBeNull();
+  expect(result.current.saving).toBe(false);
+
+  await act(() => result.current.download());
+  expect(b.callsTo("logs_download")).toHaveLength(2);
+});
+
+test("a command that fails is reported, and download works again", async () => {
+  const b = mockBackend({
+    logs_download: () => {
       throw "dialog unavailable";
     },
   });
@@ -62,5 +89,5 @@ test("a dialog that fails is reported, and download works again", async () => {
   expect(result.current.saving).toBe(false);
 
   await act(() => result.current.download());
-  expect(b.callsTo("plugin:dialog|save")).toHaveLength(2);
+  expect(b.callsTo("logs_download")).toHaveLength(2);
 });

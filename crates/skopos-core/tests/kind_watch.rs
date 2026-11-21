@@ -7,9 +7,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
-use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Secret};
+use k8s_openapi::api::core::v1::{ConfigMap, Container, Namespace, Node, Pod, PodSpec, Secret};
 use k8s_openapi::ByteString;
-use kube::api::{DeleteParams, ObjectMeta, Patch, PatchParams, PostParams};
+use kube::api::{DeleteParams, ListParams, ObjectMeta, Patch, PatchParams, PostParams};
 use kube::{Api, Client};
 use serde_json::{json, Value};
 use skopos_core::app_core::AppCore;
@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 const CONTEXT: &str = "kind-skopos-e2e";
 const NAMESPACE: &str = "skopos-test-watch";
 const SECRET_NAMESPACE: &str = "skopos-test-watch-secrets";
+const NODE_NAMESPACE: &str = "skopos-test-watch-node";
 const WAIT: Duration = Duration::from_secs(30);
 
 async fn connected() -> (AppCore, ClusterId, TempDir) {
@@ -120,7 +121,21 @@ struct Table {
 impl Table {
     async fn subscribe(core: &AppCore, id: &ClusterId, resource: ResourceRef) -> Table {
         let (tx, rx) = mpsc::channel(64);
-        core.resources_subscribe(id, resource, tx).await.unwrap();
+        core.resources_subscribe(id, resource, Vec::new(), tx, "main")
+            .await
+            .unwrap();
+        Table {
+            rx,
+            rows: BTreeMap::new(),
+        }
+    }
+
+    /// A Node's drawer: the Pods bound to `node`.
+    async fn subscribe_on_node(core: &AppCore, id: &ClusterId, node: &str) -> Table {
+        let (tx, rx) = mpsc::channel(64);
+        core.resources_subscribe_node_pods(id, node.to_owned(), tx, "main")
+            .await
+            .unwrap();
         Table {
             rx,
             rows: BTreeMap::new(),
@@ -152,6 +167,9 @@ impl Table {
                     }
                 }
                 WatchEvent::Status { .. } => {}
+                WatchEvent::SnapshotPart { .. } => {
+                    panic!("only the forwarder to the webview cuts a snapshot")
+                }
             }
         }
     }
@@ -276,6 +294,89 @@ async fn listed_and_watched_secrets_arrive_without_values() {
             let row = table.row(SECRET_NAMESPACE, name).unwrap();
             assert_eq!(row["data"]["password"], "", "{name}");
         }
+    })
+    .await;
+}
+
+fn pause_pod(name: &str, spec: PodSpec) -> Pod {
+    Pod {
+        metadata: named(name),
+        spec: Some(PodSpec {
+            containers: vec![Container {
+                name: "main".to_owned(),
+                image: Some("registry.k8s.io/pause:3.10".to_owned()),
+                ..Default::default()
+            }],
+            ..spec
+        }),
+        ..Default::default()
+    }
+}
+
+/// Creates the Pod once its new namespace has the service account a Pod needs.
+async fn create_pod(pods: &Api<Pod>, pod: &Pod) {
+    let started = Instant::now();
+    while let Err(error) = pods.create(&PostParams::default(), pod).await {
+        assert!(started.elapsed() < WAIT, "the pod was not created: {error}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// A real server picks a node's Pods by `spec.nodeName`: those of every namespace that are
+/// bound to it, a Pod bound to it later, and no Pod that is bound to no node.
+#[tokio::test]
+#[ignore = "needs the skopos-e2e kind cluster"]
+async fn a_nodes_pods_are_the_ones_the_server_says_are_bound_to_it() {
+    let (core, id, _root) = connected().await;
+    let client = core.cluster_client(&id).unwrap();
+    let nodes: Api<Node> = Api::all(client.clone());
+    let node = nodes.list(&ListParams::default()).await.unwrap().items[0]
+        .metadata
+        .name
+        .clone()
+        .unwrap();
+
+    with_namespace(&client, NODE_NAMESPACE, async {
+        let pods: Api<Pod> = Api::namespaced(client.clone(), NODE_NAMESPACE);
+        let mut on_node = Table::subscribe_on_node(&core, &id, &node).await;
+        on_node
+            .until("the node's system pods", WAIT, |t| {
+                t.rows
+                    .keys()
+                    .any(|(namespace, _)| namespace == "kube-system")
+            })
+            .await;
+
+        // No node has this label, so the Pod stays bound to none.
+        let unbound = PodSpec {
+            node_selector: Some([("skopos.test/no-such-node".to_owned(), "x".to_owned())].into()),
+            ..Default::default()
+        };
+        create_pod(&pods, &pause_pod("unbound", unbound)).await;
+        let bound = PodSpec {
+            node_name: Some(node.clone()),
+            ..Default::default()
+        };
+        create_pod(&pods, &pause_pod("bound", bound)).await;
+        on_node
+            .until("the pod bound to the node", WAIT, |t| {
+                t.row(NODE_NAMESPACE, "bound").is_some()
+            })
+            .await;
+
+        assert!(on_node.row(NODE_NAMESPACE, "unbound").is_none());
+        for (key, row) in &on_node.rows {
+            assert_eq!(row["spec"]["nodeName"], node.as_str(), "{key:?}");
+        }
+
+        pods.delete("bound", &DeleteParams::default().grace_period(0))
+            .await
+            .unwrap();
+        on_node
+            .until("the delete", WAIT, |t| {
+                t.row(NODE_NAMESPACE, "bound").is_none()
+            })
+            .await;
     })
     .await;
 }

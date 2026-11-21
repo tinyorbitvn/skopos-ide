@@ -7,7 +7,7 @@ use skopos_core::error::IpcError;
 use skopos_core::graph::GraphEvent;
 use skopos_core::kubeconfig::ClusterId;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
 use crate::state::AppState;
@@ -26,11 +26,13 @@ impl Serialize for SharedEvent {
     }
 }
 
-/// Streams the cluster's graph to `on_event` and returns the subscription id. When the
-/// channel can no longer be written, as after a webview reload, the subscription is ended so
-/// its graph does not outlive the page.
+/// Streams the cluster's graph to `on_event` and returns the subscription id. The
+/// subscription belongs to the window that asks and ends when its page loads again or it
+/// closes, so its graph does not outlive the page; so does one whose channel can no longer
+/// be written.
 #[tauri::command]
 pub async fn resource_graph_subscribe(
+    window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     namespaces: Option<Vec<String>>,
@@ -39,7 +41,7 @@ pub async fn resource_graph_subscribe(
     let (tx, mut rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
-        .resource_graph_subscribe(&cluster_id, namespaces, tx)?;
+        .resource_graph_subscribe(&cluster_id, namespaces, tx, window.label())?;
     let core = state.core.clone();
     let subscription = id.clone();
     tauri::async_runtime::spawn(async move {

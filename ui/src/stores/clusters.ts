@@ -17,6 +17,14 @@ export function useClusterState(id: string): ConnectionState {
   );
 }
 
+const NO_NAMESPACES: string[] = [];
+
+/** The connected cluster's namespaces, for a namespace filter's options. */
+export function useClusterNamespaces(clusterId: string): string[] {
+  const state = useClusterState(clusterId);
+  return state.status === "connected" ? state.info.namespaces : NO_NAMESPACES;
+}
+
 /** Connect and disconnect for one cluster, with a flag for a call in flight. */
 export function useConnect(id: string): {
   connect(): Promise<void>;

@@ -56,6 +56,7 @@ export function NodeDetail({ clusterId, object }: DetailProps) {
       <Part title="Pods">
         <PodList
           clusterId={clusterId}
+          node={name}
           match={(p) => p.spec?.nodeName === name}
         />
       </Part>

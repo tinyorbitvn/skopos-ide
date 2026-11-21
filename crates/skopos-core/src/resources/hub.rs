@@ -1,10 +1,11 @@
-//! One shared watcher per cluster and resource, fanned out to its subscribers.
+//! One shared watcher per cluster and resource, fanned out to its subscribers. A list the
+//! API server narrows, as a node's Pods, has a watcher of its own.
 //!
 //! A watcher task updates the group's store and each subscriber's pending map.
 //! Each subscriber has its own flush task, so a slow one only ever delays itself,
 //! and what it has not read yet stays bounded by the number of objects.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -17,11 +18,12 @@ use kube::api::{ApiResource, DynamicObject};
 use kube::runtime::watcher;
 use kube::{Api, Client};
 use serde_json::Value;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, Notify, Semaphore, SemaphorePermit};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::discovery::state_name;
+use super::ops::{invalid, is_path_segment, selector_value};
 use super::sanitize::strip_for_list;
 use super::trim::{
     has_topology_row, is_core_pods, trim_for_graph, trim_for_topology, trim_for_watch,
@@ -31,10 +33,14 @@ use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
+use crate::subscriptions::Subscriptions;
 
 const DEFAULT_BATCH: Duration = Duration::from_millis(150);
 const DEFAULT_LINGER: Duration = Duration::from_secs(30);
 const PAGE_SIZE: u32 = 500;
+/// How many namespaces of one cluster are listed at one time, counting every kind, once
+/// listing a kind in every namespace has been refused. A cluster can have hundreds.
+pub const NAMESPACE_LISTS_AT_ONCE: usize = 16;
 pub(super) const MIN_BACKOFF: Duration = Duration::from_secs(1);
 pub(super) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Pending changes may reach this many, or the number of objects if larger,
@@ -49,6 +55,15 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// One watcher's scope: a namespace, or `None` for the whole cluster.
 type Partition = Option<String>;
 
+/// True for an object the partition's watcher lists.
+fn in_partition(key: &ObjectKey, partition: &Partition) -> bool {
+    match partition {
+        None => true,
+        Some(namespace) => key.namespace.as_ref() == Some(namespace),
+    }
+}
+
+/// What a subscriber's rows keep: what the tables read, what the relationship graph reads, or
 /// what the node topology reads. The graph shape differs only for core Pods and the topology
 /// shape only for core Pods and Nodes, so a group stores those rows beside the table row, and
 /// every other resource has one row for every shape.
@@ -58,6 +73,55 @@ pub(crate) enum RowShape {
     Table,
     Graph,
     Topology,
+}
+
+/// The namespaces a subscriber is sent the rows of. With none named, it is sent every row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Scope {
+    namespaces: HashSet<String>,
+}
+
+impl Scope {
+    pub(crate) fn of(namespaces: Vec<String>) -> Self {
+        Self {
+            namespaces: namespaces.into_iter().collect(),
+        }
+    }
+
+    /// True when a subscriber of this scope is sent `key`'s row. An object without a
+    /// namespace is in no named one.
+    fn holds(&self, key: &ObjectKey) -> bool {
+        self.namespaces.is_empty()
+            || key
+                .namespace
+                .as_ref()
+                .is_some_and(|namespace| self.namespaces.contains(namespace))
+    }
+}
+
+/// The objects the API server picks for a group's watcher. A group with a selector holds
+/// only those, where a group without one holds every object of its resource, so the two
+/// are different groups and never share a watcher.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Selector {
+    fields: String,
+}
+
+impl Selector {
+    /// The Pods bound to the node `node`.
+    fn pods_on_node(node: &str) -> Self {
+        Self {
+            fields: format!("spec.nodeName={}", selector_value(node)),
+        }
+    }
+}
+
+/// What a subscriber asks to be sent: which row of each object, and of which objects.
+/// `selector` names the group it joins, and `scope` what it is sent of that group.
+struct Wanted {
+    shape: RowShape,
+    scope: Scope,
+    selector: Option<Selector>,
 }
 
 /// What a group keeps of one object.
@@ -79,10 +143,16 @@ impl StoredRow {
             RowShape::Topology => self.topology.as_ref().unwrap_or(&self.table),
         }
     }
+
+    /// True when a subscriber of either shape would get the same text from both.
+    fn same_as(&self, other: &StoredRow) -> bool {
+        self.table.json() == other.table.json()
+            && self.graph.as_ref().map(Row::json) == other.graph.as_ref().map(Row::json)
+    }
 }
 
-/// A group's key: cluster, group and plural.
-type GroupKey = (ClusterId, String, String);
+/// A group's key: cluster, group, plural and the selector of its watcher, if it has one.
+type GroupKey = (ClusterId, String, String, Option<Selector>);
 
 enum Phase {
     Syncing,
@@ -111,6 +181,8 @@ type StatusUpdate = (WatchStatus, Option<String>);
 struct Subscriber {
     /// Which of an object's rows this subscriber receives.
     shape: RowShape,
+    /// Which objects it receives a row of.
+    scope: Scope,
     /// Latest wins, so this holds at most one entry per object.
     changes: HashMap<ObjectKey, Option<Row>>,
     status: Option<StatusUpdate>,
@@ -186,6 +258,28 @@ impl GroupState {
         }
     }
 
+    /// Makes the partition hold `listed`, and queues each row that differs as a change.
+    /// Most rows of a new listing are the ones held already, and those are not sent again.
+    fn replace_by_changes(&mut self, partition: &Partition, listed: HashMap<ObjectKey, StoredRow>) {
+        let gone: Vec<ObjectKey> = self
+            .store
+            .keys()
+            .filter(|key| in_partition(key, partition) && !listed.contains_key(*key))
+            .cloned()
+            .collect();
+        for key in gone {
+            self.store.remove(&key);
+            self.record_change(&key, None);
+        }
+        for (key, row) in listed {
+            if self.store.get(&key).is_some_and(|held| held.same_as(&row)) {
+                continue;
+            }
+            self.record_change(&key, Some(&row));
+            self.store.insert(key, row);
+        }
+    }
+
     fn record_change(&mut self, key: &ObjectKey, value: Option<&StoredRow>) {
         // Whoever is waiting for a snapshot gets this change in it.
         if !self.synced() {
@@ -193,7 +287,7 @@ impl GroupState {
         }
         let limit = self.store.len().max(MIN_PENDING_LIMIT);
         for subscriber in self.subscribers.values_mut() {
-            if subscriber.snapshot_due {
+            if subscriber.snapshot_due || !subscriber.scope.holds(key) {
                 continue;
             }
             let row = value.map(|stored| stored.pick(subscriber.shape).clone());
@@ -209,6 +303,8 @@ impl GroupState {
 
 struct Group {
     resource: ResourceRef,
+    /// What the watcher asks the API server to pick. With none, it watches every object.
+    selector: Option<Selector>,
     /// A child of the cluster's token. Lingering out cancels it too.
     token: CancellationToken,
     state: Mutex<GroupState>,
@@ -218,6 +314,7 @@ impl Group {
     fn new(resource: ResourceRef, token: CancellationToken) -> Self {
         Self {
             resource,
+            selector: None,
             token,
             state: Mutex::new(GroupState {
                 store: HashMap::new(),
@@ -240,13 +337,14 @@ impl Group {
 
     /// False when the group stopped, and the caller needs a new one. `wake` is signalled
     /// whenever something is queued for the new subscriber, which starts with a status.
-    fn attach(&self, subscription: &str, shape: RowShape, wake: Arc<Notify>) -> bool {
+    fn attach(&self, subscription: &str, shape: RowShape, scope: Scope, wake: Arc<Notify>) -> bool {
         let mut state = self.lock();
         if state.terminal || self.token.is_cancelled() {
             return false;
         }
         let subscriber = Subscriber {
             shape,
+            scope,
             status: Some(state.status.clone()),
             snapshot_due: state.synced(),
             wake,
@@ -296,7 +394,7 @@ impl Group {
             .take()
             .map(|(status, message)| WatchEvent::Status { status, message });
         let snapshot = std::mem::take(&mut subscriber.snapshot_due).then(|| WatchEvent::Snapshot {
-            items: sorted_items(&state.store, subscriber.shape),
+            items: sorted_items(&state.store, subscriber.shape, &subscriber.scope),
         });
         let batch = (!subscriber.changes.is_empty()).then(|| {
             let mut upserts = Vec::new();
@@ -326,24 +424,26 @@ impl Group {
         (events, state.terminal)
     }
 
-    /// Replaces what the partition holds with a completed listing.
+    /// Replaces what the partition holds with a completed listing. The first listing of a
+    /// group is a snapshot. A later one, after a failure or an expired resource version,
+    /// reaches subscribers as the changes it makes to the rows they hold.
     fn finish_init(&self, partition: &Partition, listed: HashMap<ObjectKey, StoredRow>) {
         let mut state = self.lock();
-        match partition {
-            None => state.store = listed,
-            Some(namespace) => {
-                state
-                    .store
-                    .retain(|key, _| key.namespace.as_ref() != Some(namespace));
-                state.store.extend(listed);
-            }
+        let held = state.synced();
+        if held {
+            state.replace_by_changes(partition, listed);
+        } else {
+            state.store.retain(|key, _| !in_partition(key, partition));
+            state.store.extend(listed);
         }
         if let Some(entry) = state.partitions.get_mut(partition) {
             entry.phase = Phase::Live;
             entry.synced_once = true;
         }
         state.publish_status();
-        state.queue_snapshot();
+        if !held {
+            state.queue_snapshot();
+        }
     }
 
     fn apply(&self, key: ObjectKey, value: StoredRow) {
@@ -417,7 +517,9 @@ pub(crate) struct WatchHub {
     /// Keyed by cluster, group and plural.
     groups: DashMap<GroupKey, Arc<Group>>,
     /// What stops each subscription's flush task.
-    subscriptions: DashMap<String, CancellationToken>,
+    subscriptions: Subscriptions,
+    /// What the namespaces of each cluster wait on for their turn to be listed.
+    list_turns: DashMap<ClusterId, Arc<Semaphore>>,
     next_subscription: AtomicU64,
     timing: Mutex<Timing>,
     /// How many times a flusher reached `take_events`.
@@ -429,7 +531,8 @@ impl Default for WatchHub {
     fn default() -> Self {
         Self {
             groups: DashMap::new(),
-            subscriptions: DashMap::new(),
+            subscriptions: Subscriptions::default(),
+            list_turns: DashMap::new(),
             next_subscription: AtomicU64::new(1),
             timing: Mutex::new(Timing {
                 batch: DEFAULT_BATCH,
@@ -470,24 +573,31 @@ impl WatchHub {
     }
 
     /// Makes `stop` what `unsubscribe` cancels for a new id, for a watch that has no group.
-    pub(super) fn register(&self, stop: CancellationToken) -> String {
+    /// `owner` is the window that asked, if one did.
+    pub(super) fn register(&self, stop: CancellationToken, owner: Option<&str>) -> String {
         let subscription = self.new_subscription();
-        self.subscriptions.insert(subscription.clone(), stop);
+        self.subscriptions.insert(subscription.clone(), stop, owner);
         subscription
     }
 
     /// Forgets an id whose watch has ended.
     pub(super) fn deregister(&self, subscription: &str) {
-        self.subscriptions.remove(subscription);
+        self.subscriptions.forget(subscription);
+    }
+
+    /// Ends the subscriptions the window `owner` asked for.
+    pub(crate) fn stop_owned(&self, owner: &str) {
+        self.subscriptions.stop_owned(owner);
     }
 
     fn subscribe(
         self: &Arc<Self>,
         id: &ClusterId,
         resource: ResourceRef,
-        shape: RowShape,
+        wanted: Wanted,
         tx: mpsc::Sender<WatchEvent>,
         connection: &Connection,
+        owner: Option<&str>,
     ) -> CoreResult<String> {
         let subscription = self.new_subscription();
         let wake = Arc::new(Notify::new());
@@ -499,14 +609,19 @@ impl WatchHub {
                     format!("cluster {id} is not connected"),
                 ));
             }
-            let group = self.group_for(id, &resource, connection);
-            if group.attach(&subscription, shape, wake.clone()) {
+            let group = self.group_for(id, &resource, wanted.selector.as_ref(), connection);
+            if group.attach(
+                &subscription,
+                wanted.shape,
+                wanted.scope.clone(),
+                wake.clone(),
+            ) {
                 break group;
             }
         };
         let stop = group.token.child_token();
         self.subscriptions
-            .insert(subscription.clone(), stop.clone());
+            .insert(subscription.clone(), stop.clone(), owner);
         tokio::spawn(flush_subscriber(
             self.clone(),
             group,
@@ -523,20 +638,35 @@ impl WatchHub {
         self: &Arc<Self>,
         id: &ClusterId,
         resource: &ResourceRef,
+        selector: Option<&Selector>,
         connection: &Connection,
     ) -> Arc<Group> {
-        let key = (id.clone(), resource.group.clone(), resource.plural.clone());
+        let key = (
+            id.clone(),
+            resource.group.clone(),
+            resource.plural.clone(),
+            selector.cloned(),
+        );
         match self.groups.entry(key.clone()) {
             Entry::Occupied(entry) if !entry.get().is_closed() => entry.get().clone(),
             entry => {
-                let group = Arc::new(Group::new(resource.clone(), connection.token.child_token()));
+                let group = Arc::new(Group {
+                    selector: selector.cloned(),
+                    ..Group::new(resource.clone(), connection.token.child_token())
+                });
                 entry.insert(group.clone());
+                let turns = self
+                    .list_turns
+                    .entry(id.clone())
+                    .or_insert_with(|| Arc::new(Semaphore::new(NAMESPACE_LISTS_AT_ONCE)))
+                    .clone();
                 tokio::spawn(run_group(
                     self.clone(),
                     key,
                     group.clone(),
                     connection.client.clone(),
                     connection.namespaces.clone(),
+                    turns,
                 ));
                 group
             }
@@ -544,9 +674,7 @@ impl WatchHub {
     }
 
     fn unsubscribe(&self, subscription: &str) {
-        if let Some((_, stop)) = self.subscriptions.remove(subscription) {
-            stop.cancel();
-        }
+        self.subscriptions.stop(subscription);
     }
 }
 
@@ -604,7 +732,7 @@ async fn flush_subscriber(
             break;
         }
     }
-    hub.subscriptions.remove(&subscription);
+    hub.subscriptions.forget(&subscription);
     group.detach(&subscription, hub.timing().linger);
 }
 
@@ -621,8 +749,9 @@ async fn run_group(
     group: Arc<Group>,
     client: Client,
     namespaces: Vec<String>,
+    turns: Arc<Semaphore>,
 ) {
-    match run_partitions(&group, &client, &namespaces).await {
+    match run_partitions(&group, &client, &namespaces, &turns).await {
         PartitionEnd::Cancelled => {}
         PartitionEnd::Forbidden(message) => group.finish(WatchStatus::Forbidden, Some(message)),
         PartitionEnd::Gone => {
@@ -635,9 +764,15 @@ async fn run_group(
 }
 
 /// Watches the whole cluster, or each namespace when that is forbidden. Returns
-/// only once nothing is left to watch.
-async fn run_partitions(group: &Group, client: &Client, namespaces: &[String]) -> PartitionEnd {
-    let mut denied = match run_partition(group, client, None).await {
+/// only once nothing is left to watch. The namespaces wait on `turns` to be listed, and
+/// are all watched once they have been.
+async fn run_partitions(
+    group: &Group,
+    client: &Client,
+    namespaces: &[String],
+    turns: &Semaphore,
+) -> PartitionEnd {
+    let mut denied = match run_partition(group, client, None, None).await {
         PartitionEnd::Forbidden(message) => message,
         end => return end,
     };
@@ -648,7 +783,7 @@ async fn run_partitions(group: &Group, client: &Client, namespaces: &[String]) -
     let mut running: FuturesUnordered<_> = namespaces
         .iter()
         .map(|namespace| async move {
-            let end = run_partition(group, client, Some(namespace.clone())).await;
+            let end = run_partition(group, client, Some(namespace.clone()), Some(turns)).await;
             (namespace, end)
         })
         .collect();
@@ -791,10 +926,32 @@ pub(super) async fn pause(backoff: &mut Duration, token: &CancellationToken) -> 
     }
 }
 
+/// A partition's turn to list its objects, which it holds until the list ends. `turns` is
+/// what it waits on, if anything limits it. The error is the group being cancelled first.
+async fn list_turn<'a>(
+    turns: Option<&'a Semaphore>,
+    token: &CancellationToken,
+) -> Result<Option<SemaphorePermit<'a>>, PartitionEnd> {
+    let Some(turns) = turns else {
+        return Ok(None);
+    };
+    tokio::select! {
+        () = token.cancelled() => Err(PartitionEnd::Cancelled),
+        // Nothing closes the semaphore, so this never fails.
+        turn = turns.acquire() => Ok(turn.ok()),
+    }
+}
+
 /// Runs one watcher until it is cancelled or must not be retried. After a failure
-/// it starts over with a new list, so that subscribers get a snapshot of what they
-/// missed instead of `watcher` quietly resuming from its last resource version.
-async fn run_partition(group: &Group, client: &Client, partition: Partition) -> PartitionEnd {
+/// it starts over with a new list, so that subscribers get what they missed instead
+/// of `watcher` quietly resuming from its last resource version. With `turns`, it lists
+/// only while it holds a turn, and watches without one.
+async fn run_partition(
+    group: &Group,
+    client: &Client,
+    partition: Partition,
+    turns: Option<&Semaphore>,
+) -> PartitionEnd {
     let resource = &group.resource;
     let api_resource = ApiResource {
         group: resource.group.clone(),
@@ -807,9 +964,16 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
         Some(namespace) => Api::namespaced_with(client.clone(), namespace, &api_resource),
         None => Api::all_with(client.clone(), &api_resource),
     };
-    let config = watcher::Config::default().page_size(PAGE_SIZE);
+    let mut config = watcher::Config::default().page_size(PAGE_SIZE);
+    if let Some(selector) = &group.selector {
+        config = config.fields(&selector.fields);
+    }
     let mut backoff = MIN_BACKOFF;
     loop {
+        let mut turn = match list_turn(turns, &group.token).await {
+            Ok(turn) => turn,
+            Err(end) => return end,
+        };
         let mut stream = Box::pin(watcher(api.clone(), config.clone()));
         let mut listing = HashMap::new();
         let mut live_since = None;
@@ -821,6 +985,13 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
             let err = match item {
                 Some(Ok(watcher::Event::Init)) => {
                     listing = HashMap::new();
+                    // The stream lists again by itself once its resource version expires.
+                    if turn.is_none() {
+                        turn = match list_turn(turns, &group.token).await {
+                            Ok(turn) => turn,
+                            Err(end) => return end,
+                        };
+                    }
                     continue;
                 }
                 Some(Ok(watcher::Event::InitApply(object))) => {
@@ -830,6 +1001,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                 Some(Ok(watcher::Event::InitDone)) => {
                     group.finish_init(&partition, std::mem::take(&mut listing));
                     live_since = Some(Instant::now());
+                    turn = None;
                     continue;
                 }
                 Some(Ok(watcher::Event::Apply(object))) => {
@@ -847,6 +1019,8 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
                 Some(Err(err)) => err,
                 None => break None,
             };
+            // A list that failed gives its turn up before it waits to try again.
+            turn = None;
             if live_since.is_some_and(|since: Instant| since.elapsed() >= MAX_BACKOFF) {
                 backoff = MIN_BACKOFF;
             }
@@ -859,6 +1033,7 @@ async fn run_partition(group: &Group, client: &Client, partition: Partition) -> 
             }
             break Some(describe(err));
         };
+        drop(turn);
         if let Some(failure) = end_of_stream {
             if failure.code == Some(403) {
                 return PartitionEnd::Forbidden(failure.message);
@@ -908,30 +1083,101 @@ pub(super) fn validate(resource: &ResourceRef) -> CoreResult<()> {
     }
 }
 
+/// Core Pods, as discovery names them.
+fn core_pods() -> ResourceRef {
+    ResourceRef {
+        group: String::new(),
+        version: "v1".to_owned(),
+        plural: "pods".to_owned(),
+        kind: "Pod".to_owned(),
+        namespaced: true,
+    }
+}
+
 impl AppCore {
     /// Delivers `resource` to `tx` until unsubscribed, the cluster disconnects, the
     /// receiver closes or a final status has been sent. Returns the subscription id.
+    /// `owner` is the label of the window that asks, which `subscriptions_stop_owned` reads.
+    ///
+    /// With `namespaces`, only the objects of those namespaces are delivered, and with none
+    /// every object is. The watch on the cluster is the same either way, and shared.
     pub async fn resources_subscribe(
         &self,
         id: &ClusterId,
         resource: ResourceRef,
+        namespaces: Vec<String>,
         tx: mpsc::Sender<WatchEvent>,
+        owner: &str,
     ) -> CoreResult<String> {
         validate(&resource)?;
-        self.subscribe_rows(id, resource, RowShape::Table, tx)
+        if !namespaces.is_empty() && !resource.namespaced {
+            return Err(invalid("a cluster-scoped resource has no namespace"));
+        }
+        if !namespaces
+            .iter()
+            .all(|namespace| is_path_segment(namespace))
+        {
+            return Err(invalid("a namespace is not valid"));
+        }
+        let scope = Scope::of(namespaces);
+        self.subscribe_rows(id, resource, RowShape::Table, scope, tx, Some(owner))
     }
 
-    /// `resources_subscribe` for a reader inside the core, which picks the rows' shape.
+    /// Delivers the Pods bound to the node `node` to `tx`, as the rows `resources_subscribe`
+    /// sends for Pods, and returns the subscription id. It ends as `resources_subscribe`
+    /// does.
+    ///
+    /// The API server picks the Pods, by `spec.nodeName`, so the Pods of the other nodes
+    /// are neither listed nor kept. The watch is shared by the subscribers of one node,
+    /// and not with a list of every Pod.
+    pub async fn resources_subscribe_node_pods(
+        &self,
+        id: &ClusterId,
+        node: String,
+        tx: mpsc::Sender<WatchEvent>,
+        owner: &str,
+    ) -> CoreResult<String> {
+        if !is_path_segment(&node) {
+            return Err(invalid("a node name is not valid"));
+        }
+        let wanted = Wanted {
+            shape: RowShape::Table,
+            scope: Scope::default(),
+            selector: Some(Selector::pods_on_node(&node)),
+        };
+        self.subscribe_wanted(id, core_pods(), wanted, tx, Some(owner))
+    }
+
+    /// `resources_subscribe` with the rows' shape picked. A reader inside the core has no
+    /// `owner`, so no window's reload ends its subscription.
     pub(crate) fn subscribe_rows(
         &self,
         id: &ClusterId,
         resource: ResourceRef,
         shape: RowShape,
+        scope: Scope,
         tx: mpsc::Sender<WatchEvent>,
+        owner: Option<&str>,
+    ) -> CoreResult<String> {
+        let wanted = Wanted {
+            shape,
+            scope,
+            selector: None,
+        };
+        self.subscribe_wanted(id, resource, wanted, tx, owner)
+    }
+
+    fn subscribe_wanted(
+        &self,
+        id: &ClusterId,
+        resource: ResourceRef,
+        wanted: Wanted,
+        tx: mpsc::Sender<WatchEvent>,
+        owner: Option<&str>,
     ) -> CoreResult<String> {
         let connection = self.connection_of(id)?;
         self.watches()
-            .subscribe(id, resource, shape, tx, &connection)
+            .subscribe(id, resource, wanted, tx, &connection, owner)
     }
 
     /// The client, token and namespaces of a connected cluster.
@@ -970,8 +1216,9 @@ impl AppCore {
 /// The store's rows of `shape` in a stable order: by namespace (cluster-scoped first), then
 /// name. The UI puts objects a batch adds in this same order (`compareListed` in
 /// `ui/src/stores/resources.ts`); keep the two the same.
-fn sorted_items(store: &HashMap<ObjectKey, StoredRow>, shape: RowShape) -> Vec<Row> {
-    let mut entries: Vec<(&ObjectKey, &StoredRow)> = store.iter().collect();
+fn sorted_items(store: &HashMap<ObjectKey, StoredRow>, shape: RowShape, scope: &Scope) -> Vec<Row> {
+    let mut entries: Vec<(&ObjectKey, &StoredRow)> =
+        store.iter().filter(|(key, _)| scope.holds(key)).collect();
     entries.sort_by(|a, b| (&a.0.namespace, &a.0.name).cmp(&(&b.0.namespace, &b.0.name)));
     entries
         .into_iter()
@@ -1006,7 +1253,7 @@ mod tests {
                 },
             );
         }
-        let names: Vec<_> = sorted_items(&store, RowShape::Table)
+        let names: Vec<_> = sorted_items(&store, RowShape::Table, &Scope::default())
             .iter()
             .map(|row| row.to_value()["name"].as_str().unwrap().to_owned())
             .collect();
@@ -1146,12 +1393,136 @@ mod tests {
         }
     }
 
+    /// A Pod as the store holds it.
+    fn pod_row(name: &str, namespace: &str, version: &str) -> (ObjectKey, StoredRow) {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": { "name": name, "namespace": namespace, "resourceVersion": version },
+            "spec": { "containers": [] },
+        }))
+        .unwrap();
+        to_row(&object, &resource("", "pods")).unwrap()
+    }
+
+    fn names(rows: &[Row]) -> Vec<String> {
+        let mut names: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                row.to_value()["metadata"]["name"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn key_of(namespace: &str, name: &str) -> ObjectKey {
+        ObjectKey {
+            namespace: Some(namespace.to_owned()),
+            name: name.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_new_listing_of_a_synced_group_queues_what_differs_and_no_snapshot() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
+        group.finish_init(
+            &None,
+            HashMap::from([
+                pod_row("kept", "a", "1"),
+                pod_row("changed", "a", "1"),
+                pod_row("gone", "a", "1"),
+            ]),
+        );
+        let first = group.take_events("table").0;
+        assert!(
+            matches!(&first[0], WatchEvent::Snapshot { items } if items.len() == 3),
+            "{first:?}"
+        );
+
+        group.finish_init(
+            &None,
+            HashMap::from([
+                pod_row("kept", "a", "1"),
+                pod_row("changed", "a", "2"),
+                pod_row("added", "a", "1"),
+            ]),
+        );
+
+        let events = group.take_events("table").0;
+        let [WatchEvent::Batch { upserts, deletes }] = events.as_slice() else {
+            panic!("expected one batch, got {events:?}");
+        };
+        assert_eq!(names(upserts), ["added", "changed"]);
+        assert_eq!(deletes, &[key_of("a", "gone")]);
+
+        // The store is the new listing, which is what a later subscriber starts with.
+        assert!(group.attach("late", RowShape::Table, Scope::default(), Arc::default()));
+        let late = group.take_events("late").0;
+        let Some(WatchEvent::Snapshot { items }) = late
+            .iter()
+            .find(|event| matches!(event, WatchEvent::Snapshot { .. }))
+        else {
+            panic!("expected a snapshot, got {late:?}");
+        };
+        assert_eq!(names(items), ["added", "changed", "kept"]);
+    }
+
+    #[test]
+    fn a_new_listing_that_differs_in_nothing_queues_nothing() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
+        let listing = || HashMap::from([pod_row("one", "a", "1"), pod_row("two", "b", "7")]);
+        group.finish_init(&None, listing());
+        group.take_events("table");
+
+        group.finish_init(&None, listing());
+
+        let events = group.take_events("table").0;
+        assert!(events.is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn a_new_listing_of_one_namespace_leaves_the_rows_of_the_others() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
+        group.begin_fallback(&["a".to_owned(), "b".to_owned()]);
+        group.finish_init(
+            &Some("a".to_owned()),
+            HashMap::from([pod_row("one", "a", "1")]),
+        );
+        group.finish_init(
+            &Some("b".to_owned()),
+            HashMap::from([pod_row("two", "b", "1")]),
+        );
+        let first = group.take_events("table").0;
+        assert!(
+            matches!(&first[0], WatchEvent::Snapshot { items } if items.len() == 2),
+            "{first:?}"
+        );
+
+        group.finish_init(&Some("a".to_owned()), HashMap::new());
+
+        let events = group.take_events("table").0;
+        let [WatchEvent::Batch { upserts, deletes }] = events.as_slice() else {
+            panic!("expected one batch, got {events:?}");
+        };
+        assert!(upserts.is_empty(), "{upserts:?}");
+        assert_eq!(deletes, &[key_of("a", "one")]);
+    }
+
     /// The rows a batch of events carries, as values.
     fn rows_of(events: &[WatchEvent]) -> Vec<Value> {
         events
             .iter()
             .flat_map(|event| match event {
-                WatchEvent::Snapshot { items } => items.clone(),
+                WatchEvent::Snapshot { items } | WatchEvent::SnapshotPart { items } => {
+                    items.clone()
+                }
                 WatchEvent::Batch { upserts, .. } => upserts.clone(),
                 WatchEvent::Status { .. } => Vec::new(),
             })
@@ -1177,8 +1548,8 @@ mod tests {
             .unwrap()
         };
         let group = Group::new(pods.clone(), CancellationToken::new());
-        assert!(group.attach("table", RowShape::Table, Arc::default()));
-        assert!(group.attach("graph", RowShape::Graph, Arc::default()));
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
+        assert!(group.attach("graph", RowShape::Graph, Scope::default(), Arc::default()));
 
         let (key, first) = to_row(&object("1"), &pods).unwrap();
         group.finish_init(&None, HashMap::from([(key.clone(), first)]));
@@ -1200,21 +1571,107 @@ mod tests {
         assert_eq!(graph[0]["spec"]["serviceAccountName"], "web");
     }
 
+    fn scope(namespaces: &[&str]) -> Scope {
+        Scope::of(namespaces.iter().map(|&name| name.to_owned()).collect())
+    }
+
+    fn snapshot_names(events: &[WatchEvent]) -> Vec<String> {
+        let Some(WatchEvent::Snapshot { items }) = events
+            .iter()
+            .find(|event| matches!(event, WatchEvent::Snapshot { .. }))
+        else {
+            panic!("expected a snapshot, got {events:?}");
+        };
+        names(items)
+    }
+
+    #[test]
+    fn a_scoped_subscriber_starts_with_the_rows_of_its_namespaces_only() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach(
+            "scoped",
+            RowShape::Table,
+            scope(&["a", "c"]),
+            Arc::default()
+        ));
+        assert!(group.attach("whole", RowShape::Table, Scope::default(), Arc::default()));
+
+        group.finish_init(
+            &None,
+            HashMap::from([
+                pod_row("one", "a", "1"),
+                pod_row("two", "b", "1"),
+                pod_row("three", "c", "1"),
+            ]),
+        );
+
+        assert_eq!(
+            snapshot_names(&group.take_events("scoped").0),
+            ["one", "three"]
+        );
+        assert_eq!(
+            snapshot_names(&group.take_events("whole").0),
+            ["one", "three", "two"]
+        );
+    }
+
+    #[test]
+    fn a_scoped_subscriber_is_sent_no_change_of_another_namespace() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("scoped", RowShape::Table, scope(&["a"]), Arc::default()));
+        group.finish_init(
+            &None,
+            HashMap::from([pod_row("one", "a", "1"), pod_row("two", "b", "1")]),
+        );
+        group.take_events("scoped");
+
+        let (key, changed) = pod_row("two", "b", "2");
+        group.apply(key, changed);
+        let (key, added) = pod_row("three", "b", "1");
+        group.apply(key, added);
+        group.delete(&key_of("b", "two"));
+
+        let events = group.take_events("scoped").0;
+        assert!(events.is_empty(), "{events:?}");
+
+        let (key, added) = pod_row("four", "a", "1");
+        group.apply(key, added);
+        group.delete(&key_of("a", "one"));
+
+        let events = group.take_events("scoped").0;
+        let [WatchEvent::Batch { upserts, deletes }] = events.as_slice() else {
+            panic!("expected one batch, got {events:?}");
+        };
+        assert_eq!(names(upserts), ["four"]);
+        assert_eq!(deletes, &[key_of("a", "one")]);
+    }
+
+    #[test]
+    fn a_named_scope_holds_no_object_without_a_namespace() {
+        let node = ObjectKey {
+            namespace: None,
+            name: "node-1".to_owned(),
+        };
+
+        assert!(Scope::default().holds(&node));
+        assert!(!scope(&["a"]).holds(&node));
+    }
+
     #[test]
     fn registered_subscriptions_share_the_counter_and_unsubscribe_cancels_them() {
         let hub = WatchHub::default();
-        let first = hub.register(CancellationToken::new());
+        let first = hub.register(CancellationToken::new(), None);
         assert_eq!(first, "watch-1");
         assert_eq!(hub.new_subscription(), "watch-2");
 
         let stop = CancellationToken::new();
-        let third = hub.register(stop.clone());
+        let third = hub.register(stop.clone(), None);
         assert_eq!(third, "watch-3");
         hub.unsubscribe(&third);
         assert!(stop.is_cancelled());
 
         let kept = CancellationToken::new();
-        let fourth = hub.register(kept.clone());
+        let fourth = hub.register(kept.clone(), None);
         hub.deregister(&fourth);
         hub.unsubscribe(&fourth);
         assert!(!kept.is_cancelled(), "a released id is no longer known");
@@ -1280,7 +1737,7 @@ mod tests {
         };
         let group = Arc::new(Group::new(resource("", "pods"), CancellationToken::new()));
         let wake = Arc::new(Notify::new());
-        assert!(group.attach("watch-1", RowShape::Table, wake.clone()));
+        assert!(group.attach("watch-1", RowShape::Table, Scope::default(), wake.clone()));
         let (tx, rx) = mpsc::channel(16);
         let stop = group.token.child_token();
         let task = tokio::spawn(flush_subscriber(
@@ -1391,8 +1848,9 @@ mod tests {
         assert_eq!(status, WatchStatus::Reconnecting);
         assert_eq!(message.as_deref(), Some("boom"));
 
-        // After its first snapshot a subscriber gets the status before the next one.
-        rig.group.finish_init(&None, HashMap::new());
+        // After its first snapshot a subscriber gets the status before the rows that follow.
+        rig.group
+            .finish_init(&None, HashMap::from([pod_row("new", "a", "1")]));
         assert!(matches!(
             rig.rx.recv().await,
             Some(WatchEvent::Status {
@@ -1402,7 +1860,7 @@ mod tests {
         ));
         assert!(matches!(
             rig.rx.recv().await,
-            Some(WatchEvent::Snapshot { .. })
+            Some(WatchEvent::Batch { upserts, .. }) if upserts.len() == 1
         ));
 
         rig.group

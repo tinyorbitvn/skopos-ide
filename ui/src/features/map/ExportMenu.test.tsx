@@ -39,9 +39,8 @@ describe("exportFileName", () => {
 describe("useMapExport", () => {
   const canvas = { current: document.createElement("div") };
 
-  it("asks once and writes once when a second export is asked for while one runs", async () => {
+  it("calls the command once when a second export is asked for while one runs", async () => {
     const b = mockBackend({
-      "plugin:dialog|save": () => "/home/me/prod-map.png",
       // Never answers: the export is still running.
       map_export: () => new Promise(() => {}),
     });
@@ -53,7 +52,6 @@ describe("useMapExport", () => {
       await flush();
     });
     expect(result.current.running).toBe(true);
-    expect(b.callsTo("plugin:dialog|save")).toHaveLength(1);
     expect(b.callsTo("map_export")).toHaveLength(1);
     expect(renderMapPng).toHaveBeenCalledTimes(1);
 
@@ -61,15 +59,47 @@ describe("useMapExport", () => {
       void result.current.exportAs("pdf");
       await flush();
     });
-    expect(b.callsTo("plugin:dialog|save")).toHaveLength(1);
+    expect(b.callsTo("map_export")).toHaveLength(1);
+  });
+
+  it("gives the command the suggested name, format, image and scale, and no path", async () => {
+    const success = vi.spyOn(toast, "success");
+    const b = mockBackend({
+      map_export: () => "/home/me/chosen.pdf",
+    });
+    const { result } = renderHook(() => useMapExport(canvas, "prod"));
+
+    await act(() => result.current.exportAs("pdf"));
+    const [call] = b.callsTo("map_export");
+    expect(call).toEqual({
+      suggestedName: "prod-map.pdf",
+      format: "pdf",
+      png: IMAGE.png,
+      scale: IMAGE.scale,
+    });
+    expect(success).toHaveBeenCalledWith(
+      "Map exported as PDF",
+      "/home/me/chosen.pdf",
+    );
+  });
+
+  it("ends quietly when the dialog is cancelled", async () => {
+    const error = vi.spyOn(toast, "error");
+    const success = vi.spyOn(toast, "success");
+    mockBackend({ map_export: () => null });
+    const { result } = renderHook(() => useMapExport(canvas, "prod"));
+
+    await act(() => result.current.exportAs("png"));
+    expect(error).not.toHaveBeenCalled();
+    expect(success).not.toHaveBeenCalled();
+    expect(result.current.running).toBe(false);
   });
 
   it("reports an image the webview cannot draw, and exports again afterwards", async () => {
     const error = vi.spyOn(toast, "error");
     const success = vi.spyOn(toast, "success");
     const b = mockBackend({
-      "plugin:dialog|save": () => "/home/me/prod-map.pdf",
-      map_export: (a: { path: string }) => a.path,
+      map_export: () => "/home/me/prod-map.pdf",
     });
     vi.mocked(renderMapPng).mockRejectedValueOnce(
       new Error("The webview could not draw the map as an image"),
@@ -91,9 +121,9 @@ describe("useMapExport", () => {
     );
   });
 
-  it("reports a map that is gone when the dialog closes", async () => {
+  it("reports a map that is gone before anything is asked", async () => {
     const error = vi.spyOn(toast, "error");
-    mockBackend({ "plugin:dialog|save": () => "/home/me/prod-map.png" });
+    const b = mockBackend({ map_export: () => "/home/me/prod-map.png" });
     const { result } = renderHook(() =>
       useMapExport({ current: null }, "prod"),
     );
@@ -104,19 +134,19 @@ describe("useMapExport", () => {
       "Could not export the map",
       "The map is not drawn",
     );
+    expect(b.callsTo("map_export")).toEqual([]);
   });
 
-  it("reports a save dialog that fails", async () => {
+  it("reports a command that fails", async () => {
     const error = vi.spyOn(toast, "error");
     mockBackend({
-      "plugin:dialog|save": () => {
+      map_export: () => {
         throw "dialog unavailable";
       },
     });
     const { result } = renderHook(() => useMapExport(canvas, "prod"));
 
     await act(() => result.current.exportAs("png"));
-    expect(renderMapPng).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",
       "dialog unavailable",

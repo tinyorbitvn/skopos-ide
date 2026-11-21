@@ -1,12 +1,12 @@
-use std::path::PathBuf;
-
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
+use skopos_core::save_file;
 use skopos_core::sessions::{LogDownload, LogEvent, LogOptions, LogTarget};
 use tauri::ipc::Channel;
 use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
+use super::save::ask_save_path;
 use crate::state::AppState;
 
 /// Batches wait here while the webview catches up.
@@ -44,6 +44,8 @@ pub async fn logs_stop(state: State<'_, AppState>, session_id: String) -> Result
     Ok(())
 }
 
+/// Saves the target's logs where the user chooses in the save dialog. `None` when they
+/// cancel, and then nothing is read from the cluster.
 #[tauri::command]
 pub async fn logs_download(
     state: State<'_, AppState>,
@@ -51,10 +53,14 @@ pub async fn logs_download(
     cluster_id: ClusterId,
     target: LogTarget,
     options: LogOptions,
-    dest_path: PathBuf,
-) -> Result<LogDownload, IpcError> {
+    suggested_name: String,
+) -> Result<Option<LogDownload>, IpcError> {
+    let Some(dest_path) = ask_save_path(&window, save_file::LOG, &suggested_name).await? else {
+        return Ok(None);
+    };
     state
         .core
         .logs_download(&cluster_id, target, options, &dest_path, window.label())
         .await
+        .map(Some)
 }

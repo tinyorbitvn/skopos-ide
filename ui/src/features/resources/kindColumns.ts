@@ -70,7 +70,7 @@ export function useKindColumns(
   const crd = useCustomResourceDefinition(clusterId, info, resources);
   const namespaces = useMemo(() => (namespace ? [namespace] : []), [namespace]);
   const usage = useListUsage(clusterId, info?.resource ?? null, namespaces);
-  const owned = useOwnedPods(clusterId, info);
+  const owned = useOwnedPods(clusterId, info, namespaces);
   return useMemo(
     () => (info ? kindColumns(info, crd, usage, owned) : []),
     [info, crd, usage, owned],

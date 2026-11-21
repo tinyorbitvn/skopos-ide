@@ -435,6 +435,8 @@ impl Store {
     /// forbidden or no longer served. Pods that cannot be listed hide instead.
     pub(crate) fn apply(&mut self, source: Source, event: WatchEvent) -> Option<String> {
         match (source, event) {
+            // Only the forwarder to the webview cuts a snapshot, so none arrives here.
+            (_, WatchEvent::SnapshotPart { .. }) => {}
             (Source::Nodes, WatchEvent::Snapshot { items }) => {
                 self.nodes = items
                     .iter()

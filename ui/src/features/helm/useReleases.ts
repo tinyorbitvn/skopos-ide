@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useClusterState } from "../../stores/clusters";
 import { type ReleasesSlice, useHelm } from "../../stores/helm";
 import { useUiState } from "../../stores/uiState";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
@@ -12,12 +11,6 @@ export function useNamespaceSelection(
   clusterId: string,
 ): [string[], (next: string[]) => void, boolean] {
   return useUiState<string[]>(namespaceFilterKey(clusterId), []);
-}
-
-/** The connected cluster's namespaces, for the namespace filter's options. */
-export function useClusterNamespaces(clusterId: string): string[] {
-  const state = useClusterState(clusterId);
-  return state.status === "connected" ? state.info.namespaces : [];
 }
 
 /**

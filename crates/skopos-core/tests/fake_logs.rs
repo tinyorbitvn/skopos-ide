@@ -1026,6 +1026,7 @@ async fn a_download_writes_every_line_past_the_tail_limit() {
     let text = std::fs::read_to_string(&dest).unwrap();
     assert_eq!(text, format!("{ONE} one\n{TWO} two\n"));
     assert_eq!(saved.bytes, text.len() as u64);
+    assert_eq!(saved.path, dest.display().to_string());
     assert_eq!(fake.log_requests()[0].get("follow"), None);
     assert_eq!(core.session_count(), 0);
 }

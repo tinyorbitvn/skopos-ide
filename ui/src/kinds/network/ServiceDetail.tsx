@@ -18,7 +18,11 @@ function ServiceEndpoints(props: {
   namespace: string | undefined;
 }) {
   const { clusterId, resources, name, namespace } = props;
-  const list = useResourceList(clusterId, ENDPOINT_SLICES);
+  const list = useResourceList(
+    clusterId,
+    ENDPOINT_SLICES,
+    namespace ? [namespace] : undefined,
+  );
   if (list.status === "forbidden" || list.status === "notServed") {
     return (
       <ErrorNotice

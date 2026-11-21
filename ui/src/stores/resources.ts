@@ -14,19 +14,23 @@ import type { WatchEvent } from "../ipc/generated/WatchEvent";
 import type { WatchStatus } from "../ipc/generated/WatchStatus";
 import { type KubeObject, objectKey } from "../kinds/objects";
 import { useCatalog } from "./catalog";
+import { mergeAdded } from "./mergeRows";
 
 /** The kinds whose watched rows are trimmed, as `<group>/<plural>`. */
 const TRIMMED = new Set([
   "/pods",
   "/nodes",
   "/configmaps",
+  "/events",
   "apps/replicasets",
   "apiextensions.k8s.io/customresourcedefinitions",
+  "argoproj.io/applications",
 ]);
 
 /**
  * Whether the list watch sends this resource's rows with only some of their fields:
- * core Pods, Nodes and ConfigMaps, `apps` ReplicaSets and CustomResourceDefinitions.
+ * core Pods, Nodes, ConfigMaps and Events, `apps` ReplicaSets,
+ * CustomResourceDefinitions and Argo CD Applications.
  * "Watched Pod rows" and "Watched rows of other trimmed kinds" in the backend IPC
  * contract list what a row keeps. Read only those fields from a row, or read the
  * object with `resourceGet` or a single-object watch, whose rows are whole.
@@ -71,12 +75,16 @@ export const LINGER_MS = 20_000;
 interface Entry {
   key: string;
   clusterId: string;
+  /** Set for a list of some namespaces, and null for a whole list or one object. */
+  scope: Scope | null;
   /** Always up to date. `state.items` lags behind it while the window is hidden. */
   rows: Map<string, KubeObject>;
+  /** The rows of a snapshot that is arriving in parts, until its last part. */
+  incoming: Map<string, KubeObject> | null;
   /** Set when `rows` changed after `state.items` was built from them. */
   changed: boolean;
-  /** Set when a batch added a key at the end of `rows`, out of the listed order. */
-  unsorted: boolean;
+  /** The keys batches added at the end of `rows`, out of the listed order. */
+  added: Set<string>;
   state: ResourceListState;
   listeners: Set<() => void>;
   refs: number;
@@ -102,11 +110,41 @@ function notifyStore(): void {
   for (const listener of [...storeListeners]) listener();
 }
 
-function entryKey(clusterId: string, r: ResourceRef): string {
-  return JSON.stringify([clusterId, r.group, r.plural]);
+/** A list of some namespaces: the key of the whole list, and those namespaces. */
+interface Scope {
+  list: string;
+  namespaces: readonly string[];
 }
 
-/** Never equal to a list's key, which has three parts. */
+/** No namespace named, which asks for every one. The same array on every render. */
+const EVERY_NAMESPACE: readonly string[] = [];
+
+/**
+ * `namespaces` each once and in one order, so the same choice is the same list. A
+ * cluster-scoped resource has none.
+ */
+function namespacesOf(
+  resource: ResourceRef,
+  namespaces: readonly string[] | undefined,
+): readonly string[] {
+  if (!resource.namespaced || !namespaces || namespaces.length === 0)
+    return EVERY_NAMESPACE;
+  return [...new Set(namespaces)].sort();
+}
+
+function entryKey(
+  clusterId: string,
+  r: ResourceRef,
+  namespaces: readonly string[] = EVERY_NAMESPACE,
+): string {
+  const whole = [clusterId, r.group, r.plural];
+  return JSON.stringify(namespaces.length > 0 ? [...whole, namespaces] : whole);
+}
+
+/**
+ * Never equal to a list's key, which has three parts, or four when it names its
+ * namespaces.
+ */
 function objectEntryKey(
   clusterId: string,
   r: ResourceRef,
@@ -114,6 +152,14 @@ function objectEntryKey(
   name: string,
 ): string {
   return JSON.stringify([clusterId, r.group, r.plural, namespace, name]);
+}
+
+/**
+ * Never equal to a list's key, whose fourth part, when it has one, lists its namespaces,
+ * nor to an object's, which has five parts.
+ */
+function nodePodsEntryKey(clusterId: string, node: string): string {
+  return JSON.stringify([clusterId, "", "pods", { node }]);
 }
 
 /** Starts a backend subscription that sends its events to `onEvent`. */
@@ -147,15 +193,14 @@ function compareListed(a: KubeObject, b: KubeObject): number {
 }
 
 /**
- * Builds `state.items` from `rows` if they changed, and tells the components. The
- * rows are sorted here, so batches that arrive while the window is hidden sort once.
+ * Builds `state.items` from `rows` if they changed, and tells the components. New
+ * rows are put in their place here, so batches that arrive while the window is hidden
+ * are placed once. Only the new rows are sorted: the others are in order already.
  */
 function publish(entry: Entry): void {
-  if (entry.unsorted) {
-    entry.rows = new Map(
-      [...entry.rows].sort(([, a], [, b]) => compareListed(a, b)),
-    );
-    entry.unsorted = false;
+  if (entry.added.size > 0) {
+    entry.rows = mergeAdded(entry.rows, entry.added, compareListed);
+    entry.added.clear();
   }
   if (entry.changed) {
     entry.state = { ...entry.state, items: [...entry.rows.values()] };
@@ -169,15 +214,27 @@ function publish(entry: Entry): void {
  * hidden, a batch only changes the rows, and they are published when the window
  * shows. A snapshot or a status is published at once: either is rare, a snapshot
  * ends the loading that other code waits for, and a status may report an error.
+ * A large snapshot arrives in parts, each parsed on its own, and is published once,
+ * with its last part, so a list is never shown half replaced.
  */
 function apply(entry: Entry, event: WatchEvent): void {
   switch (event.type) {
+    case "snapshotPart": {
+      entry.incoming ??= new Map();
+      for (const o of event.items as unknown as KubeObject[]) {
+        entry.incoming.set(objectKey(o), o);
+      }
+      return;
+    }
     case "snapshot": {
-      entry.rows = new Map(
-        (event.items as unknown as KubeObject[]).map((o) => [objectKey(o), o]),
-      );
+      const rows = entry.incoming ?? new Map<string, KubeObject>();
+      entry.incoming = null;
+      for (const o of event.items as unknown as KubeObject[]) {
+        rows.set(objectKey(o), o);
+      }
+      entry.rows = rows;
       entry.changed = true;
-      entry.unsorted = false;
+      entry.added.clear();
       entry.state = { ...entry.state, loading: false };
       break;
     }
@@ -187,7 +244,7 @@ function apply(entry: Entry, event: WatchEvent): void {
       // a batch in no order, so new objects are put in the snapshot's order.
       for (const o of event.upserts as unknown as KubeObject[]) {
         const key = objectKey(o);
-        if (!entry.rows.has(key)) entry.unsorted = true;
+        if (!entry.rows.has(key)) entry.added.add(key);
         entry.rows.set(key, o);
       }
       entry.changed = true;
@@ -252,14 +309,21 @@ function listen(): void {
   });
 }
 
-function open(key: string, clusterId: string, start: Start): Entry {
+function open(
+  key: string,
+  clusterId: string,
+  start: Start,
+  scope: Scope | null,
+): Entry {
   listen();
   const entry: Entry = {
     key,
     clusterId,
+    scope,
     rows: new Map(),
+    incoming: null,
     changed: false,
-    unsorted: false,
+    added: new Set(),
     state: LOADING,
     listeners: new Set(),
     refs: 0,
@@ -313,10 +377,15 @@ function end(entry: Entry): void {
   if (entry.refs === 0 && !entry.closed) drop(entry);
 }
 
-function acquire(key: string, clusterId: string, start: Start): Entry {
+function acquire(
+  key: string,
+  clusterId: string,
+  start: Start,
+  scope: Scope | null,
+): Entry {
   let entry = entries.get(key);
   if (!entry) {
-    entry = open(key, clusterId, start);
+    entry = open(key, clusterId, start, scope);
     entries.set(key, entry);
     notifyStore();
   }
@@ -353,19 +422,20 @@ function useEntry(
   key: string | null,
   clusterId: string,
   start: Start | null,
+  scope: Scope | null = null,
 ): ResourceListState {
   // The effect depends on the identity in `key`, so it reads the latest props from a ref.
-  const latest = useRef({ clusterId, start });
-  latest.current = { clusterId, start };
+  const latest = useRef({ clusterId, start, scope });
+  latest.current = { clusterId, start, scope };
   const [entry, setEntry] = useState<Entry | null>(null);
 
   useEffect(() => {
-    const { clusterId: cluster, start: begin } = latest.current;
+    const { clusterId: cluster, start: begin, scope: within } = latest.current;
     if (key === null || begin === null) {
       setEntry(null);
       return;
     }
-    const acquired = acquire(key, cluster, begin);
+    const acquired = acquire(key, cluster, begin, within);
     setEntry(acquired);
     return () => release(acquired);
   }, [key]);
@@ -388,19 +458,50 @@ function useEntry(
 }
 
 /**
- * The live objects of a resource. One subscription is kept per cluster, group and
- * plural, and ended `LINGER_MS` after the last component using it goes away.
+ * The live objects of a resource: those of `namespaces`, or of every namespace when
+ * none is named. A component that shows the objects of a few namespaces names them, so
+ * the backend sends only those rows. One subscription is kept per cluster, group,
+ * plural and namespaces, and ended `LINGER_MS` after the last component using it goes
+ * away.
  */
 export function useResourceList(
   clusterId: string,
   resource: ResourceRef | null,
+  namespaces?: readonly string[],
 ): ResourceListState {
+  const within = resource
+    ? namespacesOf(resource, namespaces)
+    : EVERY_NAMESPACE;
   return useEntry(
-    resource ? entryKey(clusterId, resource) : null,
+    resource ? entryKey(clusterId, resource, within) : null,
     clusterId,
     resource
-      ? (onEvent) => api.resourcesSubscribe(clusterId, resource, onEvent)
+      ? (onEvent) =>
+          api.resourcesSubscribe(clusterId, resource, [...within], onEvent)
       : null,
+    resource && within.length > 0
+      ? { list: entryKey(clusterId, resource), namespaces: within }
+      : null,
+  );
+}
+
+/**
+ * The live Pods bound to the node `node`, with the rows a list of Pods has; none is asked
+ * for while `node` is null. The backend has the API server pick them, so a node's drawer
+ * never loads the Pods of the whole cluster. One subscription is kept per cluster and
+ * node, and ended `LINGER_MS` after the last component using it goes away. It holds only
+ * that node's Pods, so it never stands for a list of Pods.
+ */
+export function useNodePods(
+  clusterId: string,
+  node: string | null,
+): ResourceListState {
+  return useEntry(
+    node === null ? null : nodePodsEntryKey(clusterId, node),
+    clusterId,
+    node === null
+      ? null
+      : (onEvent) => api.resourcesSubscribeNodePods(clusterId, node, onEvent),
   );
 }
 
@@ -437,22 +538,38 @@ export function useObjectWatch(
 }
 
 /**
+ * The list with the key `whole`, or else a list of some namespaces of the same
+ * resource that names `namespace`, so it holds every object of that namespace.
+ */
+function heldEntry(whole: string, namespace: string | null): Entry | undefined {
+  const entry = entries.get(whole);
+  if (entry || namespace === null) return entry;
+  for (const other of entries.values()) {
+    if (other.scope?.list !== whole) continue;
+    if (other.scope.namespaces.includes(namespace)) return other;
+  }
+  return undefined;
+}
+
+/**
  * The state of the list of a resource that the store already has, because a
  * component uses it or it lingers, read without holding it: null when there is none,
- * and again once it is dropped. It never starts a subscription.
+ * and again once it is dropped. It never starts a subscription. With `namespace`, a
+ * list of some namespaces that names it counts too, when there is no whole list.
  */
 export function useHeldList(
   clusterId: string,
   resource: ResourceRef | null,
+  namespace: string | null = null,
 ): ResourceListState | null {
   const key = resource ? entryKey(clusterId, resource) : null;
   const subscribe = useCallback(
     (listener: () => void) => {
       if (key === null) return () => {};
-      // Follows the entry of `key` as the store adds and drops it.
+      // Follows the entry for `key` as the store adds and drops it.
       let followed: Entry | undefined;
       const follow = () => {
-        const next = entries.get(key);
+        const next = heldEntry(key, namespace);
         if (next === followed) return;
         followed?.listeners.delete(listener);
         followed = next;
@@ -469,11 +586,11 @@ export function useHeldList(
         followed?.listeners.delete(listener);
       };
     },
-    [key],
+    [key, namespace],
   );
   const snapshot = useCallback(
-    () => (key === null ? null : (entries.get(key)?.state ?? null)),
-    [key],
+    () => (key === null ? null : (heldEntry(key, namespace)?.state ?? null)),
+    [key, namespace],
   );
   return useSyncExternalStore(subscribe, snapshot);
 }

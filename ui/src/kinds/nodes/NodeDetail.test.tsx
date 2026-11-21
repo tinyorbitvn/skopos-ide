@@ -15,8 +15,9 @@ const info = { resource: NODES } as unknown as ApiResourceInfo;
 
 test("shows capacity, taints, addresses, versions and only this node's pods", async () => {
   let send: (e: WatchEvent) => void = () => {};
-  mockBackend({
-    resources_subscribe: (a: {
+  const backend = mockBackend({
+    resources_subscribe: () => "list",
+    resources_subscribe_node_pods: (a: {
       onEvent: { onmessage: (e: WatchEvent) => void };
     }) => {
       send = a.onEvent.onmessage;
@@ -76,4 +77,9 @@ test("shows capacity, taints, addresses, versions and only this node's pods", as
   expect(screen.getByText("containerd://1.7")).toBeTruthy();
   expect(screen.getByText("mine")).toBeTruthy();
   expect(screen.queryByText("other")).toBeNull();
+  // The node's Pods are asked for by its name, never as the Pods of the whole cluster.
+  expect(backend.callsTo("resources_subscribe_node_pods")).toMatchObject([
+    { clusterId: "c", node: "n1" },
+  ]);
+  expect(backend.callsTo("resources_subscribe")).toHaveLength(0);
 });

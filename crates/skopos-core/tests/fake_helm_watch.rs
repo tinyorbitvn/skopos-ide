@@ -45,6 +45,18 @@ async fn until_watching(fake: &FakeKube) {
     }
 }
 
+async fn until_open_watches(fake: &FakeKube, count: usize) {
+    let started = Instant::now();
+    while fake.open_watch_count() != count {
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{} watches open, not {count}",
+            fake.open_watch_count()
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// A subscription whose watcher is already watching, so later changes are live events.
 async fn watching(
     core: &AppCore,
@@ -53,7 +65,9 @@ async fn watching(
 ) -> (String, mpsc::Receiver<HelmReleasesEvent>) {
     core.set_helm_debounce_for_test(DEBOUNCE);
     let (tx, rx) = mpsc::channel(8);
-    let subscription = core.helm_releases_subscribe(&id.to_owned(), tx).unwrap();
+    let subscription = core
+        .helm_releases_subscribe(&id.to_owned(), tx, "main")
+        .unwrap();
     until_watching(fake).await;
     (subscription, rx)
 }
@@ -156,7 +170,7 @@ async fn a_forbidden_watch_sends_forbidden_once_and_ends() {
     core.set_helm_debounce_for_test(DEBOUNCE);
     let (tx, mut rx) = mpsc::channel(8);
 
-    core.helm_releases_subscribe(&id, tx).unwrap();
+    core.helm_releases_subscribe(&id, tx, "main").unwrap();
 
     match next(&mut rx).await {
         Some(HelmReleasesEvent::Forbidden { message }) => {
@@ -176,7 +190,7 @@ async fn any_other_watch_error_sends_failed_once_and_ends() {
     core.set_helm_debounce_for_test(DEBOUNCE);
     let (tx, mut rx) = mpsc::channel(8);
 
-    core.helm_releases_subscribe(&id, tx).unwrap();
+    core.helm_releases_subscribe(&id, tx, "main").unwrap();
 
     assert!(matches!(
         next(&mut rx).await,
@@ -197,6 +211,23 @@ async fn unsubscribing_ends_the_watch_without_an_event() {
     // Safe to repeat, and for an id that never existed.
     core.helm_releases_unsubscribe(&subscription);
     core.helm_releases_unsubscribe("helm-999");
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_window_s_watch_ends_with_it_and_another_window_s_goes_on() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    let (_kept, mut kept) = watching(&core, &fake, &id).await;
+    let (tx, mut ended) = mpsc::channel(8);
+    core.helm_releases_subscribe(&id, tx, "window-2").unwrap();
+    until_open_watches(&fake, 2).await;
+
+    core.subscriptions_stop_owned("window-2");
+
+    assert_eq!(next(&mut ended).await, None);
+    until_open_watches(&fake, 1).await;
+    fake.upsert("secrets", release_secret("sh.helm.release.v1.web.v1"));
+    assert_eq!(next(&mut kept).await, Some(HelmReleasesEvent::Changed));
     core.shutdown().await;
 }
 
@@ -234,6 +265,6 @@ async fn subscribing_needs_a_connected_cluster() {
     core.cluster_disconnect(&id).await.unwrap();
     let (tx, _rx) = mpsc::channel(8);
 
-    assert!(core.helm_releases_subscribe(&id, tx).is_err());
+    assert!(core.helm_releases_subscribe(&id, tx, "main").is_err());
     core.shutdown().await;
 }

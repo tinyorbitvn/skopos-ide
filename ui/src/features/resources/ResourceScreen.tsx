@@ -17,7 +17,8 @@ import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { groupFromSegment } from "../../kinds/nav";
 import { type KubeObject, objectKey } from "../../kinds/objects";
 import { kindSpec } from "../../kinds/registry";
-import { findResource, useResourceList } from "../../stores/resources";
+import { useClusterNamespaces } from "../../stores/clusters";
+import { findResource } from "../../stores/resources";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import { DetailDrawer, isDrawerEscape } from "../details/DetailDrawer";
@@ -45,6 +46,7 @@ import { PropertyFilter } from "./PropertyFilter";
 import { RowActions, useActionContext } from "./ResourceActions";
 import styles from "./ResourceScreen.module.css";
 import { useOwnedPods } from "./useOwnedPods";
+import { useTableList } from "./useTableList";
 
 const ACTIONS_COLUMN = "actions";
 /** Always shown, so a row can always be told apart. */
@@ -87,7 +89,13 @@ export function ResourceScreen(props: {
   const { resource, canDelete } = info;
   const { kind, namespaced } = resource;
 
-  const list = useResourceList(clusterId, resource);
+  const [savedNamespaces, setNamespaces, namespacesRead] = useUiState<string[]>(
+    namespaceFilterKey(clusterId),
+    [],
+  );
+  const namespaces = namespaced ? savedNamespaces : NO_NAMESPACES;
+  const listReady = !namespaced || namespacesRead;
+  const list = useTableList(clusterId, resource, namespaces, listReady);
   const crd = useCustomResourceDefinition(clusterId, info, resources);
   const { context, confirmDialog } = useActionContext(clusterId, resource);
 
@@ -144,10 +152,6 @@ export function ResourceScreen(props: {
   const [sort, setSort] = useState<TableSort | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [deleting, setDeleting] = useState<KubeObject[] | null>(null);
-  const [savedNamespaces, setNamespaces] = useUiState<string[]>(
-    namespaceFilterKey(clusterId),
-    [],
-  );
   const [choices, setChoices] = useUiState<ColumnChoices>(
     `columns:${resource.group}/${resource.plural}`,
     {},
@@ -157,15 +161,16 @@ export function ResourceScreen(props: {
     `column-widths:${resource.group}/${resource.plural}`,
     {},
   );
-  const namespaces = namespaced ? savedNamespaces : NO_NAMESPACES;
-
+  // The list holds only the chosen namespaces, so the choices are the cluster's own,
+  // and those of the rows for a cluster whose namespaces could not be listed.
+  const clusterNamespaces = useClusterNamespaces(clusterId);
   const allNamespaces = useMemo(() => {
-    const found = new Set<string>();
+    const found = new Set<string>(clusterNamespaces);
     for (const o of list.items) {
       if (o.metadata.namespace) found.add(o.metadata.namespace);
     }
     return [...found];
-  }, [list.items]);
+  }, [clusterNamespaces, list.items]);
 
   const namespaceRows = useMemo(() => {
     const allowed = new Set(namespaces);
@@ -200,7 +205,11 @@ export function ResourceScreen(props: {
     [metricsUsage, disk],
   );
   // Each workload's Pods, for the workload kinds' Status (spec N3); undefined otherwise.
-  const owned = useOwnedPods(clusterId, info);
+  const owned = useOwnedPods(
+    clusterId,
+    listReady ? info : undefined,
+    namespaces,
+  );
   const columns = useMemo<TableColumn<KubeObject>[]>(() => {
     const actions = kindSpec(resource.group, resource.plural)?.actions ?? [];
     return [

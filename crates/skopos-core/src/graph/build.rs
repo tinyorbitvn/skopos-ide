@@ -62,6 +62,8 @@ impl Store {
             return;
         };
         match event {
+            // Only the forwarder to the webview cuts a snapshot, so none arrives here.
+            WatchEvent::SnapshotPart { .. } => {}
             WatchEvent::Snapshot { items } => {
                 state.objects = items
                     .iter()
