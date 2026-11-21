@@ -516,7 +516,7 @@ test("metrics-server: the Live badge and text, no range picker, and rolling CPU 
   expect(screen.queryByTestId("metrics-range")).toBeNull();
   expect(screen.queryByTestId("metrics-loading")).toBeNull();
   expect(text("metrics-note")).toBe(
-    "Pods and disk history need Prometheus: metrics-server reports only the current CPU and memory.",
+    "Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.",
   );
   expect(text("metrics-chart-cpu-now")).toBe("750m");
   expect(text("metrics-chart-memory-now")).toBe("2 GiB");

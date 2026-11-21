@@ -5,10 +5,13 @@ import {
   columnMemory,
   DASH,
   dayLabel,
+  formatAxis,
   formatBytes,
   formatCores,
   formatCount,
   formatRate,
+  formatRequestRate,
+  formatSeconds,
   formatValue,
   gibibytes,
   oneDecimal,
@@ -218,4 +221,30 @@ test("times read as the local clock and the local day", () => {
 
   expect([clockTime(morning), clockTime(night)]).toEqual(["09:05", "23:59"]);
   expect([dayLabel(morning), dayLabel(night)]).toEqual(["Nov 11", "Jan 2"]);
+});
+
+test("requests a second keep two decimals below 1, one below 10, then thousands commas", () => {
+  expect([0.04, 0.21, 9.9, 352, 1234].map((v) => formatRequestRate(v))).toEqual(
+    ["0.04 req/s", "0.21 req/s", "9.9 req/s", "352 req/s", "1,234 req/s"],
+  );
+  expect(formatValue(352, "requestsPerSecond")).toBe("352 req/s");
+  expect(formatRequestRate(-1)).toBe(DASH);
+});
+
+test("latency reads milliseconds below a second, then seconds", () => {
+  expect([0.0042, 0.145, 1.2].map((v) => formatSeconds(v))).toEqual([
+    "4.2 ms",
+    "145 ms",
+    "1.2 s",
+  ]);
+  expect(formatValue(0.145, "seconds")).toBe("145 ms");
+  expect(formatSeconds(Number.NaN)).toBe(DASH);
+});
+
+test("an axis label of requests a second drops the unit; other units read as values", () => {
+  expect(formatAxis(400, "requestsPerSecond")).toBe("400");
+  expect(formatAxis(2000, "requestsPerSecond")).toBe("2,000");
+  expect(formatAxis(0.5, "requestsPerSecond")).toBe("0.5");
+  expect(formatAxis(0.25, "seconds")).toBe("250 ms");
+  expect(formatAxis(0.5, "cores")).toBe("500m");
 });
