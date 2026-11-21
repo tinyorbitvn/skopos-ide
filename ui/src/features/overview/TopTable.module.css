@@ -1,0 +1,105 @@
+/* A top table (cluster overview spec §3.5). */
+.top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--text-primary);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 0;
+}
+
+.table th,
+.table td {
+  padding: var(--space-4) 0;
+  vertical-align: middle;
+  text-align: left;
+}
+
+.row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.head th {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.name {
+  min-width: 0;
+  padding-right: var(--space-7);
+}
+
+.open,
+.sub {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text-link);
+  font: var(--type-label);
+  text-align: left;
+  cursor: pointer;
+}
+
+.open:hover {
+  color: var(--text-link-hover);
+  text-decoration: underline;
+}
+
+.open:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.sub {
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+}
+
+.value {
+  width: 8rem;
+  padding-right: var(--space-7);
+  font: var(--type-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.head .value {
+  font: var(--type-caption);
+}
+
+.share {
+  width: 36px;
+  text-align: center;
+}
+
+.empty td {
+  padding: var(--space-7) 0;
+  border-top: 1px solid var(--border-subtle);
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}

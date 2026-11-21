@@ -4,4 +4,4 @@ import type { WorkloadKind } from "./WorkloadKind";
 /**
  * What `metrics_query` reads.
  */
-export type MetricsTarget = { "kind": "cluster" } | { "kind": "node", name: string, } | { "kind": "pod", namespace: string, name: string, } | { "kind": "workload", namespace: string, name: string, workloadKind: WorkloadKind, } | { "kind": "pvc", namespace: string, name: string, };
+export type MetricsTarget = { "kind": "cluster" } | { "kind": "controlPlane" } | { "kind": "node", name: string, } | { "kind": "pod", namespace: string, name: string, } | { "kind": "workload", namespace: string, name: string, workloadKind: WorkloadKind, } | { "kind": "pvc", namespace: string, name: string, };

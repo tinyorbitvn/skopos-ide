@@ -12,6 +12,7 @@ import type { ConnectionLogEntry } from "../../ipc/generated/ConnectionLogEntry"
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { resetMetricsForTest } from "../../stores/metrics";
+import { resetTopologyForTest } from "../../stores/topology";
 import {
   resetWindowLayoutForTest,
   useWindowLayout,
@@ -44,6 +45,10 @@ async function show(
     cluster_disconnect: () => null,
     resources_discover: () => [],
     metrics_provider: () => noProvider("setting"),
+    node_topology_subscribe: () => "t1",
+    node_topology_unsubscribe: () => null,
+    ui_state_get: () => null,
+    ui_state_set: () => null,
     ...over,
   });
   await useCatalog.getState().init();
@@ -97,6 +102,7 @@ function setState(state: ConnectionState) {
 
 beforeEach(() => {
   resetCatalogForTest();
+  resetTopologyForTest();
   resetMetricsForTest();
 });
 

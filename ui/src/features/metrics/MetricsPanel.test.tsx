@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, expect, test } from "vitest";
 import type { IpcError } from "../../ipc/generated/IpcError";
+import type { MetricName } from "../../ipc/generated/MetricName";
 import type { MetricsProvider } from "../../ipc/generated/MetricsProvider";
 import type { MetricsRange } from "../../ipc/generated/MetricsRange";
 import type { MetricsResult } from "../../ipc/generated/MetricsResult";
@@ -516,7 +517,7 @@ test("metrics-server: the Live badge and text, no range picker, and rolling CPU 
   expect(screen.queryByTestId("metrics-range")).toBeNull();
   expect(screen.queryByTestId("metrics-loading")).toBeNull();
   expect(text("metrics-note")).toBe(
-    "Pods and disk history need Prometheus: metrics-server reports only the current CPU and memory.",
+    "Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.",
   );
   expect(text("metrics-chart-cpu-now")).toBe("750m");
   expect(text("metrics-chart-memory-now")).toBe("2 GiB");
@@ -672,4 +673,299 @@ test("a long tenant or label wraps in the source line and the note", () => {
     );
     expect([selector, decls["overflow-wrap"]]).toEqual([selector, "anywhere"]);
   }
+});
+
+const CONTROL: MetricsTarget = { kind: "controlPlane" };
+const CP_METRICS: MetricName[] = [
+  "apiRequests",
+  "apiErrors",
+  "apiLatencyP99",
+  "etcdLatencyP99",
+  "etcdDbSize",
+];
+const CP_RESULT = metricsResult({
+  apiRequests: points([300, 352]),
+  apiErrors: points([0.2, 0.21]),
+  apiLatencyP99: points([0.12, 0.145]),
+  etcdLatencyP99: points([0.004, 0.0042]),
+  etcdDbSize: points([0.5 * GIB, 0.6 * GIB]),
+});
+const CP_MISSING = metricsResult({}, { missing: CP_METRICS });
+
+/** Answers the cluster with RESULT and the control plane with `plane`. */
+function byTarget(plane: () => unknown = () => CP_RESULT) {
+  return (a: { target: MetricsTarget }) =>
+    a.target.kind === "controlPlane" ? plane() : RESULT;
+}
+
+/** The stems of a grid's charts, in order: each chart is a child of its grid. */
+const stems = (id: string) =>
+  [...screen.getByTestId(id).children].map((c) =>
+    (c.getAttribute("data-testid") ?? "").slice("metrics-chart-".length),
+  );
+
+test("the Overview's panel draws two headed groups: the cluster's charts, then the control plane's", async () => {
+  const backend = await show(
+    { metrics_provider: () => prometheus(), metrics_query: byTarget() },
+    { controlPlane: { distribution: "EKS" } },
+  );
+  expect(text("metrics-heading-cluster")).toBe("Cluster resources");
+  expect(text("metrics-heading-control-plane")).toBe("Control plane");
+  expect(text("metrics-control-plane-source")).toBe(
+    "From the API server's own metrics: EKS runs etcd, so etcd is read as the API server sees it.",
+  );
+  expect(screen.getByTestId("metrics-grid").getAttribute("data-n")).toBe("4");
+  expect(stems("metrics-grid")).toEqual(["cpu", "memory", "pods", "disk"]);
+  const plane = screen.getByTestId("metrics-grid-control-plane");
+  expect(plane.getAttribute("data-n")).toBe("4");
+  expect(stems("metrics-grid-control-plane")).toEqual([
+    "api-requests",
+    "api-latency",
+    "etcd-latency",
+    "etcd-database",
+  ]);
+  expect(text("metrics-chart-api-requests-now")).toBe("352 req/s");
+  expect(text("metrics-chart-api-latency-now")).toBe("145 ms");
+  expect(text("metrics-chart-etcd-latency-now")).toBe("4.2 ms");
+  expect(
+    within(screen.getByTestId("metrics-chart-etcd-database")).getByText(
+      "8 GiB on standard control planes",
+    ),
+  ).toBeTruthy();
+  expect(backend.callsTo("metrics_query")).toEqual([
+    { clusterId: "c1", target: CLUSTER, range: "1h" },
+    { clusterId: "c1", target: CONTROL, range: "1h" },
+  ]);
+});
+
+test("without the controlPlane prop, or in a column, the panel asks only for its own target", async () => {
+  const backend = await show({
+    metrics_provider: () => prometheus(),
+    metrics_query: byTarget(),
+  });
+  expect(screen.queryByTestId("metrics-grid-control-plane")).toBeNull();
+  expect(screen.queryByTestId("metrics-heading-cluster")).toBeNull();
+  expect(
+    backend
+      .callsTo("metrics_query")
+      .map((a) => (a.target as MetricsTarget).kind),
+  ).toEqual(["cluster"]);
+});
+
+test("in a drawer's column the control plane is never asked for", async () => {
+  const backend = await show(
+    { metrics_provider: () => prometheus(), metrics_query: byTarget() },
+    { layout: "column", controlPlane: { distribution: "kind" } },
+  );
+  expect(screen.queryByTestId("metrics-grid-control-plane")).toBeNull();
+  expect(
+    backend
+      .callsTo("metrics_query")
+      .map((a) => (a.target as MetricsTarget).kind),
+  ).toEqual(["cluster"]);
+});
+
+test("all five control plane metrics missing: one note in place of the charts, naming the cluster label", async () => {
+  await show(
+    {
+      metrics_provider: () =>
+        remote({ matcher: { name: "cluster", value: "prod" } }),
+      metrics_query: byTarget(() => CP_MISSING),
+    },
+    { controlPlane: { distribution: "kind" } },
+  );
+  expect(screen.queryByTestId("metrics-grid-control-plane")).toBeNull();
+  expect(text("metrics-heading-control-plane")).toBe("Control plane");
+  expect(text("metrics-control-plane-note")).toBe(
+    'No API server metrics in this Prometheus: there are no samples of apiserver_request_total with cluster="prod". kube-prometheus-stack scrapes the API server by default; another Prometheus needs a job for the kubernetes Service\'s endpoints.',
+  );
+});
+
+test("some control plane metrics missing: each such chart says it has no samples", async () => {
+  await show(
+    {
+      metrics_provider: () => prometheus(),
+      metrics_query: byTarget(() =>
+        metricsResult(
+          { apiRequests: points([300, 352]) },
+          {
+            missing: [
+              "apiErrors",
+              "apiLatencyP99",
+              "etcdLatencyP99",
+              "etcdDbSize",
+            ],
+          },
+        ),
+      ),
+    },
+    { controlPlane: { distribution: "kind" } },
+  );
+  expect(screen.queryByTestId("metrics-control-plane-note")).toBeNull();
+  expect(text("metrics-chart-api-requests-now")).toBe("352 req/s");
+  expect(screen.getByTestId("metrics-chart-api-latency-empty")).toBeTruthy();
+});
+
+test("the cluster's no-samples note leaves the control plane group out", async () => {
+  await show(
+    {
+      metrics_provider: () => remote({ tenant: "platform" }),
+      metrics_query: (a: { target: MetricsTarget }) =>
+        a.target.kind === "controlPlane"
+          ? CP_MISSING
+          : metricsResult({}, { missing: ["cpuUsage", "memoryUsage"] }),
+    },
+    { controlPlane: { distribution: "kind" } },
+  );
+  expect(
+    screen.getByTestId("metrics-note").querySelector("p")?.textContent,
+  ).toBe(
+    "No samples for tenant platform: check the tenant in the cluster settings.",
+  );
+  expect(screen.queryByTestId("metrics-control-plane-note")).toBeNull();
+  expect(screen.queryByTestId("metrics-heading-control-plane")).toBeNull();
+});
+
+test("a failed control plane query shows its own block, and its Retry asks again", async () => {
+  let plane: () => unknown = () => {
+    throw PROMETHEUS_DOWN;
+  };
+  const backend = await show(
+    {
+      metrics_provider: () => prometheus(),
+      metrics_query: byTarget(() => plane()),
+    },
+    { controlPlane: { distribution: "kind" } },
+  );
+  const block = screen.getByTestId("metrics-control-plane-error");
+  expect(block.querySelector("strong")?.textContent).toBe(
+    "The control plane metrics did not answer",
+  );
+  expect(screen.queryByTestId("metrics-error")).toBeNull();
+  expect(stems("metrics-grid")).toEqual(["cpu", "memory", "pods", "disk"]);
+
+  plane = () => CP_RESULT;
+  fireEvent.click(within(block).getByTestId("metrics-retry"));
+  await settle();
+  expect(screen.queryByTestId("metrics-control-plane-error")).toBeNull();
+  expect(text("metrics-chart-api-requests-now")).toBe("352 req/s");
+  expect(
+    backend
+      .callsTo("metrics_query")
+      .filter((a) => (a.target as MetricsTarget).kind === "controlPlane"),
+  ).toHaveLength(2);
+});
+
+test("a new range keeps both groups' charts dimmed until their answers", async () => {
+  const pending: { kind: string; resolve: (r: MetricsResult) => void }[] = [];
+  await show(
+    {
+      metrics_provider: () => prometheus(),
+      metrics_query: (a: { target: MetricsTarget; range: MetricsRange }) =>
+        a.range === "1h"
+          ? byTarget()(a)
+          : new Promise<MetricsResult>((resolve) => {
+              pending.push({ kind: a.target.kind, resolve });
+            }),
+    },
+    { controlPlane: { distribution: "kind" } },
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "6h" }));
+  await settle();
+  expect(text("metrics-loading")).toBe("Loading 6h");
+  for (const id of ["metrics-grid", "metrics-grid-control-plane"]) {
+    expect([id, screen.getByTestId(id).classList.contains("dim")]).toEqual([
+      id,
+      true,
+    ]);
+  }
+  expect(text("metrics-chart-api-requests-now")).toBe("352 req/s");
+
+  await act(async () => {
+    for (const p of pending) {
+      p.resolve(p.kind === "controlPlane" ? CP_RESULT : RESULT);
+    }
+    await flush();
+  });
+  expect(screen.queryByTestId("metrics-loading")).toBeNull();
+});
+
+test("Table view lists the control plane's tables after the cluster's, under both headings", async () => {
+  await show(
+    { metrics_provider: () => prometheus(), metrics_query: byTarget() },
+    { controlPlane: { distribution: "kind" } },
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Table" }));
+  await settle();
+  const tables = [
+    ...document.querySelectorAll('[data-testid^="metrics-table-"]'),
+  ].map((t) => t.getAttribute("data-testid"));
+  expect(tables).toEqual(
+    [
+      "cpu",
+      "memory",
+      "pods",
+      "disk",
+      "api-requests",
+      "api-latency",
+      "etcd-latency",
+      "etcd-database",
+    ].map((s) => `metrics-table-${s}`),
+  );
+  expect(
+    [
+      ...screen
+        .getByTestId("metrics-table-api-requests")
+        .querySelectorAll("th"),
+    ].map((th) => th.textContent),
+  ).toEqual(["Time", "Requests", "5xx errors"]);
+  expect(text("metrics-heading-cluster")).toBe("Cluster resources");
+  expect(text("metrics-heading-control-plane")).toBe("Control plane");
+});
+
+test("metrics-server: no control plane group, and the note names control plane history", async () => {
+  const backend = await show(
+    {
+      metrics_provider: () => metricsServer(),
+      metrics_usage: () =>
+        usageSnapshot([
+          usageItem({ namespace: null, name: "n1", cpuCores: 1 }),
+        ]),
+    },
+    { controlPlane: { distribution: "kind" } },
+  );
+  expect(text("metrics-note")).toBe(
+    "Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.",
+  );
+  expect(screen.queryByTestId("metrics-heading-control-plane")).toBeNull();
+  expect(screen.getByTestId("metrics-grid").getAttribute("data-n")).toBe("2");
+  expect(backend.callsTo("metrics_query")).toEqual([]);
+});
+
+test("the panel is the container of its grids: 2 columns from 612 px, 4 for four charts from 1236 px", () => {
+  const css = (
+    CSS_FILES["/src/features/metrics/MetricsPanel.module.css"] ?? ""
+  ).replace(/\s+/g, " ");
+  expect(css).toMatch(/\.panel \{[^}]*container: metrics-panel \/ inline-size/);
+  expect(css).toContain(
+    "grid-template-columns: repeat(var(--metrics-columns, 1), minmax(0, 1fr))",
+  );
+  expect(css).toContain(
+    '@container metrics-panel (min-width: 612px) { .grid { --metrics-columns: 2; } .grid[data-n="1"] { --metrics-columns: 1; } }',
+  );
+  expect(css).toContain(
+    '@container metrics-panel (min-width: 1236px) { .grid[data-n="4"] { --metrics-columns: 4; } }',
+  );
+  expect(css).not.toMatch(/auto-fit|auto-fill/);
+});
+
+test("one hover marks the cluster's and the control plane's charts", async () => {
+  await show(
+    { metrics_provider: () => prometheus(), metrics_query: byTarget() },
+    { controlPlane: { distribution: "kind" } },
+  );
+  act(() => screen.getByTestId("metrics-chart-api-latency-plot").focus());
+  expect(screen.getByTestId("metrics-chart-api-latency-readout")).toBeTruthy();
+  expect(screen.getByTestId("metrics-chart-cpu-hairline")).toBeTruthy();
+  expect(screen.queryByTestId("metrics-chart-cpu-readout")).toBeNull();
 });

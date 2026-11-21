@@ -1280,3 +1280,117 @@ async fn the_provider_names_the_pinned_prefix_tenant_and_label_and_a_detected_on
         chart_provider()
     );
 }
+
+const CONTROL_PLANE_QUERIES: [&str; 5] = [
+    "sum(rate(apiserver_request_total[120s]))",
+    r#"sum(rate(apiserver_request_total{code=~"5.."}[120s]))"#,
+    r#"histogram_quantile(0.99, sum by (le) (rate(apiserver_request_duration_seconds_bucket{verb!~"WATCH|CONNECT"}[120s])))"#,
+    "histogram_quantile(0.99, sum by (le) (rate(etcd_request_duration_seconds_bucket[120s])))",
+    "max(apiserver_storage_size_bytes) or max(etcd_db_total_size_in_bytes)",
+];
+
+#[tokio::test]
+async fn the_control_plane_is_read_through_the_service_proxy_as_five_series() {
+    use MetricName::*;
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    community_chart(&fake, prometheus(|request| matrix(request, &[12.0, 14.0])));
+
+    let result = core
+        .metrics_query(&id, &MetricsTarget::ControlPlane, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.series.keys().copied().collect::<Vec<_>>(),
+        [
+            ApiRequests,
+            ApiErrors,
+            ApiLatencyP99,
+            EtcdLatencyP99,
+            EtcdDbSize
+        ]
+    );
+    assert!(result.missing.is_empty() && result.failed.is_empty());
+    let mut asked: Vec<String> = range_requests(&fake, "metrics", "prometheus-server:80")
+        .into_iter()
+        .map(|request| request.params["query"].clone())
+        .collect();
+    asked.sort();
+    let mut expected = CONTROL_PLANE_QUERIES.map(str::to_owned).to_vec();
+    expected.sort();
+    assert_eq!(asked, expected);
+}
+
+#[tokio::test]
+async fn an_empty_prometheus_has_every_control_plane_metric_missing() {
+    use MetricName::*;
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    community_chart(&fake, prometheus(no_samples));
+
+    let result = core
+        .metrics_query(&id, &MetricsTarget::ControlPlane, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert!(result.series.is_empty());
+    assert_eq!(
+        result.missing,
+        [
+            ApiRequests,
+            ApiErrors,
+            ApiLatencyP99,
+            EtcdLatencyP99,
+            EtcdDbSize
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_cluster_label_reaches_every_control_plane_query() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    save_provider(
+        &core,
+        &id,
+        pinned_mimir(Some("team-a"), Some(("cluster", "prod"))),
+    )
+    .unwrap();
+    fake.serve_proxy("monitoring", "mimir:8080", |request| {
+        matrix(request, &[1.0])
+    });
+
+    let result = core
+        .metrics_query(&id, &MetricsTarget::ControlPlane, MetricsRange::OneHour)
+        .await
+        .unwrap();
+    assert_eq!(result.series.len(), 5);
+    let requests = range_requests(&fake, "monitoring", "mimir:8080");
+    assert_eq!(requests.len(), 5);
+    for request in &requests {
+        let query = &request.params["query"];
+        assert!(query.contains(r#"cluster="prod""#), "{query}");
+    }
+    assert!(requests.iter().any(|request| request.params["query"]
+        == r#"sum(rate(apiserver_request_total{code=~"5..", cluster="prod"}[120s]))"#));
+}
+
+#[tokio::test]
+async fn without_prometheus_the_control_plane_is_all_missing_and_nothing_is_asked() {
+    use MetricName::*;
+    let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    save_provider(&core, &id, MetricsProviderSetting::MetricsServer).unwrap();
+
+    let result = core
+        .metrics_query(&id, &MetricsTarget::ControlPlane, MetricsRange::SixHours)
+        .await
+        .unwrap();
+    assert_eq!(result.step, 300);
+    assert!(result.series.is_empty() && result.failed.is_empty());
+    assert_eq!(
+        result.missing,
+        [
+            ApiRequests,
+            ApiErrors,
+            ApiLatencyP99,
+            EtcdLatencyP99,
+            EtcdDbSize
+        ]
+    );
+}

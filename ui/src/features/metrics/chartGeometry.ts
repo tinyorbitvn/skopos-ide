@@ -1,4 +1,4 @@
-import { clockTime, dayLabel, formatValue, type MetricUnit } from "./format";
+import { clockTime, dayLabel, formatAxis, type MetricUnit } from "./format";
 
 /** The SVG's user space: the plot stretches it to its box. */
 export const VIEW_WIDTH = 1000;
@@ -25,6 +25,8 @@ const MIN_TOP: Record<MetricUnit, number> = {
   bytes: 2 ** 20,
   bytesPerSecond: 1024,
   count: 2,
+  requestsPerSecond: 1,
+  seconds: 0.01,
 };
 
 const MANTISSAS = [1, 2, 2.5, 5, 10];
@@ -58,7 +60,9 @@ export function niceTop(max: number, unit: MetricUnit): number {
   const target = Number.isFinite(max) ? max * 1.1 : 0;
   if (!(target > MIN_TOP[unit])) return MIN_TOP[unit];
   if (unit === "count") return niceUp(target, COUNT_MANTISSAS);
-  if (unit === "cores") return niceUp(target, MANTISSAS);
+  if (unit === "cores" || unit === "requestsPerSecond" || unit === "seconds") {
+    return niceUp(target, MANTISSAS);
+  }
   const k = Math.max(0, Math.floor(Math.log(target) / Math.log(1024)));
   const scale = 1024 ** k;
   return niceUp(target / scale, MANTISSAS) * scale;
@@ -165,8 +169,8 @@ export function yTicks(
   unit: MetricUnit,
   mirrored: boolean,
 ): string[] {
-  const high = formatValue(top, unit);
-  return mirrored ? [high, "0", high] : [high, formatValue(top / 2, unit), "0"];
+  const high = formatAxis(top, unit);
+  return mirrored ? [high, "0", high] : [high, formatAxis(top / 2, unit), "0"];
 }
 
 /** The index of the sample nearest to `t`, the first on a tie; -1 without samples. */

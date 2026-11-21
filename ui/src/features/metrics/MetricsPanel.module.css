@@ -1,4 +1,5 @@
 .panel {
+  container: metrics-panel / inline-size;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -103,7 +104,7 @@
 }
 
 .grid {
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: repeat(var(--metrics-columns, 1), minmax(0, 1fr));
 }
 
 .column {
@@ -112,4 +113,41 @@
 
 .dim {
   opacity: 0.55;
+}
+
+/* A group of 4 charts sits 4, 2 by 2 or one a row by the panel's width, never 3 then 1. */
+@container metrics-panel (min-width: 612px) {
+  .grid {
+    --metrics-columns: 2;
+  }
+
+  .grid[data-n="1"] {
+    --metrics-columns: 1;
+  }
+}
+
+@container metrics-panel (min-width: 1236px) {
+  .grid[data-n="4"] {
+    --metrics-columns: 4;
+  }
+}
+
+.groupHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3) var(--space-6);
+  margin-top: var(--space-4);
+}
+
+.groupHeading {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--text-primary);
+}
+
+.groupSource {
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
 }

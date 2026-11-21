@@ -41,6 +41,10 @@ export interface UsageDonutProps {
   /** Width and height in px. */
   size: number;
   testId?: string;
+  /** The svg's accessible name, in place of "<name> <pct>%, <used> of <total> <unit>". */
+  label?: string;
+  /** Leaves out the caption, for a caller that draws its own text or none. */
+  bare?: boolean;
 }
 
 /** The share and its amounts, or null when any of them is unknown or not a number. */
@@ -81,9 +85,10 @@ export function UsageDonut(props: UsageDonutProps) {
         className={styles.chart}
         role="img"
         aria-label={
-          share === null
+          props.label ??
+          (share === null
             ? `${name} unknown`
-            : `${name} ${share.pct}%, ${share.used} of ${share.total} ${unit}`
+            : `${name} ${share.pct}%, ${share.used} of ${share.total} ${unit}`)
         }
         width={size}
         height={size}
@@ -118,12 +123,14 @@ export function UsageDonut(props: UsageDonutProps) {
           {share === null ? DASH : `${share.pct}%`}
         </text>
       </svg>
-      <div className={styles.caption} aria-hidden="true">
-        <span className={styles.name}>{name}</span>
-        <span className={styles.values}>
-          {share === null ? DASH : `${share.used} / ${share.total} ${unit}`}
-        </span>
-      </div>
+      {props.bare ? null : (
+        <div className={styles.caption} aria-hidden="true">
+          <span className={styles.name}>{name}</span>
+          <span className={styles.values}>
+            {share === null ? DASH : `${share.used} / ${share.total} ${unit}`}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

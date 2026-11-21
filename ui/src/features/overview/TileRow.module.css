@@ -1,0 +1,52 @@
+/*
+ * Tile rows (cluster overview spec §3.3, plan R17). A row of n tiles of 170 px with 12 px gaps
+ * needs 352, 534, 716, 898 or 1080 px for 2 to 6. The 1px keeps rounding from wrapping a tile.
+ */
+.frame {
+  container: tiles / inline-size;
+  min-width: 0;
+}
+
+.row {
+  --cols: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-7);
+}
+
+.row > * {
+  flex: 1 1
+    calc((100% - (var(--cols) - 1) * var(--space-7)) / var(--cols) - 1px);
+}
+
+@container tiles (min-width: 352px) {
+  .row:not([data-n="1"]) {
+    --cols: 2;
+  }
+}
+
+@container tiles (min-width: 534px) {
+  .row[data-n="3"],
+  .row[data-n="5"],
+  .row[data-n="6"] {
+    --cols: 3;
+  }
+}
+
+@container tiles (min-width: 716px) {
+  .row[data-n="4"] {
+    --cols: 4;
+  }
+}
+
+@container tiles (min-width: 898px) {
+  .row[data-n="5"] {
+    --cols: 5;
+  }
+}
+
+@container tiles (min-width: 1080px) {
+  .row[data-n="6"] {
+    --cols: 6;
+  }
+}
