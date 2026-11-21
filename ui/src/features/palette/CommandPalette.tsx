@@ -178,7 +178,11 @@ function PaletteBody({ onDone }: { onDone(): void }) {
   const [selected, setSelected] = useState(0);
   const listId = useId();
 
-  const commands = useMemo(() => commandEntries(ctx, IS_MAC), [ctx]);
+  // An overview command shows while the sidebar shows its page, which discovery tells.
+  const commands = useMemo(
+    () => commandEntries({ ...ctx, resources }, IS_MAC),
+    [ctx, resources],
+  );
   const folders = useFolders((s) => s.folders);
   const placements = useFolders((s) => s.placements);
   const clusters = useMemo(

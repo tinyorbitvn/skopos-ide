@@ -400,7 +400,7 @@ function Section(props: {
   );
 }
 
-/** A section with one screen (Namespaces, Events): a direct link to it. */
+/** A section with one screen (Events): a direct link to it. */
 function DirectSection(props: { clusterId: string; section: NavSection }) {
   const { clusterId, section } = props;
   const item = section.items[0];

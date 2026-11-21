@@ -10,7 +10,7 @@ import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 export interface NavResource {
   type: "resource";
   label: string;
-  /** The sidebar's text where it differs from the kind's label: the Nodes list reads "List". */
+  /** The sidebar's text where it differs from the kind's label: the Nodes and Namespaces lists read "List". */
   sidebarLabel?: string;
   /** The API group; "" is the core group. */
   group: string;
@@ -125,10 +125,12 @@ const ARGO_CD: NavResource[] = [
 
 /**
  * The sidebar sections of F4, in their groups and in order (spec Q §2): Apps (Helm,
- * Argo), Cluster (Nodes, Namespaces, Events), then Resources. Namespaces and Events are
- * direct links. Nodes holds its list, which the sidebar calls List, and the Topology
- * page, which shows only where nodes can be listed. Argo holds the Argo CD kinds in its "Argo CD" branch (spec
- * G §3). The Workloads Overview entry links to the Workloads overview (F17). Port
+ * Argo), Cluster (Nodes, Namespaces, Events), then Resources. Events is a direct link.
+ * Nodes holds its list, which the sidebar calls List, and the Topology page, which shows
+ * only where nodes can be listed; Namespaces holds its list, also called List. Argo holds
+ * the Argo CD kinds in its "Argo CD" branch (spec G §3). Nodes, Namespaces, Workloads,
+ * Network and Storage start with an Overview entry that links to their section overview
+ * (F17, section overviews spec §3.7), which shows while the section does. Port
  * Forwarding and Helm's Charts and Releases are routes of the cluster screen, not
  * resource kinds. Custom Resources starts with Definitions; the entries for each CRD are
  * added by `customResourceGroups`. The Gateway API kinds are under Network, where
@@ -160,6 +162,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Nodes",
     group: "cluster",
     icon: glyph("nodes"),
+    overview: "nodes",
     items: [
       { ...r("Nodes", "", "nodes"), sidebarLabel: "List" },
       {
@@ -175,8 +178,8 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Namespaces",
     group: "cluster",
     icon: glyph("namespaces"),
-    direct: true,
-    items: [r("Namespaces", "", "namespaces")],
+    overview: "namespaces",
+    items: [{ ...r("Namespaces", "", "namespaces"), sidebarLabel: "List" }],
   },
   {
     id: "events",
@@ -234,6 +237,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Network",
     group: "resources",
     icon: glyph("network"),
+    overview: "network",
     items: [
       r("Services", "", "services"),
       r("EndpointSlices", "discovery.k8s.io", "endpointslices"),
@@ -258,6 +262,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Storage",
     group: "resources",
     icon: glyph("storage"),
+    overview: "storage",
     items: [
       r("PersistentVolumeClaims", "", "persistentvolumeclaims"),
       r("PersistentVolumes", "", "persistentvolumes"),

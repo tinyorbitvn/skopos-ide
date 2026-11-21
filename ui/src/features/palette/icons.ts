@@ -1,6 +1,7 @@
 import {
   ArrowRightLeft,
   BatchJob,
+  Blocks,
   Box,
   Boxes,
   CronJob,
@@ -69,6 +70,18 @@ export const ROUTE_ICONS: Partial<Record<string, IconComponent>> = {
 };
 
 export const OVERVIEW_ICON: IconComponent = LayoutDashboard;
+
+/**
+ * The tab and command icon of each section overview, by its `NavSection.overview` (section
+ * overviews spec §3.7): its section's icon, while Workloads keeps the one its tab had.
+ */
+export const OVERVIEW_ICONS = {
+  workloads: Blocks,
+  nodes: Server,
+  namespaces: Namespace,
+  network: Network,
+  storage: HardDrive,
+} as const;
 
 /** The cluster's Resource map: the icon of the `resource-map` command. */
 export const MAP_ICON: IconComponent = Network;

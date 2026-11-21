@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
+import { Blocks } from "../design/icons";
 import {
   MAP_ICON,
   OVERVIEW_ICON,
+  OVERVIEW_ICONS,
   SECTION_ICONS,
 } from "../features/palette/icons";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
@@ -244,23 +246,24 @@ test("Helm and Argo show their logos; every other section the palette's icon", (
   }
 });
 
-test("Namespaces and Events are direct links to their only kind; Nodes holds List and Topology", () => {
+test("Events is the only direct link; Nodes holds List and Topology, and Namespaces its List", () => {
   expect(
     NAV_SECTIONS.filter((s) => s.direct).map((s) => [
       s.id,
       s.items.map(navItemKey),
     ]),
-  ).toEqual([
-    ["namespaces", ["/namespaces"]],
-    ["events", ["/events"]],
-  ]);
-  const nodes = NAV_SECTIONS.find((s) => s.id === "nodes");
-  expect(
-    nodes?.items.map((i) => [navItemKey(i), navLabel(i), i.label]),
-  ).toEqual([
+  ).toEqual([["events", ["/events"]]]);
+  const labels = (id: string) =>
+    NAV_SECTIONS.find((s) => s.id === id)?.items.map((i) => [
+      navItemKey(i),
+      navLabel(i),
+      i.label,
+    ]);
+  expect(labels("nodes")).toEqual([
     ["/nodes", "List", "Nodes"],
     ["route:node-topology", "Topology", "Topology"],
   ]);
+  expect(labels("namespaces")).toEqual([["/namespaces", "List", "Namespaces"]]);
 });
 
 test("Topology shows only where nodes can be listed, so Nodes hides whole", () => {
@@ -338,16 +341,68 @@ test("the core group is spelled core in URLs", () => {
   expect(resourcePath("c1", "", "pods")).toBe("/cluster/c1/r/core/pods");
 });
 
-test("Workloads has an Overview entry and no other section does", () => {
+test("Nodes, Namespaces, Workloads, Network and Storage have an Overview entry at their own path", () => {
   expect(
     NAV_SECTIONS.filter((s) => s.overview !== undefined).map((s) => [
       s.id,
       s.overview,
     ]),
-  ).toEqual([["workloads", "workloads"]]);
+  ).toEqual([
+    ["nodes", "nodes"],
+    ["namespaces", "namespaces"],
+    ["workloads", "workloads"],
+    ["network", "network"],
+    ["storage", "storage"],
+  ]);
   expect(
     visibleSections(allServed()).find((s) => s.id === "workloads")?.overview,
   ).toBe("workloads");
+});
+
+test("an Overview shows while its section does: Nodes and Namespaces need their kind, Network always shows, Storage needs one of its kinds", () => {
+  const overviews = (resources: ApiResourceInfo[]) =>
+    visibleSections(resources).flatMap((s) =>
+      s.overview === undefined ? [] : [s.overview],
+    );
+  expect(overviews([])).toEqual(["network"]);
+  expect(
+    overviews([
+      info("", "nodes", { canList: false }),
+      info("", "namespaces", { canList: false }),
+    ]),
+  ).toEqual(["network"]);
+  expect(
+    overviews([info("", "nodes"), info("", "namespaces"), info("", "pods")]),
+  ).toEqual(["nodes", "namespaces", "workloads", "network"]);
+  expect(overviews([info("storage.k8s.io", "storageclasses")])).toEqual([
+    "network",
+    "storage",
+  ]);
+  expect(overviews(allServed())).toEqual([
+    "nodes",
+    "namespaces",
+    "workloads",
+    "network",
+    "storage",
+  ]);
+});
+
+test("each overview's tab and command take its section's icon, and Workloads keeps its tab's", () => {
+  const ids = NAV_SECTIONS.flatMap((s) =>
+    s.overview === undefined ? [] : [s.overview],
+  );
+  expect(Object.keys(OVERVIEW_ICONS)).toEqual([
+    "workloads",
+    "nodes",
+    "namespaces",
+    "network",
+    "storage",
+  ]);
+  expect([...ids].sort()).toEqual(Object.keys(OVERVIEW_ICONS).sort());
+  for (const id of ["nodes", "namespaces", "network", "storage"] as const) {
+    expect([id, OVERVIEW_ICONS[id]]).toEqual([id, SECTION_ICONS[id]]);
+  }
+  expect(OVERVIEW_ICONS.workloads).toBe(Blocks);
 });
 
 test("each Argo CD page shows only when its kind is served", () => {
