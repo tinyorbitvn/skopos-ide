@@ -78,6 +78,27 @@ pub async fn resources_subscribe_object(
     Ok(id)
 }
 
+/// Streams the Pods bound to the node `node` to `on_event`, as the rows `resources_subscribe`
+/// sends for Pods, and returns the subscription id, which `resources_unsubscribe` ends. The
+/// API server picks the Pods, so those of the other nodes are never read. It ends with the
+/// window's page as `resources_subscribe` does.
+#[tauri::command]
+pub async fn resources_subscribe_node_pods(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    node: String,
+    on_event: Channel<WatchEvent>,
+) -> Result<String, IpcError> {
+    let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
+    let id = state
+        .core
+        .resources_subscribe_node_pods(&cluster_id, node, tx, window.label())
+        .await?;
+    forward(state.core.clone(), id.clone(), rx, on_event);
+    Ok(id)
+}
+
 /// Sends what the subscription delivers to the webview, and ends it when the webview is gone.
 fn forward(
     core: AppCore,

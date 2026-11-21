@@ -154,6 +154,14 @@ function objectEntryKey(
   return JSON.stringify([clusterId, r.group, r.plural, namespace, name]);
 }
 
+/**
+ * Never equal to a list's key, whose fourth part, when it has one, lists its namespaces,
+ * nor to an object's, which has five parts.
+ */
+function nodePodsEntryKey(clusterId: string, node: string): string {
+  return JSON.stringify([clusterId, "", "pods", { node }]);
+}
+
 /** Starts a backend subscription that sends its events to `onEvent`. */
 type Start = (onEvent: (event: WatchEvent) => void) => Promise<string>;
 
@@ -474,6 +482,26 @@ export function useResourceList(
     resource && within.length > 0
       ? { list: entryKey(clusterId, resource), namespaces: within }
       : null,
+  );
+}
+
+/**
+ * The live Pods bound to the node `node`, with the rows a list of Pods has; none is asked
+ * for while `node` is null. The backend has the API server pick them, so a node's drawer
+ * never loads the Pods of the whole cluster. One subscription is kept per cluster and
+ * node, and ended `LINGER_MS` after the last component using it goes away. It holds only
+ * that node's Pods, so it never stands for a list of Pods.
+ */
+export function useNodePods(
+  clusterId: string,
+  node: string | null,
+): ResourceListState {
+  return useEntry(
+    node === null ? null : nodePodsEntryKey(clusterId, node),
+    clusterId,
+    node === null
+      ? null
+      : (onEvent) => api.resourcesSubscribeNodePods(clusterId, node, onEvent),
   );
 }
 

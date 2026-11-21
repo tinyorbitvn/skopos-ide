@@ -7,7 +7,7 @@ import {
   ErrorNotice,
   Spinner,
 } from "../../design";
-import { useResourceList } from "../../stores/resources";
+import { useNodePods, useResourceList } from "../../stores/resources";
 import { DrawerLinkContext } from "../detail/links";
 import type { KubeObject } from "../objects";
 import { PODS } from "../refs";
@@ -19,18 +19,24 @@ function podHref(clusterId: string, pod: KubeObject): string {
   return `/cluster/${encodeURIComponent(clusterId)}/r/core/pods?object=${encodeURIComponent(key)}`;
 }
 
-/** The pods of a cluster that `match` accepts, optionally within one namespace. */
+/**
+ * The pods of a cluster that `match` accepts, optionally within one namespace. With
+ * `node`, only the Pods bound to that node are asked for, in every namespace.
+ */
 export function PodList(props: {
   clusterId: string;
   match(pod: KubeObject): boolean;
   namespace?: string;
+  node?: string;
 }) {
-  const { clusterId, match, namespace } = props;
-  const list = useResourceList(
+  const { clusterId, match, namespace, node } = props;
+  const listed = useResourceList(
     clusterId,
-    PODS,
+    node === undefined ? PODS : null,
     namespace ? [namespace] : undefined,
   );
+  const onNode = useNodePods(clusterId, node ?? null);
+  const list = node === undefined ? listed : onNode;
   const drawer = useContext(DrawerLinkContext);
 
   if (list.status === "forbidden" || list.status === "notServed") {
