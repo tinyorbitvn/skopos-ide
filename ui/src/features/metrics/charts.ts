@@ -237,6 +237,102 @@ function volumeChart(capacityText: string | null): ChartDef {
   };
 }
 
+/** The control plane's target: the API server's own metrics (spec §3.6). */
+export const CONTROL_PLANE: MetricsTarget = { kind: "controlPlane" };
+
+/** The control plane's metrics, in the order core answers them. */
+export const CONTROL_PLANE_METRICS: readonly MetricName[] = [
+  "apiRequests",
+  "apiErrors",
+  "apiLatencyP99",
+  "etcdLatencyP99",
+  "etcdDbSize",
+];
+
+/** Distributions whose provider runs etcd, out of the cluster's reach. */
+const MANAGED_ETCD = new Set(["EKS", "GKE", "AKS"]);
+/** Distributions that run etcd themselves, with its 2 GiB default unless someone changed it. */
+const DEFAULT_QUOTA = new Set([
+  "kind",
+  "minikube",
+  "k3s",
+  "rke2",
+  "Kubernetes",
+]);
+
+/**
+ * What the etcd database chart's sub-line says about its limit. EKS's 8 GiB holds on standard
+ * control planes only; GKE and AKS publish none, and a self-managed quota may be changed.
+ */
+export function etcdDatabaseSub(distribution: string): string {
+  if (distribution === "EKS") return "8 GiB on standard control planes";
+  if (DEFAULT_QUOTA.has(distribution)) return "etcd's default quota is 2 GiB";
+  return "size on disk";
+}
+
+/** The control plane's four charts, in their 2-by-2 order: the API server's, then etcd's. */
+export function controlPlaneCharts(distribution: string): ChartDef[] {
+  return [
+    {
+      stem: "api-requests",
+      title: "API requests",
+      sub: "all verbs",
+      unit: "requestsPerSecond",
+      main: { metric: "apiRequests", name: "Requests" },
+      mirror: null,
+      refs: [{ metric: "apiErrors", name: "5xx errors" }],
+    },
+    {
+      stem: "api-latency",
+      title: "API latency",
+      sub: "p99, without WATCH",
+      unit: "seconds",
+      main: { metric: "apiLatencyP99", name: "p99" },
+      mirror: null,
+      refs: [],
+    },
+    {
+      stem: "etcd-latency",
+      title: "etcd latency",
+      sub: "p99 of the API server's requests",
+      unit: "seconds",
+      main: { metric: "etcdLatencyP99", name: "p99" },
+      mirror: null,
+      refs: [],
+    },
+    {
+      stem: "etcd-database",
+      title: "etcd database",
+      sub: etcdDatabaseSub(distribution),
+      unit: "bytes",
+      main: { metric: "etcdDbSize", name: "Size" },
+      mirror: null,
+      refs: [],
+    },
+  ];
+}
+
+/** The control plane group's source caption. */
+export function controlPlaneNote(distribution: string): string {
+  return MANAGED_ETCD.has(distribution)
+    ? `From the API server's own metrics: ${distribution} runs etcd, so etcd is read as the API server sees it.`
+    : "From the API server's own metrics, etcd as the API server sees it.";
+}
+
+/** The note in place of the four charts when this Prometheus has no API server samples. */
+export function controlPlaneMissingNote(matcher: LabelMatcher | null): string {
+  const label = matcher === null ? "" : ` with ${labelText(matcher)}`;
+  return `No API server metrics in this Prometheus: there are no samples of apiserver_request_total${label}. kube-prometheus-stack scrapes the API server by default; another Prometheus needs a job for the kubernetes Service's endpoints.`;
+}
+
+/** All five control plane queries answered with no samples, and none failed. */
+export function controlPlaneAllMissing(result: MetricsResult): boolean {
+  return (
+    result.failed.length === 0 &&
+    CONTROL_PLANE_METRICS.every((metric) => result.missing.includes(metric))
+  );
+}
+
 /**
  * The charts of a target, in order. metrics-server has only the current CPU and memory,
  * so it gets CPU and Memory without reference lines, and nothing for a PVC.
@@ -291,6 +387,9 @@ export function chartsFor(
       if (server) return [cpu, memory];
       return [cpu, memory, networkChart(), filesystemChart()];
     }
+    case "controlPlane":
+      // The panel draws the control plane with controlPlaneCharts, which needs the distribution.
+      return [];
     case "pvc":
       return server ? [] : [volumeChart(facts.capacityText)];
   }
@@ -300,6 +399,8 @@ export function chartsFor(
 export function serverNote(target: MetricsTarget): string {
   switch (target.kind) {
     case "cluster":
+    case "controlPlane":
+      return "Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.";
     case "node":
       return "Pods and disk history need Prometheus: metrics-server reports only the current CPU and memory.";
     case "pod":

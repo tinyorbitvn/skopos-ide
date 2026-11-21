@@ -52,6 +52,13 @@ describe("niceTop", () => {
     expect(niceTop(max, unit)).toBeCloseTo(top, 9);
   });
 
+  test("requests a second and seconds round up on 1, 2, 2.5, 5 and 10, with a floor", () => {
+    expect(niceTop(352, "requestsPerSecond")).toBe(500);
+    expect(niceTop(0, "requestsPerSecond")).toBe(1);
+    expect(niceTop(0.145, "seconds")).toBeCloseTo(0.2, 10);
+    expect(niceTop(0, "seconds")).toBe(0.01);
+  });
+
   test("all zeros give the unit's minimum top", () => {
     expect(niceTop(0, "cores")).toBe(0.1);
     expect(niceTop(0, "bytes")).toBe(MiB);
@@ -188,6 +195,12 @@ describe("ticks", () => {
       "0",
       "2.5 KiB/s",
     ]);
+    expect(yTicks(500, "requestsPerSecond", false)).toEqual([
+      "500",
+      "250",
+      "0",
+    ]);
+    expect(yTicks(0.2, "seconds", false)).toEqual(["200 ms", "100 ms", "0"]);
   });
 });
 
