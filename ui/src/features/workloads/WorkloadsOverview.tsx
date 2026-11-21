@@ -10,13 +10,18 @@ import {
 import { resourcePath } from "../../kinds/nav";
 import { formatAge, type KubeObject, objectKey } from "../../kinds/objects";
 import { useClusterState } from "../../stores/clusters";
-import { findResource, useResourceList } from "../../stores/resources";
+import {
+  findResource,
+  type ResourceListState,
+  useResourceList,
+} from "../../stores/resources";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import {
   NamespaceFilter,
   namespaceFilterKey,
 } from "../resources/NamespaceFilter";
+import { WAITING } from "../resources/useTableList";
 import {
   type Discovery,
   type KindRow,
@@ -46,16 +51,37 @@ const [
   CRONJOBS,
 ] = WORKLOAD_KINDS;
 
+/**
+ * A resource's objects in the chosen namespaces, or in every namespace when none is
+ * chosen. The backend is asked for the chosen ones only, and once `ready` says the
+ * saved choice was read, so never for every namespace first. A new choice is a new
+ * list, which loads before it is counted.
+ */
+function useListIn(
+  clusterId: string,
+  info: ApiResourceInfo | undefined,
+  namespaces: string[],
+  ready: boolean,
+): ResourceListState {
+  const list = useResourceList(
+    clusterId,
+    ready ? listedResource(info) : null,
+    namespaces,
+  );
+  return ready ? list : WAITING;
+}
+
 /** A kind's row, recounted only when its list, discovery or the namespaces change. */
 function useKindRow(
   clusterId: string,
   resources: ApiResourceInfo[],
   discovery: Discovery,
   namespaces: string[],
+  ready: boolean,
   kind: WorkloadKind,
 ): { row: KindRow; namespaces: string[] } {
   const info = findResource(resources, kind.group, kind.plural);
-  const list = useResourceList(clusterId, listedResource(info));
+  const list = useListIn(clusterId, info, namespaces, ready);
   const row = useMemo(
     () => kindRow(kind, info, discovery, list, namespaces),
     [kind, info, discovery, list, namespaces],
@@ -194,9 +220,10 @@ function RecentEvents(props: {
   info: ApiResourceInfo | undefined;
   discovery: Discovery;
   namespaces: string[];
+  ready: boolean;
 }) {
-  const { clusterId, info, discovery, namespaces } = props;
-  const list = useResourceList(clusterId, listedResource(info));
+  const { clusterId, info, discovery, namespaces, ready } = props;
+  const list = useListIn(clusterId, info, namespaces, ready);
   const now = useNow();
   const view = useMemo(
     () => listView("Events", info, discovery, list, namespaces),
@@ -237,7 +264,7 @@ function RecentEvents(props: {
 export function WorkloadsOverview() {
   const { clusterId, resources, resourcesLoading, resourcesError } =
     useClusterContext();
-  const [namespaces, setNamespaces] = useUiState<string[]>(
+  const [namespaces, setNamespaces, namespacesRead] = useUiState<string[]>(
     namespaceFilterKey(clusterId),
     [],
   );
@@ -245,7 +272,13 @@ export function WorkloadsOverview() {
     () => ({ loading: resourcesLoading, error: resourcesError }),
     [resourcesLoading, resourcesError],
   );
-  const shared = [clusterId, resources, discovery, namespaces] as const;
+  const shared = [
+    clusterId,
+    resources,
+    discovery,
+    namespaces,
+    namespacesRead,
+  ] as const;
   // One call per kind of the Workloads section, in its order: hooks may not loop.
   const kinds = [
     useKindRow(...shared, PODS),
@@ -293,6 +326,7 @@ export function WorkloadsOverview() {
         info={findResource(resources, "", "events")}
         discovery={discovery}
         namespaces={namespaces}
+        ready={namespacesRead}
       />
     </section>
   );
