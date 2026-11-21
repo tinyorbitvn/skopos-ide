@@ -22,6 +22,7 @@ import {
   yOf,
   yTicks,
 } from "./chartGeometry";
+import { useChartHover } from "./chartHover";
 import { DASH, formatValue, type MetricUnit } from "./format";
 import styles from "./TimeChart.module.css";
 
@@ -124,28 +125,34 @@ export function TimeChart(props: TimeChartProps) {
       "Use the arrow keys to read each sample.";
   }
 
-  // The selected sample: focus picks the last one, keys and hover move it. Esc hides the
-  // readout until the next key or hover.
-  const [selected, setSelected] = useState<number | null>(null);
-  const [hidden, setHidden] = useState(false);
+  // The selected sample: focus picks the last one, keys and hover move it, and Esc clears it
+  // until the next key or hover. Inside a panel's ChartHoverProvider every chart marks the
+  // same time and only its owner shows the readout; alone, the chart keeps that state itself.
+  const shared = useChartHover();
+  const [local, setLocal] = useState<{
+    t: number | null;
+    owner: string | null;
+  }>({ t: null, owner: null });
+  const hover = shared ?? {
+    ...local,
+    set: (t: number | null, owner: string | null) => setLocal({ t, owner }),
+  };
   const focused = useRef(false);
   const count = main.length;
   const index =
-    selected === null || count === 0 ? null : Math.min(selected, count - 1);
-  const sample = index === null || hidden ? null : main[index];
+    hover.t === null || count === 0 ? null : nearestIndex(main, hover.t);
+  const sample = index === null ? null : main[index];
+  const readoutShown = sample !== null && hover.owner === stem;
 
-  const pick = (next: number) => {
-    setSelected(next);
-    setHidden(false);
-  };
+  const pick = (next: number) => hover.set(main[next][0], stem);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (count === 0) return;
     if (event.key === "Escape") {
       // A shown readout takes this Escape, so a drawer around the chart stays open.
-      if (sample) {
+      if (readoutShown) {
         event.preventDefault();
         event.stopPropagation();
-        setHidden(true);
+        hover.set(null, null);
       }
       return;
     }
@@ -228,18 +235,16 @@ export function TimeChart(props: TimeChartProps) {
         onFocus={() => {
           focused.current = true;
           if (count === 0) return;
-          setSelected((s) => s ?? count - 1);
-          setHidden(false);
+          hover.set(hover.t ?? main[count - 1][0], stem);
         }}
         onBlur={() => {
           focused.current = false;
-          setSelected(null);
-          setHidden(false);
+          if (hover.owner === stem) hover.set(null, null);
         }}
         onKeyDown={onKeyDown}
         onPointerMove={onPointerMove}
         onPointerLeave={() => {
-          if (!focused.current) setSelected(null);
+          if (!focused.current && hover.owner === stem) hover.set(null, null);
         }}
       >
         <svg
@@ -311,7 +316,11 @@ export function TimeChart(props: TimeChartProps) {
             ))}
         {sample ? (
           <>
-            <div className={styles.hairline} style={{ left: `${x}%` }} />
+            <div
+              className={styles.hairline}
+              style={{ left: `${x}%` }}
+              data-testid={`metrics-chart-${stem}-hairline`}
+            />
             {dots.map((dot) => (
               <span
                 key={dot.key}
@@ -319,26 +328,28 @@ export function TimeChart(props: TimeChartProps) {
                 style={{ left: `${x}%`, top: `${dot.top}%` }}
               />
             ))}
-            <div
-              className={`${styles.readout} ${x > 60 ? styles.flip : ""}`}
-              style={{ left: `${x}%` }}
-              data-testid={`metrics-chart-${stem}-readout`}
-            >
-              <span className={styles.readoutTime}>
-                {sampleTime(sample[0], props.days)}
-              </span>
-              {listed.map((series) => (
-                <div key={series.name} className={styles.row}>
-                  <span
-                    className={`${styles.swatch} ${series.dashed ? styles.dashed : ""}`}
-                  />
-                  <strong className={styles.value}>
-                    {readValue(series, sample[0], unit, props.missing)}
-                  </strong>{" "}
-                  <span className={styles.rowName}>{series.name}</span>
-                </div>
-              ))}
-            </div>
+            {readoutShown ? (
+              <div
+                className={`${styles.readout} ${x > 60 ? styles.flip : ""}`}
+                style={{ left: `${x}%` }}
+                data-testid={`metrics-chart-${stem}-readout`}
+              >
+                <span className={styles.readoutTime}>
+                  {sampleTime(sample[0], props.days)}
+                </span>
+                {listed.map((series) => (
+                  <div key={series.name} className={styles.row}>
+                    <span
+                      className={`${styles.swatch} ${series.dashed ? styles.dashed : ""}`}
+                    />
+                    <strong className={styles.value}>
+                      {readValue(series, sample[0], unit, props.missing)}
+                    </strong>{" "}
+                    <span className={styles.rowName}>{series.name}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
         {empty ? (

@@ -411,6 +411,15 @@ async fn prometheus_from_the_community_chart_answers_every_target() {
             has(r, &machine, &[])
         })
         .await;
+        // The chart's default kubernetes-apiservers job scrapes the API server, so its request
+        // and latency metrics have samples; etcd's size depends on the Kubernetes version.
+        answer_when(&core, &id, &MetricsTarget::ControlPlane, |r| {
+            r.series.contains_key(&ApiRequests)
+                && r.series.contains_key(&ApiLatencyP99)
+                && r.series.contains_key(&EtcdLatencyP99)
+                && r.failed.is_empty()
+        })
+        .await;
         let worker = MetricsTarget::Node {
             name: NODES[1].to_owned(),
         };

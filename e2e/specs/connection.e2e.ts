@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { kubeconfig } from "../helpers/fixtures";
+import { kubectl } from "../helpers/kube";
 import {
   byTestId,
   catalogRow,
   clickWhenShown,
   expectHotbar,
+  expectResourceTitle,
   gone,
   hotbarItem,
   rowMenu,
@@ -35,6 +37,19 @@ async function expectStatus(text: string, timeout = 15000): Promise<void> {
 async function hotbarDot(name: string): Promise<string | null> {
   const dot = await (await hotbarItem(name)).$('[role="img"]');
   return dot.getAttribute("aria-label");
+}
+
+/** The trimmed text of an element, or "" while it does not exist. */
+async function textOf(id: string): Promise<string> {
+  const element = byTestId(id);
+  if (!(await element.isExisting())) return "";
+  return (await element.getText()).trim();
+}
+
+/** How many objects kubectl lists for these arguments. */
+async function countOf(args: string[]): Promise<number> {
+  const out = await kubectl([...args, "-o", "name"]);
+  return out.split("\n").filter((line) => line.trim() !== "").length;
 }
 
 describe("cluster connection", () => {
@@ -67,6 +82,48 @@ describe("cluster connection", () => {
     );
     expect(await byTestId("control-plane-etcd-detail").getText()).toContain("readyz check ok");
     expect(await byTestId("control-plane-scheduler-detail").getText()).toMatch(/leader \S+, renewed/);
+  });
+
+  it("shows the kind cluster's capacity and health, and the Pods tile opens the Pods list", async () => {
+    await shown("overview-grid", 30000);
+    // Without metrics-server the donuts show the Pods' requests, in the same units.
+    await browser.waitUntil(
+      async () =>
+        /^\d+(\.\d)? \/ \d+(\.\d)? cores$/.test(await textOf("overview-capacity-cpu-values")) &&
+        /^\d+(\.\d)? \/ \d+(\.\d)? (GiB|MiB)$/.test(
+          await textOf("overview-capacity-memory-values"),
+        ) &&
+        /^\d+ \/ \d+ pods$/.test(await textOf("overview-capacity-pods-values")),
+      { timeout: 45000, interval: 1000, timeoutMsg: "the Capacity donuts never showed numbers" },
+    );
+
+    const nodes = await countOf(["get", "nodes"]);
+    await browser.waitUntil(
+      async () =>
+        (await textOf("overview-tile-nodes-number")) === `${nodes} / ${nodes}` &&
+        (await textOf("overview-tile-nodes-sub")) === "All ready",
+      { timeout: 30000, interval: 1000, timeoutMsg: "the Nodes tile never showed every node ready" },
+    );
+    // Other specs start and stop Pods, so compare with a fresh count on every try.
+    await browser.waitUntil(
+      async () =>
+        (await textOf("overview-tile-pods-number")) ===
+        String(await countOf(["get", "pods", "--all-namespaces"])),
+      {
+        timeout: 30000,
+        interval: 1000,
+        timeoutMsg: "the Pods tile never matched the number of Pods kubectl lists",
+      },
+    );
+    expect(await textOf("overview-tile-pods-sub")).toMatch(
+      /^\d+ Running · \d+ Pending · \d+ Failed$/,
+    );
+    expect(await textOf("overview-tile-workloads-number")).toMatch(/^\d+$/);
+    expect(await textOf("overview-tile-events-number")).toMatch(/^\d+$/);
+    await shown("overview-top");
+
+    await clickWhenShown("overview-tile-pods");
+    await expectResourceTitle("Pod");
   });
 
   it("shows a failure for an unreachable cluster with reason and log", async () => {

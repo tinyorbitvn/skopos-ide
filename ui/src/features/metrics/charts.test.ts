@@ -9,7 +9,13 @@ import {
 } from "../../test/metrics";
 import {
   type ChartDef,
+  CONTROL_PLANE,
   chartsFor,
+  controlPlaneAllMissing,
+  controlPlaneCharts,
+  controlPlaneMissingNote,
+  controlPlaneNote,
+  etcdDatabaseSub,
   factsFromResult,
   labelText,
   lastValue,
@@ -304,7 +310,7 @@ test("the caller's facts win, and the answer fills the rest", () => {
 test("the metrics-server note names what needs Prometheus", () => {
   expect([CLUSTER, NODE, POD, WORKLOAD, PVC].map((t) => serverNote(t))).toEqual(
     [
-      "Pods and disk history need Prometheus: metrics-server reports only the current CPU and memory.",
+      "Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.",
       "Pods and disk history need Prometheus: metrics-server reports only the current CPU and memory.",
       "Network and filesystem charts need Prometheus: metrics-server reports only the current CPU and memory.",
       "Network and filesystem charts need Prometheus: metrics-server reports only the current CPU and memory.",
@@ -362,4 +368,105 @@ test("the no-samples note names the tenant and the label, only when nothing answ
     ),
   ).toBeNull();
   expect(noSamplesNote(mimir, metricsResult({}))).toBeNull();
+});
+
+test("the control plane has four charts from the API server's own metrics", () => {
+  const defs = controlPlaneCharts("EKS");
+  expect(defs.map((d) => [d.stem, d.title, d.sub, d.unit])).toEqual([
+    ["api-requests", "API requests", "all verbs", "requestsPerSecond"],
+    ["api-latency", "API latency", "p99, without WATCH", "seconds"],
+    [
+      "etcd-latency",
+      "etcd latency",
+      "p99 of the API server's requests",
+      "seconds",
+    ],
+    [
+      "etcd-database",
+      "etcd database",
+      "8 GiB on standard control planes",
+      "bytes",
+    ],
+  ]);
+  expect(defs[0].main).toEqual({ metric: "apiRequests", name: "Requests" });
+  expect(defs[0].refs).toEqual([{ metric: "apiErrors", name: "5xx errors" }]);
+  expect(defs.map((d) => d.main.metric)).toEqual([
+    "apiRequests",
+    "apiLatencyP99",
+    "etcdLatencyP99",
+    "etcdDbSize",
+  ]);
+  expect(CONTROL_PLANE).toEqual({ kind: "controlPlane" });
+});
+
+test("the etcd database sub-line follows the distribution", () => {
+  expect(etcdDatabaseSub("EKS")).toBe("8 GiB on standard control planes");
+  for (const d of ["kind", "minikube", "k3s", "rke2", "Kubernetes"]) {
+    expect([d, etcdDatabaseSub(d)]).toEqual([
+      d,
+      "etcd's default quota is 2 GiB",
+    ]);
+  }
+  for (const d of ["GKE", "AKS"]) {
+    expect([d, etcdDatabaseSub(d)]).toEqual([d, "size on disk"]);
+  }
+});
+
+test("an unknown distribution gets the generic wording", () => {
+  for (const d of ["OpenShift", "", "acme-k8s"]) {
+    expect([d, etcdDatabaseSub(d), controlPlaneNote(d)]).toEqual([
+      d,
+      "size on disk",
+      "From the API server's own metrics, etcd as the API server sees it.",
+    ]);
+  }
+});
+
+test("on EKS, GKE and AKS the source caption says that the provider runs etcd", () => {
+  expect(controlPlaneNote("AKS")).toBe(
+    "From the API server's own metrics: AKS runs etcd, so etcd is read as the API server sees it.",
+  );
+  expect(controlPlaneNote("kind")).toBe(
+    "From the API server's own metrics, etcd as the API server sees it.",
+  );
+});
+
+test("the all-missing note names the metric, and the cluster label when there is one", () => {
+  const tail =
+    ". kube-prometheus-stack scrapes the API server by default; another Prometheus needs a job for the kubernetes Service's endpoints.";
+  expect(controlPlaneMissingNote(null)).toBe(
+    `No API server metrics in this Prometheus: there are no samples of apiserver_request_total${tail}`,
+  );
+  expect(controlPlaneMissingNote({ name: "cluster", value: "x" })).toBe(
+    `No API server metrics in this Prometheus: there are no samples of apiserver_request_total with cluster="x"${tail}`,
+  );
+});
+
+test("the control plane is all missing only when all five metrics are and none failed", () => {
+  const all = [
+    "apiRequests",
+    "apiErrors",
+    "apiLatencyP99",
+    "etcdLatencyP99",
+    "etcdDbSize",
+  ] as const;
+  expect(controlPlaneAllMissing(metricsResult({}, { missing: [...all] }))).toBe(
+    true,
+  );
+  expect(
+    controlPlaneAllMissing(
+      metricsResult(
+        { apiRequests: points([1]) },
+        { missing: [...all.slice(1)] },
+      ),
+    ),
+  ).toBe(false);
+  expect(
+    controlPlaneAllMissing(
+      metricsResult(
+        {},
+        { missing: [...all.slice(1)], failed: ["apiRequests"] },
+      ),
+    ),
+  ).toBe(false);
 });

@@ -10,29 +10,24 @@ import {
 import { resourcePath } from "../../kinds/nav";
 import { formatAge, type KubeObject, objectKey } from "../../kinds/objects";
 import { useClusterState } from "../../stores/clusters";
-import {
-  findResource,
-  type ResourceListState,
-  useResourceList,
-} from "../../stores/resources";
+import { findResource } from "../../stores/resources";
 import { useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import {
   NamespaceFilter,
   namespaceFilterKey,
 } from "../resources/NamespaceFilter";
-import { WAITING } from "../resources/useTableList";
 import {
   type Discovery,
   type KindRow,
   kindRow,
   latestEvents,
-  listedResource,
   listView,
   WORKLOAD_KINDS,
   type WorkloadCounts,
   type WorkloadKind,
 } from "./counts";
+import { useListIn } from "./useListIn";
 import styles from "./WorkloadsOverview.module.css";
 
 /** What the app shows for a value it cannot know. */
@@ -50,26 +45,6 @@ const [
   JOBS,
   CRONJOBS,
 ] = WORKLOAD_KINDS;
-
-/**
- * A resource's objects in the chosen namespaces, or in every namespace when none is
- * chosen. The backend is asked for the chosen ones only, and once `ready` says the
- * saved choice was read, so never for every namespace first. A new choice is a new
- * list, which loads before it is counted.
- */
-function useListIn(
-  clusterId: string,
-  info: ApiResourceInfo | undefined,
-  namespaces: string[],
-  ready: boolean,
-): ResourceListState {
-  const list = useResourceList(
-    clusterId,
-    ready ? listedResource(info) : null,
-    namespaces,
-  );
-  return ready ? list : WAITING;
-}
 
 /** A kind's row, recounted only when its list, discovery or the namespaces change. */
 function useKindRow(

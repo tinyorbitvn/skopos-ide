@@ -3,8 +3,17 @@
  * or an infinity reads as a dash rather than as a number that would mislead.
  */
 
-/** CPU in cores; memory and disk in bytes; network in bytes per second; Pods as counts. */
-export type MetricUnit = "cores" | "bytes" | "bytesPerSecond" | "count";
+/**
+ * CPU in cores; memory and disk in bytes; network in bytes per second; Pods as counts; API
+ * requests per second; latency in seconds.
+ */
+export type MetricUnit =
+  | "cores"
+  | "bytes"
+  | "bytesPerSecond"
+  | "count"
+  | "requestsPerSecond"
+  | "seconds";
 
 /** What a value reads when there is none to show. */
 export const DASH = "—";
@@ -77,6 +86,33 @@ export function formatCount(n: number): string {
   return String(Math.round(n));
 }
 
+/** At most `digits` decimals, without trailing zeros: (0.040, 2) → "0.04", (145.0, 0) → "145". */
+function trimmed(n: number, digits: number): string {
+  return String(Number(n.toFixed(digits)));
+}
+
+/** Two decimals below 1, one below 10, then whole with thousands commas. */
+function rateNumber(perSecond: number): string {
+  if (perSecond < 1) return trimmed(perSecond, 2);
+  if (perSecond < 10) return trimmed(perSecond, 1);
+  return Math.round(perSecond).toLocaleString("en-US");
+}
+
+/** API requests a second: "0.04 req/s", "9.9 req/s", "1,234 req/s". */
+export function formatRequestRate(perSecond: number): string {
+  if (!usable(perSecond)) return DASH;
+  return `${rateNumber(perSecond)} req/s`;
+}
+
+/** Latency: milliseconds below a second ("4.2 ms", "145 ms"), then seconds ("1.2 s"). */
+export function formatSeconds(seconds: number): string {
+  if (!usable(seconds)) return DASH;
+  if (seconds < 1) {
+    return `${trimmed(seconds * 1000, seconds < 0.01 ? 1 : 0)} ms`;
+  }
+  return `${trimmed(seconds, 2)} s`;
+}
+
 export function formatValue(value: number, unit: MetricUnit): string {
   switch (unit) {
     case "cores":
@@ -87,7 +123,20 @@ export function formatValue(value: number, unit: MetricUnit): string {
       return formatRate(value);
     case "count":
       return formatCount(value);
+    case "requestsPerSecond":
+      return formatRequestRate(value);
+    case "seconds":
+      return formatSeconds(value);
   }
+}
+
+/** A Y axis label: the value as it reads, except that requests a second drop "req/s" ("400"). */
+export function formatAxis(value: number, unit: MetricUnit): string {
+  if (unit !== "requestsPerSecond") return formatValue(value, unit);
+  if (!usable(value)) return DASH;
+  return value < 10
+    ? trimmed(value, 1)
+    : Math.round(value).toLocaleString("en-US");
 }
 
 /** GiB with one decimal at most, without the unit: "of 15.6 GiB" and the gauge captions. */

@@ -1,0 +1,95 @@
+/* A stat tile (cluster overview spec §3.3). */
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-7) var(--space-7) var(--space-7) var(--space-8);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tile:hover:not(:disabled) {
+  border-color: var(--border-subtle);
+  background: var(--surface-hover);
+}
+
+.tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tile:disabled {
+  cursor: default;
+}
+
+.chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--status-nominal-soft);
+  color: var(--status-nominal-text);
+}
+
+.tile[data-tone="warn"] .chip {
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+}
+
+.tile[data-tone="danger"] .chip {
+  background: var(--status-critical-soft);
+  color: var(--status-critical-text);
+}
+
+.tile[data-tone="neutral"] .chip {
+  background: var(--status-neutral-soft);
+  color: var(--status-neutral-text);
+}
+
+.number {
+  font: var(--type-title-3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--track-tighter);
+  white-space: nowrap;
+}
+
+.label {
+  font: var(--type-label);
+  color: var(--text-primary);
+}
+
+.sub {
+  max-width: 100%;
+  overflow: hidden;
+  font: var(--type-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--status-nominal-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile[data-tone="warn"] .sub {
+  color: var(--status-warning-text);
+}
+
+.tile[data-tone="danger"] .sub {
+  color: var(--status-critical-text);
+}
+
+.tile[data-tone="neutral"] .sub {
+  color: var(--text-secondary);
+}

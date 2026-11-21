@@ -77,3 +77,11 @@ export const STORAGE_CLASSES: ResourceRef = {
   kind: "StorageClass",
   namespaced: false,
 };
+
+export const NAMESPACES: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "namespaces",
+  kind: "Namespace",
+  namespaced: false,
+};

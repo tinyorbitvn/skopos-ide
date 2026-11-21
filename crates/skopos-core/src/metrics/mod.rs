@@ -433,6 +433,8 @@ fn is_label_name(name: &str) -> bool {
 #[ts(export)]
 pub enum MetricsTarget {
     Cluster,
+    /// The API server's own metrics, and etcd as the API server sees it.
+    ControlPlane,
     Node {
         name: String,
     },
@@ -475,7 +477,8 @@ pub enum MetricsRange {
 }
 
 /// Units: CPU in cores; memory and disk in bytes; network and filesystem reads and writes in
-/// bytes per second; pods as counts.
+/// bytes per second; pods as counts; API requests and errors in requests per second; latency in
+/// seconds; the etcd database in bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -500,6 +503,11 @@ pub enum MetricName {
     FsReads,
     FsWrites,
     FsUsage,
+    ApiRequests,
+    ApiErrors,
+    ApiLatencyP99,
+    EtcdLatencyP99,
+    EtcdDbSize,
 }
 
 /// Points are `[unix seconds, value]`.
@@ -730,6 +738,30 @@ mod tests {
                 name: "web".to_owned(),
                 workload_kind: WorkloadKind::StatefulSet,
             }
+        );
+        let control_plane: MetricsTarget =
+            serde_json::from_value(json!({ "kind": "controlPlane" })).unwrap();
+        assert_eq!(control_plane, MetricsTarget::ControlPlane);
+        assert_eq!(
+            serde_json::to_value(MetricsTarget::ControlPlane).unwrap(),
+            json!({ "kind": "controlPlane" })
+        );
+        assert_eq!(
+            serde_json::to_value([
+                MetricName::ApiRequests,
+                MetricName::ApiErrors,
+                MetricName::ApiLatencyP99,
+                MetricName::EtcdLatencyP99,
+                MetricName::EtcdDbSize,
+            ])
+            .unwrap(),
+            json!([
+                "apiRequests",
+                "apiErrors",
+                "apiLatencyP99",
+                "etcdLatencyP99",
+                "etcdDbSize"
+            ])
         );
         let ranges: Vec<MetricsRange> =
             serde_json::from_value(json!(["1h", "6h", "24h", "7d"])).unwrap();

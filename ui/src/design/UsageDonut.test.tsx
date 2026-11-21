@@ -138,3 +138,14 @@ test.each<[string, Partial<UsageDonutProps>]>([
     root.textContent,
   ]).toEqual(["—", "CPU unknown", false, "—CPU—"]);
 });
+
+test("a label replaces the accessible name, and a bare donut has no caption", () => {
+  const { root, svg } = draw({
+    label: "CPU requests 62%, 2.5 of 4 cores",
+    bare: true,
+  });
+  expect(svg.getAttribute("aria-label")).toBe(
+    "CPU requests 62%, 2.5 of 4 cores",
+  );
+  expect(root.textContent).toBe("62%");
+});

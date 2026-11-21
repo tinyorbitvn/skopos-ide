@@ -56,6 +56,8 @@ export function usageSourceOf(
       };
     case "workload":
       return { of: "pods", namespace: target.namespace, keys: podKeys ?? [] };
+    case "controlPlane":
+      return null;
     case "pvc":
       return null;
   }
