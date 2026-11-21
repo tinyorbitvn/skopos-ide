@@ -980,3 +980,37 @@ test("a cluster-scoped list is never asked for by namespace", async () => {
 
   expect(backend.callsTo("resources_subscribe")[0].namespaces).toEqual([]);
 });
+
+const part = (...items: KubeObject[]): WatchEvent => ({
+  type: "snapshotPart",
+  items,
+});
+const namesOf = (state: ResourceListState) =>
+  state.items.map((o) => o.metadata.name);
+
+test("a snapshot sent in parts is shown whole, once its last part arrives", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+
+  await subs[0].send(part(pod("a"), pod("b")));
+  await subs[0].send(part(pod("c")));
+  expect(result.current.loading).toBe(true);
+  expect(result.current.items).toEqual([]);
+
+  await subs[0].send(snapshot(pod("d")));
+  expect(result.current.loading).toBe(false);
+  expect(namesOf(result.current)).toEqual(["a", "b", "c", "d"]);
+});
+
+test("a new snapshot sent in parts leaves the rows shown until it is whole", async () => {
+  const { subs } = setup();
+  const { result } = await mount();
+  await subs[0].send(snapshot(pod("old-1"), pod("old-2")));
+  const shown = result.current.items;
+
+  await subs[0].send(part(pod("new-1")));
+  expect(result.current.items).toBe(shown);
+
+  await subs[0].send(snapshot(pod("new-2")));
+  expect(namesOf(result.current)).toEqual(["new-1", "new-2"]);
+});

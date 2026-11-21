@@ -1319,7 +1319,9 @@ mod tests {
         events
             .iter()
             .flat_map(|event| match event {
-                WatchEvent::Snapshot { items } => items.clone(),
+                WatchEvent::Snapshot { items } | WatchEvent::SnapshotPart { items } => {
+                    items.clone()
+                }
                 WatchEvent::Batch { upserts, .. } => upserts.clone(),
                 WatchEvent::Status { .. } => Vec::new(),
             })

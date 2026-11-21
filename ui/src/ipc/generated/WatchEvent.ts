@@ -5,6 +5,7 @@ import type { JsonValue } from "./serde_json/JsonValue";
 
 /**
  * What a subscriber receives. A `Snapshot` replaces everything it holds, and a
- * `Batch` changes it.
+ * `Batch` changes it. A `SnapshotPart` holds the first rows of a snapshot that the next
+ * event continues: a large snapshot is cut into these on its way to the webview.
  */
-export type WatchEvent = { "type": "snapshot", items: Array<JsonValue>, } | { "type": "batch", upserts: Array<JsonValue>, deletes: Array<ObjectKey>, } | { "type": "status", status: WatchStatus, message: string | null, };
+export type WatchEvent = { "type": "snapshotPart", items: Array<JsonValue>, } | { "type": "snapshot", items: Array<JsonValue>, } | { "type": "batch", upserts: Array<JsonValue>, deletes: Array<ObjectKey>, } | { "type": "status", status: WatchStatus, message: string | null, };

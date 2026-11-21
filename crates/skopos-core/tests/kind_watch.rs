@@ -154,6 +154,9 @@ impl Table {
                     }
                 }
                 WatchEvent::Status { .. } => {}
+                WatchEvent::SnapshotPart { .. } => {
+                    panic!("only the forwarder to the webview cuts a snapshot")
+                }
             }
         }
     }

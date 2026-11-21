@@ -87,12 +87,22 @@ fn forward(
 ) {
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if on_event.send(event).is_err() {
+            if !send_parts(&on_event, event) {
                 core.resources_unsubscribe(&subscription);
                 break;
             }
         }
     });
+}
+
+/// Sends `event` to the webview, a large snapshot a part at a time, so that no single
+/// message takes the webview long to parse. The parts go one after another, with no other
+/// event between them. False once the channel can no longer be written.
+fn send_parts(on_event: &Channel<WatchEvent>, event: WatchEvent) -> bool {
+    event
+        .into_parts()
+        .into_iter()
+        .all(|part| on_event.send(part).is_ok())
 }
 
 #[tauri::command]
@@ -253,11 +263,51 @@ pub async fn ui_state_set(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use serde_json::json;
-    use skopos_core::resources::Row;
+    use skopos_core::resources::{Row, SNAPSHOT_PART_ROWS};
     use tauri::ipc::{InvokeResponseBody, IpcResponse};
 
     use super::*;
+
+    /// A snapshot of many rows would be one long text for the webview to parse in one go.
+    #[test]
+    fn a_large_snapshot_crosses_the_channel_a_part_at_a_time() {
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let seen = bodies.clone();
+        let channel = Channel::new(move |body| {
+            let InvokeResponseBody::Json(text) = body else {
+                panic!("the event did not cross as JSON");
+            };
+            seen.lock().unwrap().push(text);
+            Ok(())
+        });
+        let items = (0..=SNAPSHOT_PART_ROWS)
+            .map(|n| Row::new(&json!({ "n": n })).unwrap())
+            .collect();
+
+        assert!(send_parts(&channel, WatchEvent::Snapshot { items }));
+
+        let sent: Vec<Value> = bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|text| serde_json::from_str(text).unwrap())
+            .collect();
+        let shape: Vec<(&str, usize)> = sent
+            .iter()
+            .map(|event| {
+                let rows = event["items"].as_array().unwrap().len();
+                (event["type"].as_str().unwrap(), rows)
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [("snapshotPart", SNAPSHOT_PART_ROWS), ("snapshot", 1)]
+        );
+        assert_eq!(sent[1]["items"][0], json!({ "n": SNAPSHOT_PART_ROWS }));
+    }
 
     /// A row is kept as text, and must still reach the webview as the object.
     #[test]
