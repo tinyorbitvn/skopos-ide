@@ -3,6 +3,7 @@
 mod connect;
 mod control_plane;
 mod distribution;
+mod exec_command;
 mod manager;
 mod raw;
 mod state;
@@ -12,6 +13,7 @@ pub use control_plane::{
     ApiServer, ControlPlane, ControlPlaneComponent, HealthCheck, HealthState, Leader, PodCounts,
 };
 pub use distribution::detect_distribution;
+pub use exec_command::ExecCommandKind;
 pub(crate) use manager::ClusterManager;
 pub use manager::{ConnectionLogEntry, LogLevel};
 pub(crate) use raw::get_raw;
