@@ -367,6 +367,19 @@ test("without metrics.k8s.io, Capacity reads the requests and Top consumers need
   );
 });
 
+test("with no metrics provider, Top consumers needs metrics-server and hides the switch", async () => {
+  const { f } = await show(
+    fake({ metrics_provider: () => ({ kind: "none" }) }),
+  );
+  await f.send({ type: "snapshot", snapshot: SNAPSHOT });
+  await act(flush);
+  const empty = screen.getByTestId("overview-top-empty");
+  expect(within(empty).getByRole("heading").textContent).toBe(
+    "Top consumers need metrics-server",
+  );
+  expect(screen.queryByTestId("overview-top-by")).toBeNull();
+});
+
 test("a top row opens its Pod's drawer over the Overview, and a namespace row its Namespace's", async () => {
   const { f } = await show();
   await f.send({ type: "snapshot", snapshot: SNAPSHOT });

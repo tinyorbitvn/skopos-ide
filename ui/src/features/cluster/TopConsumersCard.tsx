@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { EmptyState, Segmented } from "../../design";
 import { PODS } from "../../kinds/refs";
+import { useMetrics } from "../../stores/metrics";
 import { useListUsage } from "../metrics/useListUsage";
 import { OverviewCard, type TopRow, TopTable } from "../overview";
 import styles from "./OverviewCards.module.css";
@@ -44,17 +45,33 @@ export function TopConsumersCard(props: {
   const usage = useListUsage(clusterId, PODS, NO_NAMESPACES);
   const top = useMemo(() => topConsumers(usage, by), [usage, by]);
 
-  const empty = usage?.notServed
+  const provider = useMetrics((s) => s.providers[clusterId]);
+  const kind = provider?.value?.kind;
+  const metricsOff = kind === "none";
+  const reading =
+    provider === undefined || (kind === undefined && provider.loading);
+
+  const empty = metricsOff
     ? {
         title: "Top consumers need metrics-server",
-        body: "This cluster does not serve the metrics API (metrics.k8s.io), so usage by namespace and Pod is unknown.",
+        body: "No metrics source is set for this cluster (metrics-server or Prometheus), so usage by namespace and Pod is unknown.",
       }
-    : props.nodesForbidden
+    : reading
       ? {
-          title: "Top consumers are not shown",
-          body: "Your account may not list nodes, so shares of the cluster cannot be summed.",
+          title: "Reading usage",
+          body: "Checking where this cluster reports usage.",
         }
-      : null;
+      : usage?.notServed
+        ? {
+            title: "Top consumers need metrics-server",
+            body: "This cluster does not serve the metrics API (metrics.k8s.io), so usage by namespace and Pod is unknown.",
+          }
+        : props.nodesForbidden
+          ? {
+              title: "Top consumers are not shown",
+              body: "Your account may not list nodes, so shares of the cluster cannot be summed.",
+            }
+          : null;
 
   const total = by === "cpu" ? props.totals.cores : props.totals.bytes;
   const head = by === "cpu" ? "CPU" : "Memory";
