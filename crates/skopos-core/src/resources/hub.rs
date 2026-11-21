@@ -1,4 +1,5 @@
-//! One shared watcher per cluster and resource, fanned out to its subscribers.
+//! One shared watcher per cluster and resource, fanned out to its subscribers. A list the
+//! API server narrows, as a node's Pods, has a watcher of its own.
 //!
 //! A watcher task updates the group's store and each subscriber's pending map.
 //! Each subscriber has its own flush task, so a slow one only ever delays itself,
@@ -22,7 +23,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::discovery::state_name;
-use super::ops::{invalid, is_path_segment};
+use super::ops::{invalid, is_path_segment, selector_value};
 use super::sanitize::strip_for_list;
 use super::trim::{is_core_pods, trim_for_graph, trim_for_watch};
 use super::types::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
@@ -94,10 +95,29 @@ impl Scope {
     }
 }
 
+/// The objects the API server picks for a group's watcher. A group with a selector holds
+/// only those, where a group without one holds every object of its resource, so the two
+/// are different groups and never share a watcher.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Selector {
+    fields: String,
+}
+
+impl Selector {
+    /// The Pods bound to the node `node`.
+    fn pods_on_node(node: &str) -> Self {
+        Self {
+            fields: format!("spec.nodeName={}", selector_value(node)),
+        }
+    }
+}
+
 /// What a subscriber asks to be sent: which row of each object, and of which objects.
+/// `selector` names the group it joins, and `scope` what it is sent of that group.
 struct Wanted {
     shape: RowShape,
     scope: Scope,
+    selector: Option<Selector>,
 }
 
 /// What a group keeps of one object.
@@ -124,8 +144,8 @@ impl StoredRow {
     }
 }
 
-/// A group's key: cluster, group and plural.
-type GroupKey = (ClusterId, String, String);
+/// A group's key: cluster, group, plural and the selector of its watcher, if it has one.
+type GroupKey = (ClusterId, String, String, Option<Selector>);
 
 enum Phase {
     Syncing,
@@ -276,6 +296,8 @@ impl GroupState {
 
 struct Group {
     resource: ResourceRef,
+    /// What the watcher asks the API server to pick. With none, it watches every object.
+    selector: Option<Selector>,
     /// A child of the cluster's token. Lingering out cancels it too.
     token: CancellationToken,
     state: Mutex<GroupState>,
@@ -285,6 +307,7 @@ impl Group {
     fn new(resource: ResourceRef, token: CancellationToken) -> Self {
         Self {
             resource,
+            selector: None,
             token,
             state: Mutex::new(GroupState {
                 store: HashMap::new(),
@@ -579,7 +602,7 @@ impl WatchHub {
                     format!("cluster {id} is not connected"),
                 ));
             }
-            let group = self.group_for(id, &resource, connection);
+            let group = self.group_for(id, &resource, wanted.selector.as_ref(), connection);
             if group.attach(
                 &subscription,
                 wanted.shape,
@@ -608,13 +631,22 @@ impl WatchHub {
         self: &Arc<Self>,
         id: &ClusterId,
         resource: &ResourceRef,
+        selector: Option<&Selector>,
         connection: &Connection,
     ) -> Arc<Group> {
-        let key = (id.clone(), resource.group.clone(), resource.plural.clone());
+        let key = (
+            id.clone(),
+            resource.group.clone(),
+            resource.plural.clone(),
+            selector.cloned(),
+        );
         match self.groups.entry(key.clone()) {
             Entry::Occupied(entry) if !entry.get().is_closed() => entry.get().clone(),
             entry => {
-                let group = Arc::new(Group::new(resource.clone(), connection.token.child_token()));
+                let group = Arc::new(Group {
+                    selector: selector.cloned(),
+                    ..Group::new(resource.clone(), connection.token.child_token())
+                });
                 entry.insert(group.clone());
                 let turns = self
                     .list_turns
@@ -911,7 +943,10 @@ async fn run_partition(
         Some(namespace) => Api::namespaced_with(client.clone(), namespace, &api_resource),
         None => Api::all_with(client.clone(), &api_resource),
     };
-    let config = watcher::Config::default().page_size(PAGE_SIZE);
+    let mut config = watcher::Config::default().page_size(PAGE_SIZE);
+    if let Some(selector) = &group.selector {
+        config = config.fields(&selector.fields);
+    }
     let mut backoff = MIN_BACKOFF;
     loop {
         let mut turn = match list_turn(turns, &group.token).await {
@@ -1027,6 +1062,17 @@ pub(super) fn validate(resource: &ResourceRef) -> CoreResult<()> {
     }
 }
 
+/// Core Pods, as discovery names them.
+fn core_pods() -> ResourceRef {
+    ResourceRef {
+        group: String::new(),
+        version: "v1".to_owned(),
+        plural: "pods".to_owned(),
+        kind: "Pod".to_owned(),
+        namespaced: true,
+    }
+}
+
 impl AppCore {
     /// Delivers `resource` to `tx` until unsubscribed, the cluster disconnects, the
     /// receiver closes or a final status has been sent. Returns the subscription id.
@@ -1056,6 +1102,31 @@ impl AppCore {
         self.subscribe_rows(id, resource, RowShape::Table, scope, tx, Some(owner))
     }
 
+    /// Delivers the Pods bound to the node `node` to `tx`, as the rows `resources_subscribe`
+    /// sends for Pods, and returns the subscription id. It ends as `resources_subscribe`
+    /// does.
+    ///
+    /// The API server picks the Pods, by `spec.nodeName`, so the Pods of the other nodes
+    /// are neither listed nor kept. The watch is shared by the subscribers of one node,
+    /// and not with a list of every Pod.
+    pub async fn resources_subscribe_node_pods(
+        &self,
+        id: &ClusterId,
+        node: String,
+        tx: mpsc::Sender<WatchEvent>,
+        owner: &str,
+    ) -> CoreResult<String> {
+        if !is_path_segment(&node) {
+            return Err(invalid("a node name is not valid"));
+        }
+        let wanted = Wanted {
+            shape: RowShape::Table,
+            scope: Scope::default(),
+            selector: Some(Selector::pods_on_node(&node)),
+        };
+        self.subscribe_wanted(id, core_pods(), wanted, tx, Some(owner))
+    }
+
     /// `resources_subscribe` with the rows' shape picked. A reader inside the core has no
     /// `owner`, so no window's reload ends its subscription.
     pub(crate) fn subscribe_rows(
@@ -1067,8 +1138,23 @@ impl AppCore {
         tx: mpsc::Sender<WatchEvent>,
         owner: Option<&str>,
     ) -> CoreResult<String> {
+        let wanted = Wanted {
+            shape,
+            scope,
+            selector: None,
+        };
+        self.subscribe_wanted(id, resource, wanted, tx, owner)
+    }
+
+    fn subscribe_wanted(
+        &self,
+        id: &ClusterId,
+        resource: ResourceRef,
+        wanted: Wanted,
+        tx: mpsc::Sender<WatchEvent>,
+        owner: Option<&str>,
+    ) -> CoreResult<String> {
         let connection = self.connection_of(id)?;
-        let wanted = Wanted { shape, scope };
         self.watches()
             .subscribe(id, resource, wanted, tx, &connection, owner)
     }

@@ -94,6 +94,8 @@ struct State_ {
     history: Vec<WatchEvent>,
     counts: BTreeMap<String, usize>,
     watch_counts: BTreeMap<String, usize>,
+    /// path -> the field selector of each list of it, oldest first.
+    list_field_selectors: BTreeMap<String, Vec<Option<String>>>,
     access_reviews: Vec<AccessReview>,
     fail: BTreeMap<String, u16>,
     fail_discovery: Option<u16>,
@@ -404,6 +406,7 @@ impl FakeKube {
                 history: Vec::new(),
                 counts: BTreeMap::new(),
                 watch_counts: BTreeMap::new(),
+                list_field_selectors: BTreeMap::new(),
                 access_reviews: Vec::new(),
                 fail: BTreeMap::new(),
                 fail_discovery: None,
@@ -630,6 +633,17 @@ impl FakeKube {
             .get(path)
             .copied()
             .unwrap_or(0)
+    }
+
+    /// The field selector of each list that reached `path`, oldest first: `None` for a
+    /// list that asked for every object.
+    pub fn list_field_selectors(&self, path: &str) -> Vec<Option<String>> {
+        self.inner
+            .lock()
+            .list_field_selectors
+            .get(path)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The writes that reached `path` with this method, oldest first.
@@ -1697,6 +1711,10 @@ fn list(
     if metadata_only {
         *st.metadata_lists.entry(path.to_string()).or_insert(0) += 1;
     }
+    st.list_field_selectors
+        .entry(path.to_string())
+        .or_default()
+        .push(q.get("fieldSelector").cloned());
     let mut items: Vec<Value> = st
         .objects
         .get(&res.plural)

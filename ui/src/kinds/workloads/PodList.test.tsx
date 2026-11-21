@@ -130,3 +130,46 @@ test("without a namespace it asks for the pods of every namespace", async () => 
   const asked = backend.callsTo("resources_subscribe");
   expect(asked.map((a) => a.namespaces)).toEqual([[]]);
 });
+
+test("the Pods of a node are asked for by the node, and not as every Pod", async () => {
+  let send: (e: WatchEvent) => void = () => {};
+  const backend = mockBackend({
+    resources_subscribe: () => "list",
+    resources_subscribe_node_pods: (a: {
+      onEvent: { onmessage: (e: WatchEvent) => void };
+    }) => {
+      send = a.onEvent.onmessage;
+      return "node";
+    },
+    resources_unsubscribe: () => null,
+  });
+  render(
+    <MemoryRouter>
+      <PodList
+        clusterId="c"
+        node="worker-1"
+        match={(p) => p.spec?.nodeName === "worker-1"}
+      />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  expect(screen.getByTestId("detail-pods-loading")).toBeTruthy();
+  await act(async () => {
+    send({
+      type: "snapshot",
+      items: [
+        {
+          metadata: { name: "a", namespace: "n" },
+          spec: { nodeName: "worker-1" },
+        },
+      ],
+    } as WatchEvent);
+    await flush();
+  });
+
+  expect(within(screen.getByTestId("detail-pods")).getByText("a")).toBeTruthy();
+  expect(backend.callsTo("resources_subscribe_node_pods")).toMatchObject([
+    { clusterId: "c", node: "worker-1" },
+  ]);
+  expect(backend.callsTo("resources_subscribe")).toHaveLength(0);
+});

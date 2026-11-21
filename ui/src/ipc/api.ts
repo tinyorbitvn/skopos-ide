@@ -147,6 +147,21 @@ export const api = {
       onEvent: new Channel<WatchEvent>(onEvent),
     }),
   /**
+   * Returns the subscription id of a watch of the Pods bound to the node `node`: the rows
+   * a list of Pods has, sent as a list's are. The API server picks the Pods, so those of
+   * the other nodes are never read. End it with `resourcesUnsubscribe`.
+   */
+  resourcesSubscribeNodePods: (
+    clusterId: string,
+    node: string,
+    onEvent: (event: WatchEvent) => void,
+  ) =>
+    call<string>("resources_subscribe_node_pods", {
+      clusterId,
+      node,
+      onEvent: new Channel<WatchEvent>(onEvent),
+    }),
+  /**
    * Returns the subscription id. Graph snapshots of `namespaces` (null: every
    * namespace) go to `onEvent` until unsubscribed or until a `failure` ends it.
    */

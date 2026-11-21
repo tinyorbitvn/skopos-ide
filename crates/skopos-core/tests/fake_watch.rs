@@ -153,6 +153,28 @@ impl Consumer {
         Self::start(core, id, resource, 64, owner, &[]).await
     }
 
+    /// A Node's drawer: the Pods bound to `node`.
+    async fn subscribe_on_node(core: &AppCore, id: &ClusterId, node: &str) -> Consumer {
+        let (tx, rx) = mpsc::channel(64);
+        let id = core
+            .resources_subscribe_node_pods(id, node.to_owned(), tx, "main")
+            .await
+            .unwrap();
+        Consumer {
+            id,
+            rx,
+            rows: BTreeMap::new(),
+            seen: Vec::new(),
+        }
+    }
+
+    /// The names of the rows, sorted.
+    fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.rows.keys().map(|(_, name)| name.as_str()).collect();
+        names.sort_unstable();
+        names
+    }
+
     /// A drawer, or a table that shows only `namespaces`.
     async fn subscribe_in(
         core: &AppCore,
@@ -642,6 +664,114 @@ async fn a_resource_path_with_odd_characters_is_refused() {
             .expect_err(&format!("{wrong:?}"));
         assert_eq!(err.code, skopos_core::error::ErrorCode::InvalidInput);
     }
+}
+
+fn pod_on(namespace: &str, name: &str, node: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": { "namespace": namespace, "name": name },
+        "spec": { "nodeName": node, "containers": [{ "name": "app", "image": "app" }] },
+        "status": { "phase": "Running" },
+    })
+}
+
+/// A Node's drawer shows the Pods bound to it. The API server picks them, so the Pods of
+/// the other nodes are neither listed nor sent.
+#[tokio::test]
+async fn a_nodes_pods_are_picked_by_the_server_and_no_other_pod_is_sent() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", pod_on("default", "one", "node-a"));
+    fake.upsert("pods", pod_on("other", "two", "node-b"));
+
+    let mut on_node = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    on_node.until("its snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(on_node.names(), ["one"], "{}", on_node.summary());
+
+    fake.upsert("pods", pod_on("other", "three", "node-a"));
+    fake.upsert("pods", pod_on("default", "four", "node-b"));
+    fake.upsert("pods", pod_on("default", "five", "node-a"));
+    on_node
+        .until("the node's new pods", |c| c.has("default", "five"))
+        .await;
+    assert_eq!(on_node.names(), ["five", "one", "three"]);
+    fake.delete_pod("default", "one");
+    on_node
+        .until("the delete", |c| !c.has("default", "one"))
+        .await;
+
+    let sent = serde_json::to_string(&on_node.seen).unwrap();
+    assert!(!sent.contains("node-b"), "{sent}");
+    assert_eq!(
+        fake.list_field_selectors(PODS),
+        [Some("spec.nodeName=node-a".to_owned())]
+    );
+}
+
+/// The watch of one node holds only that node's Pods, so a table of every Pod never
+/// shares it, and a node's drawer never shares the table's.
+#[tokio::test]
+async fn a_nodes_pods_and_a_table_of_every_pod_keep_their_own_watch() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert("pods", pod_on("default", "one", "node-a"));
+    fake.upsert("pods", pod_on("default", "two", "node-b"));
+
+    let mut on_a = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    let mut whole = Consumer::subscribe(&core, &id, pods()).await;
+    let mut on_b = Consumer::subscribe_on_node(&core, &id, "node-b").await;
+    let mut again = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    whole.until("its snapshot", |c| c.snapshots() == 1).await;
+    on_a.until("its snapshot", |c| c.snapshots() == 1).await;
+    on_b.until("its snapshot", |c| c.snapshots() == 1).await;
+    again.until("its snapshot", |c| c.snapshots() == 1).await;
+
+    assert_eq!(whole.names(), ["one", "two"]);
+    assert_eq!(on_a.names(), ["one"]);
+    assert_eq!(on_b.names(), ["two"]);
+    assert_eq!(again.names(), ["one"]);
+    // One watch for each node and one for the table: the second drawer of a node shares.
+    assert_eq!(fake.watch_request_count(PODS), 3);
+}
+
+/// When Pods may not be listed in every namespace, a node's Pods are picked the same way
+/// in each namespace.
+#[tokio::test]
+async fn a_nodes_pods_fall_back_to_each_namespace_with_the_same_selector() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        forbid_cluster_wide_pods: true,
+        namespaces: vec!["a".into(), "b".into()],
+        ..Default::default()
+    })
+    .await;
+    fake.upsert("pods", pod_on("a", "in-a", "node-a"));
+    fake.upsert("pods", pod_on("b", "in-b", "node-a"));
+    fake.upsert("pods", pod_on("b", "elsewhere", "node-b"));
+
+    let mut on_node = Consumer::subscribe_on_node(&core, &id, "node-a").await;
+    on_node.until("its snapshot", |c| c.snapshots() == 1).await;
+
+    assert_eq!(on_node.names(), ["in-a", "in-b"], "{}", on_node.summary());
+    for path in ["/api/v1/namespaces/a/pods", "/api/v1/namespaces/b/pods"] {
+        assert_eq!(
+            fake.list_field_selectors(path),
+            [Some("spec.nodeName=node-a".to_owned())],
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_node_name_that_is_no_name_is_refused() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    for node in ["", "..", "a/b", "a?b"] {
+        let (tx, _rx) = mpsc::channel(1);
+        let err = core
+            .resources_subscribe_node_pods(&id, node.to_owned(), tx, "main")
+            .await
+            .expect_err(node);
+        assert_eq!(err.code, ErrorCode::InvalidInput, "{node}");
+    }
+    assert_eq!(fake.request_count(PODS), 0);
 }
 
 fn numbered_pod(name: &str, rev: usize) -> Value {
