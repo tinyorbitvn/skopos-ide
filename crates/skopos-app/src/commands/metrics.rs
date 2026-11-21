@@ -5,7 +5,7 @@ use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::metrics::{
     MetricsProvider, MetricsProviderSetting, MetricsRange, MetricsResult, MetricsTarget,
-    NodeDiskSnapshot, UsageOf, UsageSnapshot,
+    NodeDiskSnapshot, UsageOf, UsageSnapshot, VolumeUsageSnapshot,
 };
 use skopos_core::secrets::Secret;
 use tauri::State;
@@ -51,6 +51,15 @@ pub async fn nodes_disk_usage(
     names: Vec<String>,
 ) -> Result<NodeDiskSnapshot, IpcError> {
     state.core.nodes_disk_usage(&id, &names).await
+}
+
+#[tauri::command]
+pub async fn volumes_usage(
+    state: State<'_, AppState>,
+    id: ClusterId,
+    nodes: Vec<String>,
+) -> Result<VolumeUsageSnapshot, IpcError> {
+    state.core.volumes_usage(&id, &nodes).await
 }
 
 /// The only command a secret crosses IPC in (spec I49).

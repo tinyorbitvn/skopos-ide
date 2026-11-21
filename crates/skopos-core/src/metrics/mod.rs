@@ -10,9 +10,11 @@ pub(crate) mod templates;
 pub(crate) use detect::Metrics;
 pub use detect::MetricsLimits;
 mod usage;
+mod volumes;
 pub use disk::{NodeDisk, NodeDiskSnapshot};
 pub(crate) use usage::{parse_quantity, METRICS_API};
 pub use usage::{UsageItem, UsageOf, UsageSnapshot};
+pub use volumes::{VolumeUsage, VolumeUsageSnapshot};
 
 use std::collections::BTreeMap;
 use std::path::Path;
