@@ -1,5 +1,6 @@
 //! Metrics (F16). Each command delegates to `AppCore`.
 
+use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::metrics::{
@@ -60,9 +61,9 @@ pub async fn metrics_secret_set(
     secret: Secret,
     provider: MetricsProviderSetting,
 ) -> Result<(), IpcError> {
-    state
-        .core
-        .metrics_secret_set_for(&cluster_id, secret, provider)
+    // The keychain can wait on its user, so it is not asked on an async thread.
+    let core = state.core.clone();
+    blocking(move || core.metrics_secret_set_for(&cluster_id, secret, provider)).await
 }
 
 #[tauri::command]
@@ -70,5 +71,6 @@ pub async fn metrics_secret_saved(
     state: State<'_, AppState>,
     cluster_id: ClusterId,
 ) -> Result<bool, IpcError> {
-    state.core.metrics_secret_saved(&cluster_id)
+    let core = state.core.clone();
+    blocking(move || core.metrics_secret_saved(&cluster_id)).await
 }
