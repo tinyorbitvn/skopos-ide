@@ -45,11 +45,12 @@ import {
   autoHidden,
   buildModel,
   chipNamespaces,
+  countsFirst,
   FORCE_MAX_NODES,
+  graphFilter,
   levelSort,
   missingText,
   namespaceView,
-  subscribedNamespaces,
   summaryText,
   summaryTitle,
   tooMany,
@@ -99,15 +100,11 @@ export function ClusterMapScreen() {
   // The last counts seen: the filters row stays while a new filter loads.
   const [counts, setCounts] = useState<GraphNamespaceCount[] | null>(null);
   const namespaces = useMemo(() => chipNamespaces(counts ?? []), [counts]);
-  // Until the namespaces are known, a saved choice subscribes with none of them.
+  // A map starts with the counts alone, unless its saved choice hides nothing.
+  const waiting = countsFirst(savedHidden, counts);
   const filter = useMemo(
-    () =>
-      hidden.size === 0
-        ? null
-        : counts === null
-          ? []
-          : subscribedNamespaces(namespaces, hidden),
-    [hidden, counts, namespaces],
+    () => graphFilter(savedHidden, counts),
+    [savedHidden, counts],
   );
   const graph = useGraph(hiddenLoaded ? clusterId : null, filter);
   const snapshot = graph.snapshot;
@@ -130,7 +127,8 @@ export function ClusterMapScreen() {
     if (snapshot) setCounts(snapshot.counts);
   }, [snapshot]);
 
-  // A cluster with no saved choice and more than 1,500 nodes keeps one namespace.
+  // A cluster with no saved choice and more than 1,500 nodes keeps one namespace, and
+  // is never asked for its whole graph.
   useEffect(() => {
     if (!hiddenLoaded || savedHidden !== null || !snapshot) return;
     if (defaultNamespace === undefined) return;
@@ -224,7 +222,7 @@ export function ClusterMapScreen() {
   let body: React.ReactNode;
   if (graph.error !== null) {
     body = <MapError message={graph.error} onRetry={graph.retry} />;
-  } else if (drawn === null) {
+  } else if (drawn === null || waiting) {
     body = <MapLoading />;
   } else if (allHidden) {
     body = <MapEmpty text={ALL_HIDDEN} />;
@@ -323,7 +321,9 @@ export function ClusterMapScreen() {
           hiddenKinds={savedKinds}
           onHiddenKindsChange={setSavedKinds}
           summary={
-            drawn ? summaryText(drawn, shownIds, { total, filtering }) : null
+            drawn && !waiting
+              ? summaryText(drawn, shownIds, { total, filtering })
+              : null
           }
           summaryTitle={summaryTitle(filtering)}
         />
