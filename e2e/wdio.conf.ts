@@ -1,18 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import { launcher as TauriLauncher } from "@wdio/tauri-service";
-import { stopApp } from "./helpers/app";
+import { keepAppLogs, stopApp } from "./helpers/app";
 import { type AppEnv, prepareAppEnv, saveDirOf } from "./helpers/env";
 import { fixtureFor } from "./helpers/fixtures";
 
 const root = path.resolve(__dirname, "..");
 const exe = process.platform === "win32" ? "skopos-app.exe" : "skopos-app";
 const specSet = process.env.SKOPOS_E2E_SPEC_SET ?? "full";
+/** Where a run keeps the app logs and a stalled app's stacks, for CI to upload. */
+const diagnosticsDir = path.join(__dirname, ".tmp", "app-logs");
 
 const envs: AppEnv[] = [];
 const envGroups = new Map<string, AppEnv>();
 
 const stops: Array<() => Promise<void>> = [];
+
+// Set when an app had to be killed because it did not quit: a run that passes still keeps
+// the app logs then, so the stall can be looked into.
+let stalled = false;
 
 function createEnv(
   kubeconfigs: Record<string, string>,
@@ -97,6 +103,7 @@ export const config = {
   reporters: ["spec"],
   mochaOpts: { ui: "bdd", timeout: 120000 },
   onPrepare() {
+    removeTempDir(diagnosticsDir);
     // The service starts an app right after this hook, before any spec is
     // known. It only needs a safe environment; onWorkerStart replaces it.
     createEnv({});
@@ -105,12 +112,18 @@ export const config = {
   // running, and before the worker is forked. So the app and the spec both get
   // the environment set here: one app and one env per spec file.
   async onWorkerStart(_cid: string, _caps: unknown, specs: string[]) {
-    await stopApp();
+    if ((await stopApp(diagnosticsDir)) === "killed") stalled = true;
     const env = await envForSpec(specs[0] ?? "");
     process.env.SKOPOS_E2E_HOME = env.home;
   },
-  async onComplete() {
+  async onComplete(exitCode: number) {
     for (const stop of stops) await stop();
+    if (exitCode !== 0 || stalled) {
+      keepAppLogs(
+        envs.map((env) => env.configDir),
+        diagnosticsDir,
+      );
+    }
     for (const env of envs) {
       removeTempDir(env.home);
       removeTempDir(env.configDir);

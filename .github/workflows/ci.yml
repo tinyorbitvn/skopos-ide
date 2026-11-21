@@ -56,12 +56,15 @@ jobs:
         run: make test-kind
       - name: End-to-end tests
         run: make e2e
+      # The run keeps the app logs only when it fails or had to kill an app that would
+      # not quit, which does not fail it.
       - name: Upload logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs
-          path: e2e/.tmp/*.log
+          path: e2e/.tmp/app-logs/
+          include-hidden-files: true
           if-no-files-found: ignore
 
   # Hosted macOS runners cannot run the kind cluster, so macOS and Windows run the smoke set
@@ -81,10 +84,12 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Smoke tests
         run: make e2e-smoke
+      # As in linux-integration: only a failed run, or one that killed a stalled app, has logs.
       - name: Upload logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-logs-${{ matrix.os }}
-          path: e2e/.tmp/*.log
+          path: e2e/.tmp/app-logs/
+          include-hidden-files: true
           if-no-files-found: ignore
