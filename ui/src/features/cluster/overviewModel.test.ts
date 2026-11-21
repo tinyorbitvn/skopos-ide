@@ -436,8 +436,13 @@ test("forbidden nodes disable the Nodes tile; loading and failed lists read a da
       kind,
       state: "unavailable",
       reason: "no",
+      cause: "forbidden",
     })),
-    events: { state: "unavailable", reason: "You may not list Events." },
+    events: {
+      state: "unavailable",
+      reason: "You may not list Events.",
+      cause: "forbidden",
+    },
   });
   expect(tiles.map((t) => [t.number, t.sub, t.tone, t.to === null])).toEqual([
     ["—", "You may not list nodes", "neutral", true],
@@ -454,9 +459,10 @@ test("forbidden nodes disable the Nodes tile; loading and failed lists read a da
     number: "—",
     sub: "Loading",
   });
-  expect(health({ pods: { state: "unavailable", reason: "x" } })[1].sub).toBe(
-    "Could not list Pods",
-  );
+  expect(
+    health({ pods: { state: "unavailable", reason: "x", cause: "error" } })[1]
+      .sub,
+  ).toBe("Could not list Pods");
 });
 
 test("workloads count the kinds that are there while others are unavailable", () => {
@@ -464,7 +470,12 @@ test("workloads count the kinds that are there while others are unavailable", ()
     workloads: [
       counted(WORKLOADS[0], 1, 0),
       ...WORKLOADS.slice(1).map(
-        (kind): KindRow => ({ kind, state: "unavailable", reason: "no" }),
+        (kind): KindRow => ({
+          kind,
+          state: "unavailable",
+          reason: "no",
+          cause: "forbidden",
+        }),
       ),
     ],
   });
