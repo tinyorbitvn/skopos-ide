@@ -22,8 +22,13 @@ const OLD = new Set([
   "--overlay-scrim",
   "--on-accent",
 ]);
-// Set at run time: by Radix on its popovers, and by VirtualTable's inline style.
-const RUNTIME = ["--vt-columns", "--vt-min-width"];
+// Set at run time: by Radix on its popovers, and by the VirtualTable and OverviewTable inline styles.
+const RUNTIME = [
+  "--vt-columns",
+  "--vt-min-width",
+  "--ot-columns",
+  "--ot-min-width",
+];
 const RUNTIME_PREFIX = "--radix-";
 
 // What every stylesheet may use: the tokens, the base layer and the run-time names.
