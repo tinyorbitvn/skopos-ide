@@ -17,7 +17,7 @@ use ts_rs::TS;
 use super::connect::{
     establish, prepare_kubeconfig, run_discovery, ConnectTimeouts, Established, Failure,
 };
-use super::exec_command::{exec_command, ExecCommand, ExecRequest};
+use super::exec_command::{exec_command, ExecCommand, ExecEnvVar, ExecRequest, ExecRequestDetails};
 use super::state::{ConnectionState, FailureKind};
 use crate::app_core::CoreEvent;
 use crate::error::{sanitize_text, CoreResult, ErrorCode, IpcError};
@@ -133,6 +133,22 @@ impl HeldExec {
             source_path: self.source_path.clone(),
             context_name: self.context_name.clone(),
             changed: self.changed,
+        }
+    }
+
+    /// Everything that would run. Sent only when the user asks to see it.
+    pub(crate) fn details(&self) -> ExecRequestDetails {
+        ExecRequestDetails {
+            args: self.command.args.clone(),
+            env: self
+                .command
+                .env
+                .iter()
+                .map(|(name, value)| ExecEnvVar {
+                    name: name.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
         }
     }
 

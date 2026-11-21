@@ -55,6 +55,23 @@ pub struct ExecRequest {
     pub changed: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecEnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// The arguments and environment of a held request. Sent only when the user asks to see them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecRequestDetails {
+    pub args: Vec<String>,
+    pub env: Vec<ExecEnvVar>,
+}
+
 /// One section's program, before the two are told apart.
 struct Invocation {
     command: String,

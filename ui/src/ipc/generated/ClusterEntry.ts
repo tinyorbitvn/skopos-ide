@@ -12,6 +12,10 @@ name: string, contextName: string, server: string | null, icon: string | null, s
  */
 execCommand: string | null, 
 /**
+ * Whether the user allowed this cluster's kubeconfig to run its exec command.
+ */
+execAllowed: boolean, 
+/**
  * Whether the kubeconfig turns off TLS verification for this cluster.
  */
 insecureTls: boolean, problem: string | null, state: ConnectionState, };

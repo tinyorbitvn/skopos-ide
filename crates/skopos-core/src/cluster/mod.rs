@@ -14,7 +14,7 @@ pub use control_plane::{
 };
 pub use distribution::detect_distribution;
 pub(crate) use exec_command::ExecConsent;
-pub use exec_command::{ExecCommandKind, ExecRequest};
+pub use exec_command::{ExecCommandKind, ExecEnvVar, ExecRequest, ExecRequestDetails};
 pub(crate) use manager::{ClusterManager, HeldExec};
 pub use manager::{ConnectionLogEntry, LogLevel};
 pub(crate) use raw::get_raw;

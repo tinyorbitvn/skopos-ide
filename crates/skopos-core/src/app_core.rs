@@ -19,7 +19,7 @@ use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{
     ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState, ExecConsent, ExecRequest,
-    HeldExec,
+    ExecRequestDetails, HeldExec,
 };
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::graph::GraphHub;
@@ -368,11 +368,13 @@ impl AppCore {
 
     pub fn catalog_list(&self) -> Vec<ClusterEntry> {
         let contexts = self.inner.snapshots.borrow().entries.clone();
+        let allowed = self.inner.exec_consents.get();
         build_entries(
             contexts,
             &self.inner.clusters.get(),
             &self.inner.pasted,
             |id| self.inner.connections.state(id),
+            |id| allowed.contains_key(id),
         )
     }
 
@@ -389,6 +391,10 @@ impl AppCore {
         if self.inner.pasted.remove(id)? {
             self.inner.secrets.delete(id);
             self.catalog_folders_forget(id);
+            // A consent left behind is harmless: it fits only the same file and context.
+            let _ = self.inner.exec_consents.update(|all| {
+                all.remove(id);
+            });
             return Ok(());
         }
         // A pasted entry can still be listed here until the sync catches up.
@@ -594,6 +600,28 @@ impl AppCore {
         self.inner.exec_consents.update(|all| {
             all.insert(id.clone(), ExecConsent { fingerprint });
         })?;
+        // Entries say whether their exec command is allowed.
+        let _ = self.inner.events.send(CoreEvent::CatalogChanged);
+        Ok(())
+    }
+
+    /// The arguments and environment of the held request `request_id`.
+    pub fn cluster_exec_request_details(
+        &self,
+        id: &ClusterId,
+        request_id: u32,
+    ) -> CoreResult<ExecRequestDetails> {
+        Ok(self.held_exec(id, request_id)?.details())
+    }
+
+    /// Takes the consent back. The cluster is disconnected too: a live connection
+    /// would run the program again whenever its credential expires.
+    pub async fn cluster_exec_forget(&self, id: &ClusterId) -> CoreResult<()> {
+        self.inner.exec_consents.update(|all| {
+            all.remove(id);
+        })?;
+        self.cluster_disconnect(id).await?;
+        let _ = self.inner.events.send(CoreEvent::CatalogChanged);
         Ok(())
     }
 

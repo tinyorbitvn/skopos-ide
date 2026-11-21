@@ -6,7 +6,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use skopos_core::app_core::AppCore;
+use skopos_core::app_core::{AppCore, CoreEvent};
 use skopos_core::cluster::{ConnectionState, ExecCommandKind, FailureKind};
 use skopos_core::error::ErrorCode;
 use skopos_core::kubeconfig::ClusterId;
@@ -359,4 +359,118 @@ async fn a_consent_store_that_cannot_be_read_asks_again() {
     let request = core.cluster_exec_request(&id).unwrap();
     core.cluster_exec_allow(&id, request.request_id).unwrap();
     connected(&core, &id).await;
+}
+
+fn entry_allowed(core: &AppCore, id: &ClusterId) -> bool {
+    let entries = core.catalog_list();
+    let entry = entries.iter().find(|entry| entry.id == *id);
+    entry.unwrap().exec_allowed
+}
+
+/// Empties the queue and says whether a catalog change was in it.
+fn saw_catalog_changed(events: &mut tokio::sync::broadcast::Receiver<CoreEvent>) -> bool {
+    let mut seen = false;
+    while let Ok(event) = events.try_recv() {
+        seen |= matches!(event, CoreEvent::CatalogChanged);
+    }
+    seen
+}
+
+#[tokio::test]
+async fn the_details_hold_the_arguments_and_values_of_the_held_request() {
+    let root = tempfile::tempdir().unwrap();
+    let user = "{ exec: { apiVersion: client.authentication.k8s.io/v1, command: \"/bin/sh\", \
+        args: [\"-c\", \"exit 1\", \"--client-secret=S3CRET-ARG\"], \
+        env: [{ name: PLUGIN_ENV, value: S3CRET-ENV }], interactiveMode: Never } }";
+    std::fs::write(kube_config(&root), config_text("http://127.0.0.1:9", user)).unwrap();
+    let core = start_core(&root).await;
+    let id = wait_for_entry(&core).await;
+    core.cluster_connect(&id).await.unwrap();
+    let request = core.cluster_exec_request(&id).unwrap();
+
+    let details = core
+        .cluster_exec_request_details(&id, request.request_id)
+        .unwrap();
+
+    assert_eq!(details.args, ["-c", "exit 1", "--client-secret=S3CRET-ARG"]);
+    assert_eq!(details.env.len(), 1);
+    assert_eq!(details.env[0].name, "PLUGIN_ENV");
+    assert_eq!(details.env[0].value, "S3CRET-ENV");
+    assert_eq!(
+        serde_json::to_value(&details).unwrap()["env"][0]["value"],
+        "S3CRET-ENV"
+    );
+}
+
+#[tokio::test]
+async fn details_for_a_stale_request_are_refused() {
+    let s = core_with_plugin().await;
+    s.core.cluster_connect(&s.id).await.unwrap();
+    let first = s.core.cluster_exec_request(&s.id).unwrap();
+    s.core.cluster_connect(&s.id).await.unwrap();
+
+    let err = s
+        .core
+        .cluster_exec_request_details(&s.id, first.request_id)
+        .unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::Conflict);
+}
+
+#[tokio::test]
+async fn the_catalog_says_whether_the_exec_command_is_allowed_and_hears_of_changes() {
+    let s = core_with_plugin().await;
+    assert!(!entry_allowed(&s.core, &s.id));
+    let mut events = s.core.subscribe();
+    s.core.cluster_connect(&s.id).await.unwrap();
+    let request = s.core.cluster_exec_request(&s.id).unwrap();
+    saw_catalog_changed(&mut events);
+
+    s.core
+        .cluster_exec_allow(&s.id, request.request_id)
+        .unwrap();
+
+    assert!(entry_allowed(&s.core, &s.id));
+    assert!(saw_catalog_changed(&mut events), "allowing told nobody");
+
+    s.core.cluster_exec_forget(&s.id).await.unwrap();
+
+    assert!(!entry_allowed(&s.core, &s.id));
+    assert!(saw_catalog_changed(&mut events), "forgetting told nobody");
+}
+
+#[tokio::test]
+async fn forgetting_disconnects_and_the_next_connect_asks() {
+    let s = core_with_plugin().await;
+    allow(&s.core, &s.id).await;
+    connected(&s.core, &s.id).await;
+
+    s.core.cluster_exec_forget(&s.id).await.unwrap();
+
+    assert_eq!(s.core.cluster_state(&s.id), ConnectionState::Disconnected);
+    assert!(!consents_text(&s.root).contains(s.id.as_str()));
+    let state = s.core.cluster_connect(&s.id).await.unwrap();
+    assert_eq!(failure(&state).0, FailureKind::ExecNotAllowed);
+    assert!(!s.core.cluster_exec_request(&s.id).unwrap().changed);
+}
+
+#[tokio::test]
+async fn removing_a_pasted_kubeconfig_drops_its_consent() {
+    let fake = FakeKube::start(FakeKubeConfig::default()).await.unwrap();
+    let root = tempfile::tempdir().unwrap();
+    kube_config(&root);
+    let marker = root.path().join("plugin-ran");
+    let core = start_core(&root).await;
+    let text = config_text(&fake.url(), &plugin_user(&marker, "one"));
+    let id = core.catalog_add_pasted(&text).unwrap().remove(0);
+    wait_until("the pasted entry", || async {
+        core.catalog_list().iter().any(|entry| entry.id == id)
+    })
+    .await;
+    allow(&core, &id).await;
+    assert!(consents_text(&root).contains(id.as_str()));
+
+    core.catalog_remove_pasted(&id).unwrap();
+
+    assert!(!consents_text(&root).contains(id.as_str()));
 }

@@ -62,6 +62,7 @@ export function clusterEntry(partial: Partial<ClusterEntry>): ClusterEntry {
     icon: null,
     source: { kind: "synced", path: "/home/me/.kube/config" },
     execCommand: null,
+    execAllowed: false,
     insecureTls: false,
     problem: null,
     state: { status: "disconnected" },

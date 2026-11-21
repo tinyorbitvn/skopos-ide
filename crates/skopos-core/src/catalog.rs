@@ -45,6 +45,8 @@ pub struct ClusterEntry {
     pub source: ClusterSource,
     /// The command a connect runs for credentials, when the kubeconfig names an exec plugin.
     pub exec_command: Option<String>,
+    /// Whether the user allowed this cluster's kubeconfig to run its exec command.
+    pub exec_allowed: bool,
     /// Whether the kubeconfig turns off TLS verification for this cluster.
     pub insecure_tls: bool,
     pub problem: Option<String>,
@@ -217,6 +219,7 @@ pub(crate) fn build_entries(
     settings: &HashMap<ClusterId, ClusterSettings>,
     pasted: &PastedConfigs,
     state_of: impl Fn(&ClusterId) -> ConnectionState,
+    exec_allowed: impl Fn(&ClusterId) -> bool,
 ) -> Vec<ClusterEntry> {
     contexts
         .into_iter()
@@ -235,6 +238,7 @@ pub(crate) fn build_entries(
                 name: display_name(own).unwrap_or_else(|| context.context_name.clone()),
                 icon: own.and_then(|s| s.icon.clone()),
                 state: state_of(&context.id),
+                exec_allowed: exec_allowed(&context.id),
                 id: context.id,
                 context_name: context.context_name,
                 server: context.server,
@@ -298,6 +302,7 @@ mod tests {
             &HashMap::new(),
             &pasted,
             |_| ConnectionState::Disconnected,
+            |_| false,
         );
 
         assert_eq!(entries[0].source, ClusterSource::Pasted { path: inside });
@@ -319,6 +324,7 @@ mod tests {
             &HashMap::new(),
             &pasted,
             |_| ConnectionState::Disconnected,
+            |_| false,
         );
 
         let v = serde_json::to_value(&entries[0]).unwrap();
@@ -344,6 +350,7 @@ mod tests {
             &HashMap::new(),
             &pasted,
             |_| ConnectionState::Disconnected,
+            |_| false,
         );
 
         let v = serde_json::to_value(&entries).unwrap();
@@ -416,5 +423,27 @@ mod tests {
 
         assert!(pasted.remove(&ids[0]).unwrap());
         assert!(!pasted.remove(&ids[0]).unwrap());
+    }
+
+    #[test]
+    fn an_entry_says_whether_its_exec_command_is_allowed() {
+        let data = tempfile::tempdir().unwrap();
+        let pasted = PastedConfigs::open(data.path()).unwrap();
+
+        let entries = build_entries(
+            vec![
+                context("a", "/h/.kube/config"),
+                context("b", "/h/.kube/config"),
+            ],
+            &HashMap::new(),
+            &pasted,
+            |_| ConnectionState::Disconnected,
+            |id| id.as_str() == "id-b",
+        );
+
+        assert!(!entries[0].exec_allowed);
+        assert!(entries[1].exec_allowed);
+        let sent = serde_json::to_value(&entries[1]).unwrap();
+        assert_eq!(sent["execAllowed"], true);
     }
 }
