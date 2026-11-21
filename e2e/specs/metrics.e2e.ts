@@ -74,6 +74,15 @@ async function chartsHaveData(stems: string[]): Promise<boolean> {
   return true;
 }
 
+/** The stems of the Metrics card's tables, top to bottom, in the Table view. */
+async function tableStems(): Promise<string[]> {
+  return browser.execute(() =>
+    Array.from(document.querySelectorAll('[data-testid^="metrics-table-"]')).map((table) =>
+      (table.getAttribute("data-testid") ?? "").slice("metrics-table-".length),
+    ),
+  );
+}
+
 /** Opens the cluster's Settings page from the header, picks a provider and saves. */
 async function saveProvider(
   kind: "auto" | "prometheus" | "metricsServer" | "none",
@@ -166,7 +175,7 @@ describe("metrics", () => {
         ),
       "the Overview never said that metrics are off",
     );
-    expect(await byTestId("overview-gauges").isExisting()).toBe(false);
+    expect(await byTestId("metrics-grid-control-plane").isExisting()).toBe(false);
 
     await openResource(PODS, "Pod");
     await until(
@@ -178,7 +187,7 @@ describe("metrics", () => {
     );
   });
 
-  it("a pinned Prometheus fills the gauges and charts, reads 6h, shows a table and moves the readout", async function () {
+  it("a pinned Prometheus fills the cluster and control plane charts, reads 6h, shows a table and moves the readout", async function () {
     this.timeout(SAMPLES_TIMEOUT + 6 * 60_000);
     await saveProvider("prometheus");
     await openOverview();
@@ -193,19 +202,21 @@ describe("metrics", () => {
       "the CPU, Memory, Pods and Disk charts never showed data",
       SAMPLES_TIMEOUT,
     );
+    // The chart's kubernetes-apiservers job scrapes the API server. etcd's database size
+    // depends on the Kubernetes version, so its chart may stay empty.
     await until(
-      async () =>
-        /^\d+(\.\d)? of \d+(\.\d)? cores · Prometheus$/.test(
-          await text("overview-gauge-cpu-caption"),
-        ) &&
-        /^\d+(\.\d)? of \d+(\.\d)? GiB · Prometheus$/.test(
-          await text("overview-gauge-memory-caption"),
-        ),
-      "the gauges never showed numbers",
+      () => chartsHaveData(["api-requests", "api-latency", "etcd-latency"]),
+      "the API requests, API latency and etcd latency charts never showed data",
+      SAMPLES_TIMEOUT,
     );
-    expect(
-      await byTestId("overview-gauge-cpu").getAttribute("aria-valuenow"),
-    ).toMatch(/^\d+$/);
+    expect(await text("metrics-heading-cluster")).toBe("Cluster resources");
+    expect(await text("metrics-heading-control-plane")).toBe("Control plane");
+    expect(await text("metrics-control-plane-source")).toBe(
+      "From the API server's own metrics, etcd as the API server sees it.",
+    );
+    expect(await text("metrics-chart-api-requests-now")).toMatch(/^[\d,.]+ req\/s$/);
+    expect(await text("metrics-chart-api-latency-now")).toMatch(/^[\d.]+ (ms|s)$/);
+    expect(await text("metrics-chart-etcd-latency-now")).toMatch(/^[\d.]+ (ms|s)$/);
 
     await clickWhenShown("metrics-view-table");
     const table = await shown("metrics-table-cpu");
@@ -213,6 +224,16 @@ describe("metrics", () => {
       async () => (await table.$$("tbody tr").length) > 0,
       "the CPU table never showed a row",
     );
+    expect(await tableStems()).toEqual([
+      "cpu",
+      "memory",
+      "pods",
+      "disk",
+      "api-requests",
+      "api-latency",
+      "etcd-latency",
+      "etcd-database",
+    ]);
     await clickWhenShown("metrics-view-chart");
 
     // The 6h query ends on the last whole 5-minute step, so a Prometheus installed minutes
@@ -293,16 +314,6 @@ describe("metrics", () => {
       "the CPU, Memory, Pods and Disk charts never showed Mimir's data",
       SAMPLES_TIMEOUT,
     );
-    await until(
-      async () =>
-        /^\d+(\.\d)? of \d+(\.\d)? cores · Prometheus$/.test(
-          await text("overview-gauge-cpu-caption"),
-        ) &&
-        /^\d+(\.\d)? of \d+(\.\d)? GiB · Prometheus$/.test(
-          await text("overview-gauge-memory-caption"),
-        ),
-      "the gauges never showed Mimir's numbers",
-    );
 
     await saveMimir("skopos-tenant-b");
     await openOverview();
@@ -334,13 +345,6 @@ describe("metrics", () => {
         "the CPU, Memory, Pods and Disk charts never showed data from the URL",
         SAMPLES_TIMEOUT,
       );
-      await until(
-        async () =>
-          /^\d+(\.\d)? of \d+(\.\d)? cores · Prometheus$/.test(
-            await text("overview-gauge-cpu-caption"),
-          ),
-        "the CPU gauge never showed numbers from the URL",
-      );
     } finally {
       forward.stop();
     }
@@ -368,6 +372,10 @@ describe("metrics", () => {
         "metrics-server, set in the cluster settings. Samples every 15 s while the cluster is connected",
       "the source line never named metrics-server",
     );
+    expect(await text("metrics-note")).toBe(
+      "Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.",
+    );
+    expect(await byTestId("metrics-grid-control-plane").isExisting()).toBe(false);
 
     await openResource(PODS, "Pod");
     await until(
