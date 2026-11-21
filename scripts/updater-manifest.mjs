@@ -90,7 +90,7 @@ export function manifestUrls(manifest, version) {
   }
   const prefix = `${REPO_URL}/releases/download/v${version}/`;
   const urls = new Set();
-  for (const [key] of PLATFORMS) {
+  for (const [key, suffix] of PLATFORMS) {
     const entry = manifest.platforms?.[key];
     if (
       typeof entry?.url !== "string" ||
@@ -99,7 +99,8 @@ export function manifestUrls(manifest, version) {
     ) {
       throw new Error(`latest.json: ${key} is missing`);
     }
-    if (!entry.url.startsWith(prefix)) {
+    // The file of this release, and the kind the platform installs.
+    if (!entry.url.startsWith(prefix) || !entry.url.endsWith(suffix)) {
       throw new Error(`latest.json: ${key} points at ${entry.url}`);
     }
     urls.add(entry.url);
