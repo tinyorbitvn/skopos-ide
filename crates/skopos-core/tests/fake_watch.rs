@@ -138,7 +138,7 @@ impl Consumer {
         resource: ResourceRef,
         capacity: usize,
     ) -> Consumer {
-        Self::start(core, id, resource, capacity, "main").await
+        Self::start(core, id, resource, capacity, "main", &[]).await
     }
 
     /// A table in the window `owner`.
@@ -148,7 +148,17 @@ impl Consumer {
         resource: ResourceRef,
         owner: &str,
     ) -> Consumer {
-        Self::start(core, id, resource, 64, owner).await
+        Self::start(core, id, resource, 64, owner, &[]).await
+    }
+
+    /// A drawer, or a table that shows only `namespaces`.
+    async fn subscribe_in(
+        core: &AppCore,
+        id: &ClusterId,
+        resource: ResourceRef,
+        namespaces: &[&str],
+    ) -> Consumer {
+        Self::start(core, id, resource, 64, "main", namespaces).await
     }
 
     async fn start(
@@ -157,10 +167,12 @@ impl Consumer {
         resource: ResourceRef,
         capacity: usize,
         owner: &str,
+        namespaces: &[&str],
     ) -> Consumer {
         let (tx, rx) = mpsc::channel(capacity);
+        let namespaces = namespaces.iter().map(|&name| name.to_owned()).collect();
         let id = core
-            .resources_subscribe(id, resource, tx, owner)
+            .resources_subscribe(id, resource, namespaces, tx, owner)
             .await
             .unwrap();
         Consumer {
@@ -562,6 +574,49 @@ async fn a_wrong_kind_does_not_exempt_secrets() {
     assert!(!text.contains("czNjcjN0"), "{text}");
 }
 
+/// A drawer, or a table that shows a few namespaces, asks for those only. It is sent their
+/// rows, from the one watch that also serves a table of every namespace.
+#[tokio::test]
+async fn a_subscription_of_some_namespaces_is_sent_only_their_rows() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.add_pod("default", "one");
+    fake.add_pod("other", "two");
+
+    let mut whole = Consumer::subscribe(&core, &id, pods()).await;
+    let mut scoped = Consumer::subscribe_in(&core, &id, pods(), &["default"]).await;
+    whole.until("both pods", |c| c.rows.len() == 2).await;
+    scoped.until("its snapshot", |c| c.snapshots() == 1).await;
+    assert_eq!(scoped.rows.len(), 1, "{}", scoped.summary());
+
+    fake.add_pod("other", "three");
+    fake.add_pod("default", "four");
+    whole.until("both new pods", |c| c.rows.len() == 4).await;
+    scoped.until("its new pod", |c| c.rows.len() == 2).await;
+
+    let names: Vec<&str> = scoped.rows.keys().map(|(_, name)| name.as_str()).collect();
+    assert_eq!(names, ["four", "one"]);
+    let sent = serde_json::to_string(&scoped.seen).unwrap();
+    assert!(!sent.contains("other"), "{sent}");
+    assert_eq!(fake.watch_request_count("/api/v1/pods"), 1);
+}
+
+#[tokio::test]
+async fn namespaces_that_cannot_apply_are_refused() {
+    let (core, _fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    for (resource, namespace) in [
+        (resource("", "Node", "nodes", false), "default"),
+        (pods(), "../kube-system"),
+        (pods(), ""),
+    ] {
+        let (tx, _rx) = mpsc::channel(1);
+        let err = core
+            .resources_subscribe(&id, resource, vec![namespace.to_owned()], tx, "main")
+            .await
+            .expect_err(namespace);
+        assert_eq!(err.code, skopos_core::error::ErrorCode::InvalidInput);
+    }
+}
+
 #[tokio::test]
 async fn a_resource_path_with_odd_characters_is_refused() {
     let (core, _fake, id, _root) = connected(FakeKubeConfig::default()).await;
@@ -576,7 +631,7 @@ async fn a_resource_path_with_odd_characters_is_refused() {
     ] {
         let (tx, _rx) = mpsc::channel(1);
         let err = core
-            .resources_subscribe(&id, wrong.clone(), tx, "main")
+            .resources_subscribe(&id, wrong.clone(), Vec::new(), tx, "main")
             .await
             .expect_err(&format!("{wrong:?}"));
         assert_eq!(err.code, skopos_core::error::ErrorCode::InvalidInput);
@@ -1140,13 +1195,19 @@ async fn subscribing_to_disconnected_cluster_errors() {
 
     let (tx, _rx) = mpsc::channel(1);
     assert!(core
-        .resources_subscribe(&id, pods(), tx, "main")
+        .resources_subscribe(&id, pods(), Vec::new(), tx, "main")
         .await
         .is_err());
 
     let (tx, _rx) = mpsc::channel(1);
     assert!(core
-        .resources_subscribe(&"no-such-cluster".to_owned(), pods(), tx, "main")
+        .resources_subscribe(
+            &"no-such-cluster".to_owned(),
+            pods(),
+            Vec::new(),
+            tx,
+            "main"
+        )
         .await
         .is_err());
 }

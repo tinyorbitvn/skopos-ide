@@ -31,8 +31,9 @@ const NOTHING: WatchedObject = {
 
 /**
  * One object, kept live without a watch of its whole resource. While the list store
- * has a list of the resource, because a component shows it or it lingers, the object
- * is that list's row, read without holding the list, so the backend sends one stream.
+ * has a list of the resource that holds the object's namespace, because a component
+ * shows it or it lingers, the object is that list's row, read without holding the
+ * list, so the backend sends one stream.
  * Otherwise a single-object watch is held, whose row is the whole object. The source
  * follows the store: a list opened later takes over, and a list dropped hands over to
  * the object watch. While the new source loads, the last answer for the same object
@@ -49,7 +50,7 @@ export function useWatchedObject(
   const key = wanted
     ? JSON.stringify([clusterId, resource.group, resource.plural, scoped, name])
     : null;
-  const held = useHeldList(clusterId, wanted ? resource : null);
+  const held = useHeldList(clusterId, wanted ? resource : null, scoped);
   // A list refused as a whole has no row to give, while a watch of the one object may
   // still be allowed (RBAC scoped to its namespace, say), so it counts as no list.
   const list = held?.status === "forbidden" ? null : held;

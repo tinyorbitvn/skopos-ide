@@ -37,18 +37,20 @@ pub async fn resources_names(
 /// Streams the resource to `on_event` and returns the subscription id. The subscription
 /// belongs to the window that asks and ends when its page loads again or it closes, so
 /// its watch does not outlive the page; so does one whose channel can no longer be written.
+/// With `namespaces`, only the objects of those namespaces are sent; with none, all are.
 #[tauri::command]
 pub async fn resources_subscribe(
     window: WebviewWindow,
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     resource: ResourceRef,
+    namespaces: Vec<String>,
     on_event: Channel<WatchEvent>,
 ) -> Result<String, IpcError> {
     let (tx, rx) = mpsc::channel(FORWARD_BACKLOG);
     let id = state
         .core
-        .resources_subscribe(&cluster_id, resource, tx, window.label())
+        .resources_subscribe(&cluster_id, resource, namespaces, tx, window.label())
         .await?;
     forward(state.core.clone(), id.clone(), rx, on_event);
     Ok(id)

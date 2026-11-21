@@ -194,7 +194,7 @@ async fn the_hub_keeps_a_watched_object_in_about_the_size_of_its_json() {
         kind: "Pod".into(),
         namespaced: true,
     };
-    core.resources_subscribe(&id, resource, tx, "main")
+    core.resources_subscribe(&id, resource, Vec::new(), tx, "main")
         .await
         .unwrap();
     let text = loop {

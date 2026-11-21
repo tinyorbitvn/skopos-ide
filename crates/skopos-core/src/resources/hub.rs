@@ -4,7 +4,7 @@
 //! Each subscriber has its own flush task, so a slow one only ever delays itself,
 //! and what it has not read yet stays bounded by the number of objects.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -22,6 +22,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::discovery::state_name;
+use super::ops::{invalid, is_path_segment};
 use super::sanitize::strip_for_list;
 use super::trim::{is_core_pods, trim_for_graph, trim_for_watch};
 use super::types::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
@@ -64,6 +65,36 @@ pub(crate) enum RowShape {
     #[default]
     Table,
     Graph,
+}
+
+/// The namespaces a subscriber is sent the rows of. With none named, it is sent every row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Scope {
+    namespaces: HashSet<String>,
+}
+
+impl Scope {
+    pub(crate) fn of(namespaces: Vec<String>) -> Self {
+        Self {
+            namespaces: namespaces.into_iter().collect(),
+        }
+    }
+
+    /// True when a subscriber of this scope is sent `key`'s row. An object without a
+    /// namespace is in no named one.
+    fn holds(&self, key: &ObjectKey) -> bool {
+        self.namespaces.is_empty()
+            || key
+                .namespace
+                .as_ref()
+                .is_some_and(|namespace| self.namespaces.contains(namespace))
+    }
+}
+
+/// What a subscriber asks to be sent: which row of each object, and of which objects.
+struct Wanted {
+    shape: RowShape,
+    scope: Scope,
 }
 
 /// What a group keeps of one object.
@@ -120,6 +151,8 @@ type StatusUpdate = (WatchStatus, Option<String>);
 struct Subscriber {
     /// Which of an object's rows this subscriber receives.
     shape: RowShape,
+    /// Which objects it receives a row of.
+    scope: Scope,
     /// Latest wins, so this holds at most one entry per object.
     changes: HashMap<ObjectKey, Option<Row>>,
     status: Option<StatusUpdate>,
@@ -224,7 +257,7 @@ impl GroupState {
         }
         let limit = self.store.len().max(MIN_PENDING_LIMIT);
         for subscriber in self.subscribers.values_mut() {
-            if subscriber.snapshot_due {
+            if subscriber.snapshot_due || !subscriber.scope.holds(key) {
                 continue;
             }
             let row = value.map(|stored| stored.pick(subscriber.shape).clone());
@@ -271,13 +304,14 @@ impl Group {
 
     /// False when the group stopped, and the caller needs a new one. `wake` is signalled
     /// whenever something is queued for the new subscriber, which starts with a status.
-    fn attach(&self, subscription: &str, shape: RowShape, wake: Arc<Notify>) -> bool {
+    fn attach(&self, subscription: &str, shape: RowShape, scope: Scope, wake: Arc<Notify>) -> bool {
         let mut state = self.lock();
         if state.terminal || self.token.is_cancelled() {
             return false;
         }
         let subscriber = Subscriber {
             shape,
+            scope,
             status: Some(state.status.clone()),
             snapshot_due: state.synced(),
             wake,
@@ -327,7 +361,7 @@ impl Group {
             .take()
             .map(|(status, message)| WatchEvent::Status { status, message });
         let snapshot = std::mem::take(&mut subscriber.snapshot_due).then(|| WatchEvent::Snapshot {
-            items: sorted_items(&state.store, subscriber.shape),
+            items: sorted_items(&state.store, subscriber.shape, &subscriber.scope),
         });
         let batch = (!subscriber.changes.is_empty()).then(|| {
             let mut upserts = Vec::new();
@@ -524,7 +558,7 @@ impl WatchHub {
         self: &Arc<Self>,
         id: &ClusterId,
         resource: ResourceRef,
-        shape: RowShape,
+        wanted: Wanted,
         tx: mpsc::Sender<WatchEvent>,
         connection: &Connection,
         owner: Option<&str>,
@@ -540,7 +574,12 @@ impl WatchHub {
                 ));
             }
             let group = self.group_for(id, &resource, connection);
-            if group.attach(&subscription, shape, wake.clone()) {
+            if group.attach(
+                &subscription,
+                wanted.shape,
+                wanted.scope.clone(),
+                wake.clone(),
+            ) {
                 break group;
             }
         };
@@ -936,15 +975,29 @@ impl AppCore {
     /// Delivers `resource` to `tx` until unsubscribed, the cluster disconnects, the
     /// receiver closes or a final status has been sent. Returns the subscription id.
     /// `owner` is the label of the window that asks, which `subscriptions_stop_owned` reads.
+    ///
+    /// With `namespaces`, only the objects of those namespaces are delivered, and with none
+    /// every object is. The watch on the cluster is the same either way, and shared.
     pub async fn resources_subscribe(
         &self,
         id: &ClusterId,
         resource: ResourceRef,
+        namespaces: Vec<String>,
         tx: mpsc::Sender<WatchEvent>,
         owner: &str,
     ) -> CoreResult<String> {
         validate(&resource)?;
-        self.subscribe_rows(id, resource, RowShape::Table, tx, Some(owner))
+        if !namespaces.is_empty() && !resource.namespaced {
+            return Err(invalid("a cluster-scoped resource has no namespace"));
+        }
+        if !namespaces
+            .iter()
+            .all(|namespace| is_path_segment(namespace))
+        {
+            return Err(invalid("a namespace is not valid"));
+        }
+        let scope = Scope::of(namespaces);
+        self.subscribe_rows(id, resource, RowShape::Table, scope, tx, Some(owner))
     }
 
     /// `resources_subscribe` with the rows' shape picked. A reader inside the core has no
@@ -954,12 +1007,14 @@ impl AppCore {
         id: &ClusterId,
         resource: ResourceRef,
         shape: RowShape,
+        scope: Scope,
         tx: mpsc::Sender<WatchEvent>,
         owner: Option<&str>,
     ) -> CoreResult<String> {
         let connection = self.connection_of(id)?;
+        let wanted = Wanted { shape, scope };
         self.watches()
-            .subscribe(id, resource, shape, tx, &connection, owner)
+            .subscribe(id, resource, wanted, tx, &connection, owner)
     }
 
     /// The client, token and namespaces of a connected cluster.
@@ -998,8 +1053,9 @@ impl AppCore {
 /// The store's rows of `shape` in a stable order: by namespace (cluster-scoped first), then
 /// name. The UI puts objects a batch adds in this same order (`compareListed` in
 /// `ui/src/stores/resources.ts`); keep the two the same.
-fn sorted_items(store: &HashMap<ObjectKey, StoredRow>, shape: RowShape) -> Vec<Row> {
-    let mut entries: Vec<(&ObjectKey, &StoredRow)> = store.iter().collect();
+fn sorted_items(store: &HashMap<ObjectKey, StoredRow>, shape: RowShape, scope: &Scope) -> Vec<Row> {
+    let mut entries: Vec<(&ObjectKey, &StoredRow)> =
+        store.iter().filter(|(key, _)| scope.holds(key)).collect();
     entries.sort_by(|a, b| (&a.0.namespace, &a.0.name).cmp(&(&b.0.namespace, &b.0.name)));
     entries
         .into_iter()
@@ -1033,7 +1089,7 @@ mod tests {
                 },
             );
         }
-        let names: Vec<_> = sorted_items(&store, RowShape::Table)
+        let names: Vec<_> = sorted_items(&store, RowShape::Table, &Scope::default())
             .iter()
             .map(|row| row.to_value()["name"].as_str().unwrap().to_owned())
             .collect();
@@ -1172,7 +1228,7 @@ mod tests {
     #[test]
     fn a_new_listing_of_a_synced_group_queues_what_differs_and_no_snapshot() {
         let group = Group::new(resource("", "pods"), CancellationToken::new());
-        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
         group.finish_init(
             &None,
             HashMap::from([
@@ -1204,7 +1260,7 @@ mod tests {
         assert_eq!(deletes, &[key_of("a", "gone")]);
 
         // The store is the new listing, which is what a later subscriber starts with.
-        assert!(group.attach("late", RowShape::Table, Arc::default()));
+        assert!(group.attach("late", RowShape::Table, Scope::default(), Arc::default()));
         let late = group.take_events("late").0;
         let Some(WatchEvent::Snapshot { items }) = late
             .iter()
@@ -1218,7 +1274,7 @@ mod tests {
     #[test]
     fn a_new_listing_that_differs_in_nothing_queues_nothing() {
         let group = Group::new(resource("", "pods"), CancellationToken::new());
-        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
         let listing = || HashMap::from([pod_row("one", "a", "1"), pod_row("two", "b", "7")]);
         group.finish_init(&None, listing());
         group.take_events("table");
@@ -1232,7 +1288,7 @@ mod tests {
     #[test]
     fn a_new_listing_of_one_namespace_leaves_the_rows_of_the_others() {
         let group = Group::new(resource("", "pods"), CancellationToken::new());
-        assert!(group.attach("table", RowShape::Table, Arc::default()));
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
         group.begin_fallback(&["a".to_owned(), "b".to_owned()]);
         group.finish_init(
             &Some("a".to_owned()),
@@ -1289,8 +1345,8 @@ mod tests {
             .unwrap()
         };
         let group = Group::new(pods.clone(), CancellationToken::new());
-        assert!(group.attach("table", RowShape::Table, Arc::default()));
-        assert!(group.attach("graph", RowShape::Graph, Arc::default()));
+        assert!(group.attach("table", RowShape::Table, Scope::default(), Arc::default()));
+        assert!(group.attach("graph", RowShape::Graph, Scope::default(), Arc::default()));
 
         let (key, first) = to_row(&object("1"), &pods).unwrap();
         group.finish_init(&None, HashMap::from([(key.clone(), first)]));
@@ -1310,6 +1366,92 @@ mod tests {
         // A graph row keeps no resourceVersion, so a label shows it is the new row.
         assert_eq!(graph[0]["metadata"]["labels"]["version"], "2");
         assert_eq!(graph[0]["spec"]["serviceAccountName"], "web");
+    }
+
+    fn scope(namespaces: &[&str]) -> Scope {
+        Scope::of(namespaces.iter().map(|&name| name.to_owned()).collect())
+    }
+
+    fn snapshot_names(events: &[WatchEvent]) -> Vec<String> {
+        let Some(WatchEvent::Snapshot { items }) = events
+            .iter()
+            .find(|event| matches!(event, WatchEvent::Snapshot { .. }))
+        else {
+            panic!("expected a snapshot, got {events:?}");
+        };
+        names(items)
+    }
+
+    #[test]
+    fn a_scoped_subscriber_starts_with_the_rows_of_its_namespaces_only() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach(
+            "scoped",
+            RowShape::Table,
+            scope(&["a", "c"]),
+            Arc::default()
+        ));
+        assert!(group.attach("whole", RowShape::Table, Scope::default(), Arc::default()));
+
+        group.finish_init(
+            &None,
+            HashMap::from([
+                pod_row("one", "a", "1"),
+                pod_row("two", "b", "1"),
+                pod_row("three", "c", "1"),
+            ]),
+        );
+
+        assert_eq!(
+            snapshot_names(&group.take_events("scoped").0),
+            ["one", "three"]
+        );
+        assert_eq!(
+            snapshot_names(&group.take_events("whole").0),
+            ["one", "three", "two"]
+        );
+    }
+
+    #[test]
+    fn a_scoped_subscriber_is_sent_no_change_of_another_namespace() {
+        let group = Group::new(resource("", "pods"), CancellationToken::new());
+        assert!(group.attach("scoped", RowShape::Table, scope(&["a"]), Arc::default()));
+        group.finish_init(
+            &None,
+            HashMap::from([pod_row("one", "a", "1"), pod_row("two", "b", "1")]),
+        );
+        group.take_events("scoped");
+
+        let (key, changed) = pod_row("two", "b", "2");
+        group.apply(key, changed);
+        let (key, added) = pod_row("three", "b", "1");
+        group.apply(key, added);
+        group.delete(&key_of("b", "two"));
+
+        let events = group.take_events("scoped").0;
+        assert!(events.is_empty(), "{events:?}");
+
+        let (key, added) = pod_row("four", "a", "1");
+        group.apply(key, added);
+        group.delete(&key_of("a", "one"));
+
+        let events = group.take_events("scoped").0;
+        let [WatchEvent::Batch { upserts, deletes }] = events.as_slice() else {
+            panic!("expected one batch, got {events:?}");
+        };
+        assert_eq!(names(upserts), ["four"]);
+        assert_eq!(deletes, &[key_of("a", "one")]);
+    }
+
+    #[test]
+    fn a_named_scope_holds_no_object_without_a_namespace() {
+        let node = ObjectKey {
+            namespace: None,
+            name: "node-1".to_owned(),
+        };
+
+        assert!(Scope::default().holds(&node));
+        assert!(!scope(&["a"]).holds(&node));
     }
 
     #[test]
@@ -1391,7 +1533,7 @@ mod tests {
         };
         let group = Arc::new(Group::new(resource("", "pods"), CancellationToken::new()));
         let wake = Arc::new(Notify::new());
-        assert!(group.attach("watch-1", RowShape::Table, wake.clone()));
+        assert!(group.attach("watch-1", RowShape::Table, Scope::default(), wake.clone()));
         let (tx, rx) = mpsc::channel(16);
         let stop = group.token.child_token();
         let task = tokio::spawn(flush_subscriber(

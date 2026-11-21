@@ -25,7 +25,7 @@ pub use argocd::{
 pub(crate) use discovery::state_name;
 pub(crate) use drain::RunningDrain;
 pub use drain::{DrainEvent, DrainOptions, DrainOutcome, PodRef, SkipReason, SkippedPod};
-pub(crate) use hub::{RowShape, WatchHub};
+pub(crate) use hub::{RowShape, Scope, WatchHub};
 pub(crate) use names::NAMES_TTL;
 pub use names::{ObjectName, ObjectNames};
 pub(crate) use ops::{invalid, is_path_segment};

@@ -233,3 +233,27 @@ test("nothing is watched without a resource or a name", async () => {
   expect(result.current).toMatchObject({ object: undefined, source: null });
   expect(f.b.calls.filter((c) => c.cmd.startsWith("resources_"))).toEqual([]);
 });
+
+test("the row comes from a held list of the object's namespace", async () => {
+  const { b, list } = backend();
+  renderHook(() => useResourceList("c1", PODS, ["n"]));
+  await act(flush);
+  const { result } = watched();
+  await act(flush);
+  await list([pod("web")]);
+
+  expect(result.current.source).toBe("list");
+  expect(result.current.object?.metadata.name).toBe("web");
+  expect(b.callsTo("resources_subscribe_object")).toEqual([]);
+});
+
+test("a held list of other namespaces does not stand in for the object's watch", async () => {
+  const { b } = backend();
+  renderHook(() => useResourceList("c1", PODS, ["other"]));
+  await act(flush);
+  const { result } = watched();
+  await act(flush);
+
+  expect(result.current.source).toBe("object");
+  expect(b.callsTo("resources_subscribe_object")).toHaveLength(1);
+});

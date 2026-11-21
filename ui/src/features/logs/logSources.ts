@@ -70,7 +70,9 @@ export function useLogSources(tab: LogsDockTab): LogSources {
     tab.namespace,
     tab.name,
   );
-  const pods = useResourceList(tab.clusterId, podTab ? null : PODS);
+  const pods = useResourceList(tab.clusterId, podTab ? null : PODS, [
+    tab.namespace,
+  ]);
   const workload = podTab ? undefined : own.object;
   const selector: LabelSelector | undefined = workload?.spec?.selector;
 
