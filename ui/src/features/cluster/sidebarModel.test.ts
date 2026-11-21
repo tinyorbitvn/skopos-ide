@@ -108,6 +108,20 @@ test("a section holds the current page on its items, its overview, its CRDs and 
   expect(at("/cluster/c1", "workloads")).toBe(false);
 });
 
+test("a section overview's page is its section's, and no other's", () => {
+  const at = (path: string, id: string) =>
+    sectionActive(path, "c1", section(id), []);
+  expect(at("/cluster/c1/nodes", "nodes")).toBe(true);
+  expect(at("/cluster/c1/namespaces", "namespaces")).toBe(true);
+  expect(at("/cluster/c1/network", "network")).toBe(true);
+  expect(at("/cluster/c1/storage", "storage")).toBe(true);
+  expect(at("/cluster/c1/node-topology", "nodes")).toBe(true);
+  expect(at("/cluster/c1/nodes", "namespaces")).toBe(false);
+  expect(at("/cluster/c1/r/core/namespaces", "nodes")).toBe(false);
+  expect(at("/cluster/c1/network", "storage")).toBe(false);
+  expect(at("/cluster/c2/nodes", "nodes")).toBe(false);
+});
+
 test("the open paths are each tab's shown entry, without query or hash", () => {
   const layout: WindowLayout = {
     label: "main",
@@ -236,13 +250,41 @@ test("a flyout lists the section's items, Argo's branch under its caption, and t
   ).toBe("rail-item-core-pods");
 });
 
-test("the Nodes flyout lists List and Topology", () => {
+test("the Nodes flyout lists Overview, List and Topology", () => {
   expect(
     flyoutEntries("c1", section("nodes"), []).map((e) =>
       e.type === "link" ? [e.label, e.path, e.testId] : [e.label],
     ),
   ).toEqual([
+    ["Overview", "/cluster/c1/nodes", "rail-item-overview-nodes"],
     ["List", "/cluster/c1/r/core/nodes", "rail-item-core-nodes"],
     ["Topology", "/cluster/c1/node-topology", "rail-item-node-topology"],
+  ]);
+});
+
+test("the Namespaces, Network and Storage flyouts start with their Overview, current on its path only", () => {
+  const first = (id: string) => {
+    const [entry] = flyoutEntries("c1", section(id), []);
+    return entry?.type === "link"
+      ? [entry.label, entry.path, entry.testId, entry.end]
+      : null;
+  };
+  expect(["namespaces", "network", "storage"].map(first)).toEqual([
+    [
+      "Overview",
+      "/cluster/c1/namespaces",
+      "rail-item-overview-namespaces",
+      true,
+    ],
+    ["Overview", "/cluster/c1/network", "rail-item-overview-network", true],
+    ["Overview", "/cluster/c1/storage", "rail-item-overview-storage", true],
+  ]);
+  expect(
+    flyoutEntries("c1", section("namespaces"), []).map((e) =>
+      e.type === "link" ? [e.label, e.path, e.testId] : [e.label],
+    ),
+  ).toEqual([
+    ["Overview", "/cluster/c1/namespaces", "rail-item-overview-namespaces"],
+    ["List", "/cluster/c1/r/core/namespaces", "rail-item-core-namespaces"],
   ]);
 });

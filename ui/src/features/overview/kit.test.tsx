@@ -9,6 +9,10 @@ import {
   OverviewCard,
   OverviewCell,
   OverviewGrid,
+  OverviewPage,
+  type OverviewRow,
+  OverviewTable,
+  type OverviewTableProps,
   ShareDonut,
   StatTile,
   type StatTileProps,
@@ -266,4 +270,395 @@ test("an empty top table says that no usage is reported yet", () => {
   expect(screen.getByTestId("overview-top-pods").textContent).toContain(
     "No usage reported yet",
   );
+});
+test("a capacity item's level fixes its donut's tone, else the share sets it", () => {
+  render(
+    <CapacityRow
+      items={[
+        { ...ITEMS[0], key: "healthy", level: "critical" },
+        { ...ITEMS[0], key: "plain", pct: 85 },
+      ]}
+    />,
+  );
+  const tone = (key: string) =>
+    within(screen.getByTestId(`overview-capacity-${key}`))
+      .getByRole("img")
+      .parentElement?.getAttribute("data-tone");
+  expect([tone("healthy"), tone("plain")]).toEqual(["critical", "warning"]);
+});
+
+test("a capacity item without a unit ends its values and its name at the number", () => {
+  render(
+    <CapacityRow
+      items={[
+        {
+          ...ITEMS[0],
+          key: "healthy",
+          label: "Healthy workloads",
+          pct: 67,
+          used: "4",
+          total: "6",
+          unit: "",
+        },
+      ]}
+    />,
+  );
+  const item = within(screen.getByTestId("overview-capacity-healthy"));
+  expect([
+    item.getByRole("img").getAttribute("aria-label"),
+    screen.getByTestId("overview-capacity-healthy-values").textContent,
+  ]).toEqual(["Healthy workloads 67%, 4 of 6", "4 / 6"]);
+});
+
+test("a top table can name its donut column and draw each row's own usage in place of its share", () => {
+  table({
+    shareHead: "Usage",
+    total: null,
+    rows: [
+      {
+        key: "worker-03",
+        name: "worker-03",
+        sub: "worker · eu-west-1c",
+        amount: 13.3,
+        amountText: "13.3 cores",
+        own: { pct: 84, label: "worker-03 CPU 84%, 13.3 of 15.8 cores" },
+        onOpen: () => {},
+      },
+      {
+        key: "worker-01",
+        name: "worker-01",
+        sub: "worker",
+        amount: 2,
+        amountText: "2 cores",
+        own: {
+          pct: 20,
+          label: "worker-01 CPU 20%, 2 of 10 cores",
+          level: "critical",
+        },
+        onOpen: () => {},
+      },
+      {
+        key: "worker-02",
+        name: "worker-02",
+        sub: "worker",
+        amount: 0,
+        amountText: "0m",
+        own: { pct: null, label: "worker-02 CPU: no data" },
+        onOpen: () => {},
+      },
+    ],
+  });
+  expect(
+    within(screen.getByTestId("overview-top-pods"))
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent),
+  ).toEqual(["Pod", "CPU", "Usage"]);
+  const donut = (key: string) =>
+    within(screen.getByTestId(`overview-top-pods-row-${key}`)).getByRole("img");
+  const busy = donut("worker-03");
+  expect([
+    busy.getAttribute("aria-label"),
+    busy.textContent,
+    busy.parentElement?.getAttribute("data-tone"),
+  ]).toEqual(["worker-03 CPU 84%, 13.3 of 15.8 cores", "84%", "warning"]);
+  expect(donut("worker-01").parentElement?.getAttribute("data-tone")).toBe(
+    "critical",
+  );
+  const unknown = donut("worker-02");
+  expect([unknown.getAttribute("aria-label"), unknown.textContent]).toEqual([
+    "worker-02 CPU: no data",
+    "—",
+  ]);
+});
+
+test("an overview page has the list toolbar's title and the chosen namespaces over a body that scrolls", () => {
+  const onKeyDown = vi.fn();
+  const { rerender } = render(
+    <OverviewPage
+      title="Storage overview"
+      testId="storage-overview"
+      namespaces={["payments", "checkout"]}
+      onKeyDown={onKeyDown}
+    >
+      <p data-testid="page-body">cards</p>
+    </OverviewPage>,
+  );
+  const page = screen.getByTestId("storage-overview");
+  const title = screen.getByTestId("storage-overview-title");
+  expect([title.tagName, title.textContent]).toEqual([
+    "H2",
+    "Storage overview",
+  ]);
+  const note = screen.getByTestId("storage-overview-namespaces");
+  expect(note.textContent).toBe("Namespaces: payments, checkout");
+  expect(note.querySelector('[data-icon="layers"]')).not.toBeNull();
+  expect(page.contains(screen.getByTestId("page-body"))).toBe(true);
+  fireEvent.keyDown(screen.getByTestId("page-body"), { key: "Escape" });
+  expect(onKeyDown).toHaveBeenCalledTimes(1);
+
+  rerender(
+    <OverviewPage
+      title="Storage overview"
+      testId="storage-overview"
+      namespaces={[]}
+    >
+      <p data-testid="page-body">cards</p>
+    </OverviewPage>,
+  );
+  expect(screen.queryByTestId("storage-overview-namespaces")).toBeNull();
+
+  const text = css("OverviewPage");
+  expect(text).toMatch(
+    /\.page \{[^}]*position: relative;[^}]*overflow: hidden;/,
+  );
+  expect(text).toMatch(
+    /\.toolbar \{[^}]*display: flex;[^}]*gap: var\(--space-5\);/,
+  );
+  expect(text).toMatch(/\.title \{[^}]*font-size: 14px;[^}]*font-weight: 600;/);
+  expect(text).toMatch(/\.grow \{ flex: 1; \}/);
+  expect(text).toMatch(/\.body \{[^}]*min-height: 0;[^}]*overflow: auto;/);
+});
+
+/** Three rows: a link (a zone), a button (an object) and plain text. */
+function overviewTable(over: Partial<OverviewTableProps> = {}) {
+  const onOpen = vi.fn();
+  const rows: OverviewRow[] = [
+    {
+      key: "eu-west-1a",
+      name: "eu-west-1a",
+      sub: "eu-west-1",
+      title: "Open the Node topology",
+      to: "/cluster/c1/topology",
+      cells: [
+        { text: "12" },
+        { text: "1 NotReady", tone: "bad" },
+        {
+          donut: {
+            pct: 61,
+            used: "31.2",
+            total: "51.2",
+            unit: "cores",
+            label: "eu-west-1a CPU 61%, 31.2 of 51.2 cores",
+            caption: "31.2 / 51.2 cores",
+          },
+        },
+      ],
+    },
+    {
+      key: "shop/web",
+      name: "web",
+      sub: "shop",
+      onOpen,
+      cells: [
+        { text: "3" },
+        { text: "Pending", tone: "warn" },
+        {
+          donut: {
+            pct: 30,
+            used: "1.2",
+            total: "4",
+            unit: "cores",
+            label: "web CPU 30%, 1.2 of 4 cores",
+            caption: "1.2 / 4 cores",
+            level: "critical",
+          },
+        },
+      ],
+    },
+    {
+      key: "none",
+      name: "No zone",
+      sub: "",
+      cells: [
+        { text: "—", tone: "dim" },
+        {
+          text: "Debian 12",
+          mono: true,
+          title: "Debian GNU/Linux 12 (bookworm)",
+        },
+        {
+          donut: {
+            pct: null,
+            used: null,
+            total: null,
+            unit: "cores",
+            label: "No zone CPU: no data",
+            caption: "No data",
+          },
+        },
+      ],
+    },
+  ];
+  render(
+    <MemoryRouter>
+      <OverviewTable
+        id="nodes-zones"
+        title="By zone"
+        label="Nodes by zone"
+        columns={[
+          { head: "Zone", width: "minmax(0, 1.4fr)" },
+          { head: "Nodes", width: "64px", align: "end" },
+          { head: "State", width: "minmax(0, 1fr)" },
+          { head: "CPU", width: "minmax(0, 1fr)" },
+        ]}
+        rows={rows}
+        minWidth={520}
+        empty={{
+          icon: Server,
+          title: "This cluster has no nodes",
+          text: "Nodes appear here once the cluster lists them.",
+        }}
+        footer="CPU and memory: usage from metrics-server"
+        {...over}
+      />
+    </MemoryRouter>,
+  );
+  return onOpen;
+}
+
+/** The cells of a row, the name's first. */
+const cellsOf = (key: string) =>
+  within(screen.getByTestId(`nodes-zones-row-${key}`)).getAllByRole("cell");
+
+test("an overview table lays each row on the columns' tracks, under a header per column", () => {
+  overviewTable();
+  const t = screen.getByRole("table", { name: "Nodes by zone" });
+  expect(t).toBe(screen.getByTestId("nodes-zones"));
+  expect(screen.getByRole("heading", { level: 3 }).textContent).toBe("By zone");
+  expect(
+    within(t)
+      .getAllByRole("columnheader")
+      .map((h) => [h.textContent, h.getAttribute("data-align")]),
+  ).toEqual([
+    ["Zone", "start"],
+    ["Nodes", "end"],
+    ["State", "start"],
+    ["CPU", "start"],
+  ]);
+  expect(within(t).getAllByRole("row")).toHaveLength(4);
+  expect(t.style.getPropertyValue("--ot-columns")).toBe(
+    "minmax(0, 1.4fr) 64px minmax(0, 1fr) minmax(0, 1fr)",
+  );
+  expect(t.style.getPropertyValue("--ot-min-width")).toBe("520px");
+  expect(screen.getByTestId("nodes-zones-footer").textContent).toBe(
+    "CPU and memory: usage from metrics-server",
+  );
+  const text = css("OverviewTable");
+  expect(text).toContain("grid-template-columns: var(--ot-columns)");
+  expect(text).toContain("min-width: var(--ot-min-width, 0)");
+  expect(text).toMatch(/\.scroll \{[^}]*overflow-x: auto;/);
+});
+
+test("an end column right-aligns in the mono face, and a cell's tone colors it", () => {
+  overviewTable();
+  const zone = cellsOf("eu-west-1a");
+  expect([
+    zone[1]?.textContent,
+    zone[1]?.getAttribute("data-align"),
+    zone[2]?.getAttribute("data-tone"),
+    zone[2]?.hasAttribute("data-mono"),
+  ]).toEqual(["12", "end", "bad", false]);
+  expect(cellsOf("shop/web")[2]?.getAttribute("data-tone")).toBe("warn");
+  const plain = cellsOf("none");
+  expect([
+    plain[1]?.getAttribute("data-tone"),
+    plain[2]?.hasAttribute("data-mono"),
+    plain[2]?.getAttribute("title"),
+  ]).toEqual(["dim", true, "Debian GNU/Linux 12 (bookworm)"]);
+  const text = css("OverviewTable");
+  expect(text).toMatch(
+    /\.cell\[data-align="end"\] \{[^}]*justify-content: flex-end;[^}]*font: var\(--type-mono\);/,
+  );
+  expect(text).toContain(".cell[data-mono] { font: var(--type-mono); }");
+  for (const [tone, color] of [
+    ["warn", "--status-warning-text"],
+    ["bad", "--status-critical-text"],
+    ["dim", "--text-tertiary"],
+  ] as const) {
+    expect(text).toContain(
+      `.cell[data-tone="${tone}"] { color: var(${color}); }`,
+    );
+  }
+});
+
+test("a donut cell is a 36 px donut named by its label, in its level, with its caption beside it", () => {
+  overviewTable();
+  const zoneCell = cellsOf("eu-west-1a")[3] as HTMLElement;
+  const zone = within(zoneCell).getByRole("img");
+  expect([
+    zone.getAttribute("width"),
+    zone.getAttribute("aria-label"),
+    zone.textContent,
+    zone.parentElement?.getAttribute("data-tone"),
+  ]).toEqual([
+    "36",
+    "eu-west-1a CPU 61%, 31.2 of 51.2 cores",
+    "61%",
+    "nominal",
+  ]);
+  expect(
+    within(zoneCell).getByText("31.2 / 51.2 cores").getAttribute("aria-hidden"),
+  ).toBe("true");
+  expect(
+    within(cellsOf("shop/web")[3] as HTMLElement)
+      .getByRole("img")
+      .parentElement?.getAttribute("data-tone"),
+  ).toBe("critical");
+  const none = within(cellsOf("none")[3] as HTMLElement).getByRole("img");
+  expect([none.getAttribute("aria-label"), none.textContent]).toEqual([
+    "No zone CPU: no data",
+    "—",
+  ]);
+});
+
+test("a row's name opens its object with a button, goes to a page with a link, or is plain text", () => {
+  const onOpen = overviewTable();
+  const link = screen.getByTestId("nodes-zones-open-eu-west-1a");
+  expect([
+    link.tagName,
+    link.getAttribute("href"),
+    link.getAttribute("title"),
+    link.textContent,
+  ]).toEqual([
+    "A",
+    "/cluster/c1/topology",
+    "Open the Node topology",
+    "eu-west-1a",
+  ]);
+  const button = screen.getByTestId("nodes-zones-open-shop/web");
+  expect(button.tagName).toBe("BUTTON");
+  fireEvent.click(button);
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(cellsOf("shop/web")[0]?.textContent).toBe("webshop");
+  expect(screen.queryByTestId("nodes-zones-open-none")).toBeNull();
+  const plain = screen.getByTestId("nodes-zones-row-none");
+  expect(within(plain).queryByRole("button")).toBeNull();
+  expect(within(plain).queryByRole("link")).toBeNull();
+  expect(cellsOf("none")[0]?.textContent).toBe("No zone");
+});
+
+test("while its lists load a table reads Loading in place of its rows, without a footer", () => {
+  overviewTable({ loading: true });
+  expect(screen.getByTestId("nodes-zones-loading").textContent).toBe("Loading");
+  expect(
+    within(screen.getByTestId("nodes-zones")).getAllByRole("columnheader"),
+  ).toHaveLength(4);
+  expect(screen.queryByTestId("nodes-zones-row-shop/web")).toBeNull();
+  expect(screen.queryByTestId("nodes-zones-footer")).toBeNull();
+  expect(screen.queryByTestId("nodes-zones-empty")).toBeNull();
+});
+
+test("with no rows a table gives way to its empty state, with its icon", () => {
+  overviewTable({ rows: [] });
+  expect(screen.queryByTestId("nodes-zones")).toBeNull();
+  expect(screen.queryByRole("heading", { name: "By zone" })).toBeNull();
+  const empty = screen.getByTestId("nodes-zones-empty");
+  expect(within(empty).getByRole("heading").textContent).toBe(
+    "This cluster has no nodes",
+  );
+  expect(empty.textContent).toContain(
+    "Nodes appear here once the cluster lists them.",
+  );
+  expect(empty.querySelector('[data-icon="server"]')).not.toBeNull();
+  expect(screen.queryByTestId("nodes-zones-footer")).toBeNull();
 });

@@ -1,12 +1,21 @@
 import { waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
-import { ChevronLeft, ChevronRight } from "../design/icons";
+import {
+  Blocks,
+  ChevronLeft,
+  ChevronRight,
+  HardDrive,
+  Namespace,
+  Network,
+  Server,
+} from "../design/icons";
 import { openTerminal } from "../features/dock/openTerminal";
 import {
   resetUpdatesForTest,
   useUpdates,
 } from "../features/updates/updateStore";
+import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetPrefsForTest } from "../stores/prefs";
@@ -24,6 +33,7 @@ import { updateState } from "../test/updates";
 import {
   COMMANDS,
   type CommandContext,
+  type CommandId,
   commandById,
   runCommand,
   runMenuCommand,
@@ -50,6 +60,42 @@ function on(state: ConnectionState) {
   return { id: "c1", name: "prod", state };
 }
 
+function served(plural: string, canList = true): ApiResourceInfo {
+  return {
+    resource: {
+      group: "",
+      version: "v1",
+      plural,
+      kind: plural,
+      namespaced: true,
+    },
+    verbs: ["list", "watch"],
+    shortNames: [],
+    canList,
+    canWatch: true,
+    canCreate: true,
+    canUpdate: true,
+    canPatch: true,
+    canDelete: true,
+  };
+}
+
+/** Enough for every section with an Overview: Nodes, Namespaces, Workloads (Pods), Network, Storage (claims). */
+const EVERY_OVERVIEW = [
+  served("nodes"),
+  served("namespaces"),
+  served("pods"),
+  served("persistentvolumeclaims"),
+];
+
+const OVERVIEWS: readonly CommandId[] = [
+  "workloads-overview",
+  "nodes-overview",
+  "namespaces-overview",
+  "network-overview",
+  "storage-overview",
+];
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -73,6 +119,11 @@ test("the registry lists the spec's commands in order", () => {
       ["cluster-settings", "Cluster settings for prod", null],
       ["resource-map", "Resource map of prod", null],
       ["node-topology", "Node topology of prod", null],
+      ["workloads-overview", "Workloads overview of prod", null],
+      ["nodes-overview", "Nodes overview of prod", null],
+      ["namespaces-overview", "Namespaces overview of prod", null],
+      ["network-overview", "Network overview of prod", null],
+      ["storage-overview", "Storage overview of prod", null],
       ["shortcuts", "Show keyboard shortcuts", "shortcuts"],
       ["about", "About SkoposIDE", null],
       ["check-updates", "Check for Updates", null],
@@ -93,8 +144,11 @@ test("the registry lists the spec's commands in order", () => {
 test("terminal, disconnect, install-chart, resource-map and node-topology need the current cluster connected; cluster-settings any cluster", () => {
   const available = (ctx: CommandContext) =>
     COMMANDS.filter((c) => c.available(ctx)).map((c) => c.id);
-  // toggle-sidebar needs a mounted sidebar, not a cluster; its own test covers it.
-  const all = COMMANDS.map((c) => c.id).filter((id) => id !== "toggle-sidebar");
+  // toggle-sidebar needs a mounted sidebar, not a cluster, and the overview commands the
+  // cluster's resources too; their own tests cover them.
+  const all = COMMANDS.map((c) => c.id).filter(
+    (id) => id !== "toggle-sidebar" && !OVERVIEWS.includes(id),
+  );
   const onCluster = all.filter(
     (id) =>
       id !== "terminal" &&
@@ -124,6 +178,60 @@ test("node-topology opens the cluster's node topology", () => {
   const ctx = context({ cluster: on(CONNECTED) });
   runCommand("node-topology", ctx);
   expect(ctx.navigate.mock.calls).toEqual([["/cluster/c1/node-topology"]]);
+});
+
+test("an overview command shows while the cluster is connected and the sidebar shows its page", () => {
+  const shown = (over: Partial<Omit<CommandContext, "navigate">>) =>
+    COMMANDS.filter((c) => c.available(context(over)))
+      .map((c) => c.id)
+      .filter((id) => OVERVIEWS.includes(id));
+  expect(shown({ cluster: on(CONNECTED), resources: EVERY_OVERVIEW })).toEqual([
+    ...OVERVIEWS,
+  ]);
+  // Port Forwarding keeps Network in the sidebar; Nodes and Namespaces need their kind.
+  expect(shown({ cluster: on(CONNECTED), resources: [] })).toEqual([
+    "network-overview",
+  ]);
+  expect(
+    shown({
+      cluster: on(CONNECTED),
+      resources: [served("nodes", false), served("namespaces", false)],
+    }),
+  ).toEqual(["network-overview"]);
+  // Without the cluster's resources no page is known to show; off a connection none does.
+  expect(shown({ cluster: on(CONNECTED) })).toEqual([]);
+  expect(
+    shown({ cluster: on({ status: "connecting" }), resources: EVERY_OVERVIEW }),
+  ).toEqual([]);
+  expect(shown({ resources: EVERY_OVERVIEW })).toEqual([]);
+});
+
+test("each overview command is named after its page and the cluster, with its tab's icon, and opens the page once", () => {
+  const ctx = context({ cluster: on(CONNECTED), resources: EVERY_OVERVIEW });
+  expect(
+    OVERVIEWS.map((id) => [commandById(id).label(ctx), commandById(id).icon]),
+  ).toEqual([
+    ["Workloads overview of prod", Blocks],
+    ["Nodes overview of prod", Server],
+    ["Namespaces overview of prod", Namespace],
+    ["Network overview of prod", Network],
+    ["Storage overview of prod", HardDrive],
+  ]);
+  for (const id of OVERVIEWS) runCommand(id, ctx);
+  expect(ctx.navigate.mock.calls).toEqual([
+    ["/cluster/c1/workloads"],
+    ["/cluster/c1/nodes"],
+    ["/cluster/c1/namespaces"],
+    ["/cluster/c1/network"],
+    ["/cluster/c1/storage"],
+  ]);
+  const there = context({
+    pathname: "/cluster/c1/nodes",
+    cluster: on(CONNECTED),
+    resources: EVERY_OVERVIEW,
+  });
+  runCommand("nodes-overview", there);
+  expect(there.navigate).not.toHaveBeenCalled();
 });
 
 test("install-chart opens the cluster's Charts", () => {
@@ -360,8 +468,19 @@ test("the commands that open a location name it, so the click modes can open it 
     ["cluster-settings", "/cluster/c1/settings"],
     ["resource-map", "/cluster/c1/map"],
     ["node-topology", "/cluster/c1/node-topology"],
+    ["workloads-overview", "/cluster/c1/workloads"],
+    ["nodes-overview", "/cluster/c1/nodes"],
+    ["namespaces-overview", "/cluster/c1/namespaces"],
+    ["network-overview", "/cluster/c1/network"],
+    ["storage-overview", "/cluster/c1/storage"],
   ]);
   expect(commandById("resource-map").path?.(context())).toBeNull();
+  expect(commandById("storage-overview").path?.(context())).toBeNull();
+  expect(
+    commandById("storage-overview").path?.(
+      context({ cluster: { id: "a/b", name: "x", state: CONNECTED } }),
+    ),
+  ).toBe("/cluster/a%2Fb/storage");
 });
 
 test("toggle-sidebar collapses or expands the mounted sidebar, named and drawn for its state", () => {

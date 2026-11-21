@@ -102,17 +102,23 @@ export function listedResource(
   return info?.canList ? info.resource : null;
 }
 
+/**
+ * Why a list cannot be shown (R1): the account may not list it, the cluster does not serve
+ * it, or discovery failed. Tiles pick their sub-line by it, never by the reason's text.
+ */
+export type UnavailableCause = "forbidden" | "notServed" | "error";
+
 /** A watched list as a part of the overview shows it. */
 export type ListView =
   | { state: "loading" }
-  | { state: "unavailable"; reason: string }
+  | { state: "unavailable"; reason: string; cause: UnavailableCause }
   /** The objects in the chosen namespaces. */
   | { state: "ready"; items: KubeObject[] };
 
 /**
- * Loading until discovery and the first list arrive; unavailable when the cluster
- * does not serve the resource or the user may not list it; else its objects in the
- * chosen namespaces. `label` names the resource in the reasons, as "Pods".
+ * Loading until discovery and the first list arrive; unavailable, with its cause, when the
+ * cluster does not serve the resource, the user may not list it or discovery failed; else
+ * its objects in the chosen namespaces. `label` names the resource in the reasons, as "Pods".
  */
 export function listView(
   label: string,
@@ -125,12 +131,27 @@ export function listView(
   const forbidden = `You may not list ${label}.`;
   if (!info) {
     if (discovery.loading) return { state: "loading" };
-    return { state: "unavailable", reason: discovery.error ?? notServed };
+    if (discovery.error !== null) {
+      return { state: "unavailable", reason: discovery.error, cause: "error" };
+    }
+    return { state: "unavailable", reason: notServed, cause: "notServed" };
   }
-  if (!info.canList) return { state: "unavailable", reason: forbidden };
-  if (list.status === "forbidden" || list.status === "notServed") {
-    const fallback = list.status === "forbidden" ? forbidden : notServed;
-    return { state: "unavailable", reason: list.message ?? fallback };
+  if (!info.canList) {
+    return { state: "unavailable", reason: forbidden, cause: "forbidden" };
+  }
+  if (list.status === "forbidden") {
+    return {
+      state: "unavailable",
+      reason: list.message ?? forbidden,
+      cause: "forbidden",
+    };
+  }
+  if (list.status === "notServed") {
+    return {
+      state: "unavailable",
+      reason: list.message ?? notServed,
+      cause: "notServed",
+    };
   }
   if (list.loading) return { state: "loading" };
   const items = info.resource.namespaced
@@ -139,10 +160,18 @@ export function listView(
   return { state: "ready", items };
 }
 
-/** A row of the kinds table. */
+/**
+ * A row of the kinds table: its list as `listView` sees it, with the cause when it is
+ * unavailable, so a row that is not counted can be given to `waitingTile` as it is.
+ */
 export type KindRow =
   | { kind: WorkloadKind; state: "loading" }
-  | { kind: WorkloadKind; state: "unavailable"; reason: string }
+  | {
+      kind: WorkloadKind;
+      state: "unavailable";
+      reason: string;
+      cause: UnavailableCause;
+    }
   | { kind: WorkloadKind; state: "counted"; counts: WorkloadCounts };
 
 /** A kind's row: its list as `listView` sees it, counted once it is there. */

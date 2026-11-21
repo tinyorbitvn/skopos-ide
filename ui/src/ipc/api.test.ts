@@ -355,6 +355,11 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
     { id: "c1", names: ["n1", "n2"] },
   ],
   [
+    "volumes_usage",
+    () => api.volumesUsage("c1", ["n1", "n2"]),
+    { id: "c1", nodes: ["n1", "n2"] },
+  ],
+  [
     "metrics_secret_set",
     () => api.metricsSecretSet("c1", "s3cret", { kind: "metricsServer" }),
     { clusterId: "c1", secret: "s3cret", provider: { kind: "metricsServer" } },

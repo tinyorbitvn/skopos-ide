@@ -8,7 +8,6 @@ import {
 } from "react-router";
 import {
   ArrowRightLeft,
-  Blocks,
   CircleArrowUp,
   type IconComponent,
   LayoutDashboard,
@@ -32,9 +31,14 @@ import {
 } from "../../features/helm/HelmFormScreen";
 import { HelmReleasesRoute } from "../../features/helm/HelmReleasesScreen";
 import { MapRoute } from "../../features/map/MapRoute";
+import { OVERVIEW_ICONS } from "../../features/palette/icons";
 import { PortForwardsRoute } from "../../features/portForward/PortForwardsScreen";
 import { PreferencesScreen } from "../../features/prefs/PreferencesScreen";
 import { ResourceRoute } from "../../features/resources/ResourceScreen";
+import { NamespacesOverview } from "../../features/sections/NamespacesOverview";
+import { NetworkOverview } from "../../features/sections/NetworkOverview";
+import { NodesOverview } from "../../features/sections/NodesOverview";
+import { StorageOverview } from "../../features/sections/StorageOverview";
 import { ClusterSettingsRoute } from "../../features/settings/ClusterSettingsScreen";
 import { NodeTopologyScreen } from "../../features/topology/NodeTopologyScreen";
 import { WorkloadsOverview } from "../../features/workloads/WorkloadsOverview";
@@ -55,6 +59,10 @@ export function tabRoutes(): RouteObject[] {
       children: [
         { index: true, element: <ClusterOverview /> },
         { path: "workloads", element: <WorkloadsOverview /> },
+        { path: "nodes", element: <NodesOverview /> },
+        { path: "namespaces", element: <NamespacesOverview /> },
+        { path: "network", element: <NetworkOverview /> },
+        { path: "storage", element: <StorageOverview /> },
         { path: "r/:group/:plural", element: <ResourceRoute /> },
         { path: "port-forwards", element: <PortForwardsRoute /> },
         { path: "helm/charts", element: <HelmChartsRoute /> },
@@ -125,7 +133,31 @@ const SCREENS: readonly Screen[] = [
   { pattern: "/catalog", name: named("Catalog"), icon: LayoutGrid },
   { pattern: "/preferences", name: named("Preferences"), icon: Settings },
   { pattern: "/cluster/:id", name: named("Overview"), icon: LayoutDashboard },
-  { pattern: "/cluster/:id/workloads", name: named("Workloads"), icon: Blocks },
+  {
+    pattern: "/cluster/:id/workloads",
+    name: named("Workloads overview"),
+    icon: OVERVIEW_ICONS.workloads,
+  },
+  {
+    pattern: "/cluster/:id/nodes",
+    name: named("Nodes overview"),
+    icon: OVERVIEW_ICONS.nodes,
+  },
+  {
+    pattern: "/cluster/:id/namespaces",
+    name: named("Namespaces overview"),
+    icon: OVERVIEW_ICONS.namespaces,
+  },
+  {
+    pattern: "/cluster/:id/network",
+    name: named("Network overview"),
+    icon: OVERVIEW_ICONS.network,
+  },
+  {
+    pattern: "/cluster/:id/storage",
+    name: named("Storage overview"),
+    icon: OVERVIEW_ICONS.storage,
+  },
   {
     pattern: "/cluster/:id/r/:group/:plural",
     name: resourceLabel,

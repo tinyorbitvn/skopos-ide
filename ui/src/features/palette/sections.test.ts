@@ -9,6 +9,7 @@ import {
   useSidebarToggle,
 } from "../../stores/sidebarCollapse";
 import { clusterEntry, mockBackend } from "../../test/ipc";
+import { OVERVIEW_ICON } from "./icons";
 import {
   buildSections,
   CAPS,
@@ -290,6 +291,7 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
   expect(pages.map((p) => [p.testId, p.label, p.hint])).toEqual([
     ["palette-page-overview", "Overview", "Page"],
     ["palette-page-workloads", "Workloads overview", "Page"],
+    ["palette-page-network", "Network overview", "Page"],
     ["palette-page-helm/charts", "Charts", "Page"],
     ["palette-page-helm/releases", "Releases", "Page"],
     ["palette-page-r/core/pods", "Pods", "Page"],
@@ -302,6 +304,7 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
   expect(ctx.navigate.mock.calls).toEqual([
     ["/cluster/c1"],
     ["/cluster/c1/workloads"],
+    ["/cluster/c1/network"],
     ["/cluster/c1/helm/charts"],
     ["/cluster/c1/helm/releases"],
     ["/cluster/c1/r/core/pods"],
@@ -311,11 +314,58 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
   ]);
 });
 
-test("Nodes gives two pages: its list and Topology", () => {
+test("every section overview is a page beside Workloads overview, named after its section", () => {
+  const pages = pageEntries("c1", [
+    info("", "nodes", "Node"),
+    info("", "namespaces", "Namespace"),
+    info("", "pods", "Pod"),
+    info("", "persistentvolumeclaims", "PersistentVolumeClaim"),
+  ]).filter((p) => p.label.endsWith(" overview"));
+  expect(pages.map((p) => [p.testId, p.label, p.icon, p.path])).toEqual([
+    [
+      "palette-page-nodes",
+      "Nodes overview",
+      OVERVIEW_ICON,
+      "/cluster/c1/nodes",
+    ],
+    [
+      "palette-page-namespaces",
+      "Namespaces overview",
+      OVERVIEW_ICON,
+      "/cluster/c1/namespaces",
+    ],
+    [
+      "palette-page-workloads",
+      "Workloads overview",
+      OVERVIEW_ICON,
+      "/cluster/c1/workloads",
+    ],
+    [
+      "palette-page-network",
+      "Network overview",
+      OVERVIEW_ICON,
+      "/cluster/c1/network",
+    ],
+    [
+      "palette-page-storage",
+      "Storage overview",
+      OVERVIEW_ICON,
+      "/cluster/c1/storage",
+    ],
+  ]);
+});
+
+test("Nodes gives three pages: its overview, its list and Topology", () => {
   const pages = pageEntries("c1", [info("", "nodes", "Node")]).filter((p) =>
     p.testId.includes("node"),
   );
   expect(pages.map((p) => [p.testId, p.label, p.icon, p.path])).toEqual([
+    [
+      "palette-page-nodes",
+      "Nodes overview",
+      OVERVIEW_ICON,
+      "/cluster/c1/nodes",
+    ],
     ["palette-page-r/core/nodes", "Nodes", Server, "/cluster/c1/r/core/nodes"],
     [
       "palette-page-node-topology",
@@ -333,6 +383,7 @@ test("the other Gateway API kinds are pages of Network once, never custom resour
   ]);
   expect(pages.map((p) => [p.testId, p.label])).toEqual([
     ["palette-page-overview", "Overview"],
+    ["palette-page-network", "Network overview"],
     ["palette-page-helm/charts", "Charts"],
     ["palette-page-helm/releases", "Releases"],
     ["palette-page-r/gateway.networking.k8s.io/gateways", "Gateways"],
@@ -341,9 +392,10 @@ test("the other Gateway API kinds are pages of Network once, never custom resour
   ]);
 });
 
-test("without discovery, Pages hold the overview and the routes", () => {
+test("without discovery, Pages hold Overview, the Network overview and the routes", () => {
   expect(pageEntries("c1", []).map((p) => p.testId)).toEqual([
     "palette-page-overview",
+    "palette-page-network",
     "palette-page-helm/charts",
     "palette-page-helm/releases",
     "palette-page-port-forwards",
@@ -400,7 +452,7 @@ test("rows that open a location carry it, for the click modes (P11 to P13)", () 
   const pages = pageEntries("c1", []);
   expect(pages.map((p) => p.path).slice(0, 2)).toEqual([
     "/cluster/c1",
-    "/cluster/c1/helm/charts",
+    "/cluster/c1/network",
   ]);
   const [object] = objectEntries("c1", [
     {

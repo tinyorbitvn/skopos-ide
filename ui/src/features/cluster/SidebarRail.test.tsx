@@ -115,15 +115,20 @@ test("the rail shows one icon per section between group dividers, with the secti
     icon("workloads").querySelector("[data-icon]")?.getAttribute("data-icon"),
   ).toBe(SECTION_ICONS.workloads?.iconName);
   expect([
-    icon("namespaces").tagName,
-    icon("namespaces").getAttribute("href"),
-    icon("namespaces").getAttribute("aria-label"),
-  ]).toEqual(["A", "/cluster/c1/r/core/namespaces", "Namespaces"]);
-  expect([
-    icon("nodes").tagName,
-    icon("nodes").getAttribute("aria-label"),
-    icon("nodes").getAttribute("aria-haspopup"),
-  ]).toEqual(["BUTTON", "Nodes", "menu"]);
+    icon("events").tagName,
+    icon("events").getAttribute("href"),
+    icon("events").getAttribute("aria-label"),
+  ]).toEqual(["A", "/cluster/c1/r/core/events", "Events"]);
+  for (const [id, label] of [
+    ["nodes", "Nodes"],
+    ["namespaces", "Namespaces"],
+  ]) {
+    expect([
+      icon(id).tagName,
+      icon(id).getAttribute("aria-label"),
+      icon(id).getAttribute("aria-haspopup"),
+    ]).toEqual(["BUTTON", label, "menu"]);
+  }
   expect([
     icon("workloads").tagName,
     icon("workloads").getAttribute("aria-label"),
@@ -201,11 +206,8 @@ test("a single-screen icon navigates with the sidebar's link handlers", async ()
   await show();
   fireEvent.click(icon("events"));
   expect(paths()).toEqual(["/cluster/c1/r/core/events"]);
-  fireEvent.click(icon("namespaces"), { ctrlKey: true });
-  expect(paths()).toEqual([
-    "/cluster/c1/r/core/events",
-    "/cluster/c1/r/core/namespaces",
-  ]);
+  fireEvent.click(icon("map"), { ctrlKey: true });
+  expect(paths()).toEqual(["/cluster/c1/r/core/events", "/cluster/c1/map"]);
 });
 
 test("a multi-item icon opens its flyout of kinds on the first one; a second click closes it", async () => {
@@ -350,7 +352,7 @@ test("choosing an item navigates with the sidebar's link handlers and closes the
   expect(flyout("workloads")).toBeNull();
 });
 
-test("the Nodes flyout lists List and Topology, and Topology opens the page", async () => {
+test("the Nodes flyout lists Overview, List and Topology, and Topology opens the page", async () => {
   await show();
   fireEvent.click(icon("nodes"));
   const box = flyout("nodes");
@@ -361,11 +363,40 @@ test("the Nodes flyout lists List and Topology, and Topology opens the page", as
   expect(
     items.map((i) => [i.textContent, i.getAttribute("data-testid")]),
   ).toEqual([
+    ["Overview", "rail-item-overview-nodes"],
     ["List", "rail-item-core-nodes"],
     ["Topology", "rail-item-node-topology"],
   ]);
   fireEvent.click(screen.getByTestId("rail-item-node-topology"));
   expect(paths()).toEqual(["/cluster/c1/node-topology"]);
+});
+
+test("Namespaces opens a flyout of Overview and List, and its Overview opens the page", async () => {
+  await show();
+  fireEvent.click(icon("namespaces"));
+  const box = flyout("namespaces");
+  if (box === null) throw new Error("no flyout");
+  expect(icon("namespaces").getAttribute("aria-expanded")).toBe("true");
+  const items = within(
+    within(box).getByRole("menu", { name: "Namespaces" }),
+  ).getAllByRole("menuitem");
+  expect(
+    items.map((i) => [i.textContent, i.getAttribute("data-testid")]),
+  ).toEqual([
+    ["Overview", "rail-item-overview-namespaces"],
+    ["List", "rail-item-core-namespaces"],
+  ]);
+  fireEvent.click(screen.getByTestId("rail-item-overview-namespaces"));
+  expect(paths()).toEqual(["/cluster/c1/namespaces"]);
+});
+
+test("a section overview's page makes its section the current icon", async () => {
+  for (const id of ["nodes", "namespaces", "workloads", "network"]) {
+    await show({}, `/cluster/c1/${id}`);
+    expect([id, icon(id).getAttribute("aria-current")]).toEqual([id, "page"]);
+    expect(icon("overview").getAttribute("aria-current")).toBeNull();
+    cleanup();
+  }
 });
 
 test("double-clicking a flyout item pins its tab and closes the flyout", async () => {

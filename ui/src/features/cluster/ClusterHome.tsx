@@ -1,5 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router";
+import { useMemo } from "react";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { NAMESPACES, NODES, PODS } from "../../kinds/refs";
@@ -7,12 +6,10 @@ import { useCatalog } from "../../stores/catalog";
 import { useClusterState } from "../../stores/clusters";
 import { findResource } from "../../stores/resources";
 import { useTopology } from "../../stores/topology";
-import { DetailDrawer, isDrawerEscape } from "../details/DetailDrawer";
-import { useDrawerHistory } from "../details/useDrawerHistory";
 import { OverviewMetrics } from "../metrics/OverviewMetrics";
 import { useListUsage } from "../metrics/useListUsage";
 import { OverviewCell, OverviewGrid } from "../overview";
-import { DrawerObjectActions } from "../resources/DrawerObjectActions";
+import { useOverviewDrawer } from "../sections/useOverviewDrawer";
 import { CapacityCard } from "./CapacityCard";
 import { ClusterCard } from "./ClusterCard";
 import { useClusterContext } from "./ClusterLayout";
@@ -21,11 +18,8 @@ import { HealthCard } from "./HealthCard";
 import { type CapacityTotals, capacityOf } from "./overviewModel";
 import { TopConsumersCard } from "./TopConsumersCard";
 
-/** The kinds the Overview opens in its drawer, by `?open=`. */
-const OPENABLE: Partial<Record<string, ResourceRef>> = {
-  pods: PODS,
-  namespaces: NAMESPACES,
-};
+/** The kinds the Overview opens in its drawer, as `?open=pods` and `?open=namespaces` (R3). */
+const OPENABLE: readonly ResourceRef[] = [PODS, NAMESPACES];
 /** Node usage is read across the cluster. */
 const NO_NAMESPACES: string[] = [];
 const NO_TOTALS: CapacityTotals = { cores: null, bytes: null, pods: null };
@@ -65,46 +59,14 @@ export function ClusterHome(props: {
     () => ({ cores: totals.cores, bytes: totals.bytes }),
     [totals.cores, totals.bytes],
   );
-
-  const [params, setParams] = useSearchParams();
-  const open = params.get("open");
-  const opened = open === null ? undefined : OPENABLE[open];
-  const resource = opened ?? PODS;
-  const history = useDrawerHistory(
-    resource,
-    opened === undefined ? null : params.get("object"),
-  );
-  const drawerInfo = findResource(resources, resource.group, resource.plural);
-  // `setParams` changes with the location; the callback reads it here, so it stays the same.
-  const setParamsRef = useRef(setParams);
-  setParamsRef.current = setParams;
-  const openObject = useCallback((plural: string | null, key?: string) => {
-    setParamsRef.current(
-      (p) => {
-        const next = new URLSearchParams(p);
-        if (plural === null || key === undefined) {
-          next.delete("open");
-          next.delete("object");
-        } else {
-          next.set("open", plural);
-          next.set("object", key);
-        }
-        return next;
-      },
-      { replace: false },
-    );
-  }, []);
+  const drawer = useOverviewDrawer(clusterId, resources, OPENABLE);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the root only listens for the Escape that closes the drawer, as on list screens.
     <div
       className={styles.home}
       data-testid="overview-page"
-      onKeyDown={(e) => {
-        if (!isDrawerEscape(e)) return;
-        e.stopPropagation();
-        openObject(null);
-      }}
+      onKeyDown={drawer.onKeyDown}
     >
       <OverviewGrid testId="overview-grid">
         <OverviewCell span={5}>
@@ -128,7 +90,9 @@ export function ClusterHome(props: {
             clusterId={clusterId}
             totals={totals}
             nodesForbidden={nodesForbidden}
-            onOpen={openObject}
+            onOpen={(plural, key) =>
+              drawer.open(plural === "pods" ? PODS : NAMESPACES, key)
+            }
           />
         </OverviewCell>
         <OverviewCell span={12}>
@@ -140,24 +104,7 @@ export function ClusterHome(props: {
           />
         </OverviewCell>
       </OverviewGrid>
-      <DetailDrawer
-        clusterId={clusterId}
-        resource={resource}
-        history={history}
-        onClose={() => openObject(null)}
-        resources={resources}
-        actions={
-          drawerInfo === undefined
-            ? undefined
-            : (object) => (
-                <DrawerObjectActions
-                  clusterId={clusterId}
-                  info={drawerInfo}
-                  object={object}
-                />
-              )
-        }
-      />
+      {drawer.drawer}
     </div>
   );
 }

@@ -6,20 +6,18 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, Outlet, Route, Routes } from "react-router";
+import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
 import { resetCatalogForTest } from "../../stores/catalog";
+import { resetMetricsForTest } from "../../stores/metrics";
 import { resetResourcesForTest } from "../../stores/resources";
 import { flush, mockBackend } from "../../test/ipc";
-import {
-  CONNECTED,
-  connectClusters,
-  setClusterState,
-} from "../../test/terminal";
+import { noProvider } from "../../test/metrics";
+import { connectClusters } from "../../test/terminal";
 import type { ClusterOutletContext } from "../cluster/ClusterLayout";
 import { WorkloadsOverview } from "./WorkloadsOverview";
 
@@ -51,6 +49,16 @@ const REPLICASETS = info("apps", "replicasets", "ReplicaSet");
 const JOBS = info("batch", "jobs", "Job");
 const CRONJOBS = info("batch", "cronjobs", "CronJob");
 const EVENTS = info("", "events", "Event");
+/** Served, so an event about a Node opens it; the page never watches Nodes. */
+const NODES = info("", "nodes", "Node", {
+  resource: {
+    group: "",
+    version: "v1",
+    plural: "nodes",
+    kind: "Node",
+    namespaced: false,
+  },
+});
 const ALL = [
   PODS,
   DEPLOYMENTS,
@@ -60,6 +68,7 @@ const ALL = [
   JOBS,
   CRONJOBS,
   EVENTS,
+  NODES,
 ];
 
 function fakeBackend(uiState: Record<string, unknown> = {}) {
@@ -78,6 +87,11 @@ function fakeBackend(uiState: Record<string, unknown> = {}) {
       return `sub-${a.resource.plural}`;
     },
     resources_unsubscribe: () => null,
+    // What the drawer reads, answered never, so it stays on its title.
+    resources_subscribe_object: () => "object-sub",
+    resource_get: () => new Promise(() => {}),
+    resource_events: () => new Promise(() => {}),
+    metrics_provider: () => noProvider(),
   });
   async function send(plural: string, event: WatchEvent) {
     await act(async () => {
@@ -106,6 +120,11 @@ function fakeBackend(uiState: Record<string, unknown> = {}) {
 
 type Fake = ReturnType<typeof fakeBackend>;
 
+function Where() {
+  const location = useLocation();
+  return <p data-testid="where">{`${location.pathname}${location.search}`}</p>;
+}
+
 async function show(
   resources: ApiResourceInfo[] = ALL,
   over: Partial<ClusterOutletContext> = {},
@@ -121,7 +140,15 @@ async function show(
     <MemoryRouter initialEntries={["/cluster/c1/workloads"]}>
       <Routes>
         <Route path="/cluster/:id" element={<Outlet context={context} />}>
-          <Route path="workloads" element={<WorkloadsOverview />} />
+          <Route
+            path="workloads"
+            element={
+              <>
+                <WorkloadsOverview />
+                <Where />
+              </>
+            }
+          />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -129,7 +156,7 @@ async function show(
   await act(flush);
 }
 
-/** What the overview watches, sorted. */
+/** What the page watches, sorted. */
 const WATCHED = [
   "cronjobs",
   "daemonsets",
@@ -141,21 +168,11 @@ const WATCHED = [
   "statefulsets",
 ];
 
-/** Every kind's first list, empty unless given. */
+/** Every watched kind's first list, empty unless given. */
 async function snapshots(fake: Fake, lists: Record<string, KubeObject[]>) {
   for (const plural of WATCHED) {
     await fake.snapshot(plural, lists[plural] ?? []);
   }
-}
-
-/** A connected cluster `c1` with these namespaces. */
-function connect(namespaces: string[]) {
-  connectClusters({ id: "c1", name: "one" });
-  if (CONNECTED.status !== "connected") throw new Error("not connected");
-  setClusterState("c1", {
-    status: "connected",
-    info: { ...CONNECTED.info, namespaces },
-  });
 }
 
 function pod(
@@ -202,20 +219,48 @@ const availableDeployment = (name: string, namespace: string): KubeObject => ({
   },
 });
 
+const scaledDownDeployment = (name: string, namespace: string): KubeObject => ({
+  metadata: { name, namespace },
+  spec: { replicas: 0 },
+  status: {},
+});
+
+const stalledDeployment = (name: string, namespace: string): KubeObject => ({
+  metadata: { name, namespace },
+  spec: { replicas: 2 },
+  status: {
+    conditions: [
+      {
+        type: "Progressing",
+        status: "False",
+        reason: "ProgressDeadlineExceeded",
+      },
+    ],
+  },
+});
+
 function event(
   name: string,
   over: {
     namespace?: string;
     minutes?: number;
     type?: string;
-    object?: string;
+    reason?: string;
     message?: string;
+    involved?: Record<string, string>;
   } = {},
 ): KubeObject {
+  const namespace = over.namespace ?? "default";
   return {
-    metadata: { name, namespace: over.namespace ?? "default", uid: name },
+    metadata: { name, namespace, uid: name },
     type: over.type ?? "Normal",
-    involvedObject: { kind: "Pod", name: over.object ?? `pod-${name}` },
+    reason: over.reason ?? "Started",
+    involvedObject: over.involved ?? {
+      apiVersion: "v1",
+      kind: "Pod",
+      name: `pod-${name}`,
+      namespace,
+    },
     message: over.message ?? `message ${name}`,
     lastTimestamp: new Date(
       Date.now() - (over.minutes ?? 1) * 60_000,
@@ -223,31 +268,67 @@ function event(
   };
 }
 
-const kindsTable = () => screen.getByRole("table", { name: "Workload kinds" });
-const eventsTable = () => screen.getByRole("table", { name: "Recent events" });
-const kindRow = (plural: string) =>
-  within(kindsTable()).getByTestId(`workload-kind-${plural}`);
-/** Kind, Total, Healthy, Pending and Failing as shown. */
-const cells = (plural: string) =>
-  within(kindRow(plural))
-    .getAllByRole("cell")
-    .map((c) => c.textContent);
-
-function toggleNamespace(namespace: string) {
-  fireEvent.keyDown(screen.getByTestId("namespace-filter"), { key: "Enter" });
-  fireEvent.click(screen.getByTestId(`namespace-option-${namespace}`));
-  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-}
+const text = (id: string) => screen.getByTestId(id).textContent;
+const href = (id: string) => screen.getByTestId(id).getAttribute("href");
+/** A table's row keys, in order. */
+const rowKeys = (table: string) =>
+  screen
+    .getAllByTestId(new RegExp(`^${table}-row-`))
+    .map((r) => r.getAttribute("data-testid")?.slice(`${table}-row-`.length));
+/** A row's cells' texts, its name first: the name may be a row header or a cell. */
+const rowCells = (id: string) => {
+  const row = within(screen.getByTestId(id));
+  return [
+    ...row.queryAllByRole("rowheader"),
+    ...row.queryAllByRole("cell"),
+  ].map((c) => c.textContent);
+};
+/** A row's cells after its name. */
+const cells = (id: string) => rowCells(id).slice(1);
+const heads = (table: string) =>
+  within(screen.getByTestId(table))
+    .getAllByRole("columnheader")
+    .map((h) => h.textContent);
+const tile = (id: string) => [
+  text(`overview-tile-${id}-number`),
+  text(`overview-tile-${id}-sub`),
+  screen.getByTestId(`overview-tile-${id}`).getAttribute("data-tone"),
+];
 
 beforeEach(() => {
   resetResourcesForTest();
+  resetMetricsForTest();
+  resetCatalogForTest();
+  connectClusters({ id: "c1", name: "one" });
 });
 afterEach(() => {
   resetResourcesForTest();
   resetCatalogForTest();
 });
 
-test("each kind is counted by its list's status, in the sidebar's order", async () => {
+test("the page is titled Workloads overview, with the kinds, then Health beside Workloads with problems, then Recent events", async () => {
+  fakeBackend();
+  await show();
+  expect(text("workloads-overview-title")).toBe("Workloads overview");
+  expect(screen.getByTestId("workloads-overview")).toBeTruthy();
+  const grid = screen.getByTestId("workloads-overview-card-kinds").parentElement
+    ?.parentElement as HTMLElement;
+  expect(
+    [...grid.children].map((c) => [
+      c.getAttribute("data-span"),
+      c.firstElementChild?.getAttribute("data-testid"),
+    ]),
+  ).toEqual([
+    ["12", "workloads-overview-card-kinds"],
+    ["5", "workloads-overview-card-health"],
+    ["7", "workloads-overview-card-problems"],
+    ["12", "workloads-overview-card-events"],
+  ]);
+  // No namespace is chosen in the lists, so there is no note.
+  expect(screen.queryByTestId("workloads-overview-namespaces")).toBeNull();
+});
+
+test("each kind's tile counts its objects by their list's status, in the sidebar's order, and links to its list", async () => {
   const fake = fakeBackend();
   await show();
   await snapshots(fake, {
@@ -260,80 +341,32 @@ test("each kind is counted by its list's status, in the sidebar's order", async 
     deployments: [availableDeployment("web", "shop")],
   });
 
-  expect(screen.getByTestId("workloads-overview-title").textContent).toBe(
-    "Workloads",
-  );
-  const kinds = within(kindsTable())
-    .getAllByRole("row")
-    .slice(1)
-    .map((r) => within(r).getAllByRole("cell")[0]?.textContent);
-  expect(kinds).toEqual([
-    "Pods",
-    "Deployments",
-    "DaemonSets",
-    "StatefulSets",
-    "ReplicaSets",
-    "Jobs",
-    "CronJobs",
+  const card = screen.getByTestId("workloads-overview-card-kinds");
+  expect(
+    within(card)
+      .getAllByRole("link")
+      .map((a) => a.getAttribute("data-testid")),
+  ).toEqual([
+    "overview-tile-pods",
+    "overview-tile-deployments",
+    "overview-tile-daemonsets",
+    "overview-tile-statefulsets",
+    "overview-tile-replicasets",
+    "overview-tile-jobs",
+    "overview-tile-cronjobs",
   ]);
-  // The Terminating pod counts only in Total.
-  expect(cells("pods")).toEqual(["Pods", "4", "1", "1", "1"]);
-  expect(cells("deployments")).toEqual(["Deployments", "1", "1", "0", "0"]);
-  expect(cells("cronjobs")).toEqual(["CronJobs", "0", "0", "0", "0"]);
+  // The Terminating Pod counts only in the number.
+  expect(tile("pods")).toEqual(["4", "1 failing · 1 pending", "danger"]);
+  expect(tile("deployments")).toEqual(["1", "All healthy", "ok"]);
+  expect(tile("cronjobs")).toEqual(["0", "None", "neutral"]);
+  expect(href("overview-tile-pods")).toBe("/cluster/c1/r/core/pods");
+  expect(href("overview-tile-deployments")).toBe(
+    "/cluster/c1/r/apps/deployments",
+  );
+  expect(href("overview-tile-cronjobs")).toBe("/cluster/c1/r/batch/cronjobs");
 });
 
-test("failing objects show a danger badge, and none a plain 0", async () => {
-  const fake = fakeBackend();
-  await show();
-  await snapshots(fake, {
-    pods: [pod("c", "shop", "crashing"), pod("e", "shop", "crashing")],
-    deployments: [availableDeployment("web", "shop")],
-  });
-  const failing = (plural: string) =>
-    within(kindRow(plural)).getAllByRole("cell")[4] as HTMLElement;
-  const badge = failing("pods").firstElementChild as HTMLElement;
-  expect(badge.textContent).toBe("2");
-  expect(badge.className).toMatch(/\bbadge\b/);
-  expect(badge.className).toMatch(/\bdanger\b/);
-  expect(failing("deployments").textContent).toBe("0");
-  expect(failing("deployments").querySelector(".badge")).toBeNull();
-});
-
-test("a kind links to its list screen", async () => {
-  const fake = fakeBackend();
-  await show();
-  await snapshots(fake, {});
-  expect(
-    within(kindRow("pods"))
-      .getByRole("link", { name: "Pods" })
-      .getAttribute("href"),
-  ).toBe("/cluster/c1/r/core/pods");
-  expect(
-    within(kindRow("cronjobs"))
-      .getByRole("link", { name: "CronJobs" })
-      .getAttribute("href"),
-  ).toBe("/cluster/c1/r/batch/cronjobs");
-});
-
-test("a kind still loading shows a spinner in its own row", async () => {
-  const fake = fakeBackend();
-  await show();
-  await fake.snapshot("pods", [pod("a", "shop", "running")]);
-  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
-  expect(within(kindRow("pods")).queryByRole("status")).toBeNull();
-  expect(within(kindRow("deployments")).getByRole("status")).toBeTruthy();
-  expect(screen.getByTestId("workloads-overview-title")).toBeTruthy();
-});
-
-test("while discovery runs, every kind is loading", async () => {
-  fakeBackend();
-  await show([], { resourcesLoading: true });
-  for (const plural of ["pods", "jobs", "cronjobs"]) {
-    expect(within(kindRow(plural)).getByRole("status")).toBeTruthy();
-  }
-});
-
-test("a kind not served, not listable or forbidden shows a dash, and the rest still count", async () => {
+test("a kind still loading, forbidden or not served reads a dash with its reason, and the rest still count", async () => {
   const fake = fakeBackend();
   await show([
     PODS,
@@ -349,61 +382,285 @@ test("a kind not served, not listable or forbidden shows a dash, and the rest st
     status: "forbidden",
     message: "daemonsets is forbidden",
   });
-  await snapshots(fake, { pods: [pod("a", "shop", "running")] });
+  await fake.snapshot("pods", [pod("a", "shop", "running")]);
 
-  // A kind that may not be listed is not even watched.
+  // A kind that may not be listed, or is not served, is not even watched.
   expect(fake.subscribed()).not.toContain("jobs");
   expect(fake.subscribed()).not.toContain("cronjobs");
-  const dash = ["—", "—", "—", "—"];
-  expect(cells("cronjobs")).toEqual(["CronJobs", ...dash]);
-  expect(cells("jobs")).toEqual(["Jobs", ...dash]);
-  expect(cells("daemonsets")).toEqual(["DaemonSets", ...dash]);
-  expect(within(kindRow("jobs")).queryByRole("link")).toBeNull();
-  expect(
-    within(kindRow("cronjobs")).getAllByTitle(/does not serve/),
-  ).toHaveLength(4);
-  expect(
-    within(kindRow("daemonsets")).getAllByTitle("daemonsets is forbidden"),
-  ).toHaveLength(4);
-  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
+  expect(tile("pods")).toEqual(["1", "All healthy", "ok"]);
+  expect(tile("deployments")).toEqual(["—", "Loading", "neutral"]);
+  expect(href("overview-tile-deployments")).toBe(
+    "/cluster/c1/r/apps/deployments",
+  );
+  expect(tile("daemonsets")).toEqual([
+    "—",
+    "You may not list DaemonSets",
+    "neutral",
+  ]);
+  expect(tile("jobs")).toEqual(["—", "You may not list Jobs", "neutral"]);
+  expect(tile("cronjobs")).toEqual([
+    "—",
+    "This cluster does not serve CronJobs",
+    "neutral",
+  ]);
+  for (const id of ["daemonsets", "jobs", "cronjobs"]) {
+    const button = screen.getByTestId(`overview-tile-${id}`);
+    expect(button.tagName).toBe("BUTTON");
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+  }
+  // The cards wait for the kind that still loads.
+  expect(screen.getByTestId("workloads-health-loading")).toBeTruthy();
+  expect(screen.getByTestId("workloads-problems-loading")).toBeTruthy();
 });
 
-test("recent events come newest first, at most ten, with their type as a badge", async () => {
+test("while discovery runs, every tile and table is loading", async () => {
+  fakeBackend();
+  await show([], { resourcesLoading: true });
+  for (const id of ["pods", "jobs", "cronjobs"]) {
+    expect(text(`overview-tile-${id}-sub`)).toBe("Loading");
+  }
+  expect(screen.getByTestId("workloads-health-loading")).toBeTruthy();
+  expect(screen.getByTestId("workloads-problems-loading")).toBeTruthy();
+  expect(screen.getByTestId("workloads-events-loading")).toBeTruthy();
+  expect(screen.queryByTestId("overview-capacity-healthy")).toBeNull();
+});
+
+test("Health shows the healthy share of the listed kinds and each kind's counts", async () => {
   const fake = fakeBackend();
   await show();
-  const events = Array.from({ length: 12 }, (_, i) =>
-    event(`e${i}`, { minutes: 12 - i }),
+  await snapshots(fake, {
+    pods: [
+      pod("a", "shop", "running"),
+      pod("b", "shop", "pending"),
+      pod("c", "shop", "crashing"),
+      pod("d", "shop", "terminating"),
+    ],
+    deployments: [
+      availableDeployment("web", "shop"),
+      scaledDownDeployment("idle", "shop"),
+    ],
+  });
+
+  // Healthy is all but pending and failing: the Terminating Pod and the scaled-down
+  // Deployment count as healthy.
+  const donut = screen.getByTestId("overview-capacity-healthy");
+  expect(within(donut).getByRole("img").getAttribute("aria-label")).toMatch(
+    /^Healthy workloads 67%, 4 of 6$/,
   );
-  events[11] = event("e11", {
-    minutes: 0,
+  expect(text("overview-capacity-healthy-values")).toBe("4 / 6");
+  expect(text("overview-capacity-healthy-note")).toBe("1 pending · 1 failing");
+
+  expect(heads("workloads-health")).toEqual([
+    "Kind",
+    "Healthy",
+    "Pending",
+    "Failing",
+  ]);
+  expect(rowKeys("workloads-health")).toEqual([
+    "pods",
+    "deployments",
+    "daemonsets",
+    "statefulsets",
+    "replicasets",
+    "jobs",
+    "cronjobs",
+  ]);
+  expect(cells("workloads-health-row-pods")).toEqual(["2", "1", "1"]);
+  expect(cells("workloads-health-row-deployments")).toEqual(["2", "0", "0"]);
+  expect(cells("workloads-health-row-cronjobs")).toEqual(["0", "0", "0"]);
+});
+
+test("with no kind to list, Health and Workloads with problems say so", async () => {
+  fakeBackend();
+  await show([EVENTS]);
+  expect(text("overview-tile-pods-sub")).toBe(
+    "This cluster does not serve Pods",
+  );
+  expect(screen.queryByTestId("overview-capacity-healthy")).toBeNull();
+  expect(text("workloads-health-empty")).toContain(
+    "You may not list workloads",
+  );
+  expect(text("workloads-problems-empty")).toContain(
+    "You may not list workloads",
+  );
+});
+
+test("Workloads with problems puts failing first, then sorts by namespace and name, and a row opens its drawer", async () => {
+  const fake = fakeBackend();
+  await show();
+  await snapshots(fake, {
+    pods: [
+      pod("web-2", "shop", "pending"),
+      pod("api-0", "shop", "crashing"),
+      pod("web-1", "default", "pending"),
+      pod("ok-0", "shop", "running"),
+    ],
+    deployments: [stalledDeployment("web", "shop")],
+  });
+
+  expect(heads("workloads-problems")).toEqual(["Workload", "Kind", "Status"]);
+  expect(rowKeys("workloads-problems")).toEqual([
+    "pods/shop/api-0",
+    "deployments/shop/web",
+    "pods/default/web-1",
+    "pods/shop/web-2",
+  ]);
+  expect(rowCells("workloads-problems-row-pods/shop/api-0")[0]).toContain(
+    "shop",
+  );
+  expect(cells("workloads-problems-row-pods/shop/api-0")).toEqual([
+    "Pod",
+    "CrashLoopBackOff",
+  ]);
+  expect(cells("workloads-problems-row-deployments/shop/web")).toEqual([
+    "Deployment",
+    "Stalled",
+  ]);
+  expect(cells("workloads-problems-row-pods/default/web-1")).toEqual([
+    "Pod",
+    "Pending",
+  ]);
+  expect(screen.queryByTestId("workloads-problems-footer")).toBeNull();
+
+  fireEvent.click(
+    screen.getByTestId("workloads-problems-open-pods/shop/api-0"),
+  );
+  expect(text("where")).toBe(
+    "/cluster/c1/workloads?open=pods&object=shop%2Fapi-0",
+  );
+  await act(flush);
+  expect(text("detail-title")).toBe("api-0");
+  fireEvent.keyDown(screen.getByTestId("detail-close"), { key: "Escape" });
+  await act(flush);
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  expect(text("where")).toBe("/cluster/c1/workloads");
+
+  fireEvent.click(
+    screen.getByTestId("workloads-problems-open-deployments/shop/web"),
+  );
+  expect(text("where")).toBe(
+    "/cluster/c1/workloads?open=deployments.apps&object=shop%2Fweb",
+  );
+  await act(flush);
+  expect(text("detail-kind")).toBe("Deployment");
+});
+
+test("past fifty problems the card says how many there are", async () => {
+  const fake = fakeBackend();
+  await show();
+  await snapshots(fake, {
+    pods: Array.from({ length: 51 }, (_, i) =>
+      pod(`p-${i}`, "shop", "crashing"),
+    ),
+  });
+  expect(rowKeys("workloads-problems")).toHaveLength(50);
+  expect(text("workloads-problems-footer")).toBe(
+    "Showing 50 of 51. The lists show them all.",
+  );
+});
+
+test("with nothing failing or pending, every workload is healthy", async () => {
+  const fake = fakeBackend();
+  await show();
+  await snapshots(fake, {
+    pods: [pod("a", "shop", "running")],
+    deployments: [availableDeployment("web", "shop")],
+  });
+  expect(text("workloads-problems-empty")).toContain(
+    "Every workload is healthy",
+  );
+});
+
+test("Recent events shows the eight newest, and an event opens the object it names when discovery lists its kind", async () => {
+  const fake = fakeBackend();
+  await show();
+  const events = Array.from({ length: 10 }, (_, i) =>
+    event(`e${i}`, { minutes: 20 - i }),
+  );
+  events[9] = event("e9", {
+    minutes: 2,
     type: "Warning",
-    object: "web-7f9c5d-x2k9p",
+    reason: "BackOff",
     message: "Back-off restarting failed container api",
+    involved: {
+      apiVersion: "v1",
+      kind: "Pod",
+      name: "api-0",
+      namespace: "default",
+    },
+  });
+  events[8] = event("e8", {
+    minutes: 3,
+    involved: {
+      apiVersion: "example.com/v1",
+      kind: "Widget",
+      name: "w-1",
+      namespace: "default",
+    },
+  });
+  events[7] = event("e7", {
+    minutes: 4,
+    reason: "NodeReady",
+    involved: { apiVersion: "v1", kind: "Node", name: "n1" },
   });
   await snapshots(fake, { events });
 
-  const rows = within(eventsTable()).getAllByTestId("workload-event");
-  expect(rows).toHaveLength(10);
-  const first = within(rows[0] as HTMLElement).getAllByRole("cell");
-  expect(first[1]?.querySelector(".badge")?.className).toMatch(/\bwarn\b/);
-  expect(first[1]?.textContent).toBe("Warning");
-  expect(
-    within(first[2] as HTMLElement).getByTitle("Pod/web-7f9c5d-x2k9p"),
-  ).toBeTruthy();
-  expect(
-    within(first[3] as HTMLElement).getByTitle(
-      "Back-off restarting failed container api",
-    ),
-  ).toBeTruthy();
-  const second = within(rows[1] as HTMLElement).getAllByRole("cell");
-  expect(second[1]?.querySelector(".badge")?.className).toMatch(/\bneutral\b/);
-  expect(second[2]?.textContent).toBe("Pod/pod-e10");
-  // e0 and e1 are the oldest, so they are left out.
-  expect(screen.queryByText("Pod/pod-e1")).toBeNull();
-  expect(screen.queryByText("Pod/pod-e0")).toBeNull();
+  expect(heads("workloads-events")).toEqual([
+    "Object",
+    "Type",
+    "Message",
+    "Age",
+  ]);
+  expect(rowKeys("workloads-events")).toEqual([
+    "e9",
+    "e8",
+    "e7",
+    "e6",
+    "e5",
+    "e4",
+    "e3",
+    "e2",
+  ]);
+  const [object, ...rest] = rowCells("workloads-events-row-e9");
+  expect(object).toContain("api-0");
+  expect(object).toContain("Pod · BackOff");
+  expect(rest.slice(0, 2)).toEqual([
+    "Warning",
+    "Back-off restarting failed container api",
+  ]);
+  // Two minutes, and the few milliseconds the test took since.
+  expect(rest[2]).toMatch(/^2m(\d+s)?$/);
+  expect(cells("workloads-events-row-e8")[0]).toBe("Normal");
+  // A kind discovery does not list is plain text.
+  expect(text("workloads-events-row-e8")).toContain("w-1");
+  expect(screen.queryByTestId("workloads-events-open-e8")).toBeNull();
+
+  fireEvent.click(screen.getByTestId("workloads-events-open-e9"));
+  expect(text("where")).toBe(
+    "/cluster/c1/workloads?open=pods&object=default%2Fapi-0",
+  );
+  await act(flush);
+  expect(text("detail-title")).toBe("api-0");
+  fireEvent.keyDown(screen.getByTestId("detail-close"), { key: "Escape" });
+  await act(flush);
+
+  // An event about a Node opens the Node, which has no namespace.
+  fireEvent.click(screen.getByTestId("workloads-events-open-e7"));
+  expect(text("where")).toBe("/cluster/c1/workloads?open=nodes&object=%2Fn1");
+  await act(flush);
+  expect(text("detail-kind")).toBe("Node");
 });
 
-test("events the user may not list leave the kinds alone", async () => {
+test("with no event, Recent events says so", async () => {
+  const fake = fakeBackend();
+  await show();
+  await snapshots(fake, {});
+  const empty = text("workloads-events-empty");
+  expect(empty).toContain("No recent events");
+  expect(empty).toContain("Events of the selected namespaces show here.");
+});
+
+test("events that may not be listed say so and leave the kinds alone", async () => {
   const fake = fakeBackend();
   await show();
   await fake.send("events", {
@@ -412,94 +669,36 @@ test("events the user may not list leave the kinds alone", async () => {
     message: "events is forbidden",
   });
   await snapshots(fake, { pods: [pod("a", "shop", "running")] });
-  expect(screen.getByTestId("workloads-events-status").textContent).toContain(
-    "events is forbidden",
-  );
-  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
+  expect(text("workloads-events-empty")).toContain("You may not list events");
+  expect(tile("pods")).toEqual(["1", "All healthy", "ok"]);
 });
 
-test("the namespace filter of the lists limits the counts and the events", async () => {
-  connect(["team-a", "team-b"]);
-  const fake = fakeBackend({ "namespaces:c1": ["team-a"] });
+test("the namespaces chosen in the lists show as a note, and only they are asked for and counted", async () => {
+  const fake = fakeBackend({ "namespaces:c1": ["team-a", "team-b"] });
   await show();
-  await snapshots(fake, {
-    pods: [pod("a", "team-a", "running")],
-    events: [event("ea", { namespace: "team-a" })],
-  });
   await waitFor(() =>
-    expect(screen.getByTestId("namespace-filter").textContent).toContain(
-      "team-a",
+    expect(text("workloads-overview-namespaces")).toContain(
+      "Namespaces: team-a, team-b",
     ),
   );
-  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
-  expect(screen.getByText("Pod/pod-ea")).toBeTruthy();
-
-  // The open menu hides the page from the accessibility tree, so it closes each time.
-  toggleNamespace("team-b");
-  await act(flush);
+  // Never every namespace first.
+  expect(fake.askedFor()).toEqual(
+    WATCHED.map((plural) => [plural, ["team-a", "team-b"]]),
+  );
   await snapshots(fake, {
     pods: [
       pod("a", "team-a", "running"),
       pod("b", "team-b", "crashing"),
-      pod("c", "team-b", "crashing"),
+      pod("c", "team-c", "crashing"),
     ],
-    events: [
-      event("ea", { namespace: "team-a" }),
-      event("eb", { namespace: "team-b" }),
-    ],
+    events: [event("ea", { namespace: "team-a" })],
   });
-  expect(cells("pods")).toEqual(["Pods", "3", "1", "0", "2"]);
-  expect(screen.getByText("Pod/pod-eb")).toBeTruthy();
-
-  toggleNamespace("team-a");
-  await act(flush);
-  await snapshots(fake, {
-    pods: [pod("b", "team-b", "crashing"), pod("c", "team-b", "crashing")],
-    events: [event("eb", { namespace: "team-b" })],
-  });
-  expect(cells("pods")).toEqual(["Pods", "2", "0", "0", "2"]);
-  expect(screen.queryByText("Pod/pod-ea")).toBeNull();
-  await waitFor(() =>
-    expect(fake.uiState["namespaces:c1"]).toEqual(["team-b"]),
-  );
-});
-
-test("a saved choice of namespaces is all that is asked for, and never every namespace first", async () => {
-  const fake = fakeBackend({ "namespaces:c1": ["team-a"] });
-  await show();
-
-  expect(fake.askedFor()).toEqual(
-    WATCHED.map((plural) => [plural, ["team-a"]]),
-  );
+  expect(tile("pods")).toEqual(["2", "1 failing", "danger"]);
+  expect(rowKeys("workloads-events")).toEqual(["ea"]);
 });
 
 test("with no namespace chosen, every namespace is asked for", async () => {
   const fake = fakeBackend();
   await show();
-
   expect(fake.askedFor()).toEqual(WATCHED.map((plural) => [plural, []]));
-});
-
-test("choosing a namespace asks for it, and a kind loads until its list of that namespace is there", async () => {
-  connect(["team-a", "team-b"]);
-  const fake = fakeBackend();
-  await show();
-  await snapshots(fake, {
-    pods: [pod("a", "team-a", "running"), pod("b", "team-b", "crashing")],
-    events: [event("eb", { namespace: "team-b" })],
-  });
-  expect(cells("pods")).toEqual(["Pods", "2", "1", "0", "1"]);
-
-  toggleNamespace("team-a");
-  await act(flush);
-
-  expect(fake.askedFor().filter(([, within]) => within.length > 0)).toEqual(
-    WATCHED.map((plural) => [plural, ["team-a"]]),
-  );
-  // The counts of every namespace are not shown as those of `team-a`.
-  expect(within(kindRow("pods")).getByRole("status")).toBeTruthy();
-  expect(screen.getByRole("status", { name: "Loading events" })).toBeTruthy();
-
-  await fake.snapshot("pods", [pod("a", "team-a", "running")]);
-  expect(cells("pods")).toEqual(["Pods", "1", "1", "0", "0"]);
 });
