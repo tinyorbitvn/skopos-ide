@@ -576,6 +576,27 @@ test("a move between windows gives the core's outcome", async () => {
   ).resolves.toEqual(outcome);
 });
 
+test("the exec consent calls name the cluster and the request", async () => {
+  const ipc = mockBackend({
+    cluster_exec_request: () => ({ requestId: 7 }),
+    cluster_exec_request_details: () => ({ args: [], env: [] }),
+    cluster_exec_allow: () => null,
+    cluster_exec_forget: () => null,
+  });
+
+  await api.clusterExecRequest("c1");
+  await api.clusterExecRequestDetails("c1", 7);
+  await api.clusterExecAllow("c1", 7);
+  await api.clusterExecForget("c1");
+
+  expect(ipc.calls).toEqual([
+    { cmd: "cluster_exec_request", args: { id: "c1" } },
+    { cmd: "cluster_exec_request_details", args: { id: "c1", requestId: 7 } },
+    { cmd: "cluster_exec_allow", args: { id: "c1", requestId: 7 } },
+    { cmd: "cluster_exec_forget", args: { id: "c1" } },
+  ]);
+});
+
 const SCOPE: ChatScope = { clusters: ["c1"], global: false };
 const OBJECT: ObjectRef = {
   cluster: "c1",

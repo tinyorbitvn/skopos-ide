@@ -26,6 +26,8 @@ import type { ControlPlane } from "./generated/ControlPlane";
 import type { DataChange } from "./generated/DataChange";
 import type { DrainEvent } from "./generated/DrainEvent";
 import type { DrainOptions } from "./generated/DrainOptions";
+import type { ExecRequest } from "./generated/ExecRequest";
+import type { ExecRequestDetails } from "./generated/ExecRequestDetails";
 import type { GraphEvent } from "./generated/GraphEvent";
 import type { HelmInfo } from "./generated/HelmInfo";
 import type { HelmInstallRequest } from "./generated/HelmInstallRequest";
@@ -106,6 +108,17 @@ export const api = {
   clusterConnect: (id: string) =>
     call<ConnectionState>("cluster_connect", { id }),
   clusterDisconnect: (id: string) => call<void>("cluster_disconnect", { id }),
+  /** What the last blocked connect refused to run, without arguments or values. */
+  clusterExecRequest: (id: string) =>
+    call<ExecRequest>("cluster_exec_request", { id }),
+  /** The arguments and environment of that request, when the user asks to see them. */
+  clusterExecRequestDetails: (id: string, requestId: number) =>
+    call<ExecRequestDetails>("cluster_exec_request_details", { id, requestId }),
+  /** Remembers that the cluster's kubeconfig may run that request. It does not connect. */
+  clusterExecAllow: (id: string, requestId: number) =>
+    call<void>("cluster_exec_allow", { id, requestId }),
+  /** Takes the consent back and disconnects the cluster. */
+  clusterExecForget: (id: string) => call<void>("cluster_exec_forget", { id }),
   clusterState: (id: string) => call<ConnectionState>("cluster_state", { id }),
   /** Health of the API server and the control-plane components; what is not visible is null. */
   clusterControlPlane: (id: string) =>
