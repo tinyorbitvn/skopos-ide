@@ -56,6 +56,7 @@ export function ClusterHome(props: {
         clusterId={clusterId}
         clusterName={props.clusterName}
         info={info}
+        allocatable={{ cores: null, bytes: null }}
       />
     </section>
   );
