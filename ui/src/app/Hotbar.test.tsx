@@ -228,7 +228,7 @@ test("a long non-ASCII name stays on one line in the tooltip, in full", async ()
   expect(style.whiteSpace).toBe("nowrap");
 });
 
-test("the Help menu sits directly above Preferences and lists three items", async () => {
+test("the Help menu sits directly above Preferences and lists four items", async () => {
   await show([alpha], []);
 
   const help = screen.getByTestId("hotbar-help");
