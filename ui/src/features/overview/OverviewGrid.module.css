@@ -1,0 +1,50 @@
+/* An overview page's grid (cluster overview spec §3.1). The frame is the container. */
+.frame {
+  container: overview / inline-size;
+  min-width: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space-8);
+  align-items: stretch;
+}
+
+/* The cards of a row stretch to the row's height. */
+.cell {
+  display: flex;
+  flex-direction: column;
+  grid-column: span 12;
+  min-width: 0;
+}
+
+.cell > * {
+  flex: 1 1 auto;
+}
+
+@container overview (min-width: 900px) {
+  .cell[data-span="4"] {
+    grid-column: span 4;
+  }
+
+  .cell[data-span="5"] {
+    grid-column: span 5;
+  }
+
+  .cell[data-span="6"] {
+    grid-column: span 6;
+  }
+
+  .cell[data-span="7"] {
+    grid-column: span 7;
+  }
+
+  .cell[data-span="8"] {
+    grid-column: span 8;
+  }
+
+  .cell[data-span="12"] {
+    grid-column: span 12;
+  }
+}
