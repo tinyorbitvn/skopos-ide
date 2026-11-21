@@ -172,6 +172,13 @@ describe("manifestUrls", () => {
       () => manifestUrls(moved, VERSION),
       /windows-x86_64 points at/,
     );
+    const swapped = structuredClone(manifest);
+    swapped.platforms["windows-x86_64"].url =
+      swapped.platforms["linux-x86_64-deb"].url;
+    assert.throws(
+      () => manifestUrls(swapped, VERSION),
+      /windows-x86_64 points at .*\.deb/,
+    );
     for (const bad of [null, [], "latest"]) {
       assert.throws(() => manifestUrls(bad, VERSION), /latest\.json/);
     }
