@@ -7,9 +7,11 @@ import type { KubeObject } from "../../kinds/objects";
 import { kindSpec } from "../../kinds/registry";
 import type { ResourceListState } from "../../stores/resources";
 import {
+  type Discovery,
   inNamespaces,
   kindRow,
   latestEvents,
+  listView,
   WORKLOAD_KINDS,
   workloadCounts,
 } from "./counts";
@@ -193,16 +195,23 @@ test("a kind the cluster does not serve or the user may not list has no counts",
     kind: PODS,
     state: "unavailable",
     reason: "This cluster does not serve Pods.",
+    cause: "notServed",
   });
   expect(
     kindRow(PODS, undefined, { loading: false, error: "boom" }, list(), []),
-  ).toEqual({ kind: PODS, state: "unavailable", reason: "boom" });
+  ).toEqual({
+    kind: PODS,
+    state: "unavailable",
+    reason: "boom",
+    cause: "error",
+  });
   expect(
     kindRow(PODS, served({ canList: false }), discovered, list(), []),
   ).toEqual({
     kind: PODS,
     state: "unavailable",
     reason: "You may not list Pods.",
+    cause: "forbidden",
   });
   expect(
     kindRow(
@@ -212,14 +221,73 @@ test("a kind the cluster does not serve or the user may not list has no counts",
       list({ status: "forbidden", message: "pods is forbidden" }),
       [],
     ),
-  ).toEqual({ kind: PODS, state: "unavailable", reason: "pods is forbidden" });
+  ).toEqual({
+    kind: PODS,
+    state: "unavailable",
+    reason: "pods is forbidden",
+    cause: "forbidden",
+  });
   expect(
     kindRow(PODS, served(), discovered, list({ status: "notServed" }), []),
   ).toEqual({
     kind: PODS,
     state: "unavailable",
     reason: "This cluster does not serve Pods.",
+    cause: "notServed",
   });
+});
+
+test("an unavailable list says why by its cause, whatever its reason reads (R1)", () => {
+  const view = (
+    info: ApiResourceInfo | undefined,
+    discovery: Discovery,
+    state: ResourceListState,
+  ) => listView("PersistentVolumes", info, discovery, state, []);
+  expect(view(undefined, { loading: true, error: null }, list())).toEqual({
+    state: "loading",
+  });
+  expect(
+    view(undefined, { loading: false, error: "the server is gone" }, list()),
+  ).toEqual({
+    state: "unavailable",
+    reason: "the server is gone",
+    cause: "error",
+  });
+  expect(view(undefined, discovered, list())).toEqual({
+    state: "unavailable",
+    reason: "This cluster does not serve PersistentVolumes.",
+    cause: "notServed",
+  });
+  expect(view(served({ canList: false }), discovered, list())).toEqual({
+    state: "unavailable",
+    reason: "You may not list PersistentVolumes.",
+    cause: "forbidden",
+  });
+  expect(
+    view(
+      served(),
+      discovered,
+      list({ status: "forbidden", message: "persistentvolumes is forbidden" }),
+    ),
+  ).toEqual({
+    state: "unavailable",
+    reason: "persistentvolumes is forbidden",
+    cause: "forbidden",
+  });
+  expect(
+    view(
+      served(),
+      discovered,
+      list({ status: "notServed", message: "the cluster disconnected" }),
+    ),
+  ).toEqual({
+    state: "unavailable",
+    reason: "the cluster disconnected",
+    cause: "notServed",
+  });
+  expect(view(served(), discovered, list({ items: [object("pv-1")] }))).toEqual(
+    { state: "ready", items: [object("pv-1")] },
+  );
 });
 
 const event = (
