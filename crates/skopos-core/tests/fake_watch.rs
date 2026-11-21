@@ -12,7 +12,9 @@ use skopos_core::error::ErrorCode;
 use skopos_core::graph::{GraphEvent, GraphRel};
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
-use skopos_core::resources::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
+use skopos_core::resources::{
+    ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus, NAMESPACE_LISTS_AT_ONCE,
+};
 use skopos_fakekube::{DenyRule, FakeKube, FakeKubeConfig, FakeResource};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
@@ -970,6 +972,44 @@ async fn a_new_list_of_each_namespace_sends_no_rows_of_the_other() {
     assert_eq!(upserted, ["later-a", "later-b"], "{}", pods.summary());
     assert!(deleted.is_empty(), "{deleted:?}");
     assert!(pods.has("a", "in-a") && pods.has("b", "in-b"));
+}
+
+/// Without the right to list a kind in every namespace, each namespace is listed by itself.
+/// A cluster can have hundreds, so only some of them are listed at one time, whatever the
+/// number of kinds being listed.
+#[tokio::test]
+async fn namespaces_are_listed_a_few_at_a_time_after_a_cluster_wide_refusal() {
+    let names: Vec<String> = (0..40).map(|n| format!("team-{n:02}")).collect();
+    let (core, fake, id, _root) = connected(FakeKubeConfig {
+        forbid_cluster_wide_pods: true,
+        deny_cluster_wide: vec![DenyRule {
+            verb: "list".into(),
+            plural: "secrets".into(),
+            namespace: None,
+        }],
+        namespaces: names.clone(),
+        ..Default::default()
+    })
+    .await;
+    for name in &names {
+        fake.add_pod(name, "web");
+    }
+    fake.delay_namespaced_lists(Duration::from_millis(30));
+
+    let mut pods = Consumer::subscribe(&core, &id, pods()).await;
+    let _secrets = Consumer::subscribe(&core, &id, secrets()).await;
+    pods.until("the pod of every namespace", |c| c.rows.len() == 40)
+        .await;
+    eventually("a watch of every namespace for both kinds", || {
+        fake.open_watch_count() == 80
+    })
+    .await;
+
+    let most = fake.most_namespaced_lists_at_once();
+    assert!(
+        (2..=NAMESPACE_LISTS_AT_ONCE).contains(&most),
+        "{most} namespaces were listed at one time"
+    );
 }
 
 #[tokio::test]
