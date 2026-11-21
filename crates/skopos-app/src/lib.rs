@@ -3,6 +3,7 @@ mod events;
 mod keychain;
 mod menu;
 mod state;
+mod updates;
 mod windows;
 
 use std::sync::Arc;
@@ -98,6 +99,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState { core: core.clone() })
         .manage(windows::WindowTracker::default())
         .on_window_event(windows::on_window_event)
@@ -219,9 +221,15 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::windows::window_flushed,
             commands::windows::window_tab_move,
             commands::windows::window_tab_drop,
+            commands::updates::update_state_get,
+            commands::updates::update_check,
+            commands::updates::update_install,
+            commands::updates::update_cancel,
+            commands::updates::update_skip,
         ])
         .setup(move |app| {
             windows::restore(app.handle(), &forwarded);
+            updates::start(app.handle(), &forwarded);
             events::spawn_forwarder(app.handle().clone(), forwarded);
             #[cfg(target_os = "macos")]
             menu::install(app.handle())?;
@@ -313,6 +321,17 @@ mod capability_tests {
         }
     }
 
+    /// In-app update spec §4: the UI calls our commands, so the webview gets no updater API.
+    #[test]
+    fn webview_has_no_updater_permission() {
+        for raw in [
+            include_str!("../capabilities/default.json"),
+            include_str!("../capabilities-e2e/e2e.json"),
+        ] {
+            assert!(!raw.contains("updater"));
+        }
+    }
+
     /// Spec P35: the core owns window bounds, so the window-state plugin is gone.
     #[test]
     fn the_window_state_plugin_is_gone() {
@@ -340,5 +359,34 @@ mod bundle_tests {
         for source in ["../../THIRD_PARTY_NOTICES.md", "../../LICENSE"] {
             assert!(crate_dir.join(source).is_file(), "{source} is missing");
         }
+    }
+}
+
+#[cfg(test)]
+mod updater_config_tests {
+    fn config() -> serde_json::Value {
+        serde_json::from_str(include_str!("../tauri.conf.json")).unwrap()
+    }
+
+    /// In-app update spec §6.2: the app trusts only the key whose private half signs releases.
+    #[test]
+    fn the_updater_trusts_the_committed_key_and_asks_the_latest_release() {
+        let config = config();
+        let updater = &config["plugins"]["updater"];
+        assert_eq!(updater["pubkey"], include_str!("../updater.key.pub").trim());
+        assert_eq!(
+            updater["endpoints"],
+            serde_json::json!([
+                "https://github.com/vanlongme/skopos-ide/releases/latest/download/latest.json"
+            ])
+        );
+        assert_eq!(updater["windows"]["installMode"], "passive");
+    }
+
+    /// Without the private key every CI, e2e and local build would fail: only the release
+    /// build makes updater files (spec §6.2).
+    #[test]
+    fn only_the_release_build_makes_updater_files() {
+        assert!(config()["bundle"].get("createUpdaterArtifacts").is_none());
     }
 }

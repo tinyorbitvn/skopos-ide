@@ -84,3 +84,25 @@
 .placeholder {
   padding: var(--space-8);
 }
+
+.statusUpdate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-accent);
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.statusUpdate:hover {
+  background: var(--surface-hover);
+}
+
+.statusUpdate:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

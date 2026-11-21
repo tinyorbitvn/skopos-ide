@@ -4,7 +4,13 @@
 
 /// The ids of the app items. Selecting one sends `menu://command` with `{ id }` to the
 /// focused window.
-pub const APP_COMMANDS: [&str; 4] = ["about", "preferences", "palette", "shortcuts"];
+pub const APP_COMMANDS: [&str; 5] = [
+    "about",
+    "check_updates",
+    "preferences",
+    "palette",
+    "shortcuts",
+];
 pub const MENU_EVENT: &str = "menu://command";
 
 /// The Tauri predefined items the menu uses.
@@ -54,6 +60,11 @@ pub fn menu_layout() -> Vec<MenuSpec> {
                 App {
                     id: "about",
                     label: "About SkoposIDE",
+                    accelerator: None,
+                },
+                App {
+                    id: "check_updates",
+                    label: "Check for Updates…",
                     accelerator: None,
                 },
                 Separator,
@@ -219,6 +230,7 @@ mod tests {
                     "SkoposIDE",
                     vec![
                         "About SkoposIDE",
+                        "Check for Updates…",
                         "-",
                         "Settings…",
                         "-",
@@ -258,6 +270,7 @@ mod tests {
             apps,
             vec![
                 ("about", None),
+                ("check_updates", None),
                 ("preferences", Some("CmdOrCtrl+,")),
                 ("palette", Some("CmdOrCtrl+Shift+P")),
                 ("shortcuts", Some("CmdOrCtrl+/")),

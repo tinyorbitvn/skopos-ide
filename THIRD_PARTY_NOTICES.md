@@ -214,7 +214,7 @@ MIT:
 - `block-buffer` 0.10.4: Copyright (c) 2018-2019 The RustCrypto Project Developers
 - `block-buffer` 0.12.1, `block-padding`: Copyright (c) 2018-2025 The RustCrypto Project
   Developers
-- `block2`, `objc2`, `objc2-encode`, `objc2-exception-helper`: Author: Mads Marquart
+- `block2`, `objc2`, `objc2-encode`, `objc2-exception-helper`, `objc2-osa-kit`: Author: Mads Marquart
 - `brotli`: Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
 - `bytemuck`: Copyright (c) 2019 Daniel "Lokathor" Gee.
 - `bytes`: Copyright (c) 2018 Carl Lerche
@@ -337,6 +337,7 @@ MIT:
 - `matchers`, `sharded-slab`: Copyright (c) 2019 Eliza Weisman
 - `memoffset`: Copyright (c) 2017 Gilad Naaman
 - `mime`: Copyright (c) 2014 Sean McArthur
+- `minisign-verify`: Copyright (c) 2019-2025 Frank Denis
 - `miniz_oxide`: Copyright 2013-2014 RAD Game Tools and Valve Software; Copyright 2010-2014 Rich
   Geldreich and Tenacious Software LLC; Copyright (c) 2017 Frommi; Copyright (c) 2017-2024
   oyvindln
@@ -353,6 +354,7 @@ MIT:
 - `open`: Copyright © `2015` `Sebastian Thiel`
 - `ordered-stream`: Authors: Daniel De Graaf, Zeeshan Ali Khan
 - `os_pipe`: Author: Jack O'Connor
+- `osakit`: Copyright (c) 2024 Marat Dulin
 - `parking`: Copyright 2014-2020 The Rust Project Developers; Authors: Stjepan Glavina, The Rust
   Project Developers
 - `pem`: Copyright (c) 2016 Jonathan Creekmore
@@ -419,8 +421,8 @@ MIT:
 - `system-configuration`, `system-configuration-sys`: Copyright (c) 2024 Mullvad VPN AB
 - `tar`: Copyright (c) The tar-rs Project Contributors
 - `tauri`, `tauri-codegen`, `tauri-macros`, `tauri-plugin-clipboard-manager`,
-  `tauri-plugin-dialog`, `tauri-plugin-fs`, `tauri-plugin-opener`, `tauri-runtime`,
-  `tauri-runtime-wry`, `tauri-utils`: Copyright (c) 2017 - Present Tauri Apps Contributors
+  `tauri-plugin-dialog`, `tauri-plugin-fs`, `tauri-plugin-opener`, `tauri-plugin-updater`,
+  `tauri-runtime`, `tauri-runtime-wry`, `tauri-utils`: Copyright (c) 2017 - Present Tauri Apps Contributors
 - `tempfile`: Copyright (c) 2015 Steven Allen
 - `tendril`: Copyright (c) 2015 Keegan McAllister
 - `tiff`: Copyright (c) 2018 PistonDevelopers
@@ -461,6 +463,7 @@ MIT:
 - `wry`: Copyright (c) 2020-2023 Ngo Iok Ui & Tauri Programme within The Commons Conservancy
 - `x11`, `x11-dl`: Authors: daggerbot, Erle Pereira, AltF02
 - `x11rb`, `x11rb-protocol`: Copyright 2019 x11rb Contributers
+- `xattr`: Copyright (c) 2015 Steven Allen
 - `zbus`, `zbus_macros`, `zbus_names`, `zvariant`, `zvariant_derive`: Copyright (c) 2024 Zeeshan
   Ali Khan & zbus contributors
 - `zcheapstr`: Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors

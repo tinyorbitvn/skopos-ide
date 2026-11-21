@@ -1,5 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
+import {
+  resetUpdatesForTest,
+  useUpdates,
+} from "../features/updates/updateStore";
 import type { PortForward } from "../ipc/generated/PortForward";
 import type { TabState } from "../ipc/generated/TabState";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
@@ -7,9 +11,11 @@ import {
   resetPortForwardsForTest,
   usePortForwards,
 } from "../stores/portForwards";
+import { resetShellForTest, useShell } from "../stores/shell";
 import { resetWindowLayoutForTest } from "../stores/windowLayout";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
 import { forward } from "../test/portForwards";
+import { RELEASE, updateState } from "../test/updates";
 import { StatusBar } from "./StatusBar";
 
 function tab(id: string, path: string): TabState {
@@ -17,6 +23,8 @@ function tab(id: string, path: string): TabState {
 }
 
 beforeEach(() => {
+  resetUpdatesForTest();
+  resetShellForTest();
   resetCatalogForTest();
   resetPortForwardsForTest();
   resetWindowLayoutForTest();
@@ -122,4 +130,66 @@ test("the count follows the store", async () => {
   await show([forward({ id: "a", state: "running" })]);
   act(() => usePortForwards.setState({ forwards: [forward({ id: "a" })] }));
   expect(screen.queryByTestId("status-port-forwards")).toBeNull();
+});
+
+const available = updateState({
+  phase: { type: "available", release: RELEASE },
+});
+
+test("without an update the right side ends with the version", async () => {
+  await show([]);
+  expect(screen.getByTestId("status-version").textContent).toBe(
+    "SkoposIDE 0.1.0",
+  );
+  expect(screen.queryByTestId("status-update")).toBeNull();
+});
+
+test("an offered release replaces the version with a button that opens the dialog", async () => {
+  useUpdates.setState({ state: available });
+  await show([]);
+  expect(screen.queryByTestId("status-version")).toBeNull();
+  const button = screen.getByTestId("status-update");
+  expect(button.textContent).toBe("Update to 0.10.0");
+  fireEvent.click(button);
+  expect(useShell.getState().dialog).toBe("updates");
+});
+
+test("a skipped release keeps the version, and a newer one brings the button back", async () => {
+  useUpdates.setState({ state: { ...available, skipped: "0.10.0" } });
+  await show([]);
+  expect(screen.getByTestId("status-version").textContent).toBe(
+    "SkoposIDE 0.1.0",
+  );
+  act(() =>
+    useUpdates.setState({
+      state: {
+        ...available,
+        skipped: "0.10.0",
+        phase: {
+          type: "available",
+          release: { ...RELEASE, version: "0.11.0" },
+        },
+      },
+    }),
+  );
+  expect(screen.getByTestId("status-update").textContent).toBe(
+    "Update to 0.11.0",
+  );
+});
+
+test("a download shows its share in the status bar", async () => {
+  useUpdates.setState({
+    state: updateState({
+      phase: {
+        type: "downloading",
+        version: "0.10.0",
+        received: 6_720_000,
+        total: 16_000_000,
+      },
+    }),
+  });
+  await show([]);
+  expect(screen.getByTestId("status-update").textContent).toBe(
+    "Downloading 0.10.0 · 42%",
+  );
 });

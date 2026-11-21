@@ -2,7 +2,8 @@ name: release
 
 # Pushing a v* tag (scripts/release.sh bump, then git push --atomic origin main <tag>) checks
 # the tag, runs the whole CI on it, drafts the release with its CHANGELOG notes, builds the four
-# targets into that draft, and publishes it once every build has passed. See docs/releasing.md.
+# targets into that draft, and publishes it with the updater's latest.json once every build has
+# passed. See docs/releasing.md.
 on:
   push:
     tags: ["v*"]
@@ -109,12 +110,25 @@ jobs:
         with:
           rust-targets: ${{ matrix.rust-targets }}
           cache-key: ${{ matrix.target }}
-      - uses: tauri-apps/tauri-action@v0
+      - name: The updater signing key is set
+        env:
+          KEY_SET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set; see docs/releasing.md"
+            exit 1
+          fi
+      # Pinned to a commit: this step gets the updater signing key. Bump by hand.
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.draft.outputs.release-id }}
-          args: ${{ matrix.args }} --config crates/skopos-app/tauri.conf.json
+          # latest.json is built once, by the publish job, from all four builds.
+          uploadUpdaterJson: false
+          args: ${{ matrix.args }} --config crates/skopos-app/tauri.conf.json --config crates/skopos-app/tauri.updater.conf.json
       - name: Verify the macOS signature
         if: runner.os == 'macOS'
         run: |
@@ -127,10 +141,26 @@ jobs:
   publish:
     needs: [verify, draft, build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - name: Build latest.json from the draft's updater files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.draft.outputs.release-id }}
+        run: |
+          release="repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          dir="$RUNNER_TEMP/updater"
+          mkdir -p "$dir/sigs"
+          gh api "$release" --jq .body > "$dir/notes.md"
+          gh api "$release" --jq '.assets[].name' > "$dir/assets.txt"
+          gh release download "$GITHUB_REF_NAME" --pattern '*.sig' --dir "$dir/sigs" --clobber
+          node scripts/updater-manifest.mjs build --version "${GITHUB_REF_NAME#v}" \
+            --notes "$dir/notes.md" --assets "$dir/assets.txt" --sigs "$dir/sigs" \
+            --out "$dir/latest.json"
+          gh release upload "$GITHUB_REF_NAME" "$dir/latest.json" --clobber
       - name: Publish the draft once it holds every build
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,6 +175,19 @@ jobs:
             name="SkoposIDE_${version}_${suffix}"
             grep -qxF "$name" <<<"$names" || missing+=("$name")
           done
+          updater=(
+            "SkoposIDE_${version}_amd64.AppImage.sig"
+            "SkoposIDE_${version}_amd64.deb.sig"
+            "SkoposIDE_${version}_x64-setup.exe.sig"
+            "SkoposIDE_aarch64.app.tar.gz"
+            "SkoposIDE_aarch64.app.tar.gz.sig"
+            "SkoposIDE_x64.app.tar.gz"
+            "SkoposIDE_x64.app.tar.gz.sig"
+            "latest.json"
+          )
+          for name in "${updater[@]}"; do
+            grep -qxF "$name" <<<"$names" || missing+=("$name")
+          done
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "::error::the draft lacks ${missing[*]}"
             exit 1
@@ -152,3 +195,28 @@ jobs:
           if [ "$PRERELEASE" = true ]; then latest=false; else latest=true; fi
           gh api -X PATCH "$release" -F draft=false -f make_latest="$latest" \
             --jq '"\(.html_url) with \(.assets | length) assets"'
+      - name: Installed copies find this release
+        # A pre-release is not Latest, so the link still serves the last stable release.
+        if: needs.verify.outputs.prerelease != 'true'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          # The latest link can lag behind the publish for a moment.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL -o "$RUNNER_TEMP/latest.json" "$url" &&
+              node scripts/updater-manifest.mjs urls --version "$version" \
+                --file "$RUNNER_TEMP/latest.json" > "$RUNNER_TEMP/urls.txt"; then
+              break
+            fi
+            if [ "$attempt" = 6 ]; then
+              echo "::error::$url does not offer $version"
+              exit 1
+            fi
+            sleep 20
+          done
+          while read -r asset; do
+            curl -fsSIL -o /dev/null "$asset" || {
+              echo "::error::$asset does not answer"
+              exit 1
+            }
+          done < "$RUNNER_TEMP/urls.txt"

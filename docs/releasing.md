@@ -38,10 +38,18 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
    2. **ci:** the whole CI runs on the tagged commit. Nothing is built if it fails.
    3. **draft:** a draft release is made with those notes.
    4. **build:** Linux, macOS arm64, macOS x64 and Windows builds are added to the draft. The
-      macOS signature is checked inside the dmg.
-   5. **publish:** once all four builds pass, the draft must hold the five installers (AppImage,
-      deb, arm64 and x64 dmg, Windows setup exe); then it is published and marked Latest. A tag
-      with a pre-release suffix, such as `v0.7.0-rc.1`, is published as a pre-release.
+      macOS signature is checked inside the dmg. Each build signs its updater files with the
+      updater key: the AppImage, the deb and the Windows setup exe get a `.sig`, and each macOS
+      build adds `SkoposIDE_aarch64.app.tar.gz` or `SkoposIDE_x64.app.tar.gz` and its `.sig`.
+      A build stops at once when the key's secret is not set.
+   5. **publish:** once all four builds pass, `scripts/updater-manifest.mjs` builds
+      `latest.json` from the draft's updater files and signatures and uploads it to the draft.
+      The draft must then hold the five installers (AppImage, deb, arm64 and x64 dmg, Windows
+      setup exe), the updater files and `latest.json`; then it is published and marked Latest.
+      A tag with a pre-release suffix, such as `v0.7.0-rc.1`, is published as a pre-release,
+      which installed copies are not offered. For a stable release, the job then checks that
+      `releases/latest/download/latest.json` offers the new version and that each of its
+      downloads answers.
 
 ## When a release fails
 
@@ -57,6 +65,37 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
   ```
 
   The version files and notes already say 0.7.0, so `make release` is not run again.
+
+## The updater key
+
+Installed copies install only an update signed with the updater key.
+
+- The maintainer made the key with `pnpm tauri signer generate -w ~/.tauri/skopos-updater.key`
+  and keeps the key file and its password in a password manager. Nobody else handles them, and
+  they are never committed.
+- The repository secrets `TAURI_SIGNING_PRIVATE_KEY` (the key file's content) and
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` hold them for the release builds.
+- The public half is `crates/skopos-app/updater.key.pub`, and the same line is `pubkey` in
+  `crates/skopos-app/tauri.conf.json`. A test checks that they match.
+- If the key is lost, installed copies cannot update any more. A release signed with a new key
+  must then be installed by hand.
+- Only the release build makes updater files (`--config crates/skopos-app/tauri.updater.conf.json`),
+  so CI, e2e and local builds need no key.
+
+## Testing an update by hand
+
+Do this for the first release that includes the updater, and again whenever the updater or the
+release workflow changes.
+
+1. Install the release by hand on macOS (arm64, and x64 where possible), Windows, the AppImage
+   and the deb.
+2. Publish the next release.
+3. In each copy, choose Help > Check for Updates…, then Install and Restart. Check that the app
+   restarts into the new version with its windows and tabs as they were.
+4. On macOS, check that no Gatekeeper prompt appears. Note any Keychain prompts: an ad-hoc
+   signed build asks again for the passwords it keeps in the Keychain.
+5. On the deb, check that cancelling the password prompt shows "The package was not installed.
+   If you cancelled the password prompt, try again." and that Try Again works.
 
 ## Project site
 
