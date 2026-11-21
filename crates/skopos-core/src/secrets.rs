@@ -9,6 +9,7 @@ use dashmap::DashMap;
 use serde::Deserialize;
 
 use crate::app_core::AppCore;
+use crate::blocking::blocking;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::metrics::MetricsProviderSetting;
@@ -98,10 +99,16 @@ impl Secrets {
         }
     }
 
-    /// The cluster's secret, from memory once read.
+    /// The cluster's secret when it is in memory, without asking the store.
+    fn remembered(&self, id: &ClusterId) -> Option<Secret> {
+        self.read.get(id).map(|secret| secret.clone())
+    }
+
+    /// The cluster's secret, from memory once read. Reading the store can block: see
+    /// `AppCore::metrics_secret`.
     pub(crate) fn get(&self, id: &ClusterId) -> CoreResult<Option<Secret>> {
-        if let Some(secret) = self.read.get(id) {
-            return Ok(Some(secret.clone()));
+        if let Some(secret) = self.remembered(id) {
+            return Ok(Some(secret));
         }
         let secret = self.store.get(id)?;
         if let Some(secret) = &secret {
@@ -152,6 +159,16 @@ impl AppCore {
     /// Whether a password or token is saved for the cluster (spec I51).
     pub fn metrics_secret_saved(&self, id: &ClusterId) -> CoreResult<bool> {
         Ok(self.secrets().get(id)?.is_some())
+    }
+
+    /// The cluster's secret, for async code. A keychain can wait on its user or on a keyring
+    /// that is locked, so a secret that is not in memory yet is read on a blocking thread.
+    pub(crate) async fn metrics_secret(&self, id: &ClusterId) -> CoreResult<Option<Secret>> {
+        if let Some(secret) = self.secrets().remembered(id) {
+            return Ok(Some(secret));
+        }
+        let (core, id) = (self.clone(), id.clone());
+        blocking(move || core.secrets().get(&id)).await
     }
 }
 

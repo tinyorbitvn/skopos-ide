@@ -35,7 +35,13 @@ struct EnvelopeRef<'a, T> {
 pub struct JsonStore<T> {
     path: PathBuf,
     version: u32,
+    /// The value readers get. Held only to copy or to replace it and never while the file
+    /// is written, so a reader, which may be the app's main thread, does not wait for the
+    /// disk.
     state: Mutex<T>,
+    /// Held for the whole of an update, so one at a time reads the value, changes it,
+    /// writes the file and replaces the value.
+    updating: Mutex<()>,
     tx: watch::Sender<T>,
     /// Set by a failed write of `try_update_kept`, cleared by a good one.
     save_failing: AtomicBool,
@@ -86,6 +92,7 @@ where
                 path,
                 version,
                 state: Mutex::new(value),
+                updating: Mutex::new(()),
                 tx,
                 save_failing: AtomicBool::new(false),
             },
@@ -156,15 +163,14 @@ where
     }
 
     /// As `update`, but `f` may refuse the change: its error leaves the value and the
-    /// file as they were. The lock is held throughout, so a check in `f` sees the
-    /// value it changes.
+    /// file as they were. No other update runs meanwhile, so a check in `f` sees the
+    /// value it changes. A reader gets the value from before until the file is written.
     pub fn try_update<R>(&self, f: impl FnOnce(&mut T) -> CoreResult<R>) -> CoreResult<R> {
-        let mut guard = self.lock();
-        let mut next = guard.clone();
+        let _updating = self.updating();
+        let mut next = self.get();
         let out = f(&mut next)?;
         self.write(&next)?;
-        *guard = next.clone();
-        self.tx.send_replace(next);
+        self.replace(next);
         Ok(out)
     }
 
@@ -177,16 +183,16 @@ where
         &self,
         f: impl FnOnce(&mut T) -> CoreResult<R>,
     ) -> CoreResult<(R, Option<StoreWarning>)> {
-        let mut guard = self.lock();
-        let mut next = guard.clone();
+        let _updating = self.updating();
+        let mut next = self.get();
         let out = f(&mut next)?;
-        let warning = self.keep(&mut guard, next);
+        let warning = self.keep(next);
         Ok((out, warning))
     }
 
     /// Writes `next` and sends it, keeping it in memory even when the write fails;
-    /// the warning is the one `try_update_kept` gives back.
-    fn keep(&self, guard: &mut MutexGuard<'_, T>, next: T) -> Option<StoreWarning> {
+    /// the warning is the one `try_update_kept` gives back. The caller holds `updating`.
+    fn keep(&self, next: T) -> Option<StoreWarning> {
         let warning = match self.write(&next) {
             Ok(()) => {
                 self.save_failing.store(false, Ordering::Relaxed);
@@ -204,9 +210,14 @@ where
                 })
             }
         };
-        **guard = next.clone();
-        self.tx.send_replace(next);
+        self.replace(next);
         warning
+    }
+
+    /// Makes `next` the value and sends it. The caller holds `updating`.
+    fn replace(&self, next: T) {
+        *self.lock() = next.clone();
+        self.tx.send_replace(next);
     }
 
     pub fn subscribe(&self) -> watch::Receiver<T> {
@@ -215,6 +226,10 @@ where
 
     fn lock(&self) -> MutexGuard<'_, T> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn updating(&self) -> MutexGuard<'_, ()> {
+        self.updating.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     fn write(&self, value: &T) -> CoreResult<()> {
@@ -253,13 +268,14 @@ where
         &self,
         f: impl FnOnce(&mut T) -> CoreResult<R>,
     ) -> CoreResult<(R, bool, Option<StoreWarning>)> {
-        let mut guard = self.lock();
-        let mut next = guard.clone();
+        let _updating = self.updating();
+        let current = self.get();
+        let mut next = current.clone();
         let out = f(&mut next)?;
-        if next == *guard {
+        if next == current {
             return Ok((out, false, None));
         }
-        let warning = self.keep(&mut guard, next);
+        let warning = self.keep(next);
         Ok((out, true, warning))
     }
 }
@@ -271,6 +287,76 @@ mod tests {
     #[derive(Default, Clone, Serialize, Deserialize, PartialEq, Debug)]
     struct Sample {
         n: u32,
+    }
+
+    #[test]
+    fn a_reader_does_not_wait_for_an_update_under_way() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _) = JsonStore::<Sample>::open(dir.path().join("a.json"), 1);
+        let store = Arc::new(store);
+        store.update(|v| v.n = 1).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        // An update that is held where it would be writing the file.
+        let writer = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                store
+                    .update(|v| {
+                        entered_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        v.n = 2;
+                    })
+                    .unwrap();
+            })
+        };
+        entered_rx.recv().unwrap();
+
+        let (read_tx, read_rx) = mpsc::channel();
+        let reader = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                let _ = read_tx.send(store.get().n);
+            })
+        };
+        let read = read_rx.recv_timeout(Duration::from_secs(2));
+
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+        reader.join().unwrap();
+        assert_eq!(read, Ok(1), "the reader waited for the update");
+        assert_eq!(store.get().n, 2);
+    }
+
+    #[test]
+    fn concurrent_updates_take_turns_and_none_is_lost() {
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.json");
+        let (store, _) = JsonStore::<Sample>::open(path.clone(), 1);
+        let store = Arc::new(store);
+
+        let writers: Vec<_> = (0..4)
+            .map(|_| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..10 {
+                        store.update(|v| v.n += 1).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+
+        assert_eq!(store.get().n, 40);
+        let (again, _) = JsonStore::<Sample>::open(path, 1);
+        assert_eq!(again.get().n, 40, "the file holds the last value");
     }
 
     #[test]
