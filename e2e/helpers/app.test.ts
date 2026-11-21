@@ -1,7 +1,11 @@
+import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { stopApp } from "./app.ts";
+import { keepAppLogs, stopApp } from "./app.ts";
 
 // A stand-in for the app's embedded WebDriver server. When its window is closed it
 // either quits at once, cutting the request off, or keeps running with no window.
@@ -33,16 +37,36 @@ async function startFakeApp(mode: "quits" | "stays"): Promise<FakeApp> {
   return { child, port: Number(String(line).trim()), exited };
 }
 
+function tempDir(t: { after: (fn: () => void) => void }): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skopos-app-test-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
 test("an app that quits while its window closes is not an error", { timeout: 10000 }, async (t) => {
   const app = await startFakeApp("quits");
   t.after(() => app.child.kill());
-  await stopApp(app.port);
+  assert.equal(await stopApp(tempDir(t), app.port), "exited");
   await app.exited;
 });
 
-test("an app still running after its window closed is killed", { timeout: 10000 }, async (t) => {
+// On macOS the stalled app's stacks are sampled first, which takes a few seconds.
+test("an app still running after its window closed is killed", { timeout: 20000 }, async (t) => {
   const app = await startFakeApp("stays");
   t.after(() => app.child.kill());
-  await stopApp(app.port, 300);
+  assert.equal(await stopApp(tempDir(t), app.port, 300), "killed");
   await app.exited;
+});
+
+test("the logs of each app config dir are kept apart", (t) => {
+  const kept = tempDir(t);
+  const first = tempDir(t);
+  const second = tempDir(t);
+  fs.mkdirSync(path.join(first, "logs"));
+  fs.writeFileSync(path.join(first, "logs", "skopos.log"), "first\n");
+
+  keepAppLogs([first, second], kept);
+
+  assert.deepEqual(fs.readdirSync(kept), [path.basename(first)]);
+  assert.equal(fs.readFileSync(path.join(kept, path.basename(first), "skopos.log"), "utf8"), "first\n");
 });
