@@ -20,7 +20,7 @@ its acceptance checklist passes.
 | Tray | Tray icon listing the connected clusters, with connect and quit. Deferred from Milestone A F19 on 2026-11-10 |
 | CLI | `skopos` command: open clusters and resources from a shell |
 | MCP | Model Context Protocol server exposing cluster tools to AI agents |
-| Delivery | Code signing, notarization, auto-update |
+| Delivery | Code signing, notarization |
 
 ## Milestone C: AI and extensions
 

@@ -59,6 +59,23 @@ Release builds are unsigned for now.
 - **Windows**: in SmartScreen choose "More info", then "Run anyway".
 - **Linux**: mark the AppImage executable with `chmod +x` and run it.
 
+## Updates
+
+SkoposIDE asks github.com for `latest.json` of the newest release 10 seconds after it starts
+and every 6 hours. Preferences > Updates turns this off, and Check for Updates… in the Help
+menu asks at once. When a newer release is out, a toast and a button in the status bar offer
+it. The update dialog shows the release notes; Install and Restart downloads the update,
+checks its signature, installs it and restarts SkoposIDE with its windows and tabs.
+
+- **macOS**: the app must be in Applications. A copy run from the disk image can't update
+  itself. After an update, macOS may ask again for the passwords SkoposIDE keeps in the
+  Keychain, because each build has its own ad-hoc signature; choose Always Allow.
+- **Windows**: the installer closes SkoposIDE, installs the update and starts it. If the
+  installer fails after SkoposIDE has closed, start SkoposIDE again: the old version is still
+  installed.
+- **Linux**: the AppImage replaces itself. The deb asks for your password to install the
+  package. Other packages can't update themselves.
+
 ## License
 
 Apache-2.0. Copyright The SkoposIDE Authors. See [LICENSE](LICENSE). Third-party credits are in

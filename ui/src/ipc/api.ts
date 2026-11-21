@@ -59,6 +59,7 @@ import type { TerminalSize } from "./generated/TerminalSize";
 import type { ToolName } from "./generated/ToolName";
 import type { ToolStatus } from "./generated/ToolStatus";
 import type { TopologyEvent } from "./generated/TopologyEvent";
+import type { UpdateState } from "./generated/UpdateState";
 import type { UsageOf } from "./generated/UsageOf";
 import type { UsageSnapshot } from "./generated/UsageSnapshot";
 import type { WatchEvent } from "./generated/WatchEvent";
@@ -695,4 +696,17 @@ export const api = {
   uiStateGet: (key: string) => call<JsonValue | null>("ui_state_get", { key }),
   uiStateSet: (key: string, value: JsonValue) =>
     call<void>("ui_state_set", { key, value }),
+  /** The in-app update state now; later changes arrive as `update://state`. */
+  updateStateGet: () => call<UpdateState>("update_state_get"),
+  /** A check the user asked for. Answers with the state it ended in, a failure included. */
+  updateCheck: () => call<UpdateState>("update_check"),
+  /**
+   * Downloads, verifies and installs the available release. The app restarts when it
+   * succeeds; a failure also arrives as the `failed` state.
+   */
+  updateInstall: () => call<void>("update_install"),
+  /** Stops a download; the state goes back to `available`. */
+  updateCancel: () => call<void>("update_cancel"),
+  /** No toast or status bar button for this version; a manual check still shows it. */
+  updateSkip: (version: string) => call<void>("update_skip", { version }),
 };

@@ -138,6 +138,23 @@ describe("parseRelease", () => {
     assert.throws(() => parseRelease(json), /https/);
     assert.throws(() => parseRelease(releaseJson({ html_url: "javascript:void(0)" })), /https/);
   });
+
+  test("the updater files beside the installers do not change what the site offers", () => {
+    const json = releaseJson();
+    const download = (name) => `${REPO_URL}/releases/download/v0.6.1/${name}`;
+    for (const name of [
+      "SkoposIDE_0.6.1_amd64.deb.sig",
+      "SkoposIDE_0.6.1_x64-setup.exe.sig",
+      "SkoposIDE_aarch64.app.tar.gz",
+      "SkoposIDE_aarch64.app.tar.gz.sig",
+      "SkoposIDE_x64.app.tar.gz",
+      "SkoposIDE_x64.app.tar.gz.sig",
+      "latest.json",
+    ]) {
+      json.assets.push({ name, size: 420, browser_download_url: download(name) });
+    }
+    assert.deepEqual(parseRelease(json), parseRelease(releaseJson()));
+  });
 });
 
 test("ASSET_SUFFIXES is the list the release workflow checks", () => {

@@ -31,9 +31,11 @@ import {
   Keyboard,
   LayoutGrid,
   Pin,
+  RefreshCw,
   Settings,
   TriangleAlert,
 } from "../design/icons";
+import { checkForUpdates } from "../features/updates/updateStore";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { useCatalog } from "../stores/catalog";
 import { useShell } from "../stores/shell";
@@ -138,7 +140,10 @@ function RailNotice(props: { label: string; icon: React.ReactNode }) {
   );
 }
 
-/** Spec C §9.1: the shell dialogs from the rail, without key chips. */
+/**
+ * Spec C §9.1: the shell dialogs from the rail, without key chips, and Check for
+ * Updates (in-app update R7).
+ */
 function HelpMenu() {
   const open = useShell((s) => s.open);
   return (
@@ -173,6 +178,13 @@ function HelpMenu() {
           icon: <Info size={14} aria-hidden="true" />,
           testId: "help-about",
           onSelect: () => open("about"),
+        },
+        {
+          id: "check-updates",
+          label: "Check for Updates…",
+          icon: <RefreshCw size={14} aria-hidden="true" />,
+          testId: "help-check-updates",
+          onSelect: () => void checkForUpdates(),
         },
       ]}
     />

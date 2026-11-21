@@ -572,6 +572,16 @@ impl AppCore {
         self.windows().get().windows
     }
 
+    /// The window the user focused last, or `main` when none was focused yet: where the
+    /// update toast shows (in-app update R3).
+    pub fn window_last_focused(&self) -> String {
+        self.windows()
+            .focus()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| MAIN_WINDOW.to_owned())
+    }
+
     pub fn window_layout(&self, label: &str) -> CoreResult<WindowLayout> {
         find(&self.windows().get(), label).cloned()
     }

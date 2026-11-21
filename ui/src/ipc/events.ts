@@ -4,6 +4,7 @@ import type { PortForward } from "./generated/PortForward";
 import type { StoreWarning } from "./generated/StoreWarning";
 import type { SyncWarning } from "./generated/SyncWarning";
 import type { ToolProgress } from "./generated/ToolProgress";
+import type { UpdateState } from "./generated/UpdateState";
 import type { WindowLayout } from "./generated/WindowLayout";
 import { windowLabel } from "./window";
 
@@ -46,7 +47,10 @@ export const events = {
   /** A tool download's progress: at most every 200 ms, and at once on each phase change. */
   onToolsProgress: (handler: (progress: ToolProgress) => void) =>
     on("tools://progress", handler),
-  /** The macOS menu's app items: `about`, `preferences`, `palette`, `shortcuts`. Only the focused window gets them. */
+  /** The whole update state, after every change, to every window. */
+  onUpdateState: (handler: (state: UpdateState) => void) =>
+    on("update://state", handler),
+  /** The macOS menu's app items: `about`, `check_updates`, `preferences`, `palette`, `shortcuts`. Only the focused window gets them. */
   onMenuCommand: (handler: (command: { id: string }) => void) =>
     onOwn("menu://command", handler),
   /**

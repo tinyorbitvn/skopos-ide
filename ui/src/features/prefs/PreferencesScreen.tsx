@@ -9,6 +9,7 @@ import {
   Input,
   Segmented,
   Spinner,
+  Switch,
   toast,
 } from "../../design";
 import { X } from "../../design/icons";
@@ -16,6 +17,8 @@ import { failureMessage } from "../../ipc/client";
 import type { SyncSource } from "../../ipc/generated/SyncSource";
 import type { Theme } from "../../ipc/generated/Theme";
 import { classifySourcePath, usePrefs } from "../../stores/prefs";
+import { checkForUpdates, useUpdates } from "../updates/updateStore";
+import { lastCheckedText } from "../updates/updateText";
 import { HelmReposSection } from "./HelmReposSection";
 import styles from "./PreferencesScreen.module.css";
 import { ToolsSection } from "./ToolsSection";
@@ -116,6 +119,37 @@ function Sources({ sources }: { sources: SyncSource[] }) {
   );
 }
 
+/** Automatic checks, when the last check succeeded, and a manual check (spec §5.3). */
+function UpdatesSection({ enabled }: { enabled: boolean }) {
+  const setUpdateCheck = usePrefs((s) => s.setUpdateCheck);
+  const lastCheckedAt = useUpdates((s) => s.state?.lastCheckedAt ?? null);
+  const checking = useUpdates((s) => s.state?.phase.type === "checking");
+  return (
+    <section className={styles.section}>
+      <h3 className={styles.heading}>Updates</h3>
+      <Switch
+        label="Check for updates automatically"
+        checked={enabled}
+        onChange={(on) => void setUpdateCheck(on)}
+        testId="prefs-update-check"
+      />
+      <div className={styles.updatesRow}>
+        <span className={styles.muted} data-testid="prefs-last-checked">
+          {lastCheckedText(lastCheckedAt, Date.now())}
+        </span>
+        <Button
+          size="sm"
+          loading={checking}
+          onClick={() => void checkForUpdates()}
+          data-testid="prefs-check-now"
+        >
+          Check Now
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function PreferencesScreen() {
   const prefs = usePrefs((s) => s.prefs);
   const loading = usePrefs((s) => s.loading);
@@ -161,6 +195,7 @@ export function PreferencesScreen() {
           />
         </div>
       </section>
+      <UpdatesSection enabled={prefs.updateCheck} />
     </div>
   );
 }

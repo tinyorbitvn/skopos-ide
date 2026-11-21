@@ -4,6 +4,7 @@ import type { PortForward } from "./PortForward";
 import type { StoreWarning } from "./StoreWarning";
 import type { SyncWarning } from "./SyncWarning";
 import type { ToolProgress } from "./ToolProgress";
+import type { UpdateState } from "./UpdateState";
 import type { WindowLayout } from "./WindowLayout";
 
-export type CoreEvent = { "type": "catalogChanged" } | { "type": "clusterState", id: string, state: ConnectionState, } | { "type": "kubeconfigWarnings", warnings: Array<SyncWarning>, } | { "type": "storeWarning", warning: StoreWarning, } | { "type": "portForwardsChanged", forwards: Array<PortForward>, } | { "type": "toolProgress", progress: ToolProgress, } | { "type": "catalogFoldersChanged" } | { "type": "windowLayoutChanged", layout: WindowLayout, };
+export type CoreEvent = { "type": "catalogChanged" } | { "type": "clusterState", id: string, state: ConnectionState, } | { "type": "kubeconfigWarnings", warnings: Array<SyncWarning>, } | { "type": "storeWarning", warning: StoreWarning, } | { "type": "portForwardsChanged", forwards: Array<PortForward>, } | { "type": "toolProgress", progress: ToolProgress, } | { "type": "catalogFoldersChanged" } | { "type": "windowLayoutChanged", layout: WindowLayout, } | { "type": "updateState", state: UpdateState, };

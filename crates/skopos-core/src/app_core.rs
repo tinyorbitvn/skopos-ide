@@ -35,7 +35,8 @@ use crate::store::{JsonStore, StoreWarning};
 use crate::tools::{ToolProgress, Tools};
 use crate::topology::TopologyHub;
 use crate::ui_state::UiState;
-use crate::windows::{WindowLayout, Windows};
+use crate::updates::{UpdateMemory, UpdateSource, UpdateState, Updates};
+use crate::windows::{WindowLayout, Windows, MAIN_WINDOW};
 
 const STORE_VERSION: u32 = 1;
 const PREFS_FILE: &str = "prefs.json";
@@ -45,6 +46,7 @@ const PORTFORWARDS_FILE: &str = "portforwards.json";
 const UI_STATE_FILE: &str = "ui-state.json";
 const CATALOG_FOLDERS_FILE: &str = "catalog-folders.json";
 const WINDOWS_FILE: &str = "windows.json";
+const UPDATES_FILE: &str = "updates.json";
 /// The safety net under file events, which some filesystems never deliver.
 const SYNC_POLL: Duration = Duration::from_secs(10);
 const EVENT_BACKLOG: usize = 64;
@@ -78,6 +80,11 @@ pub enum CoreEvent {
     /// window (`layout.label`) needs it.
     WindowLayoutChanged {
         layout: WindowLayout,
+    },
+    /// The in-app update state changed (in-app update spec §5.1). `state.toast_window` is set
+    /// only on the change that announces a release for the first time.
+    UpdateState {
+        state: UpdateState,
     },
 }
 
@@ -120,6 +127,8 @@ struct Inner {
     sync_events: Mutex<Option<JoinHandle<()>>>,
     events: broadcast::Sender<CoreEvent>,
     startup_warnings: Mutex<Vec<StoreWarning>>,
+    /// The in-app updates (in-app update spec §5.1).
+    updates: Updates,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -264,6 +273,9 @@ impl AppCore {
         let (ui_state, ui_warning) = UiState::open(paths.config.join(UI_STATE_FILE), STORE_VERSION);
         warnings.extend(ui_warning);
         let pasted = PastedConfigs::open(&paths.data)?;
+        let update_memory: JsonStore<UpdateMemory> =
+            open_store(&paths, UPDATES_FILE, &mut warnings);
+        let updates = Updates::new(update_memory, events.clone(), env!("CARGO_PKG_VERSION"));
 
         let (sync, snapshots) = KubeconfigSync::start(all_sources(&pasted, sources), SYNC_POLL);
         let sync_events = tokio::spawn(publish_sync_changes(
@@ -301,6 +313,7 @@ impl AppCore {
                 sync_events: Mutex::new(Some(sync_events)),
                 events,
                 startup_warnings: Mutex::new(warnings),
+                updates,
             }),
         })
     }
@@ -562,6 +575,29 @@ impl AppCore {
         &self.inner.helm
     }
 
+    pub(crate) fn updates(&self) -> &Updates {
+        &self.inner.updates
+    }
+
+    /// Starts the in-app updates with the app's source (in-app update spec §5.1).
+    /// `automatic` is false in debug and e2e builds. Call it inside the Tokio runtime.
+    pub fn updates_start(&self, source: Arc<dyn UpdateSource>, automatic: bool) {
+        // Weak: the scheduler must not keep the core alive.
+        let core = Arc::downgrade(&self.inner);
+        let toast_window = move || {
+            core.upgrade().map_or_else(
+                || MAIN_WINDOW.to_owned(),
+                |inner| AppCore { inner }.window_last_focused(),
+            )
+        };
+        self.inner.updates.start(
+            source,
+            automatic,
+            self.inner.prefs.subscribe(),
+            toast_window,
+        );
+    }
+
     /// Where `resources_discover(refresh)` calls of this cluster share their runs.
     pub(crate) fn discovery_flight(
         &self,
@@ -633,6 +669,7 @@ impl AppCore {
     /// network for. Then disconnects every cluster and stops background work. The last
     /// snapshot stays readable.
     pub async fn shutdown(&self) {
+        self.inner.updates.stop();
         self.sessions_stop_all();
         if !self.sessions_wait_idle(SHUTDOWN_LIMIT).await {
             tracing::warn!("some sessions did not stop within {SHUTDOWN_LIMIT:?}");
