@@ -201,6 +201,18 @@ describe("render", () => {
     assert.equal(html, '<img src="images/shot.png" width="800" height="600">');
   });
 
+  test("leads image paths back to the root from a page in a folder", () => {
+    const html = render("<img {{image:shot.png}}>", { release, images, sprite: "", base: "../" });
+    assert.equal(html, '<img src="../images/shot.png" width="1440" height="900">');
+  });
+
+  test("names the page in its errors", () => {
+    assert.throws(
+      () => render("{{nope}}", { release, images, sprite: "", page: "docs/metrics.html" }),
+      /site\/docs\/metrics\.html: unknown placeholder \{\{nope\}\}/,
+    );
+  });
+
   test("escapes release values for HTML", () => {
     const html = render("{{release.date}}", {
       release: { ...release, date: `<b>&"'` },
@@ -550,16 +562,42 @@ describe("page", () => {
     assert.ok(html.includes('<script src="ribbon.js" defer></script>'));
   });
 
-  test("lays the features out as six cards with figures and three small cards", () => {
+  test("lays the features out as nine cards, each with its canvas picture", () => {
     const cards = [...html.matchAll(/<article class="card ([^"]+)">([\s\S]*?)<\/article>/g)];
     assert.deepEqual(
-      cards.filter((m) => m[2].includes("<figure")).map((m) => m[1]),
-      ["card--half", "card--half", "card--third", "card--third", "card--third", "card--wide"],
+      cards.map((m) => m[1]),
+      [
+        "card--half",
+        "card--half",
+        "card--third",
+        "card--third",
+        "card--third",
+        "card--wide",
+        "card--third",
+        "card--third",
+        "card--third",
+      ],
     );
-    assert.deepEqual(
-      cards.filter((m) => !m[2].includes("<figure")).map((m) => m[1]),
-      ["card--third card--small", "card--third card--small", "card--third card--small"],
-    );
+    for (const [, cls, body] of cards) {
+      assert.match(body, /<figure class="card__media[^"]*">\s*<img src="images\/canvas-[a-z-]+\.png"/, cls);
+    }
+  });
+
+  test("gives the cards of a row pictures of one shape", () => {
+    const shape = (name) => {
+      const { width, height } = pngSize(fs.readFileSync(path.join(ROOT, "site", "images", name)));
+      return Math.round((width / height) * 100) / 100;
+    };
+    const cards = [...template.matchAll(/<article class="card ([^"]+)">([\s\S]*?)<\/article>/g)];
+    const byClass = new Map();
+    for (const [, cls, body] of cards) {
+      if (cls === "card--wide") continue;
+      const name = /\{\{image:([a-z0-9-]+\.png)\}\}/.exec(body)[1];
+      byClass.set(cls, [...(byClass.get(cls) ?? []), shape(name)]);
+    }
+    for (const [cls, shapes] of byClass) {
+      assert.ok(Math.max(...shapes) - Math.min(...shapes) <= 0.02, `${cls}: ${shapes.join(", ")}`);
+    }
   });
 
   test("hides the orbit frame, its stars and the wordmark from assistive technology", () => {
@@ -637,32 +675,23 @@ describe("page", () => {
     assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
   });
 
-  test("labels the four drawn figures", () => {
-    for (const id of ["mock-dock", "mock-map", "mock-metrics", "mock-apps"]) {
-      assert.match(
-        template,
-        new RegExp(`<figure class="card__media mock[^"]*" id="${id}" role="img" aria-label="[^"]{20,}">`),
-        id,
-      );
-    }
+  test("describes each canvas picture in its alt text", () => {
+    const imgs = [...template.matchAll(/<img \{\{image:(canvas-[a-z-]+\.png)\}\} alt="([^"]*)"/g)];
+    assert.equal(imgs.length, 10);
+    for (const [, name, alt] of imgs) assert.ok(alt.length >= 40, name);
   });
 
-  test("draws the four figures", () => {
-    for (const id of ["mock-dock", "mock-map", "mock-metrics", "mock-apps"]) {
-      const match = new RegExp(`<figure [^>]*id="${id}"[^>]*>([\\s\\S]*?)</figure>`).exec(template);
-      assert.ok(match, id);
-      assert.ok(match[1].trim().length > 200, `${id} is empty`);
-    }
+  test("links the metrics docs from the menu, the metrics card and the footer", () => {
+    assert.equal(html.match(/href="docs\/metrics\.html"/g)?.length, 3);
+    assert.ok(html.includes('<a class="card__link" href="docs/metrics.html">'));
   });
 
   test("sets page text in colors with at least 4.5:1 contrast", () => {
     // --text-tertiary (gray-500) measures 4.37:1 on white, below the spec's 4.5:1 for text.
-    // Only the drawn figures, which picture the app's own screens, may use it.
     const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)];
     const pageText = rules
       .filter((m) => /(^|[;\s])color:\s*var\(--text-tertiary\)/.test(m[2]))
-      .map((m) => m[1].trim().replace(/\s+/g, " "))
-      .filter((selector) => !selector.split(",").every((s) => s.trim().startsWith(".mock")));
+      .map((m) => m[1].trim().replace(/\s+/g, " "));
     assert.deepEqual(pageText, []);
   });
 
@@ -686,18 +715,6 @@ describe("page", () => {
       .map((m) => m[1].trim());
     assert.deepEqual(filled, []);
     assert.match(css, /\n\.button--primary \{[^}]*background: var\(--surface-inverse\);[^}]*color: var\(--text-inverse\);/);
-  });
-
-  test("maps the drawn figures' raw grays to their dark counterparts", () => {
-    const rule = /\n\.mock \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    for (const [from, to] of [
-      ["50", "900"],
-      ["100", "800"],
-      ["200", "700"],
-      ["300", "600"],
-    ]) {
-      assert.match(rule, new RegExp(`--gray-${from}: var\\(--gray-${to}\\);`), `--gray-${from}`);
-    }
   });
 
   test("stops the gradient drift and the card hover under reduced motion", () => {
@@ -800,5 +817,115 @@ describe("page", () => {
   test("hides the orbit frame and its stars on narrow screens", () => {
     const block = /@media \(max-width: 760px\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
     assert.match(block, /\.frame,\s*\.rule__star,\s*\.nav__links \{\s*display: none;\s*\}/);
+  });
+});
+
+describe("docs pages", () => {
+  const release = parseRelease(releaseJson());
+  const template = fs.readFileSync(path.join(ROOT, "site", "docs", "metrics.html"), "utf8");
+  let out;
+  let html;
+
+  before(() => {
+    out = tempOut();
+    build({ release, out, root: ROOT });
+    html = fs.readFileSync(path.join(out, "docs", "metrics.html"), "utf8");
+  });
+  after(() => fs.rmSync(out, { recursive: true, force: true }));
+
+  test("renders the metrics page with no placeholder left", () => {
+    assert.ok(!html.includes("{{"));
+    assert.ok(html.includes("latest: v0.6.1 · 2026-11-16"));
+  });
+
+  test("every relative link and source exists, from the page's folder", () => {
+    const refs = [...html.matchAll(/\s(?:href|src)="([^"#]+)(?:#[^"]*)?"/g)]
+      .map((m) => m[1])
+      .filter((ref) => !/^[a-z]+:/.test(ref));
+    assert.ok(refs.length > 0);
+    for (const ref of refs) {
+      assert.ok(fs.existsSync(path.join(out, "docs", ...ref.split("/"))), ref);
+    }
+  });
+
+  test("every image has alt text and the size of its file", () => {
+    const imgs = [...html.matchAll(/<img\s[^>]*>/g)].map((m) => m[0]);
+    assert.ok(imgs.some((img) => img.includes("../images/canvas-settings-metrics.png")));
+    for (const img of imgs) {
+      assert.match(img, /\salt="[^"]*"/, img);
+      const src = /\ssrc="\.\.\/(images\/[^"]+\.png)"/.exec(img)?.[1];
+      if (!src) continue;
+      const file = fs.readFileSync(path.join(out, ...src.split("/")));
+      const width = Number(/\swidth="(\d+)"/.exec(img)?.[1]);
+      const height = Number(/\sheight="(\d+)"/.exec(img)?.[1]);
+      assert.deepEqual({ width, height }, pngSize(file), src);
+    }
+  });
+
+  test("every icon it uses has its symbol, and every in-page link its target", () => {
+    for (const [, id] of html.matchAll(/href="#(i-[a-z0-9-]+)"/g)) {
+      assert.ok(html.includes(`<symbol id="${id}"`), id);
+    }
+    for (const [, id] of html.matchAll(/href="#([a-z][a-z0-9-]*)"/g)) {
+      if (!id.startsWith("i-")) assert.ok(html.includes(`id="${id}"`), id);
+    }
+  });
+
+  test("has one h1, the landmarks, a skip link and the dark theme", () => {
+    assert.equal(html.match(/<h1[\s>]/g)?.length, 1);
+    for (const part of ['<header class="nav">', '<main id="main"', '<footer class="footer">']) {
+      assert.ok(html.includes(part), part);
+    }
+    assert.ok(html.includes('<a class="skip" href="#main">Skip to content</a>'));
+    assert.ok(html.includes('<html lang="en" data-theme="dark">'));
+    assert.ok(html.includes('<a href="metrics.html" aria-current="page">Docs</a>'));
+  });
+
+  test("links only to the repository, its files and its releases", () => {
+    const urls = [...html.matchAll(/(?:href|src)="([a-z]+:[^"]*)"/g)].map((m) => m[1]);
+    for (const url of urls) assert.match(url, /^https:\/\/github\.com\/vanlongme\/skopos-ide($|[/#])/);
+  });
+
+  test("follows the copy rules outside code: no exclamation marks and no we", () => {
+    const text = template
+      .replace(/<code>[\s\S]*?<\/code>/g, " ")
+      .replace(/<!doctype html>/i, "")
+      .replace(/<[^>]+>/g, " ");
+    assert.doesNotMatch(text, /!/);
+    assert.doesNotMatch(text, /\b(we|our|us)\b/i);
+    assert.doesNotMatch(template, /\sstyle="/);
+  });
+
+  test("names the settings the app shows and the series its queries read", () => {
+    const settings = fs.readFileSync(
+      path.join(ROOT, "ui", "src", "features", "settings", "ClusterSettingsScreen.tsx"),
+      "utf8",
+    );
+    for (const label of [
+      "Detect",
+      "Prometheus or Mimir in the cluster",
+      "Prometheus-compatible URL",
+      "metrics-server only",
+      "Namespace",
+      "Service",
+      "Port",
+      "Scheme",
+      "Path prefix",
+      "Tenant",
+      "URL",
+      "Authentication",
+    ]) {
+      assert.ok(settings.includes(`label: "${label}"`) || settings.includes(`label="${label}"`), label);
+      assert.ok(template.includes(label), label);
+    }
+    const metrics = path.join(ROOT, "crates", "skopos-core", "src", "metrics");
+    const queries = fs.readFileSync(path.join(metrics, "templates.rs"), "utf8");
+    const series = new Set([...template.matchAll(/<code>([a-z_]+_(?:total|bytes|bucket|info|phase|requests|limits|allocatable|capacity))<\/code>/g)].map((m) => m[1]));
+    assert.ok(series.size >= 20, `${series.size} series`);
+    for (const name of series) assert.ok(queries.includes(`"${name}"`), name);
+    const detect = fs.readFileSync(path.join(metrics, "detect.rs"), "utf8");
+    for (const value of ["kube-prometheus-stack-prometheus", "operated-prometheus", "http-web", "monitoring"]) {
+      assert.ok(detect.includes(`"${value}"`) && template.includes(value), value);
+    }
   });
 });

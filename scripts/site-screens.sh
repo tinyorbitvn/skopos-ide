@@ -3,7 +3,7 @@
 # `make e2e-screens`) into site/images/.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-names=(pods-drawer-dark pods-drawer-light catalog-dark dock-yaml-dark)
+names=(pods-drawer-dark pods-drawer-light)
 missing=()
 for name in "${names[@]}"; do
   [ -f "tmp/screens/$name.png" ] || missing+=("tmp/screens/$name.png")

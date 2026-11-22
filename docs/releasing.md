@@ -109,8 +109,20 @@ The project site at https://vanlongme.github.io/skopos-ide/ is built from `site/
   installer is missing from the release, the build stops and the live site stays as it was.
 - When you cut a release, remove the `next-release` marks in `site/index.html` for what the
   release ships, and mark new features under `## [Unreleased]` that the page shows.
-- `make site-screens` refreshes the screenshots in `site/images/` from the e2e `screens` spec
-  (Docker, kind and the WebKit driver).
+- `make site-screens` refreshes the hero and theme screenshots in `site/images/` from the e2e
+  `screens` spec (Docker, kind and the WebKit driver).
+- `make site-canvas-screens` refreshes the feature pictures (`site/images/canvas-*.png`) from the
+  main board of the SkoposIDE Screens design canvas, App.dc.html ("Whole application"). It
+  renders the board in headless Chrome or Chromium (set `CHROME` if it is not on `PATH`), clicks
+  through it and cuts each picture out; `scripts/canvas-screens.mjs` lists the shots. The board
+  loads Google Fonts, so it needs the network. First save the canvas files under `tmp/canvas/` at
+  their published paths, for example with the Artifact tool's `read` and `paths` in Claude Code:
+  `project/App.dc.html`, the `project/ds/…` files the board's head names,
+  `artifact-type/dc-runtime.js` (the board's `./support.js`) and, for each `/_blob/<id>` script
+  the board loads, the asset saved as `_blob/<id>.js`. The script names any file still missing.
+- Every `.html` file under `site/` is a page template with the same placeholders, such as
+  `site/docs/metrics.html`, the metrics setup page. Keep it in step with the metrics settings and
+  queries in `crates/skopos-core/src/metrics/` and `ui/src/features/settings/`.
 - `make site` builds the site into `tmp/site/` from the latest published release. Serve that
   folder over HTTP to look at it (`python3 -m http.server --directory tmp/site`), since browsers
   block fonts from `file://`.
