@@ -36,8 +36,9 @@ const WRITE_EACH: &str = r#"for f in "$@"; do
   if (echo written > "$f") 2>/dev/null; then echo "wrote $f"; else echo "refused $f"; fi
 done
 t=$(mktemp) && echo "tmp $t""#;
-/// Tries a Unix socket (the exit code is 100 and the errno when it fails), an inet socket and a
-/// socket pair, then prints the filter mode the agent's children run under.
+/// Tries a Unix socket (the exit code is 100 and the errno when it fails), an inet socket, a
+/// stream socket pair, a datagram one and a raw one (a datagram pair to the kernel), then prints
+/// the filter mode the agent's children run under.
 const SOCKETS: &str = r#"python3 -c '
 import socket, sys
 try:
@@ -50,6 +51,22 @@ python3 -c 'import socket; socket.socket(socket.AF_INET)'
 echo "inet=$?"
 python3 -c 'import socket; socket.socketpair()'
 echo "pair=$?"
+python3 -c '
+import socket, sys
+try:
+    socket.socketpair(type=socket.SOCK_DGRAM)
+except OSError as error:
+    sys.exit(100 + error.errno)
+'
+echo "datagrams=$?"
+python3 -c '
+import socket, sys
+try:
+    socket.socketpair(type=socket.SOCK_RAW)
+except OSError as error:
+    sys.exit(100 + error.errno)
+'
+echo "raw=$?"
 grep "^Seccomp:" /proc/self/status"#;
 
 /// Whether to run: only with `SKOPOS_SANDBOX_TEST=1`, and then bubblewrap must work.
@@ -123,6 +140,11 @@ impl Machine {
     /// outside home, the home `.kube` folder and the outside kubeconfig as the app's sources,
     /// and only `PATH` from the app's environment.
     fn spec(&self, program: &str, args: Vec<String>) -> SandboxSpec {
+        self.spec_with(program, args, vec![self.outside.join("folder")])
+    }
+
+    /// `spec` with `folders` as the person's folders.
+    fn spec_with(&self, program: &str, args: Vec<String>, folders: Vec<PathBuf>) -> SandboxSpec {
         let agent = AgentSpec {
             id: "probe".to_owned(),
             name: "Probe".to_owned(),
@@ -161,7 +183,7 @@ impl Machine {
             agent_dir: self.agent_dir.clone(),
             run_dir: self.run_dir.clone(),
             home: &self.home,
-            folders: vec![self.outside.join("folder")],
+            folders,
             kubeconfigs,
             app_binary: PathBuf::from(APP),
             path_var: std::env::var_os("PATH"),
@@ -171,9 +193,7 @@ impl Machine {
 
     /// The sandbox of an agent running `sh -c <script>` with `args` as `$1` onward.
     fn probe(&self, script: &str, args: &[String]) -> SandboxSpec {
-        let mut words = vec!["-c".to_owned(), script.to_owned(), "probe".to_owned()];
-        words.extend_from_slice(args);
-        self.spec("/bin/sh", words)
+        self.spec("/bin/sh", sh_words(script, args))
     }
 }
 
@@ -245,6 +265,51 @@ async fn the_agent_cannot_read_a_kubeconfig_outside_home() {
     );
 }
 
+/// `sh -c <script>` with `args` as `$1` onward, as the agent's arguments.
+fn sh_words(script: &str, args: &[String]) -> Vec<String> {
+    let mut words = vec!["-c".to_owned(), script.to_owned(), "probe".to_owned()];
+    words.extend_from_slice(args);
+    words
+}
+
+#[tokio::test]
+async fn a_kubeconfig_in_a_folder_reached_through_a_link_stays_hidden() {
+    if !enabled().await {
+        return;
+    }
+    let machine = machine();
+    // A link the home's cover hides, and one outside home that shows as it is; both absolute.
+    let link = machine.home.join("kube-link");
+    let shown = machine.outside.join("kube-shown");
+    for at in [&link, &shown] {
+        std::os::unix::fs::symlink(machine.outside.join("kube"), at).unwrap();
+    }
+    let files: Vec<String> = [
+        link.join("config"),
+        link.join("notes.txt"),
+        machine.outside.join("kube/config"),
+        shown.join("config"),
+    ]
+    .iter()
+    .map(text)
+    .collect();
+    let folders = vec![link.clone(), shown.clone()];
+    let spec = machine.spec_with("/bin/sh", sh_words(PRINT_EACH, &files), folders);
+    let (code, stdout) = run(&spec).await;
+    assert_eq!(code, Some(0));
+    // Through either link and at its real path, the kubeconfig is covered; the file beside it
+    // reads.
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        [
+            format!("{}=", files[0]),
+            format!("{}=notes", files[1]),
+            format!("{}=", files[2]),
+            format!("{}=", files[3]),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn the_agent_cannot_write_outside_its_folder() {
     if !enabled().await {
@@ -310,9 +375,9 @@ async fn the_agent_cannot_create_a_unix_socket() {
     let machine = machine();
     let (code, stdout) = run(&machine.probe(SOCKETS, &[])).await;
     assert_eq!(code, Some(0));
-    // `unix=101` is EPERM; a missing python3 shows as 127.
+    // `101` is EPERM; a missing python3 shows as 127.
     assert_eq!(
-        stdout, "unix=101\ninet=0\npair=0\nSeccomp:\t2\n",
+        stdout, "unix=101\ninet=0\npair=0\ndatagrams=101\nraw=101\nSeccomp:\t2\n",
         "python3 is needed"
     );
 }

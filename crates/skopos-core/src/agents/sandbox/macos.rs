@@ -4,6 +4,8 @@
 //! first, then rules, a later rule winning over an earlier one it overlaps. Seatbelt matches
 //! resolved paths, so every path goes in by its real path.
 
+use std::ffi::CStr;
+use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -36,6 +38,21 @@ const STATUS_PROFILE: &str = "(version 1)(allow default)";
 const STATUS_PROGRAM: &str = "/usr/bin/true";
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const STATUS_OUTPUT_LIMIT: usize = 16 * 1024;
+/// Shared folders of other programs' files and sockets, which the Linux sandbox covers with
+/// tmpfs; with the person's own temporary and cache folders, the agent may not read them.
+const SYSTEM_TEMP_FOLDERS: [&str; 3] = ["/private/tmp", "/private/var/tmp", "/private/var/run"];
+/// The `confstr(3)` names of the person's own folders under `/var/folders`, from Apple's
+/// `<unistd.h>`: the per-user folder, the temporary folder and the cache folder.
+const CS_DARWIN_USER_DIR: c_int = 65536;
+const CS_DARWIN_USER_TEMP_DIR: c_int = 65537;
+const CS_DARWIN_USER_CACHE_DIR: c_int = 65538;
+/// The person's terminals, which the agent may read and write as their owner: a read takes
+/// what they type, such as a password. `/dev/tty`, the agent's own terminal if any, stays open.
+const OTHER_TERMINALS: [&str; 2] = [r"^/dev/ttys[0-9]+$", r"^/dev/(pty|tty)[p-w][0-9a-f]$"];
+
+extern "C" {
+    fn confstr(name: c_int, buf: *mut c_char, len: usize) -> usize;
+}
 /// The rules every profile starts with: nothing but what follows, the agent's own processes and
 /// signals among themselves, system settings, mapping code, and reading the system.
 const OPENING: [&str; 8] = [
@@ -49,23 +66,78 @@ const OPENING: [&str; 8] = [
     r#"(allow file-read* (subpath "/"))"#,
 ];
 
-/// Spec §4.6's profile for `spec`, one rule a line, in this order: the opening rules; no reading
-/// under the home folder, except the folders above an allowed path, which the agent may `stat`
-/// on its way down; reading again each `read_write` and `read_only` path; writing each
-/// `read_write` path, `/dev/null` and the terminals; no reading or writing the hidden kubeconfig
-/// files, last among the file rules so that no allowed folder opens them again; connecting to
-/// `localhost:<proxy>` and `localhost:<mcp>` only; looking up `MACH_SERVICES` only.
+/// Spec §4.6's profile for `spec`, with `temp_folders`.
 pub fn profile(spec: &SandboxSpec, ports: ChatPorts) -> String {
+    profile_with(spec, ports, &temp_folders())
+}
+
+/// `SYSTEM_TEMP_FOLDERS` and the person's own folder, temporary folder and cache folder, by
+/// their real paths.
+pub fn temp_folders() -> Vec<PathBuf> {
+    let mut folders: Vec<PathBuf> = SYSTEM_TEMP_FOLDERS.iter().map(PathBuf::from).collect();
+    for name in [
+        CS_DARWIN_USER_DIR,
+        CS_DARWIN_USER_TEMP_DIR,
+        CS_DARWIN_USER_CACHE_DIR,
+    ] {
+        if let Some(folder) = configured_folder(name) {
+            let real = real_path(&folder);
+            if !folders.contains(&real) {
+                folders.push(real);
+            }
+        }
+    }
+    folders
+}
+
+/// The folder `confstr(3)` gives for `name`, if any.
+fn configured_folder(name: c_int) -> Option<PathBuf> {
+    // SAFETY: with no buffer, `confstr` only gives the size the value needs.
+    let size = unsafe { confstr(name, std::ptr::null_mut(), 0) };
+    if size == 0 {
+        return None;
+    }
+    let mut buffer = vec![0 as c_char; size];
+    // SAFETY: `buffer` holds `size` bytes, room for the value and its closing nul.
+    let written = unsafe { confstr(name, buffer.as_mut_ptr(), size) };
+    if written == 0 || written > size {
+        return None;
+    }
+    // SAFETY: `confstr` wrote a nul-terminated string into `buffer`.
+    let text = unsafe { CStr::from_ptr(buffer.as_ptr()) };
+    let folder = PathBuf::from(text.to_str().ok()?);
+    folder.is_absolute().then_some(folder)
+}
+
+/// The profile, one rule a line, in this order: the opening rules; no reading under the home
+/// folder or `temp_folders`, except the folders above an allowed path, which the agent may
+/// `stat` on its way down; reading again each `read_write` and `read_only` path; writing each
+/// `read_write` path, `/dev/null` and its controlling terminal; no reading or writing the
+/// hidden kubeconfig files and the person's other terminals, last among the file rules so that
+/// no allowed folder opens them again; connecting to `localhost:<proxy>` and `localhost:<mcp>`
+/// only; looking up `MACH_SERVICES` only.
+fn profile_with(spec: &SandboxSpec, ports: ChatPorts, temp_folders: &[PathBuf]) -> String {
     let home = real_path(&spec.home);
     let read_write: Vec<PathBuf> = spec.read_write.iter().map(|path| real_path(path)).collect();
     let read_only: Vec<PathBuf> = spec.read_only.iter().map(|path| real_path(path)).collect();
     let allowed: Vec<&PathBuf> = read_write.iter().chain(&read_only).collect();
     let mut rules: Vec<String> = OPENING.iter().map(|rule| rule.to_string()).collect();
-    rules.push(format!("(deny file-read* (subpath {}))", quoted(&home)));
-    for folder in folders_above(&home, &allowed) {
+    let covered: Vec<&PathBuf> = std::iter::once(&home).chain(temp_folders).collect();
+    for folder in &covered {
+        rules.push(format!("(deny file-read* (subpath {}))", quoted(folder)));
+    }
+    let mut above: Vec<PathBuf> = Vec::new();
+    for folder in &covered {
+        for path in folders_above(folder, &allowed) {
+            if !above.contains(&path) {
+                above.push(path);
+            }
+        }
+    }
+    for folder in &above {
         rules.push(format!(
             "(allow file-read-metadata (literal {}))",
-            quoted(&folder)
+            quoted(folder)
         ));
     }
     for path in &allowed {
@@ -75,11 +147,23 @@ pub fn profile(spec: &SandboxSpec, ports: ChatPorts) -> String {
         rules.push(format!("(allow file-write* (subpath {}))", quoted(path)));
     }
     rules.push(r#"(allow file-write* (literal "/dev/null"))"#.to_owned());
-    rules.push(r##"(allow file-write* (regex #"^/dev/tty"))"##.to_owned());
+    rules.push(r#"(allow file-write* (literal "/dev/tty"))"#.to_owned());
+    let mut hidden: Vec<PathBuf> = Vec::new();
     for file in &spec.hidden_files {
+        let real = real_path(file);
+        if !hidden.contains(&real) {
+            hidden.push(real);
+        }
+    }
+    for file in &hidden {
         rules.push(format!(
             "(deny file-read* file-write* (literal {}))",
-            quoted(&real_path(file))
+            quoted(file)
+        ));
+    }
+    for terminals in OTHER_TERMINALS {
+        rules.push(format!(
+            r##"(deny file-read* file-write* (regex #"{terminals}"))"##
         ));
     }
     for port in [ports.proxy, ports.mcp] {
@@ -230,6 +314,7 @@ mod tests {
                 PathBuf::from("/opt/skopos-test/node"),
                 PathBuf::from(APP_FOLDER),
             ],
+            linked: Vec::new(),
             hidden_files: vec![PathBuf::from("/etc/skopos-test/config")],
             env: vec![
                 ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
@@ -256,6 +341,8 @@ mod tests {
             "(allow file-map-executable)".to_owned(),
             r#"(allow file-read* (subpath "/"))"#.to_owned(),
             format!(r#"(deny file-read* (subpath "{HOME}"))"#),
+            r#"(deny file-read* (subpath "/private/tmp"))"#.to_owned(),
+            r#"(deny file-read* (subpath "/private/var/folders/xy/T"))"#.to_owned(),
             format!(r#"(allow file-read-metadata (literal "{HOME}"))"#),
             format!(r#"(allow file-read-metadata (literal "{HOME}/Library"))"#),
             format!(r#"(allow file-read-metadata (literal "{HOME}/Library/Application Support"))"#),
@@ -276,8 +363,11 @@ mod tests {
             format!(r#"(allow file-write* (subpath "{HOME}/.claude"))"#),
             format!(r#"(allow file-write* (subpath "{tmp}"))"#),
             r#"(allow file-write* (literal "/dev/null"))"#.to_owned(),
-            r##"(allow file-write* (regex #"^/dev/tty"))"##.to_owned(),
+            r#"(allow file-write* (literal "/dev/tty"))"#.to_owned(),
             r#"(deny file-read* file-write* (literal "/etc/skopos-test/config"))"#.to_owned(),
+            r##"(deny file-read* file-write* (regex #"^/dev/ttys[0-9]+$"))"##.to_owned(),
+            r##"(deny file-read* file-write* (regex #"^/dev/(pty|tty)[p-w][0-9a-f]$"))"##
+                .to_owned(),
             r#"(allow network-outbound (remote ip "localhost:50001"))"#.to_owned(),
             r#"(allow network-outbound (remote ip "localhost:50002"))"#.to_owned(),
             r#"(allow mach-lookup (global-name "com.apple.SecurityServer"))"#.to_owned(),
@@ -290,9 +380,56 @@ mod tests {
             r#"(allow mach-lookup (global-name "com.apple.trustd.agent"))"#.to_owned(),
             r#"(allow mach-lookup (global-name "com.apple.logd"))"#.to_owned(),
         ];
-        let text = profile(&fixed_spec(), PORTS);
+        let text = profile_with(&fixed_spec(), PORTS, &fixed_temp_folders());
         assert_eq!(text.lines().collect::<Vec<_>>(), expected);
         assert!(text.ends_with(")\n"));
+    }
+
+    fn fixed_temp_folders() -> Vec<PathBuf> {
+        vec![
+            PathBuf::from("/private/tmp"),
+            PathBuf::from("/private/var/folders/xy/T"),
+        ]
+    }
+
+    #[test]
+    fn a_path_in_a_temporary_folder_is_read_again_with_the_folders_above_it_and_hidden_once() {
+        let mut spec = fixed_spec();
+        let tmp = PathBuf::from("/private/var/folders/xy/T/skopos-run/tmp");
+        spec.read_write = vec![tmp.clone()];
+        spec.read_only = Vec::new();
+        spec.hidden_files = vec![
+            PathBuf::from("/etc/skopos-test/config"),
+            PathBuf::from("/etc/skopos-test/config"),
+        ];
+        let text = profile_with(&spec, PORTS, &fixed_temp_folders());
+        let lines: Vec<&str> = text.lines().collect();
+        let wanted = [
+            r#"(deny file-read* (subpath "/private/var/folders/xy/T"))"#,
+            r#"(allow file-read-metadata (literal "/private/var/folders/xy/T"))"#,
+            r#"(allow file-read-metadata (literal "/private/var/folders/xy/T/skopos-run"))"#,
+            r#"(allow file-read* (subpath "/private/var/folders/xy/T/skopos-run/tmp"))"#,
+            r#"(allow file-write* (subpath "/private/var/folders/xy/T/skopos-run/tmp"))"#,
+        ];
+        let at: Vec<usize> = wanted
+            .iter()
+            .map(|rule| lines.iter().position(|line| line == rule).expect(rule))
+            .collect();
+        assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{lines:?}");
+        let hidden = r#"(deny file-read* file-write* (literal "/etc/skopos-test/config"))"#;
+        assert_eq!(lines.iter().filter(|line| **line == hidden).count(), 1);
+    }
+
+    #[test]
+    fn the_temporary_folders_are_the_shared_ones_and_the_persons_own() {
+        let folders = temp_folders();
+        assert_eq!(folders[..3], SYSTEM_TEMP_FOLDERS.map(PathBuf::from));
+        // The person's temporary folder is where `std::env::temp_dir` points on a Mac.
+        assert!(folders.len() >= 4, "{folders:?}");
+        assert!(
+            folders[3].starts_with("/private/var/folders"),
+            "{folders:?}"
+        );
     }
 
     #[test]

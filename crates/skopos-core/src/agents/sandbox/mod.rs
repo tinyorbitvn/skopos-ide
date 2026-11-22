@@ -177,6 +177,7 @@ mod tests {
             home: agent_dir.join("home"),
             read_write: vec![agent_dir.to_path_buf()],
             read_only: Vec::new(),
+            linked: Vec::new(),
             hidden_files: Vec::new(),
             env: env
                 .iter()

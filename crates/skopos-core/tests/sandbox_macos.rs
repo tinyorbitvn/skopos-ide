@@ -114,6 +114,11 @@ impl Machine {
     /// outside home, the home `.kube` folder and the outside kubeconfig as the app's sources,
     /// and only `PATH` from the app's environment.
     fn spec(&self, program: &str, args: Vec<String>) -> SandboxSpec {
+        self.spec_with(program, args, vec![self.outside.join("folder")])
+    }
+
+    /// `spec` with `folders` as the person's folders.
+    fn spec_with(&self, program: &str, args: Vec<String>, folders: Vec<PathBuf>) -> SandboxSpec {
         let agent = AgentSpec {
             id: "probe".to_owned(),
             name: "Probe".to_owned(),
@@ -152,7 +157,7 @@ impl Machine {
             agent_dir: self.agent_dir.clone(),
             run_dir: self.run_dir.clone(),
             home: &self.home,
-            folders: vec![self.outside.join("folder")],
+            folders,
             kubeconfigs,
             app_binary: PathBuf::from(APP),
             path_var: std::env::var_os("PATH"),
@@ -162,9 +167,7 @@ impl Machine {
 
     /// The sandbox of an agent running `sh -c <script>` with `args` as `$1` onward.
     fn probe(&self, script: &str, args: &[String]) -> SandboxSpec {
-        let mut words = vec!["-c".to_owned(), script.to_owned(), "probe".to_owned()];
-        words.extend_from_slice(args);
-        self.spec("/bin/sh", words)
+        self.spec("/bin/sh", sh_words(script, args))
     }
 
     /// Runs `spec`'s agent in its sandbox with this machine's chat ports and gives its exit
@@ -231,6 +234,89 @@ async fn the_agent_cannot_read_a_kubeconfig_outside_home() {
             format!("{}=refused", files[0]),
             format!("{}=notes", files[1]),
             format!("{}=readme", files[2]),
+        ]
+    );
+}
+
+/// `sh -c <script>` with `args` as `$1` onward, as the agent's arguments.
+fn sh_words(script: &str, args: &[String]) -> Vec<String> {
+    let mut words = vec!["-c".to_owned(), script.to_owned(), "probe".to_owned()];
+    words.extend_from_slice(args);
+    words
+}
+
+#[tokio::test]
+async fn a_kubeconfig_in_a_folder_reached_through_a_link_stays_hidden() {
+    if !enabled().await {
+        return;
+    }
+    let machine = machine();
+    // A link the home's cover hides, and one outside home that shows as it is; both absolute.
+    let link = machine.home.join("kube-link");
+    let shown = machine.outside.join("kube-shown");
+    for at in [&link, &shown] {
+        std::os::unix::fs::symlink(machine.outside.join("kube"), at).unwrap();
+    }
+    let files: Vec<String> = [
+        link.join("config"),
+        link.join("notes.txt"),
+        machine.outside.join("kube/config"),
+        shown.join("config"),
+    ]
+    .iter()
+    .map(text)
+    .collect();
+    let folders = vec![link.clone(), shown.clone()];
+    let spec = machine.spec_with("/bin/sh", sh_words(PRINT_EACH, &files), folders);
+    let (code, stdout) = machine.run(&spec).await;
+    assert_eq!(code, Some(0));
+    // Through either link and at its real path, the kubeconfig is covered; the file beside it
+    // reads.
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        [
+            format!("{}=refused", files[0]),
+            format!("{}=notes", files[1]),
+            format!("{}=refused", files[2]),
+            format!("{}=refused", files[3]),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_agent_cannot_read_the_shared_or_its_persons_temporary_folders() {
+    if !enabled().await {
+        return;
+    }
+    let machine = machine();
+    let folder = |name: &str| {
+        let output = std::process::Command::new("/usr/bin/getconf")
+            .arg(name)
+            .output()
+            .unwrap();
+        let path = String::from_utf8(output.stdout).unwrap();
+        tempfile::tempdir_in(path.trim()).unwrap()
+    };
+    let shared = tempfile::tempdir_in("/private/tmp").unwrap();
+    let personal = folder("DARWIN_USER_TEMP_DIR");
+    let user = folder("DARWIN_USER_DIR");
+    let own = machine.run_dir.join("tmp");
+    let mut files = Vec::new();
+    for dir in [shared.path(), personal.path(), user.path(), own.as_path()] {
+        let file = dir.join("note.txt");
+        std::fs::write(&file, "note").unwrap();
+        files.push(text(file));
+    }
+    let (code, stdout) = machine.run(&machine.probe(PRINT_EACH, &files)).await;
+    assert_eq!(code, Some(0));
+    // The chat's own temporary folder reads as usual.
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        [
+            format!("{}=refused", files[0]),
+            format!("{}=refused", files[1]),
+            format!("{}=refused", files[2]),
+            format!("{}=note", files[3]),
         ]
     );
 }

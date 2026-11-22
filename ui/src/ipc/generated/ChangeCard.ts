@@ -27,7 +27,13 @@ diff: Array<DiffLine>,
 /**
  * An exec's command, word by word.
  */
-command: Array<string> | null, state: ChangeState, 
+command: Array<string> | null, 
+/**
+ * The Secrets the changed object reads, or the Pod an exec runs in reads, named while
+ * Secret values are hidden from agents. Such a change always waits for the person: neither
+ * `Don't ask` nor a standing approval covers it (spec §4.5).
+ */
+secrets: Array<string>, state: ChangeState, 
 /**
  * `Deleted.` or `Exit code <n>` once applied. A rollout's line is the panel's (R5).
  */
