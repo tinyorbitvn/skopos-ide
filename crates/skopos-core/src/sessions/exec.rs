@@ -1,7 +1,7 @@
 //! Pod shell and attach (F12), over the exec and attach APIs. The node shell runs on the
 //! same code once its pod is up.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures::SinkExt;
@@ -28,6 +28,8 @@ const INPUT_BACKLOG: usize = 64;
 const STREAM_BUFFER: usize = 64 * 1024;
 /// After the output ended, how long the exit status may take to arrive.
 const STATUS_LIMIT: Duration = Duration::from_secs(2);
+/// The most output a one-shot command keeps, stdout and stderr together (spec §4.4).
+const ONCE_OUTPUT_CAP: usize = 64 * 1024;
 
 /// `bash` when the image has it, else `sh` (F12).
 pub(super) const SHELL: [&str; 3] = [
@@ -352,6 +354,66 @@ fn check_names(namespace: &str, pod: &str, container: Option<&str>) -> CoreResul
     }
 }
 
+/// What a one-shot command printed and how it ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecOutput {
+    /// `None` when the API server sent no exit status.
+    pub exit_code: Option<i32>,
+    /// Stdout and stderr in the order they arrived, cut at 64 KiB.
+    pub output: String,
+}
+
+/// Output kept up to a limit. What comes later is read and dropped, so a command that prints
+/// a lot is never held up by a full stream.
+struct CappedOutput {
+    bytes: Vec<u8>,
+    cap: usize,
+}
+
+impl CappedOutput {
+    fn new(cap: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            cap,
+        }
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        let room = self.cap.saturating_sub(self.bytes.len());
+        self.bytes
+            .extend_from_slice(&chunk[..chunk.len().min(room)]);
+    }
+
+    fn into_text(self) -> String {
+        String::from_utf8_lossy(&self.bytes).into_owned()
+    }
+}
+
+/// Reads one output stream to its end into the shared buffer.
+async fn collect_output(mut stream: impl AsyncRead + Unpin, output: &Mutex<CappedOutput>) {
+    let mut chunk = vec![0; READ_CHUNK];
+    loop {
+        let count = match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => return,
+            Ok(count) => count,
+        };
+        output
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(&chunk[..count]);
+    }
+}
+
+fn timed_out(limit: Duration) -> IpcError {
+    IpcError::new(
+        ErrorCode::Cancelled,
+        format!(
+            "The command did not finish within {} seconds.",
+            limit.as_secs()
+        ),
+    )
+}
+
 struct RemoteRequest {
     kind: RemoteKind,
     namespace: String,
@@ -475,6 +537,74 @@ impl AppCore {
             size,
         };
         self.spawn_remote(id, request, output, owner)
+    }
+
+    /// Runs one command in a container without a TTY or input and collects what it prints, for
+    /// the agents' `exec` tool (spec §4.4). `container: None` picks the default one (F12). A
+    /// command still running after `timeout`, counted from the start of the connection, is
+    /// ended and the call fails. A cluster call, so it works on every OS.
+    pub async fn pod_exec_once(
+        &self,
+        id: &ClusterId,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+        command: &[String],
+        timeout: Duration,
+    ) -> CoreResult<ExecOutput> {
+        check_names(namespace, pod, container)?;
+        if command.is_empty() {
+            return Err(invalid("the command is empty"));
+        }
+        let client = self.cluster_client(id)?;
+        let object = read_pod(&client, namespace, pod).await?;
+        let container = choose_container(&object, container.map(str::to_owned))?;
+        let pods: Api<Pod> = Api::namespaced(client, namespace);
+        let params = stream_params(&container, false, false);
+        let deadline = tokio::time::Instant::now() + timeout;
+        let connected =
+            tokio::time::timeout_at(deadline, pods.exec(pod, command.to_vec(), &params)).await;
+        let mut process = match connected {
+            Err(_elapsed) => return Err(timed_out(timeout)),
+            Ok(process) => process?,
+        };
+        let status = process.take_status();
+        let out = process.stdout();
+        let err = process.stderr();
+        let output = Mutex::new(CappedOutput::new(ONCE_OUTPUT_CAP));
+        let collect = async {
+            let stdout = async {
+                if let Some(stream) = out {
+                    collect_output(stream, &output).await;
+                }
+            };
+            let stderr = async {
+                if let Some(stream) = err {
+                    collect_output(stream, &output).await;
+                }
+            };
+            tokio::join!(stdout, stderr);
+        };
+        if tokio::time::timeout_at(deadline, collect).await.is_err() {
+            process.abort();
+            return Err(timed_out(timeout));
+        }
+        let status = match status {
+            Some(status) => tokio::time::timeout(STATUS_LIMIT, status)
+                .await
+                .unwrap_or(None),
+            None => None,
+        };
+        let exit_code = match event_from_status(status) {
+            SessionEvent::Exited { code } => code.and_then(|code| i32::try_from(code).ok()),
+            SessionEvent::Failed { error, .. } => return Err(error),
+            SessionEvent::Status { .. } | SessionEvent::Started { .. } => None,
+        };
+        let output = output
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .into_text();
+        Ok(ExecOutput { exit_code, output })
     }
 }
 
@@ -604,5 +734,35 @@ mod tests {
         assert!(check_names("default", "a/b", None).is_err());
         assert!(check_names("..", "pod", None).is_err());
         assert!(check_names("default", "pod", Some("a/b")).is_err());
+    }
+
+    #[test]
+    fn one_shot_output_keeps_what_came_first_up_to_the_cap() {
+        let mut output = CappedOutput::new(8);
+        output.push(b"abc");
+        output.push(b"defgh");
+        output.push(b"ijk");
+        assert_eq!(output.into_text(), "abcdefgh");
+    }
+
+    #[test]
+    fn one_shot_output_is_capped_at_64_kib() {
+        let mut output = CappedOutput::new(ONCE_OUTPUT_CAP);
+        for _ in 0..20 {
+            output.push(&[b'x'; 4096]);
+        }
+        assert_eq!(output.into_text().len(), 64 * 1024);
+    }
+
+    #[tokio::test]
+    async fn stdout_and_stderr_go_into_one_buffer_in_arrival_order() {
+        let output = Mutex::new(CappedOutput::new(ONCE_OUTPUT_CAP));
+        collect_output(&b"out\n"[..], &output).await;
+        collect_output(&b"err\n"[..], &output).await;
+        let text = output
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .into_text();
+        assert_eq!(text, "out\nerr\n");
     }
 }

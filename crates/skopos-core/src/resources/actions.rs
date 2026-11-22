@@ -64,7 +64,7 @@ pub enum SecretData {
     Base64(String),
 }
 
-fn scalable(r: &ResourceRef) -> bool {
+pub(crate) fn scalable(r: &ResourceRef) -> bool {
     r.group == "apps"
         && matches!(
             r.plural.as_str(),
@@ -72,7 +72,7 @@ fn scalable(r: &ResourceRef) -> bool {
         )
 }
 
-fn restartable(r: &ResourceRef) -> bool {
+pub(crate) fn restartable(r: &ResourceRef) -> bool {
     r.group == "apps"
         && matches!(
             r.plural.as_str(),

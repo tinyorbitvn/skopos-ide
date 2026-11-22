@@ -9,6 +9,7 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import type { ClusterAgentSettings } from "../../ipc/generated/ClusterAgentSettings";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
@@ -525,6 +526,22 @@ test("Choose image opens the file picker; another type is refused, an SVG is tak
   expect(screen.queryByTestId("settings-icon-remove")).toBeNull();
   await save();
   expect(savedPayload(backend)?.icon).toBeNull();
+});
+
+const AGENT: ClusterAgentSettings = {
+  changes: "readOnly",
+  namespaces: ["shop"],
+  secretValues: true,
+  exec: true,
+  defaultAgent: "codex",
+  notes: "Deploys go through Argo CD.",
+};
+
+test("Save sends the agent settings back as they were saved", async () => {
+  const backend = await show({ saved: clusterSettings({ agent: AGENT }) });
+  type("settings-display-name", "Prod");
+  await save();
+  expect(savedPayload(backend)?.agent).toEqual(AGENT);
 });
 
 test("the default namespace offers the kubeconfig, the cluster's namespaces and the saved one", async () => {

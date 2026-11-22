@@ -1,5 +1,8 @@
 import { Channel } from "@tauri-apps/api/core";
 import { call } from "./client";
+import type { AgentChanges } from "./generated/AgentChanges";
+import type { AgentPrefs } from "./generated/AgentPrefs";
+import type { AgentStatus } from "./generated/AgentStatus";
 import type { ApiResourceInfo } from "./generated/ApiResourceInfo";
 import type { AppInfo } from "./generated/AppInfo";
 import type { ApplyResult } from "./generated/ApplyResult";
@@ -7,8 +10,14 @@ import type { ArgoRollbackOptions } from "./generated/ArgoRollbackOptions";
 import type { ArgoSyncOptions } from "./generated/ArgoSyncOptions";
 import type { CatalogFolder } from "./generated/CatalogFolder";
 import type { CatalogFolders } from "./generated/CatalogFolders";
+import type { ChangeAnswer } from "./generated/ChangeAnswer";
 import type { ChartSearch } from "./generated/ChartSearch";
 import type { ChartVersion } from "./generated/ChartVersion";
+import type { ChatEvent } from "./generated/ChatEvent";
+import type { ChatInfo } from "./generated/ChatInfo";
+import type { ChatScope } from "./generated/ChatScope";
+import type { ChatSummary } from "./generated/ChatSummary";
+import type { ClusterAgentSettings } from "./generated/ClusterAgentSettings";
 import type { ClusterEntry } from "./generated/ClusterEntry";
 import type { ClusterSettings } from "./generated/ClusterSettings";
 import type { ConnectionLogEntry } from "./generated/ConnectionLogEntry";
@@ -44,15 +53,18 @@ import type { MoveOutcome } from "./generated/MoveOutcome";
 import type { MoveTarget } from "./generated/MoveTarget";
 import type { NodeDiskSnapshot } from "./generated/NodeDiskSnapshot";
 import type { ObjectNames } from "./generated/ObjectNames";
+import type { ObjectRef } from "./generated/ObjectRef";
 import type { PortForward } from "./generated/PortForward";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
 import type { Prefs } from "./generated/Prefs";
 import type { Propagation } from "./generated/Propagation";
 import type { ResourceRef } from "./generated/ResourceRef";
+import type { SandboxStatus } from "./generated/SandboxStatus";
 import type { SavedKubeconfig } from "./generated/SavedKubeconfig";
 import type { SecretChange } from "./generated/SecretChange";
 import type { SecretValue } from "./generated/SecretValue";
 import type { SessionEvent } from "./generated/SessionEvent";
+import type { StoredChat } from "./generated/StoredChat";
 import type { SyncWarning } from "./generated/SyncWarning";
 import type { JsonValue } from "./generated/serde_json/JsonValue";
 import type { TerminalSize } from "./generated/TerminalSize";
@@ -742,4 +754,68 @@ export const api = {
   updateCancel: () => call<void>("update_cancel"),
   /** No toast or status bar button for this version; a manual check still shows it. */
   updateSkip: (version: string) => call<void>("update_skip", { version }),
+  /**
+   * The built-in agents, then the custom ones, each with its state: `unknown` until a
+   * probe ran. Every agent and chat call rejects with Unsupported on Windows.
+   */
+  agentsStatus: () => call<AgentStatus[]>("agents_status"),
+  /** Starts the agent in the sandbox once to learn its state, then ends it. */
+  agentProbe: (id: string) => call<AgentStatus>("agent_probe", { id }),
+  /** Rejects with InvalidInput when the name is taken or the command is not found. */
+  agentCustomAdd: (name: string, command: string) =>
+    call<AgentStatus>("agent_custom_add", { name, command }),
+  agentCustomRemove: (id: string) => call<void>("agent_custom_remove", { id }),
+  agentDefaultSet: (id: string) => call<void>("agent_default_set", { id }),
+  agentPrefs: () => call<AgentPrefs>("agent_prefs"),
+  /** Gives the prefs as saved; rejects with InvalidInput for a domain it refuses. */
+  agentDomainAdd: (domain: string) =>
+    call<AgentPrefs>("agent_domain_add", { domain }),
+  agentDomainRemove: (domain: string) =>
+    call<AgentPrefs>("agent_domain_remove", { domain }),
+  /** `~/x` or `/x`; rejects with InvalidInput for a folder that does not exist. */
+  agentFolderAdd: (folder: string) =>
+    call<AgentPrefs>("agent_folder_add", { folder }),
+  agentFolderRemove: (folder: string) =>
+    call<AgentPrefs>("agent_folder_remove", { folder }),
+  /** Kept for the app run; `refresh` checks again. */
+  agentSandboxStatus: (refresh: boolean) =>
+    call<SandboxStatus>("agent_sandbox_status", { refresh }),
+  /** Saves only this setting of the cluster, without the side effects of a full save. */
+  clusterAgentChangesSet: (id: string, changes: AgentChanges) =>
+    call<void>("cluster_agent_changes_set", { id, changes }),
+  clusterAgentSettings: (id: string) =>
+    call<ClusterAgentSettings>("cluster_agent_settings", { id }),
+  /**
+   * Starts a chat in this window, ending the window's running one. `agent` null: the
+   * cluster's or the app's default; `continueChat`: a stored chat's id. Events go to
+   * `onEvent` until the chat closes.
+   */
+  chatStart: (
+    scope: ChatScope,
+    agent: string | null,
+    continueChat: string | null,
+    onEvent: (event: ChatEvent) => void,
+  ) =>
+    call<ChatInfo>("chat_start", {
+      scope,
+      agent,
+      continueChat,
+      onEvent: new Channel<ChatEvent>(onEvent),
+    }),
+  /** Resolves when the turn ends; its items arrive on the chat's channel meanwhile. */
+  chatPrompt: (chatId: string, text: string, object: ObjectRef | null) =>
+    call<void>("chat_prompt", { chatId, text, object }),
+  /** Cancels the turn and answers waiting changes as stopped. */
+  chatStop: (chatId: string) => call<void>("chat_stop", { chatId }),
+  /** Stops the chat, ends its agent and saves the chat. */
+  chatClose: (chatId: string) => call<void>("chat_close", { chatId }),
+  /** NotFound when no change card waits under `cardId`. */
+  chatAnswer: (chatId: string, cardId: string, answer: ChangeAnswer) =>
+    call<void>("chat_answer", { chatId, cardId, answer }),
+  /** Ends the chat's standing approval for the cluster. */
+  chatUndoStanding: (chatId: string, clusterId: string) =>
+    call<void>("chat_undo_standing", { chatId, clusterId }),
+  /** The scope's stored chats, newest first. */
+  chatList: (scope: ChatScope) => call<ChatSummary[]>("chat_list", { scope }),
+  chatGet: (id: string) => call<StoredChat>("chat_get", { id }),
 };
