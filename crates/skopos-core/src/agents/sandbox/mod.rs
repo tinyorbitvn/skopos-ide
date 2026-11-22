@@ -9,6 +9,8 @@ pub mod env;
 pub mod init;
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod paths;
 pub mod spec;
 
@@ -57,7 +59,13 @@ pub async fn sandbox_status() -> SandboxStatus {
 }
 
 /// Whether this machine can start the agent sandbox.
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub async fn sandbox_status() -> SandboxStatus {
+    macos::status().await
+}
+
+/// Whether this machine can start the agent sandbox.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub async fn sandbox_status() -> SandboxStatus {
     SandboxStatus::Unsupported
 }
@@ -69,8 +77,15 @@ pub fn sandbox_command(spec: &SandboxSpec, _ports: ChatPorts) -> CoreResult<Comm
     linux::bwrap_command(spec)
 }
 
+/// The command that starts the agent of `spec` inside its sandbox, under the chat's Seatbelt
+/// profile, which lets it reach only `ports` on the loopback.
+#[cfg(target_os = "macos")]
+pub fn sandbox_command(spec: &SandboxSpec, ports: ChatPorts) -> CoreResult<Command> {
+    Ok(macos::seatbelt_command(spec, ports))
+}
+
 /// The command that starts the agent of `spec` inside its sandbox.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn sandbox_command(_spec: &SandboxSpec, _ports: ChatPorts) -> CoreResult<Command> {
     Err(crate::error::IpcError::new(
         crate::error::ErrorCode::Unsupported,
