@@ -6,8 +6,11 @@
 pub mod acp;
 pub mod approvals;
 pub mod bridge;
+pub mod chat;
+pub mod chats;
 pub mod diff;
 pub mod endpoint;
+pub mod events;
 pub mod mcp;
 pub mod modes;
 pub mod probe;
