@@ -4,6 +4,7 @@
 //! defaults (spec §2, §11).
 
 pub mod registry;
+pub mod sandbox;
 pub mod settings;
 
 use std::ffi::OsString;
