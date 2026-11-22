@@ -20,6 +20,7 @@ import {
   ensureProvider,
   forgetProvider,
   forgetQueries,
+  IDLE_QUERY_LIMIT,
   QUERY_STEP_MS,
   queryKey,
   refreshProvider,
@@ -220,6 +221,91 @@ test("watchers of one key share a poller that asks at once, every step, and stop
   await flush();
   expect(backend.callsTo("metrics_query")).toHaveLength(3);
   expect(metrics().queries[KEY]?.value).toEqual(RESULT);
+});
+
+/** The pod `web-<n>` in namespace shop. */
+const pod = (n: number): MetricsTarget => ({
+  kind: "pod",
+  namespace: "shop",
+  name: `web-${n}`,
+});
+
+test("answers no panel shows are kept for the last IDLE_QUERY_LIMIT targets, the oldest dropped first", async () => {
+  mockBackend({ metrics_query: () => RESULT });
+  for (let n = 0; n <= IDLE_QUERY_LIMIT; n += 1) {
+    const stop = watchQuery("c1", pod(n), "1h");
+    await flush();
+    stop();
+  }
+  // Opening pod after pod leaves no more answers than the limit.
+  expect(Object.keys(metrics().queries)).toHaveLength(IDLE_QUERY_LIMIT);
+  expect(metrics().queries[queryKey("c1", pod(0), "1h")]).toBeUndefined();
+  for (let n = 1; n <= IDLE_QUERY_LIMIT; n += 1) {
+    expect(metrics().queries[queryKey("c1", pod(n), "1h")]?.value).toEqual(
+      RESULT,
+    );
+  }
+});
+
+test("a target shown again before it is dropped shows its last answer at once and moves to the back", async () => {
+  mockBackend({ metrics_query: () => RESULT });
+  for (let n = 0; n < IDLE_QUERY_LIMIT; n += 1) {
+    const stop = watchQuery("c1", pod(n), "1h");
+    await flush();
+    stop();
+  }
+  // Shown again: its answer is there before any new ask comes back.
+  const again = watchQuery("c1", pod(0), "1h");
+  expect(metrics().queries[queryKey("c1", pod(0), "1h")]?.value).toEqual(
+    RESULT,
+  );
+  await flush();
+  again();
+  // pod 0 is now the latest to go idle, so the next idle target drops pod 1, not pod 0.
+  const stop = watchQuery("c1", pod(IDLE_QUERY_LIMIT), "1h");
+  await flush();
+  stop();
+  expect(metrics().queries[queryKey("c1", pod(0), "1h")]?.value).toEqual(
+    RESULT,
+  );
+  expect(metrics().queries[queryKey("c1", pod(1), "1h")]).toBeUndefined();
+});
+
+test("an answer still on its way when its target is dropped does not bring it back", async () => {
+  const answers: Array<(value: MetricsResult) => void> = [];
+  mockBackend({
+    metrics_query: () =>
+      new Promise<MetricsResult>((resolve) => answers.push(resolve)),
+  });
+  const stopFirst = watchQuery("c1", pod(0), "1h");
+  await flush();
+  stopFirst();
+  for (let n = 1; n <= IDLE_QUERY_LIMIT; n += 1) {
+    const stop = watchQuery("c1", pod(n), "1h");
+    await flush();
+    stop();
+  }
+  // pod 0's ask answers after pod 0 was dropped.
+  answers[0](RESULT);
+  await flush();
+  expect(metrics().queries[queryKey("c1", pod(0), "1h")]).toBeUndefined();
+  expect(Object.keys(metrics().queries)).toHaveLength(IDLE_QUERY_LIMIT);
+});
+
+test("a target that is watched is never dropped, however many others go idle", async () => {
+  mockBackend({ metrics_query: () => RESULT });
+  const shown = watchQuery("c1", pod(0), "1h");
+  await flush();
+  for (let n = 1; n <= IDLE_QUERY_LIMIT + 3; n += 1) {
+    const stop = watchQuery("c1", pod(n), "1h");
+    await flush();
+    stop();
+  }
+  expect(metrics().queries[queryKey("c1", pod(0), "1h")]?.value).toEqual(
+    RESULT,
+  );
+  expect(Object.keys(metrics().queries)).toHaveLength(IDLE_QUERY_LIMIT + 1);
+  shown();
 });
 
 test.each([
