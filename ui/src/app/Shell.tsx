@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, EmptyState, Spinner } from "../design";
 import { AboutDialog } from "../features/about/AboutDialog";
+import { ExecConsentDialog } from "../features/cluster/ExecConsentDialog";
 import { Dock } from "../features/dock/Dock";
 import { CommandPalette } from "../features/palette/CommandPalette";
 import { ShortcutsDialog } from "../features/shortcuts/ShortcutsDialog";
@@ -201,6 +202,7 @@ export function Shell() {
         <ShortcutsDialog />
         <AboutDialog />
         <UpdateDialog />
+        <ExecConsentDialog />
       </ShellRouter>
     </div>
   );

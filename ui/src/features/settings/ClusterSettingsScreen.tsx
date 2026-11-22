@@ -7,7 +7,9 @@ import {
   useState,
 } from "react";
 import { useNavigate, useParams } from "react-router";
+import { connectionNotes } from "../../app/connectionNotes";
 import {
+  Badge,
   Button,
   ErrorNotice,
   Input,
@@ -671,6 +673,14 @@ export function ClusterSettingsScreen(props: { clusterId: string }) {
   const name = cluster?.name ?? clusterId;
   const connected = state.status === "connected";
 
+  async function stopAllowing(): Promise<void> {
+    try {
+      await api.clusterExecForget(clusterId);
+    } catch (error) {
+      toast.error("Could not stop allowing", failureMessage(error));
+    }
+  }
+
   let body: ReactNode;
   if (settings.error) {
     body = (
@@ -706,6 +716,33 @@ export function ClusterSettingsScreen(props: { clusterId: string }) {
               <p className={styles.sub}>
                 Context {cluster.contextName} in {cluster.source.path}. These
                 settings stay in SkoposIDE; the kubeconfig file is not changed.
+              </p>
+            ) : null}
+            {cluster
+              ? connectionNotes(cluster).map((note) => (
+                  <p
+                    key={note.id}
+                    className={styles.note}
+                    data-testid={`settings-note-${note.id}`}
+                  >
+                    <Badge tone={note.tone}>{note.label}</Badge>
+                    <span>{note.detail}</span>
+                  </p>
+                ))
+              : null}
+            {cluster?.execAllowed && cluster.execCommand !== null ? (
+              <p
+                className={`${styles.note} ${styles.allowed}`}
+                data-testid="settings-exec-allowed"
+              >
+                <span>Allowed to run when you connect.</span>
+                <Button
+                  size="sm"
+                  data-testid="settings-exec-forget"
+                  onClick={() => void stopAllowing()}
+                >
+                  Stop allowing
+                </Button>
               </p>
             ) : null}
           </div>

@@ -33,6 +33,11 @@ pub struct ContextEntry {
     pub server: Option<String>,
     pub source_path: String,
     pub uses_exec: bool,
+    /// The command of the user's exec plugin, as the file writes it. Its arguments and
+    /// environment are left in the file, as they can hold a secret.
+    pub exec_command: Option<String>,
+    /// Whether the cluster turns off TLS verification (`insecure-skip-tls-verify`).
+    pub insecure_tls: bool,
     pub problem: Option<String>,
 }
 
@@ -56,6 +61,9 @@ struct RawCluster {
 #[serde(default)]
 struct RawClusterBody {
     server: Option<String>,
+    // Left untyped, so that a value of another type flags nothing instead of failing the file.
+    #[serde(rename = "insecure-skip-tls-verify")]
+    insecure_skip_tls_verify: Value,
 }
 
 #[derive(Deserialize)]
@@ -65,11 +73,13 @@ struct RawUser {
     user: Option<RawUserBody>,
 }
 
-// Only `exec` is looked at, so the rest of the section stays unmodelled.
+// Only what names a program is looked at, so the rest stays unmodelled.
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct RawUserBody {
     exec: Value,
+    #[serde(rename = "auth-provider")]
+    auth_provider: Value,
 }
 
 #[derive(Deserialize)]
@@ -146,9 +156,28 @@ pub(super) fn parse_file(path: &Path, bytes: &[u8]) -> Result<ParsedFile, String
         let user_name = context.context.user.unwrap_or_default();
         let cluster = clusters.iter().find(|c| c.name == cluster_name);
         let user = users.iter().find(|u| u.name == user_name);
-        let uses_exec = user
-            .and_then(|u| u.user.as_ref())
-            .is_some_and(|body| !body.exec.is_null());
+        let user_body = user.and_then(|u| u.user.as_ref());
+        let exec = user_body
+            .map(|body| &body.exec)
+            .filter(|exec| !exec.is_null());
+        // `kube` runs a `gcp` auth provider's `cmd-path`, and uses it before `exec`.
+        let provider_command = user_body
+            .map(|body| &body.auth_provider)
+            .filter(|provider| provider.get("name").and_then(Value::as_str) == Some("gcp"))
+            .and_then(|provider| provider.get("config"))
+            .and_then(|config| config.get("cmd-path"))
+            .and_then(Value::as_str)
+            .filter(|command| !command.trim().is_empty())
+            .map(str::to_owned);
+        let uses_exec = exec.is_some() || provider_command.is_some();
+        let exec_command = provider_command.or_else(|| {
+            exec.and_then(|exec| exec.get("command"))
+                .and_then(Value::as_str)
+                .filter(|command| !command.trim().is_empty())
+                .map(str::to_owned)
+        });
+        let insecure_tls =
+            cluster.is_some_and(|c| c.cluster.insecure_skip_tls_verify.as_bool() == Some(true));
         let problem = match (cluster.is_some(), user.is_some()) {
             (true, true) => None,
             (false, true) => Some(format!(
@@ -168,6 +197,8 @@ pub(super) fn parse_file(path: &Path, bytes: &[u8]) -> Result<ParsedFile, String
             cluster_name,
             user_name,
             uses_exec,
+            exec_command,
+            insecure_tls,
             problem,
         });
     }
@@ -434,11 +465,161 @@ contexts:
     }
 
     #[test]
+    fn an_exec_plugin_s_command_is_carried_without_its_arguments() {
+        let raw = br#"
+clusters:
+- { name: c1, cluster: { server: "https://x" } }
+users:
+- name: plain
+  user: { token: abc }
+- name: oidc
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: /usr/local/bin/kubectl-oidc_login
+      args: [get-token, --oidc-client-secret=s3cret]
+      env: [{ name: PLUGIN_TOKEN, value: hunter2 }]
+contexts:
+- { name: a, context: { cluster: c1, user: plain } }
+- { name: b, context: { cluster: c1, user: oidc } }
+"#;
+        let e = parse_contexts(Path::new("/k/config"), raw).unwrap();
+        assert_eq!(e[0].exec_command, None);
+        assert_eq!(
+            e[1].exec_command.as_deref(),
+            Some("/usr/local/bin/kubectl-oidc_login")
+        );
+        let sent = serde_json::to_string(&e[1]).unwrap();
+        assert!(
+            !sent.contains("s3cret") && !sent.contains("hunter2"),
+            "{sent}"
+        );
+        assert!(!sent.contains("get-token"), "{sent}");
+    }
+
+    #[test]
+    fn a_gcp_auth_provider_s_command_counts_as_an_exec_plugin() {
+        let raw = br#"
+clusters:
+- { name: c1, cluster: { server: "https://x" } }
+users:
+- name: gke
+  user:
+    auth-provider:
+      name: gcp
+      config: { cmd-path: /usr/bin/gcloud, cmd-args: "config config-helper", access-token: s3cret }
+- name: both
+  user:
+    auth-provider: { name: gcp, config: { cmd-path: /usr/bin/gcloud } }
+    exec: { apiVersion: client.authentication.k8s.io/v1, command: aws }
+- name: oidc
+  user:
+    auth-provider: { name: oidc, config: { id-token: s3cret } }
+contexts:
+- { name: a, context: { cluster: c1, user: gke } }
+- { name: b, context: { cluster: c1, user: both } }
+- { name: c, context: { cluster: c1, user: oidc } }
+"#;
+        let e = parse_contexts(Path::new("/k/config"), raw).unwrap();
+        assert!(e[0].uses_exec);
+        assert_eq!(e[0].exec_command.as_deref(), Some("/usr/bin/gcloud"));
+        // `kube` uses the auth provider before `exec`.
+        assert_eq!(e[1].exec_command.as_deref(), Some("/usr/bin/gcloud"));
+        assert!(!e[2].uses_exec);
+        assert_eq!(e[2].exec_command, None);
+        let sent = serde_json::to_string(&e).unwrap();
+        assert!(
+            !sent.contains("s3cret") && !sent.contains("config-helper"),
+            "{sent}"
+        );
+    }
+
+    #[test]
+    fn an_auth_provider_of_another_type_flags_nothing_and_keeps_the_file() {
+        let raw = br#"
+clusters:
+- { name: c1, cluster: { server: "https://x" } }
+users:
+- { name: text, user: { auth-provider: gcp } }
+- { name: list, user: { auth-provider: [gcp] } }
+contexts:
+- { name: a, context: { cluster: c1, user: text } }
+- { name: b, context: { cluster: c1, user: list } }
+"#;
+        let e = parse_contexts(Path::new("/k/config"), raw).unwrap();
+        assert_eq!(e.len(), 2);
+        assert!(e
+            .iter()
+            .all(|entry| !entry.uses_exec && entry.exec_command.is_none()));
+    }
+
+    #[test]
+    fn an_exec_section_with_no_usable_command_is_still_an_exec_plugin() {
+        let raw = br#"
+clusters:
+- { name: c1, cluster: { server: "https://x" } }
+users:
+- { name: none, user: { exec: { apiVersion: client.authentication.k8s.io/v1 } } }
+- { name: blank, user: { exec: { command: "  " } } }
+- { name: list, user: { exec: { command: [sh, -c] } } }
+contexts:
+- { name: a, context: { cluster: c1, user: none } }
+- { name: b, context: { cluster: c1, user: blank } }
+- { name: c, context: { cluster: c1, user: list } }
+"#;
+        let e = parse_contexts(Path::new("/k/config"), raw).unwrap();
+        assert_eq!(e.len(), 3);
+        assert!(e.iter().all(|entry| entry.uses_exec));
+        assert!(e.iter().all(|entry| entry.exec_command.is_none()));
+    }
+
+    #[test]
+    fn a_cluster_that_turns_tls_verification_off_is_flagged() {
+        let raw = br#"
+clusters:
+- { name: off, cluster: { server: "https://x", insecure-skip-tls-verify: true } }
+- { name: on, cluster: { server: "https://y", insecure-skip-tls-verify: false } }
+- { name: unset, cluster: { server: "https://z" } }
+users:
+- { name: u1, user: { token: abc } }
+contexts:
+- { name: a, context: { cluster: off, user: u1 } }
+- { name: b, context: { cluster: on, user: u1 } }
+- { name: c, context: { cluster: unset, user: u1 } }
+- { name: d, context: { cluster: missing, user: u1 } }
+"#;
+        let e = parse_contexts(Path::new("/k/config"), raw).unwrap();
+        let flagged: Vec<bool> = e.iter().map(|entry| entry.insecure_tls).collect();
+        assert_eq!(flagged, [true, false, false, false]);
+    }
+
+    #[test]
+    fn a_tls_setting_of_another_type_flags_nothing_and_keeps_the_file() {
+        let raw = br#"
+clusters:
+- { name: c1, cluster: { server: "https://x", insecure-skip-tls-verify: "true" } }
+- { name: c2, cluster: { server: "https://y", insecure-skip-tls-verify: [1] } }
+users:
+- { name: u1, user: { token: abc } }
+contexts:
+- { name: a, context: { cluster: c1, user: u1 } }
+- { name: b, context: { cluster: c2, user: u1 } }
+"#;
+        let e = parse_contexts(Path::new("/k/config"), raw).unwrap();
+        assert_eq!(e.len(), 2);
+        assert!(e
+            .iter()
+            .all(|entry| !entry.insecure_tls && entry.problem.is_none()));
+    }
+
+    #[test]
     fn serializes_camel_case() {
         let e = parse_contexts(Path::new("/k/config"), TWO.as_bytes()).unwrap();
         let v = serde_json::to_value(&e[0]).unwrap();
         assert_eq!(v["contextName"], "one");
         assert_eq!(v["sourcePath"], "/k/config");
         assert_eq!(v["usesExec"], false);
+        assert_eq!(v["execCommand"], serde_json::Value::Null);
+        assert_eq!(v["insecureTls"], false);
     }
 }

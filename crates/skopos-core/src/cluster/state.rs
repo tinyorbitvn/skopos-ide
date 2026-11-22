@@ -20,6 +20,8 @@ pub enum FailureKind {
     Forbidden,
     ConfigInvalid,
     Other,
+    /// The kubeconfig would run a program for credentials that the user has not allowed.
+    ExecNotAllowed,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

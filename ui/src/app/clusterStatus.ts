@@ -14,6 +14,10 @@ export function clusterStatus(state: ConnectionState): {
   label: string;
   tone: Tone;
 } {
+  // The connect was held back for a decision. Nothing went wrong.
+  if (state.status === "failed" && state.kind === "execNotAllowed") {
+    return { label: "Needs permission", tone: "warn" };
+  }
   return STATUS[state.status];
 }
 

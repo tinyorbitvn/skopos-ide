@@ -11,6 +11,10 @@ import { TabView } from "../../app/tabs/TabView";
 import type { ConnectionLogEntry } from "../../ipc/generated/ConnectionLogEntry";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
+import {
+  resetExecConsentForTest,
+  useExecConsent,
+} from "../../stores/execConsent";
 import { resetMetricsForTest } from "../../stores/metrics";
 import { resetTopologyForTest } from "../../stores/topology";
 import {
@@ -101,6 +105,7 @@ function setState(state: ConnectionState) {
 }
 
 beforeEach(() => {
+  resetExecConsentForTest();
   resetCatalogForTest();
   resetTopologyForTest();
   resetMetricsForTest();
@@ -231,4 +236,25 @@ test("no namespace warning when namespaces can be listed", async () => {
   await show({ status: "connected", info: INFO });
   await screen.findByTestId("cluster-info-namespaces");
   expect(screen.queryByTestId("cluster-namespaces-warning")).toBeNull();
+});
+
+test("a connect that waits for permission offers to review it", async () => {
+  const notAllowed = {
+    status: "failed",
+    kind: "execNotAllowed",
+    message:
+      'This kubeconfig runs "aws" to get credentials, and you have not allowed that yet.',
+  } as const;
+  const ipc = await show(notAllowed, { cluster_connect: () => notAllowed });
+
+  expect(await screen.findByText("Permission needed")).toBeTruthy();
+  expect(screen.getByText(notAllowed.message)).toBeTruthy();
+  expect(screen.queryByTestId("cluster-reconnect")).toBeNull();
+  const review = screen.getByTestId("cluster-review-exec");
+  expect(review.textContent).toBe("Review and allow");
+
+  fireEvent.click(review);
+
+  await waitFor(() => expect(ipc.callsTo("cluster_connect")).toHaveLength(1));
+  await waitFor(() => expect(useExecConsent.getState().clusterId).toBe("id-x"));
 });

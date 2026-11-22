@@ -16,6 +16,7 @@ use kube::{Api, Client, Config, Discovery};
 use tokio::time::{timeout, timeout_at, Instant};
 
 use super::distribution::detect_distribution;
+use super::exec_command::exec_command;
 use super::manager::{ClusterHandle, LogLevel};
 use super::state::{ClusterInfo, FailureKind};
 use crate::error::{
@@ -116,14 +117,6 @@ fn config_failure(source: &str, err: &KubeconfigError) -> Failure {
         )),
         _ => Failure::config(format!("{source}: {err}")),
     }
-}
-
-/// The command of the context's exec plugin, from the extracted kubeconfig.
-fn exec_command(kubeconfig: &Kubeconfig) -> Option<String> {
-    kubeconfig.auth_infos.iter().find_map(|named| {
-        let exec = named.auth_info.as_ref()?.exec.as_ref()?;
-        exec.command.clone()
-    })
 }
 
 fn timed_out(what: &str, limit: Duration) -> Failure {
@@ -227,7 +220,7 @@ pub(crate) async fn establish(
     timeouts: &ConnectTimeouts,
 ) -> Result<Established, Failure> {
     let classifier = Classifier {
-        exec_command: exec_command(&kubeconfig),
+        exec_command: exec_command(&kubeconfig).map(|command| command.command),
     };
     let limit = if entry.uses_exec {
         timeouts.version_exec

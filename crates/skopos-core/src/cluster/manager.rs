@@ -2,11 +2,12 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dashmap::DashMap;
+use kube::config::Kubeconfig;
 use kube::{Client, Discovery};
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
@@ -16,6 +17,7 @@ use ts_rs::TS;
 use super::connect::{
     establish, prepare_kubeconfig, run_discovery, ConnectTimeouts, Established, Failure,
 };
+use super::exec_command::{exec_command, ExecCommand, ExecEnvVar, ExecRequest, ExecRequestDetails};
 use super::state::{ConnectionState, FailureKind};
 use crate::app_core::CoreEvent;
 use crate::error::{sanitize_text, CoreResult, ErrorCode, IpcError};
@@ -100,11 +102,100 @@ struct Live {
 
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
+static NEXT_EXEC_REQUEST: AtomicU32 = AtomicU32::new(1);
+
+/// What a blocked attempt refused to run, kept for the consent dialog. In memory only.
+#[derive(Debug, Clone)]
+pub(crate) struct HeldExec {
+    pub(crate) request_id: u32,
+    pub(crate) command: ExecCommand,
+    /// A consent for another fingerprint existed.
+    pub(crate) changed: bool,
+    pub(crate) source_path: String,
+    pub(crate) context_name: String,
+}
+
+impl HeldExec {
+    /// What the window may show without being asked: no argument, no environment value.
+    pub(crate) fn summary(&self) -> ExecRequest {
+        ExecRequest {
+            request_id: self.request_id,
+            kind: self.command.kind,
+            command: self.command.command.clone(),
+            arg_count: u32::try_from(self.command.args.len()).unwrap_or(u32::MAX),
+            env_names: self
+                .command
+                .env
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect(),
+            server: self.command.server.clone(),
+            source_path: self.source_path.clone(),
+            context_name: self.context_name.clone(),
+            changed: self.changed,
+        }
+    }
+
+    /// Everything that would run. Sent only when the user asks to see it.
+    pub(crate) fn details(&self) -> ExecRequestDetails {
+        ExecRequestDetails {
+            args: self.command.args.clone(),
+            env: self
+                .command
+                .env
+                .iter()
+                .map(|(name, value)| ExecEnvVar {
+                    name: name.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The failure of the attempt that was blocked. It names the command only.
+    fn failure(&self) -> Failure {
+        let command = &self.command.command;
+        let message = if self.changed {
+            format!(
+                "The program this kubeconfig runs for credentials (\"{command}\"), the \
+                 cluster address or its TLS and proxy settings changed since you allowed it."
+            )
+        } else {
+            format!(
+                "This kubeconfig runs \"{command}\" to get credentials, \
+                 and you have not allowed that yet."
+            )
+        };
+        Failure::new(FailureKind::ExecNotAllowed, message)
+    }
+}
+
+/// What the kubeconfig would run, unless the user allowed exactly that.
+fn refused_exec(
+    kubeconfig: &Kubeconfig,
+    entry: &ContextEntry,
+    allowed: Option<&str>,
+) -> Option<HeldExec> {
+    let command = exec_command(kubeconfig)?;
+    if allowed == Some(command.fingerprint.as_str()) {
+        return None;
+    }
+    Some(HeldExec {
+        request_id: NEXT_EXEC_REQUEST.fetch_add(1, Ordering::Relaxed),
+        command,
+        changed: allowed.is_some(),
+        source_path: entry.source_path.clone(),
+        context_name: entry.context_name.clone(),
+    })
+}
+
 struct Shared {
     log: VecDeque<ConnectionLogEntry>,
     /// Replaced for each attempt, since a cancelled token stays cancelled.
     token: CancellationToken,
     live: Option<Live>,
+    /// What the last attempt refused to run. The next attempt and a disconnect drop it.
+    held_exec: Option<HeldExec>,
 }
 
 impl Shared {
@@ -145,6 +236,7 @@ impl ClusterHandle {
                 log: VecDeque::new(),
                 token: CancellationToken::new(),
                 live: None,
+                held_exec: None,
             }),
         }
     }
@@ -176,6 +268,7 @@ impl ClusterHandle {
         }
         let token = CancellationToken::new();
         shared.token = token.clone();
+        shared.held_exec = None;
         self.set_state(&mut shared, ConnectionState::Connecting);
         Some(token)
     }
@@ -190,7 +283,12 @@ impl ClusterHandle {
         settled.map_or(ConnectionState::Disconnected, |state| state.clone())
     }
 
-    fn finish_attempt(&self, token: &CancellationToken, outcome: Result<Established, Failure>) {
+    fn finish_attempt(
+        &self,
+        token: &CancellationToken,
+        outcome: Result<Established, Failure>,
+        held_exec: Option<HeldExec>,
+    ) {
         let mut shared = lock(&self.shared);
         // Disconnect already set the state. It cannot have deleted a file written
         // after it ran, and the next attempt waits for this one, so the file is ours.
@@ -198,6 +296,8 @@ impl ClusterHandle {
             remove_kubeconfig(&self.kubeconfig_path);
             return;
         }
+        // Set with the state, so the request is there when the window hears of the failure.
+        shared.held_exec = held_exec;
         let state = match outcome {
             Ok(established) => {
                 shared.live = Some(Live {
@@ -230,6 +330,7 @@ impl ClusterHandle {
         let mut shared = lock(&self.shared);
         shared.token.cancel();
         shared.live = None;
+        shared.held_exec = None;
         // Inside the lock, so it cannot delete the file of an attempt begun after this.
         remove_kubeconfig(&self.kubeconfig_path);
         if *self.state.borrow() != ConnectionState::Disconnected {
@@ -244,6 +345,7 @@ async fn run_attempt(
     token: CancellationToken,
     entry: ContextEntry,
     settings: ClusterSettings,
+    allowed: Option<String>,
     timeouts: ConnectTimeouts,
 ) {
     let _running = handle.attempt.lock().await;
@@ -259,11 +361,20 @@ async fn run_attempt(
         let path = handle.kubeconfig_path.clone();
         tokio::task::spawn_blocking(move || prepare_kubeconfig(&entry, &path)).await
     };
+    let mut held_exec = None;
     let outcome = match prepared {
-        Ok(Ok(kubeconfig)) => tokio::select! {
-            biased;
-            () = token.cancelled() => Err(Failure::new(FailureKind::Other, "cancelled")),
-            outcome = establish(&handle, kubeconfig, &entry, &settings, &timeouts) => outcome,
+        Ok(Ok(kubeconfig)) => match refused_exec(&kubeconfig, &entry, allowed.as_deref()) {
+            // Before `establish`, where `kube` would run the program.
+            Some(refused) => {
+                let failure = refused.failure();
+                held_exec = Some(refused);
+                Err(failure)
+            }
+            None => tokio::select! {
+                biased;
+                () = token.cancelled() => Err(Failure::new(FailureKind::Other, "cancelled")),
+                outcome = establish(&handle, kubeconfig, &entry, &settings, &timeouts) => outcome,
+            },
         },
         Ok(Err(failure)) => Err(failure),
         Err(e) => Err(Failure::new(
@@ -271,7 +382,7 @@ async fn run_attempt(
             format!("reading the kubeconfig failed: {e}"),
         )),
     };
-    handle.finish_attempt(&token, outcome);
+    handle.finish_attempt(&token, outcome, held_exec);
 }
 
 pub(crate) struct ClusterManager {
@@ -314,10 +425,12 @@ impl ClusterManager {
 
     /// Returns once the attempt this call began or joined has ended. The attempt
     /// runs in its own task, so a caller going away neither stops it nor leaves it stuck.
+    /// `allowed` is the fingerprint of the exec command the user allowed for this cluster.
     pub(crate) async fn connect(
         &self,
         entry: ContextEntry,
         settings: ClusterSettings,
+        allowed: Option<String>,
     ) -> ConnectionState {
         let handle = self
             .handles
@@ -338,6 +451,7 @@ impl ClusterManager {
                 token,
                 entry,
                 settings,
+                allowed,
                 timeouts,
             ));
         }
@@ -368,6 +482,12 @@ impl ClusterManager {
     pub(crate) fn state(&self, id: &ClusterId) -> ConnectionState {
         self.handle(id)
             .map_or(ConnectionState::Disconnected, |h| h.state.borrow().clone())
+    }
+
+    /// What the last blocked attempt for `id` refused to run.
+    pub(crate) fn held_exec(&self, id: &ClusterId) -> Option<HeldExec> {
+        self.handle(id)
+            .and_then(|handle| lock(&handle.shared).held_exec.clone())
     }
 
     pub(crate) fn log(&self, id: &ClusterId) -> Vec<ConnectionLogEntry> {

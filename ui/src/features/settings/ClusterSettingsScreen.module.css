@@ -39,6 +39,30 @@
   overflow-wrap: anywhere;
 }
 
+/* What the kubeconfig does on connect: a badge, then the sentence that explains it. */
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+  margin: var(--space-3) 0 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+
+.note > :first-child {
+  flex: none;
+}
+
+.note > span:last-child {
+  min-width: 0;
+}
+
+/* A note with a button: the text sits on the button's middle line. */
+.allowed {
+  align-items: center;
+}
+
 .form {
   display: flex;
   flex-direction: column;

@@ -87,6 +87,63 @@ async function startSmokeFixture() {
   };
 }
 
+/** Where the exec consent spec's plugin leaves a file when it runs. */
+export const EXEC_CONSENT_MARKER = path.resolve(
+  __dirname,
+  "..",
+  ".tmp",
+  "exec-consent-plugin-ran",
+);
+
+/**
+ * One fakekube context whose user signs in through an exec plugin. The plugin
+ * leaves `EXEC_CONSENT_MARKER` behind and prints a token.
+ */
+async function startExecConsentFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skopos-e2e-exec-"));
+  const fake = await startFakeKube({
+    kubeconfigPath: path.join(dir, "fake"),
+    context: "fake",
+  });
+  fs.mkdirSync(path.dirname(EXEC_CONSENT_MARKER), { recursive: true });
+  fs.rmSync(EXEC_CONSENT_MARKER, { force: true });
+  const credential = JSON.stringify({
+    apiVersion: "client.authentication.k8s.io/v1",
+    kind: "ExecCredential",
+    status: { token: "from-plugin" },
+  });
+  const script = `touch '${EXEC_CONSENT_MARKER}'; echo '${credential}'`;
+  const config = `${[
+    "apiVersion: v1",
+    "kind: Config",
+    "clusters:",
+    "- name: exec-plugin",
+    "  cluster:",
+    `    server: ${fake.url}`,
+    "users:",
+    "- name: exec-plugin",
+    "  user:",
+    "    exec:",
+    "      apiVersion: client.authentication.k8s.io/v1",
+    "      command: /bin/sh",
+    `      args: ["-c", ${JSON.stringify(script)}]`,
+    "      interactiveMode: Never",
+    "contexts:",
+    "- name: exec-plugin",
+    "  context:",
+    "    cluster: exec-plugin",
+    "    user: exec-plugin",
+  ].join("\n")}\n`;
+  return {
+    kubeconfigs: { "exec-plugin": config },
+    async stop() {
+      await fake.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(EXEC_CONSENT_MARKER, { force: true });
+    },
+  };
+}
+
 /** The kind cluster and nothing else. */
 async function startKindFixture() {
   return {
@@ -298,6 +355,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   "hotbar-restart-2-verify": { kubeconfigs: {}, envGroup: "hotbar-restart" },
   connection: { kubeconfigs: {}, start: startConnectionFixture },
   smoke: { kubeconfigs: {}, start: startSmokeFixture },
+  "exec-consent": { kubeconfigs: {}, start: startExecConsentFixture },
   resources: { kubeconfigs: {}, start: startKindFixture },
   editor: { kubeconfigs: {}, start: startKindFixture },
   crd: { kubeconfigs: {}, start: startKindFixture },

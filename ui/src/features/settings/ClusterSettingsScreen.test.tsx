@@ -10,6 +10,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
 import type { ClusterAgentSettings } from "../../ipc/generated/ClusterAgentSettings";
+import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
@@ -62,6 +63,7 @@ async function show(
   options: {
     saved?: ClusterSettings;
     state?: ConnectionState;
+    cluster?: Partial<ClusterEntry>;
     handlers?: Parameters<typeof mockBackend>[0];
   } = {},
 ) {
@@ -74,6 +76,7 @@ async function show(
         name: "x",
         contextName: "kind-x",
         state: options.state ?? { status: "disconnected" },
+        ...options.cluster,
       }),
     ],
   });
@@ -171,6 +174,32 @@ function savedPayload(backend: Backend): ClusterSettings | undefined {
     | ClusterSettings
     | undefined;
 }
+
+test("the head says what the kubeconfig runs and that TLS is not verified", async () => {
+  await show({ cluster: { execCommand: "aws", insecureTls: true } });
+
+  const tls = within(screen.getByTestId("settings-note-tls"));
+  expect(tls.getByText("TLS not verified")).toBeTruthy();
+  expect(
+    tls.getByText(
+      "This kubeconfig turns off TLS verification (insecure-skip-tls-verify), so the server's identity is not checked.",
+    ),
+  ).toBeTruthy();
+  const exec = within(screen.getByTestId("settings-note-exec"));
+  expect(exec.getByText("Exec plugin")).toBeTruthy();
+  expect(
+    exec.getByText(
+      'Connecting runs "aws" from this kubeconfig to get credentials.',
+    ),
+  ).toBeTruthy();
+});
+
+test("the head has no such note for a kubeconfig that runs nothing and checks TLS", async () => {
+  await show();
+  await screen.findByTestId("settings-title");
+  expect(screen.queryByTestId("settings-note-tls")).toBeNull();
+  expect(screen.queryByTestId("settings-note-exec")).toBeNull();
+});
 
 test("the head names the cluster and its kubeconfig, and the fields show the saved settings", async () => {
   await show({ saved: FULL });
@@ -1175,4 +1204,27 @@ test("a keychain that cannot be read asks for the password, without a toast", as
     },
   ]);
   expect(error).not.toHaveBeenCalled();
+});
+
+test("an allowed exec command can be stopped from the head", async () => {
+  const backend = await show({
+    cluster: { execCommand: "aws", execAllowed: true },
+    handlers: { cluster_exec_forget: () => null },
+  });
+
+  const allowed = within(screen.getByTestId("settings-exec-allowed"));
+  expect(allowed.getByText("Allowed to run when you connect.")).toBeTruthy();
+
+  fireEvent.click(screen.getByTestId("settings-exec-forget"));
+
+  await waitFor(() =>
+    expect(backend.callsTo("cluster_exec_forget")).toEqual([{ id: "id-x" }]),
+  );
+});
+
+test("the head offers nothing to stop for an exec command that is not allowed", async () => {
+  await show({ cluster: { execCommand: "aws", execAllowed: false } });
+
+  expect(screen.getByTestId("settings-note-exec")).toBeTruthy();
+  expect(screen.queryByTestId("settings-exec-allowed")).toBeNull();
 });

@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { clusterStatus } from "../../app/clusterStatus";
+import { connectionNotes } from "../../app/connectionNotes";
 import {
   Badge,
   Button,
@@ -28,6 +29,7 @@ import { failureMessage } from "../../ipc/client";
 import type { CatalogFolder } from "../../ipc/generated/CatalogFolder";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import { useCatalog } from "../../stores/catalog";
+import { connectAndAsk } from "../../stores/clusters";
 import { useFolders } from "../../stores/folders";
 import { settingsPath } from "../settings/paths";
 import styles from "./CatalogScreen.module.css";
@@ -84,7 +86,7 @@ function ConnectButton({ cluster }: { cluster: ClusterEntry }) {
     setBusy(true);
     try {
       if (live) await api.clusterDisconnect(cluster.id);
-      else await api.clusterConnect(cluster.id);
+      else await connectAndAsk(cluster.id);
     } catch (error) {
       const action = live ? "disconnect from" : "connect to";
       toast.error(`Could not ${action} ${cluster.name}`, failureMessage(error));
@@ -469,6 +471,15 @@ function ClusterRow(props: {
           {c.source.kind === "pasted" ? (
             <Badge tone="info">Pasted</Badge>
           ) : null}
+          {connectionNotes(c).map((note) => (
+            <span
+              key={note.id}
+              title={note.detail}
+              data-testid={`catalog-note-${note.id}`}
+            >
+              <Badge tone={note.tone}>{note.label}</Badge>
+            </span>
+          ))}
         </span>
       </td>
       <td>
