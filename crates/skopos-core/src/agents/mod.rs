@@ -5,6 +5,7 @@
 
 pub mod bridge;
 pub mod endpoint;
+pub mod mcp;
 pub mod modes;
 pub mod proxy;
 pub mod registry;

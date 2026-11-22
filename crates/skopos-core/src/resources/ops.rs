@@ -103,16 +103,30 @@ pub(super) fn resource_request(r: &ResourceRef, namespace: Option<&str>) -> Core
     Ok(Request::new(DynamicObject::url_path(&resource, namespace)))
 }
 
-/// Sets `kind` and `apiVersion` from the resource before stripping, which depends
-/// on them, so that what is blanked does not rest on the server's answer or the
-/// caller's `kind`.
-fn masked(mut object: Value, r: &ResourceRef) -> Value {
+/// Sets `kind` and `apiVersion` from the resource, so that what is decided from them,
+/// such as whether values are blanked, does not rest on the server's answer or the
+/// caller's `kind`. List items from an API server carry neither.
+fn stamped(mut object: Value, r: &ResourceRef) -> Value {
     if let Some(fields) = object.as_object_mut() {
         fields.insert("apiVersion".to_owned(), api_version(r).into());
         fields.insert("kind".to_owned(), stamped_kind(r).into());
     }
+    object
+}
+
+/// Stamps the object, then strips it, which depends on `kind` and `apiVersion`.
+fn masked(object: Value, r: &ResourceRef) -> Value {
+    let mut object = stamped(object, r);
     strip_for_list(&mut object);
     object
+}
+
+/// The items of a list the API server answered.
+fn items_of(mut list: Value) -> Vec<Value> {
+    match list.get_mut("items").map(Value::take) {
+        Some(Value::Array(items)) => items,
+        _ => Vec::new(),
+    }
 }
 
 /// Checks that the YAML still describes the object being edited.
@@ -213,6 +227,25 @@ impl AppCore {
         label_selector: Option<&str>,
         field_selector: Option<&str>,
     ) -> CoreResult<Vec<Value>> {
+        let mut items = self
+            .resources_list_raw(id, r, namespace, label_selector, field_selector)
+            .await?;
+        for item in &mut items {
+            strip_for_list(item);
+        }
+        Ok(items)
+    }
+
+    /// As `resources_list`, with `kind` and `apiVersion` set from `r` and nothing removed,
+    /// for the agent tools, which trim what they return themselves (R4).
+    pub(crate) async fn resources_list_raw(
+        &self,
+        id: &ClusterId,
+        r: &ResourceRef,
+        namespace: Option<&str>,
+        label_selector: Option<&str>,
+        field_selector: Option<&str>,
+    ) -> CoreResult<Vec<Value>> {
         let namespace = namespace.filter(|_| r.namespaced);
         if namespace.is_some_and(|namespace| !is_path_segment(namespace)) {
             return Err(invalid("the namespace is not valid"));
@@ -226,12 +259,11 @@ impl AppCore {
         if let Some(fields) = field_selector {
             params = params.fields(fields);
         }
-        let mut list = send(&client, request.list(&params)).await?;
-        let items = match list.get_mut("items").map(Value::take) {
-            Some(Value::Array(items)) => items,
-            _ => Vec::new(),
-        };
-        Ok(items.into_iter().map(|item| masked(item, r)).collect())
+        let list = send(&client, request.list(&params)).await?;
+        Ok(items_of(list)
+            .into_iter()
+            .map(|item| stamped(item, r))
+            .collect())
     }
 
     /// One object, for showing: `managedFields` removed and Secret values blanked.
@@ -242,8 +274,21 @@ impl AppCore {
         namespace: Option<&str>,
         name: &str,
     ) -> CoreResult<Value> {
+        let mut object = self.resource_get_raw(id, r, namespace, name).await?;
+        strip_for_list(&mut object);
+        Ok(object)
+    }
+
+    /// As `resource_get`, with `kind` and `apiVersion` set from `r` and nothing removed.
+    pub(crate) async fn resource_get_raw(
+        &self,
+        id: &ClusterId,
+        r: &ResourceRef,
+        namespace: Option<&str>,
+        name: &str,
+    ) -> CoreResult<Value> {
         let object = self.fetch_object(id, r, namespace, name).await?;
-        Ok(masked(object, r))
+        Ok(stamped(object, r))
     }
 
     /// One object as YAML, for editing: `managedFields` removed. Secret values stay,
@@ -362,12 +407,84 @@ impl AppCore {
         }
         Ok(events)
     }
+
+    /// Events newest first, at most `MAX_EVENTS`, read in each of `namespaces`, or in all
+    /// namespaces when `None`. `kind` keeps the events about objects of that kind, and
+    /// `name` those about objects of that name.
+    pub(crate) async fn events_in(
+        &self,
+        id: &ClusterId,
+        namespaces: Option<&[String]>,
+        kind: Option<&str>,
+        name: Option<&str>,
+    ) -> CoreResult<Vec<Value>> {
+        let mut terms = Vec::new();
+        if let Some(kind) = kind {
+            terms.push(format!("involvedObject.kind={}", selector_value(kind)));
+        }
+        if let Some(name) = name {
+            terms.push(format!("involvedObject.name={}", selector_value(name)));
+        }
+        let mut params = ListParams::default();
+        if !terms.is_empty() {
+            params = params.fields(&terms.join(","));
+        }
+        let client = self.cluster_client(id)?;
+        let mut events = Vec::new();
+        match namespaces {
+            None => {
+                let request = Request::new(Event::url_path(&(), None));
+                events.extend(items_of(send(&client, request.list(&params)).await?));
+            }
+            Some(namespaces) => {
+                for namespace in namespaces {
+                    if !is_path_segment(namespace) {
+                        return Err(invalid("the namespace is not valid"));
+                    }
+                    let request = Request::new(Event::url_path(&(), Some(namespace.as_str())));
+                    events.extend(items_of(send(&client, request.list(&params)).await?));
+                }
+            }
+        }
+        events.sort_by_cached_key(|event| Reverse(last_seen(event)));
+        events.truncate(MAX_EVENTS);
+        for event in &mut events {
+            strip_for_list(event);
+        }
+        Ok(events)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn stamping_sets_kind_and_api_version_and_keeps_secret_values() {
+        let secrets = ResourceRef {
+            group: String::new(),
+            version: "v1".into(),
+            plural: "secrets".into(),
+            kind: "secret".into(),
+            namespaced: true,
+        };
+        let item = json!({
+            "metadata": { "name": "db", "managedFields": [{ "manager": "kubectl" }] },
+            "data": { "password": "c2VjcmV0" },
+        });
+        let raw = stamped(item.clone(), &secrets);
+        assert_eq!(raw["kind"], "Secret");
+        assert_eq!(raw["apiVersion"], "v1");
+        assert_eq!(raw["data"]["password"], "c2VjcmV0");
+        assert_eq!(
+            raw["metadata"]["managedFields"],
+            json!([{ "manager": "kubectl" }])
+        );
+        let shown = masked(item, &secrets);
+        assert_eq!(shown["data"]["password"], "");
+        assert!(shown["metadata"].get("managedFields").is_none());
+    }
 
     #[test]
     fn path_segments_exclude_what_would_change_the_path() {
