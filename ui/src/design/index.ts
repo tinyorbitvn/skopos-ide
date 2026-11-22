@@ -24,9 +24,11 @@ export { Tooltip } from "./Tooltip";
 export { applyTheme, type ThemeChoice } from "./theme";
 export { UsageDonut, type UsageDonutProps } from "./UsageDonut";
 export {
+  type ColumnFilter,
   type ColumnWidths,
   type TableColumn,
   type TableSort,
   useNow,
+  useNowWhile,
   VirtualTable,
 } from "./VirtualTable";

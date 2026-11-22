@@ -51,6 +51,11 @@
   border-color: var(--border-accent);
 }
 
+.token[data-missing="true"] {
+  border-color: var(--status-warning-text);
+  background: var(--status-warning-soft);
+}
+
 .body {
   display: inline-flex;
   align-items: center;
@@ -174,6 +179,12 @@
 
 .editValue {
   font-family: var(--font-mono);
+}
+
+.editError {
+  margin: 0;
+  color: var(--status-critical-text);
+  font: var(--type-caption);
 }
 
 .editFoot {

@@ -11,7 +11,9 @@ import {
   openResource,
   navItem,
   revealNav,
+  expectRowsExactly,
   rowId,
+  searchResources,
   shown,
   tableHeaders,
 } from "../helpers/ui";
@@ -86,6 +88,16 @@ metadata:
   namespace: ${NS}
 spec:
   flavor: e2e-mint
+`;
+
+const SECOND_INSTANCE = `
+apiVersion: ${GROUP}/v1
+kind: Widget
+metadata:
+  name: two
+  namespace: ${NS}
+spec:
+  flavor: e2e-lime
 `;
 
 describe("custom resources", () => {
@@ -163,6 +175,23 @@ describe("custom resources", () => {
         timeoutMsg: "the printer column's value never showed",
       },
     );
+  });
+
+  it("filters by a printer column's value", async () => {
+    await kubectl(["apply", "-f", "-"], SECOND_INSTANCE);
+    await openResource(NAV_ITEM, "Widget");
+    await shown(rowId(NS, "two"));
+    // The column's key exists once the definition is read and its column shows.
+    await browser.waitUntil(
+      async () => (await tableHeaders()).includes("Flavor"),
+      { timeout: 15000, timeoutMsg: "the printer column never showed" },
+    );
+
+    await searchResources("flavor = e2e-mint");
+    await expectRowsExactly([rowId(NS, "one")]);
+    await searchResources("flavor : lime");
+    await expectRowsExactly([rowId(NS, "two")]);
+    await searchResources("");
   });
 
   it("puts two API groups of one domain under a domain row, and back", async () => {

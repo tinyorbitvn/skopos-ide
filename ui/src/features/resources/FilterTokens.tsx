@@ -12,11 +12,17 @@ import { ChevronDown, X } from "../../design/icons";
 import { Segmented } from "../../design/Segmented";
 import styles from "./FilterTokens.module.css";
 import {
+  columnOf,
+  type FilterContext,
   type FilterJoin,
   type FilterOperator,
   filterText,
+  measureHint,
+  measureValue,
+  NO_COLUMNS,
   type ObjectFilter,
   OPERATORS,
+  operatorName,
   operatorsOf,
   propertyText,
   propertyWords,
@@ -32,6 +38,8 @@ const OPERATOR_IDS: Record<FilterOperator, string> = {
   "!=": "not-equals",
   ":": "contains",
   "!:": "not-contains",
+  ">": "greater",
+  "<": "less",
 };
 
 function operatorOf(id: string): FilterOperator {
@@ -46,15 +54,28 @@ export function cutText(text: string, max: number): string {
 }
 
 /**
- * The token an edit gives, or null when the edit removes it: an empty value removes it,
- * except for a label or annotation with `:` or `!:`, where it means any value (spec M19).
+ * The token an edit gives, null when the edit removes it, or "invalid": an empty value
+ * removes it, except for `:` or `!:` on a label, an annotation or a column, where it means
+ * any value (spec M19); `>` and `<` need a number or a time (column filter spec §3.5).
  */
 export function editedFilter(
   filter: ObjectFilter,
   operator: FilterOperator,
   value: string,
-): ObjectFilter | null {
+  context: FilterContext = NO_COLUMNS,
+): ObjectFilter | null | "invalid" {
   const trimmed = value.trim();
+  if (operator === ">" || operator === "<") {
+    if (trimmed === "") return null;
+    // A column that left the list cannot say whether it counts or times, so the
+    // value stays as typed; the token matches again once the column is back.
+    const missing =
+      filter.property.type === "column" &&
+      columnOf(filter.property, context) === undefined;
+    return !missing && measureValue(filter.property, trimmed, context) === null
+      ? "invalid"
+      : { property: filter.property, operator, value: trimmed };
+  }
   if (trimmed === "" && !takesAnyValue(filter.property, operator)) return null;
   return { property: filter.property, operator, value: trimmed };
 }
@@ -71,6 +92,8 @@ export interface FilterTokensProps {
   total: number;
   /** Puts focus back in the filter box. */
   onFocusBox(): void;
+  /** The list's columns, for a column token's operators and header (column filter spec §3.5). */
+  context: FilterContext;
 }
 
 /**
@@ -122,6 +145,9 @@ export function FilterTokens(props: FilterTokensProps): ReactElement | null {
     >
       {tokens.map((token, i) => {
         const text = filterText(token);
+        const missing =
+          token.property.type === "column" &&
+          !props.context.byKey.has(token.property.key);
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no identity but their place; two tokens may be equal.
           <span key={i} className={styles.item}>
@@ -141,6 +167,12 @@ export function FilterTokens(props: FilterTokensProps): ReactElement | null {
               <span
                 className={styles.token}
                 data-editing={editing === i}
+                data-missing={missing}
+                title={
+                  missing && token.property.type === "column"
+                    ? `This list has no column ${token.property.key}`
+                    : undefined
+                }
                 data-testid={`filter-token-${i}`}
               >
                 <button
@@ -172,6 +204,7 @@ export function FilterTokens(props: FilterTokensProps): ReactElement | null {
                 <FilterEdit
                   filter={token}
                   anchor={i}
+                  context={props.context}
                   onDone={(result) => finish(i, result)}
                 />
               ) : null}
@@ -237,12 +270,15 @@ function FilterEdit(props: {
   filter: ObjectFilter;
   /** The token's place, which marks the part of the page a pointer down keeps it open in. */
   anchor: number;
+  context: FilterContext;
   /** The edited token, null when the edit removes it, or "cancel". */
   onDone(result: ObjectFilter | null | "cancel"): void;
 }): ReactElement {
   const { filter } = props;
   const [operator, setOperator] = useState(filter.operator);
   const [value, setValue] = useState(filter.value);
+  const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
   const valueId = useId();
   const done = useRef(props.onDone);
   done.current = props.onDone;
@@ -262,7 +298,19 @@ function FilterEdit(props: {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [props.anchor]);
 
-  const apply = () => props.onDone(editedFilter(filter, operator, value));
+  // The column's operators, and the token's own even when its column left the list,
+  // so the choice it has stays on screen (column filter spec §3.5).
+  const allowed = operatorsOf(filter.property, props.context);
+  const choices = allowed.includes(filter.operator)
+    ? allowed
+    : [...allowed, filter.operator];
+
+  const apply = () => {
+    const result = editedFilter(filter, operator, value, props.context);
+    if (result === "invalid")
+      setError(measureHint(filter.property, props.context));
+    else props.onDone(result);
+  };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
@@ -290,7 +338,7 @@ function FilterEdit(props: {
       <div className={styles.editRow}>
         <span className={styles.editLabel}>Property</span>
         <span className={styles.editProperty}>
-          {propertyWords(filter.property)}
+          {propertyWords(filter.property, props.context)}
         </span>
       </div>
       <div className={styles.editRow}>
@@ -299,12 +347,15 @@ function FilterEdit(props: {
           label="Operator"
           size="sm"
           value={OPERATOR_IDS[operator]}
-          options={operatorsOf(filter.property).map((o) => ({
+          options={choices.map((o) => ({
             value: OPERATOR_IDS[o],
             label: o,
-            hint: OPERATORS.find((x) => x.operator === o)?.name,
+            hint: operatorName(o, filter.property, props.context),
           }))}
-          onChange={(id) => setOperator(operatorOf(id))}
+          onChange={(id) => {
+            setOperator(operatorOf(id));
+            setError(null);
+          }}
           testId="filter-edit-operator"
         />
       </div>
@@ -318,9 +369,24 @@ function FilterEdit(props: {
           spellCheck={false}
           autoComplete="off"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          aria-invalid={error !== null}
+          aria-describedby={error !== null ? errorId : undefined}
           data-testid="filter-edit-value"
         />
+        {error !== null ? (
+          <p
+            id={errorId}
+            className={styles.editError}
+            role="alert"
+            data-testid="filter-edit-error"
+          >
+            {error}
+          </p>
+        ) : null}
       </div>
       <div className={styles.editFoot}>
         <Button

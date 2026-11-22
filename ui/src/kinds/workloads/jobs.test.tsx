@@ -17,6 +17,7 @@ import {
   cronStatus,
   JobDetail,
   jobCompletions,
+  jobDurationSeconds,
   jobDurationText,
   jobResumeAction,
   jobStatus,
@@ -393,4 +394,22 @@ test("a Job and a CronJob list their Pod template's volumes and service account"
     expect(relations.getByRole("link", { name: "runner" })).toBeTruthy();
     view.unmount();
   }
+});
+
+test("a Job's duration in seconds runs to now, or to its completion, and is null before it starts", () => {
+  const now = Date.parse("2026-11-22T12:00:00Z");
+  const running = {
+    metadata: { name: "j" },
+    status: { startTime: "2026-11-22T11:58:00Z" },
+  };
+  const done = {
+    metadata: { name: "j" },
+    status: {
+      startTime: "2026-11-22T11:00:00Z",
+      completionTime: "2026-11-22T11:00:45Z",
+    },
+  };
+  expect(jobDurationSeconds(running, now)).toBe(120);
+  expect(jobDurationSeconds(done, now)).toBe(45);
+  expect(jobDurationSeconds({ metadata: { name: "j" } }, now)).toBeNull();
 });

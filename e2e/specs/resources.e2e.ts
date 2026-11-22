@@ -412,6 +412,60 @@ spec:
     await expectRowsExactly([]);
   });
 
+  it("filters by column values: a status, an age, and a hidden IP", async () => {
+    await openResource(PODS, "Pod");
+    const web = (ids: string[]) =>
+      ids.filter((id) => id.startsWith(`resource-row-${NS}-web-`));
+    const once = (ids: string[]) =>
+      ids.filter((id) => id.startsWith(`resource-row-${NS}-once-`));
+
+    // Every pod of the fixture runs: the Job's pod runs the pause image, which never exits.
+    await searchResources("status = Running");
+    await expectRows(
+      "every pod of the fixture",
+      (ids) => web(ids).length === 2 && once(ids).length === 1,
+    );
+    await searchResources("status != Running");
+    await expectRows(
+      "none of the fixture's pods",
+      (ids) => web(ids).length === 0 && once(ids).length === 0,
+    );
+
+    await searchResources("age < 1d");
+    await expectRows(
+      "every pod of the fixture",
+      (ids) => web(ids).length === 2 && once(ids).length === 1,
+    );
+
+    await searchResources("age > 1y");
+    await expectRowsExactly([]);
+
+    // IP is hidden in a Pod list; free text still finds it, and the row says so.
+    const podQuery = ["-n", NS, "get", "pods", "-l", "app=web", "-o"];
+    const ip = (
+      await kubectl([...podQuery, "jsonpath={.items[0].status.podIP}"])
+    ).trim();
+    const name = (
+      await kubectl([...podQuery, "jsonpath={.items[0].metadata.name}"])
+    ).trim();
+    expect(ip).not.toBe("");
+    await searchResources(ip);
+    await expectRows("the pod with that IP", (ids) =>
+      ids.includes(rowId(NS, name)),
+    );
+    const chip = (await shown(rowId(NS, name))).$(
+      '[data-testid="filter-chip"]',
+    );
+    await chip.waitForExist({ timeout: 10000 });
+    expect(await chip.getAttribute("title")).toBe(`column ip=${ip}`);
+
+    // Naming the hidden column keeps only the pod that shows exactly that IP.
+    await searchResources(`ip = ${ip}`);
+    await expectRowsExactly([rowId(NS, name)]);
+
+    await searchResources("");
+  });
+
   it("sorts by age and by name", async () => {
     await createConfigMap("sort-z-older");
     await nextCreationSecond("sort-z-older");

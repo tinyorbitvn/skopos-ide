@@ -7,7 +7,7 @@ import {
   textColumn,
 } from "../columns";
 import type { KubeObject } from "../objects";
-import { ageCell, ageSortValue, registerKind } from "../registry";
+import { ageCell, ageFilter, ageSortValue, registerKind } from "../registry";
 import { CrdDetail, EventDetail, NamespaceDetail } from "./ClusterDetails";
 import {
   eventCount,
@@ -28,6 +28,7 @@ const lastSeenColumn: TableColumn<KubeObject> = {
   header: "Last seen",
   width: 96,
   sortValue: (o) => ageSortValue(eventLastSeen(o)),
+  filter: ageFilter((o) => eventLastSeen(o)),
   render: (o) => ageCell(eventLastSeen(o)),
 };
 
