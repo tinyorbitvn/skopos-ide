@@ -127,12 +127,13 @@ export function pngSize(buf) {
 }
 
 /**
- * Fills the page's placeholders:
+ * Fills a page's placeholders:
  *   {{release.version|tag|date|isoDate|url}}, {{asset:<suffix>:name|url|size}},
  *   {{image:<file>.png}} (src, width and height) and {{sprite}}.
- * An unknown key or a placeholder left open is an error.
+ * `base` leads image paths back to the site's root from a page in a folder, such as "../";
+ * `page` names the page in errors. An unknown key or a placeholder left open is an error.
  */
-export function render(template, { release, images, sprite }) {
+export function render(template, { release, images, sprite, base = "", page = "index.html" }) {
   const html = template.replace(/\{\{([^{}]*)\}\}/g, (_, key) => {
     if (key === "sprite") return sprite;
     let match = /^release\.(\w+)$/.exec(key);
@@ -144,14 +145,14 @@ export function render(template, { release, images, sprite }) {
     match = /^image:([a-z0-9-]+\.png)$/.exec(key);
     if (match && Object.hasOwn(images, match[1])) {
       const { width, height } = images[match[1]];
-      return `src="images/${match[1]}" width="${width}" height="${height}"`;
+      return `src="${base}images/${match[1]}" width="${width}" height="${height}"`;
     }
-    throw new Error(`site/index.html: unknown placeholder {{${key}}}`);
+    throw new Error(`site/${page}: unknown placeholder {{${key}}}`);
   });
   const open = html.indexOf("{{");
   if (open !== -1) {
     throw new Error(
-      `site/index.html: placeholder left open near ${JSON.stringify(html.slice(open, open + 40))}`,
+      `site/${page}: placeholder left open near ${JSON.stringify(html.slice(open, open + 40))}`,
     );
   }
   return html;
@@ -254,29 +255,37 @@ function listFiles(dir, prefix = "") {
 }
 
 /**
- * Renders site/ for a parsed release into out. Everything is read and rendered first;
- * the folder is replaced only when all of it succeeded.
+ * Renders site/ for a parsed release into out: every .html file is a page template, the
+ * other files are copied. Everything is read and rendered first; the folder is replaced
+ * only when all of it succeeded.
  */
 export function build({ release, out, root }) {
   const target = assertSafeOut(out, root);
   const siteDir = path.join(root, "site");
   const files = new Map();
-  const template = fs.readFileSync(path.join(siteDir, "index.html"), "utf8");
+  const pages = new Map();
   for (const rel of listFiles(siteDir)) {
-    if (rel !== "index.html") files.set(rel, fs.readFileSync(path.join(siteDir, ...rel.split("/"))));
+    const data = fs.readFileSync(path.join(siteDir, ...rel.split("/")));
+    if (rel.endsWith(".html")) pages.set(rel, data.toString("utf8"));
+    else files.set(rel, data);
   }
+  if (!pages.has("index.html")) throw new Error("site/index.html not found");
   const images = {};
   for (const [rel, data] of files) {
     const m = /^images\/([a-z0-9-]+\.png)$/.exec(rel);
     if (m) images[m[1]] = pngSize(data);
   }
-  const names = [...template.matchAll(/href="#i-([a-z0-9-]+)"/g)].map((m) => m[1]);
   const icons = path.join(root, "ui", "node_modules", "lucide-react", "dist", "esm", "icons");
   const readLucide = (name) => {
     const file = path.join(icons, `${name}.mjs`);
     return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
   };
-  files.set("index.html", render(template, { release, images, sprite: sprite(names, { readLucide }) }));
+  for (const [rel, template] of pages) {
+    const names = [...template.matchAll(/href="#i-([a-z0-9-]+)"/g)].map((m) => m[1]);
+    const base = "../".repeat(rel.split("/").length - 1);
+    const symbols = sprite(names, { readLucide });
+    files.set(rel, render(template, { release, images, sprite: symbols, base, page: rel }));
+  }
   files.set("tokens.css", fs.readFileSync(path.join(root, "ui", "src", "design", "tinyorbit.css")));
   files.set("icon.svg", fs.readFileSync(path.join(root, "assets", "icon.svg")));
   for (const [pkg, file] of FONTS) {
