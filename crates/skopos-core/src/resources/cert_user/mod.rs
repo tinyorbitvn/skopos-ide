@@ -13,3 +13,6 @@ pub use run::{BoundBinding, CertUserEvent, CertUserLimits, CertUserStep};
 pub(crate) fn generate_for_tests(user: &str, groups: &[String]) -> String {
     csr::generate(user, groups).unwrap().1
 }
+
+#[cfg(test)]
+pub(crate) use csr::request_with_subject;

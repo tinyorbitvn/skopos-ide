@@ -68,6 +68,10 @@ pub(crate) fn certificate_expiry(pem: &[u8]) -> CoreResult<String> {
 
 /// Describes a CSR's request and, once issued, its certificate. Both are base64, as in the
 /// object's JSON. Nothing of an input that does not parse is quoted back.
+///
+/// The subject is read as the API server reads it, or refused: a request with more than one
+/// CN, or a CN or O value in a string type read here differently or not at all (the API server
+/// also reads T61String and BMPString), would otherwise show one identity and grant another.
 pub fn certificate_request_describe(
     request: &str,
     certificate: Option<&str>,
@@ -80,18 +84,28 @@ pub fn certificate_request_describe(
         .ok_or_else(unreadable)?;
     let (_, parsed) = X509CertificationRequest::from_der(&der).map_err(|_| unreadable())?;
     let info = &parsed.certification_request_info;
-    let common_name = info
+    let value_unreadable =
+        || invalid("the signing request has a CN or O value that cannot be read");
+    let common_names = info
         .subject
         .iter_common_name()
-        .find_map(|v| v.as_str().ok())
-        .unwrap_or_default()
-        .to_owned();
+        .map(|v| v.as_str().map_err(|_| value_unreadable()))
+        .collect::<CoreResult<Vec<_>>>()?;
+    if common_names.len() > 1 {
+        return Err(invalid(
+            "the signing request has more than one CN, so the user it names is not clear",
+        ));
+    }
+    let common_name = common_names.first().copied().unwrap_or_default().to_owned();
     let organizations = info
         .subject
         .iter_organization()
-        .filter_map(|v| v.as_str().ok())
-        .map(str::to_owned)
-        .collect();
+        .map(|v| {
+            v.as_str()
+                .map(str::to_owned)
+                .map_err(|_| value_unreadable())
+        })
+        .collect::<CoreResult<Vec<_>>>()?;
     let not_after = match certificate {
         None => None,
         Some(text) => {
@@ -111,7 +125,7 @@ pub fn certificate_request_describe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resources::cert_user::generate_for_tests;
+    use crate::resources::cert_user::{generate_for_tests, request_with_subject};
 
     const RSA_REQUEST: &str = include_str!("../../tests/fixtures/rsa-2048.csr");
 
@@ -160,6 +174,55 @@ mod tests {
             certificate_expiry(certificate.as_bytes()).unwrap(),
             "2031-01-02T00:00:00Z"
         );
+    }
+
+    const UTF8: u8 = 0x0c;
+    const PRINTABLE: u8 = 0x13;
+    const BMP: u8 = 0x1e;
+
+    #[test]
+    fn a_request_with_two_common_names_is_refused() {
+        // The API server takes the last CN; showing the first would name someone else.
+        let pem = request_with_subject(&[("CN", UTF8, b"carol"), ("CN", UTF8, b"system:admin")]);
+        let error = certificate_request_describe(&STANDARD.encode(pem), None).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert_eq!(
+            error.message,
+            "the signing request has more than one CN, so the user it names is not clear"
+        );
+    }
+
+    #[test]
+    fn a_value_in_a_string_type_not_read_here_is_refused() {
+        // "system:nodes" in UTF-16: the API server reads it, so dropping it would hide a group.
+        let bmp: Vec<u8> = "system:nodes"
+            .encode_utf16()
+            .flat_map(u16::to_be_bytes)
+            .collect();
+        for subject in [
+            vec![("CN", UTF8, b"carol".as_slice()), ("O", BMP, &bmp)],
+            vec![("CN", BMP, bmp.as_slice())],
+        ] {
+            let pem = request_with_subject(&subject);
+            let error = certificate_request_describe(&STANDARD.encode(pem), None).unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput);
+            assert_eq!(
+                error.message,
+                "the signing request has a CN or O value that cannot be read"
+            );
+        }
+    }
+
+    #[test]
+    fn printable_strings_and_a_missing_common_name_are_read() {
+        let pem = request_with_subject(&[("CN", PRINTABLE, b"carol"), ("O", PRINTABLE, b"devs")]);
+        let info = certificate_request_describe(&STANDARD.encode(pem), None).unwrap();
+        assert_eq!(info.common_name, "carol");
+        assert_eq!(info.organizations, ["devs"]);
+
+        let pem = request_with_subject(&[("O", UTF8, b"devs")]);
+        let info = certificate_request_describe(&STANDARD.encode(pem), None).unwrap();
+        assert_eq!(info.common_name, "");
     }
 
     #[test]

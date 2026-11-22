@@ -68,11 +68,11 @@ fn der(tag: u8, content: &[u8]) -> Vec<u8> {
 
 /// One attribute as its own relative distinguished name, as `openssl req -subj /O=a/O=b` does.
 fn name_attribute(oid: &[u8], value: &str) -> Vec<u8> {
-    let pair = [
-        der(OBJECT_IDENTIFIER, oid),
-        der(UTF8_STRING, value.as_bytes()),
-    ]
-    .concat();
+    tagged_attribute(oid, UTF8_STRING, value.as_bytes())
+}
+
+fn tagged_attribute(oid: &[u8], tag: u8, value: &[u8]) -> Vec<u8> {
+    let pair = [der(OBJECT_IDENTIFIER, oid), der(tag, value)].concat();
     der(SET, &der(SEQUENCE, &pair))
 }
 
@@ -95,11 +95,18 @@ pub(crate) fn generate(user: &str, groups: &[String]) -> CoreResult<(SecretKey, 
     for group in groups {
         subject.extend(name_attribute(&ORGANIZATION, group));
     }
+    let request = signed_request(&key, &subject)?;
+    Ok((key, request))
+}
+
+/// A request in PEM for `subject`, the Name's relative distinguished names in DER, signed by
+/// `key`.
+fn signed_request(key: &SecretKey, subject: &[u8]) -> CoreResult<String> {
     let info = der(
         SEQUENCE,
         &[
             der(INTEGER, &[0]),
-            der(SEQUENCE, &subject),
+            der(SEQUENCE, subject),
             key.0.subject_public_key_info(),
             der(ATTRIBUTES, &[]),
         ]
@@ -118,7 +125,26 @@ pub(crate) fn generate(user: &str, groups: &[String]) -> CoreResult<(SecretKey, 
         ]
         .concat(),
     );
-    Ok((key, pem_block("CERTIFICATE REQUEST", &request)))
+    Ok(pem_block("CERTIFICATE REQUEST", &request))
+}
+
+/// A request PEM whose subject is these attributes, each its own relative distinguished name:
+/// `("CN" or "O", the string's DER tag, its bytes)`. For tests of how requests are read.
+#[cfg(test)]
+pub(crate) fn request_with_subject(attributes: &[(&str, u8, &[u8])]) -> String {
+    let key = SecretKey(KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap());
+    let subject: Vec<u8> = attributes
+        .iter()
+        .flat_map(|(name, tag, value)| {
+            let oid: &[u8] = if *name == "CN" {
+                &COMMON_NAME
+            } else {
+                &ORGANIZATION
+            };
+            tagged_attribute(oid, *tag, value)
+        })
+        .collect();
+    signed_request(&key, &subject).unwrap()
 }
 
 #[cfg(test)]
