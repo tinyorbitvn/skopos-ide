@@ -113,6 +113,9 @@ struct Inner {
     /// The discovery run of each cluster, shared by its `refresh` callers.
     discoveries: DashMap<ClusterId, Arc<SingleFlight<Vec<ApiResourceInfo>>>>,
     sessions: Arc<SessionRegistry>,
+    /// The running chats and the stored ones (agents spec §4.8).
+    #[cfg(unix)]
+    chats: crate::agents::chat::Chats,
     home: PathBuf,
     /// The app's data folder; agents keep their folders and run folders under it.
     data: PathBuf,
@@ -311,6 +314,8 @@ impl AppCore {
                 next_drain: AtomicU64::new(1),
                 discoveries: DashMap::new(),
                 sessions: Arc::new(SessionRegistry::default()),
+                #[cfg(unix)]
+                chats: crate::agents::chat::Chats::new(&paths.data),
                 home: paths.home.clone(),
                 data: paths.data.clone(),
                 agent_sandbox_off: std::sync::atomic::AtomicBool::new(false),
@@ -677,6 +682,11 @@ impl AppCore {
 
     pub(crate) fn sessions(&self) -> &Arc<SessionRegistry> {
         &self.inner.sessions
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn chats(&self) -> &crate::agents::chat::Chats {
+        &self.inner.chats
     }
 
     pub(crate) fn agent_probes(&self) -> &AgentProbes {
