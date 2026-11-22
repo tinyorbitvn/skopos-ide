@@ -32,6 +32,8 @@ const OPERATOR_IDS: Record<FilterOperator, string> = {
   "!=": "not-equals",
   ":": "contains",
   "!:": "not-contains",
+  ">": "greater-than",
+  "<": "less-than",
 };
 
 function operatorOf(id: string): FilterOperator {
