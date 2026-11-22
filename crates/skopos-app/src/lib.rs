@@ -255,6 +255,27 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::updates::update_install,
             commands::updates::update_cancel,
             commands::updates::update_skip,
+            commands::agents::agents_status,
+            commands::agents::agent_probe,
+            commands::agents::agent_custom_add,
+            commands::agents::agent_custom_remove,
+            commands::agents::agent_default_set,
+            commands::agents::agent_prefs,
+            commands::agents::agent_domain_add,
+            commands::agents::agent_domain_remove,
+            commands::agents::agent_folder_add,
+            commands::agents::agent_folder_remove,
+            commands::agents::agent_sandbox_status,
+            commands::agents::cluster_agent_changes_set,
+            commands::agents::cluster_agent_settings,
+            commands::agents::chat_start,
+            commands::agents::chat_prompt,
+            commands::agents::chat_stop,
+            commands::agents::chat_close,
+            commands::agents::chat_answer,
+            commands::agents::chat_undo_standing,
+            commands::agents::chat_list,
+            commands::agents::chat_get,
         ])
         .setup(move |app| {
             windows::restore(app.handle(), &forwarded);
@@ -443,5 +464,99 @@ mod updater_config_tests {
     #[test]
     fn only_the_release_build_makes_updater_files() {
         assert!(config()["bundle"].get("createUpdaterArtifacts").is_none());
+    }
+}
+
+#[cfg(test)]
+mod command_tests {
+    use std::collections::BTreeSet;
+
+    /// The agent and chat commands (agents spec §5.2).
+    const AGENT_COMMANDS: [&str; 21] = [
+        "agents_status",
+        "agent_probe",
+        "agent_custom_add",
+        "agent_custom_remove",
+        "agent_default_set",
+        "agent_prefs",
+        "agent_domain_add",
+        "agent_domain_remove",
+        "agent_folder_add",
+        "agent_folder_remove",
+        "agent_sandbox_status",
+        "cluster_agent_changes_set",
+        "cluster_agent_settings",
+        "chat_start",
+        "chat_prompt",
+        "chat_stop",
+        "chat_close",
+        "chat_answer",
+        "chat_undo_standing",
+        "chat_list",
+        "chat_get",
+    ];
+
+    /// The command names the `generate_handler!` list of this file registers.
+    fn registered(source: &str) -> BTreeSet<&str> {
+        let open = "generate_handler![";
+        let start = source.find(open).expect("lib.rs registers its commands") + open.len();
+        let list = &source[start..];
+        let end = list.find(']').expect("the command list ends");
+        list[..end]
+            .split(',')
+            .filter_map(|entry| entry.trim().strip_prefix("commands::"))
+            .filter_map(|path| path.rsplit("::").next())
+            .collect()
+    }
+
+    /// The names `api.ts` passes to `call`, as in `call<T>("name"` or `call("name"`.
+    fn called(source: &str) -> BTreeSet<&str> {
+        let mut names = BTreeSet::new();
+        for (at, _) in source.match_indices("call") {
+            let starts_word = source[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '.'));
+            let after = &source[at + "call".len()..];
+            if !starts_word || !(after.starts_with('<') || after.starts_with('(')) {
+                continue;
+            }
+            let Some(open) = after.find('(') else {
+                continue;
+            };
+            let Some(quoted) = after[open + 1..].trim_start().strip_prefix('"') else {
+                continue;
+            };
+            if let Some(end) = quoted.find('"') {
+                names.insert(&quoted[..end]);
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn the_agent_commands_are_registered() {
+        let registered = registered(include_str!("lib.rs"));
+        let missing: Vec<&str> = AGENT_COMMANDS
+            .into_iter()
+            .filter(|name| !registered.contains(name))
+            .collect();
+        assert!(missing.is_empty(), "not registered: {missing:?}");
+    }
+
+    #[test]
+    fn every_command_the_ui_calls_is_registered() {
+        let registered = registered(include_str!("lib.rs"));
+        let called = called(include_str!("../../../ui/src/ipc/api.ts"));
+        // The parser must see the wrappers, or the check below proves nothing.
+        assert!(called.contains("app_info") && called.contains("logs_start"));
+        let missing: Vec<&str> = called
+            .into_iter()
+            .filter(|name| !registered.contains(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "api.ts calls unregistered commands: {missing:?}"
+        );
     }
 }
