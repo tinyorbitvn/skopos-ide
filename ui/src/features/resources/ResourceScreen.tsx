@@ -10,6 +10,7 @@ import {
   Spinner,
   type TableColumn,
   type TableSort,
+  useNowWhile,
   VirtualTable,
 } from "../../design";
 import { Columns3 } from "../../design/icons";
@@ -26,15 +27,16 @@ import { drawerTabOf } from "../details/drawerHistory";
 import { useDrawerHistory } from "../details/useDrawerHistory";
 import { useListUsage } from "../metrics/useListUsage";
 import { useNodesDisk } from "../metrics/useNodesDisk";
+import { filterColumns } from "./columnFilter";
 import { DeleteDialog } from "./DeleteDialog";
 import { cutText, FilterTokens } from "./FilterTokens";
 import {
   buildFilterIndex,
   chipText,
   type FilterJoin,
+  filterContext,
   type MatchChip,
   matchChips,
-  NO_COLUMNS,
   type ObjectFilter,
   passes,
   typedFilter,
@@ -179,19 +181,7 @@ export function ResourceScreen(props: {
       (o) => allowed.size === 0 || allowed.has(o.metadata.namespace ?? ""),
     );
   }, [list.items, namespaces]);
-  // The suggestions read the objects after the namespace filter (spec M17). They show
-  // only while the box has focus, so the index is counted only then: on a large list each
-  // watch batch would otherwise count every label and annotation again for nothing.
   const [suggesting, setSuggesting] = useState(false);
-  const filterIndex = useMemo(
-    () => (suggesting ? buildFilterIndex(namespaceRows) : NO_INDEX),
-    [suggesting, namespaceRows],
-  );
-  const typed = useMemo(() => typedFilter(search), [search]);
-  const rows = useMemo(
-    () => namespaceRows.filter((o) => passes(o, tokens, join, typed)),
-    [namespaceRows, tokens, join, typed],
-  );
 
   // CPU and Memory for Pods and Nodes, and Disk for Nodes; undefined for every other kind.
   const metricsUsage = useListUsage(clusterId, resource, namespaces);
@@ -233,6 +223,46 @@ export function ResourceScreen(props: {
     ];
   }, [info, crd, resource, context, usage, owned]);
 
+  const kindActions = kindSpec(resource.group, resource.plural)?.actions ?? [];
+  const KindDeleteDialog =
+    kindSpec(resource.group, resource.plural)?.deleteDialog ?? DeleteDialog;
+
+  const isHidden = (c: TableColumn<KubeObject>) => isHiddenBy(choices, c);
+  // The same list while nothing it reads changes, so the table keeps its columns.
+  const hiddenColumns = useMemo(
+    () => columns.filter((c) => isHiddenBy(choices, c)).map((c) => c.id),
+    [columns, choices],
+  );
+
+  // Every column a filter can read, with its key (column filter spec §3.1).
+  const filterCols = useMemo(
+    () => filterColumns(columns, hiddenColumns),
+    [columns, hiddenColumns],
+  );
+  // While a filter is set, the rows follow the 30 s clock, so ages stay true (spec §3.7).
+  const filtering = tokens.length > 0 || search.trim() !== "";
+  const now = useNowWhile(filtering);
+  const filterCtx = useMemo(
+    () => filterContext(filterCols, now),
+    [filterCols, now],
+  );
+  // The suggestions read the objects after the namespace filter (spec M17). They show
+  // only while the box has focus, so the index is counted only then: on a large list each
+  // watch batch would otherwise count every label and annotation again for nothing.
+  const filterIndex = useMemo(
+    () => (suggesting ? buildFilterIndex(namespaceRows, filterCtx) : NO_INDEX),
+    [suggesting, namespaceRows, filterCtx],
+  );
+  const typed = useMemo(
+    () => typedFilter(search, filterCtx),
+    [search, filterCtx],
+  );
+  const rows = useMemo(
+    () =>
+      namespaceRows.filter((o) => passes(o, tokens, join, typed, filterCtx)),
+    [namespaceRows, tokens, join, typed, filterCtx],
+  );
+
   // The table's Name column shows the match chips; the drawer's Summary gets `columns`.
   const tableColumns = useMemo(() => {
     const filters = typed === null ? tokens : [...tokens, typed];
@@ -244,24 +274,13 @@ export function ResourceScreen(props: {
             render: (o: KubeObject) => (
               <span className={styles.nameCell}>
                 <span className={styles.nameText}>{c.render(o)}</span>
-                <MatchChips chips={matchChips(o, filters)} />
+                <MatchChips chips={matchChips(o, filters, filterCtx)} />
               </span>
             ),
           }
         : c,
     );
-  }, [columns, tokens, typed]);
-
-  const kindActions = kindSpec(resource.group, resource.plural)?.actions ?? [];
-  const KindDeleteDialog =
-    kindSpec(resource.group, resource.plural)?.deleteDialog ?? DeleteDialog;
-
-  const isHidden = (c: TableColumn<KubeObject>) => isHiddenBy(choices, c);
-  // The same list while nothing it reads changes, so the table keeps its columns.
-  const hiddenColumns = useMemo(
-    () => columns.filter((c) => isHiddenBy(choices, c)).map((c) => c.id),
-    [columns, choices],
-  );
+  }, [columns, tokens, typed, filterCtx]);
 
   // Only what is on screen is deleted, so a search cannot hide part of a bulk delete.
   const selectedRows = rows.filter((o) => selected.has(objectKey(o)));
@@ -337,7 +356,7 @@ export function ResourceScreen(props: {
           tokens={tokens}
           onTokensChange={setTokens}
           index={filterIndex}
-          context={NO_COLUMNS}
+          context={filterCtx}
           inputRef={filterBox}
         />
         {namespaced ? (
@@ -403,7 +422,7 @@ export function ResourceScreen(props: {
         shown={rows.length}
         total={namespaceRows.length}
         onFocusBox={() => filterBox.current?.focus()}
-        context={NO_COLUMNS}
+        context={filterCtx}
       />
 
       <div className={styles.body}>
