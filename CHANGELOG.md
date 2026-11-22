@@ -2,8 +2,7 @@
 
 What changed in each SkoposIDE release. Add notes under Unreleased as changes land on main;
 `make release VERSION=x.y.z` dates them, and the release workflow publishes them as the
-release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes on the
-[releases page](https://github.com/vanlongme/skopos-ide/releases).
+release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
@@ -102,3 +101,117 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
   - **Cluster label**, a name and value added to every metrics query, for a Mimir or Prometheus that holds several clusters.
 - **Metrics source line:** names the tenant and the cluster label in use. When a query answers with no samples, it says which setting to check; a query that fails is reported apart from one that comes back empty.
 - **Details drawer:** in the Overview, Metadata comes right under Summary.
+
+## [0.5.0] - 2026-11-14
+
+### In the app
+
+- **Details drawer:**
+  - it floats over the list on a dimmed backdrop instead of narrowing it;
+  - its sections are cards that open and close, and the app remembers which ones you closed for each kind;
+  - related objects are links that open in the same drawer, with Back to return: the owner, Node, Namespace, ServiceAccount, Priority class, and the ConfigMaps, Secrets and PersistentVolumeClaims a Pod mounts;
+  - a Pod's Overview is laid out as Summary, Relations, Volumes, Scheduling, Containers and Metadata, and workload kinds show their Pod template's volumes and service account the same way.
+- **Workloads overview:** counts Pods, Deployments, DaemonSets, StatefulSets, ReplicaSets, Jobs and CronJobs as Healthy, Pending or Failing, and lists the 10 newest events, in the namespaces the lists are filtered to.
+- **Sidebar:** Custom Resources are grouped by domain, then API group, then kind, for example `k8s.io` › `gateway.networking` › Gateways.
+- **Resource map:**
+  - a filters row with Namespaces and Kinds menus, Clear filters, and a count of what is shown;
+  - hidden kinds are bridged, so a Pod still links to its Deployment when ReplicaSets are hidden.
+- **Secrets:** Reveal and Hide are an eye icon button.
+- **Fixes:**
+  - the header no longer pushes Disconnect onto a second line on the Resource map at the default window size;
+  - long cell text no longer shows through the Actions column when you hover a row.
+
+## [0.4.0] - 2026-11-14
+
+### In the app
+
+- **Argo CD:**
+  - an Argo CD section in the sidebar, shown when the cluster serves the Argo CD resources;
+  - Applications, ApplicationSets and AppProjects lists, with Project, Sync, Health and Revision for Applications;
+  - drawers with an Application's sources, last operation, resources and history, an ApplicationSet's generators, generated Applications and template, and an AppProject's destinations, repositories, sync windows and Applications;
+  - Sync with Prune, Dry run, Apply only, Force and a revision; it asks you to confirm first when the project may have sync windows;
+  - Refresh, Hard refresh, Terminate and Roll back;
+  - delete one or several Applications, with or without the resources they deployed.
+- **Sidebar:**
+  - the Gateway API lists move from Custom Resources to Network;
+  - each Custom Resources group opens and closes, shows how many kinds it has, and opens by itself when you are on one of its pages;
+  - resize the navigation and the details drawer by dragging their edge or with the arrow keys; double-click resets them, and the app keeps both widths between runs.
+- **Resource map:** the map fills the page under its toolbar again.
+
+### In the core
+
+- **Access checks:** "Loading resources" finishes much sooner on large clusters. A cluster admin needs a single access review instead of one per kind and verb, and other users get one rules review per namespace, with access reviews only for what the rules cannot settle.
+
+### Security
+
+- The end-to-end test tools move to wdio 10.2, with glob and minimatch past their advisories. These packages are not part of the app.
+
+## [0.3.0] - 2026-11-13
+
+### In the app
+
+- **Helm:**
+  - a Helm section in the sidebar and the palette;
+  - Charts and Releases lists, each with a drawer;
+  - install and upgrade from a page with values and a preview;
+  - roll back and uninstall dialogs;
+  - chart READMEs shown as markdown, never as HTML.
+- **Tools and repositories in Preferences:** see helm and kubectl, with their downloads, and manage Helm repositories.
+- **Metrics:**
+  - gauges and a Metrics section on the cluster Overview;
+  - a Metrics tab in the drawer;
+  - CPU and Memory columns in the Pods and Nodes tables;
+  - charts that also read as a table.
+- **Cluster settings:** a Settings page for each cluster, opened from the header, the catalog or the palette. It chooses Prometheus, metrics-server or no metrics for that cluster.
+- **Resource map:**
+  - a map of a cluster's objects and how they connect: owners, selectors, routes, mounts, env references, service accounts, volume claims and classes;
+  - Grouped, Layered and Force layouts, namespace filters, search and a details pane;
+  - an object map around any resource, 1 or 2 hops deep;
+  - a Resource map tab in the drawer;
+  - icons from the Kubernetes Icons Set.
+- **Gateway API:** GatewayClass, Gateway and HTTPRoute lists with their status, shown when the cluster serves them.
+- **Workspace:**
+  - several clusters side by side, in up to three panes;
+  - tabs you can pin, drag between panes and split;
+  - each pane has compact Overview, Pods and Events views;
+  - the layout is kept across restarts;
+  - open it from the hotbar (Shift-click opens a new pane) or the palette.
+
+### In the core
+
+- **Resource graph:** a live graph of a cluster's objects and their relations, with a namespace view, for the map.
+- **Pods:** the Pod rows keep each container's image.
+- **Helm:** a release's manifest, and uninstall that keeps the history.
+
+### Security
+
+- The editor's dompurify is now 3.4.17, which fixes the advisories reported against 3.4.15.
+
+## [0.2.0] - 2026-11-10
+
+### In the app
+
+- **Logs dock:** open Logs tabs from Pods and workloads, follow a workload's pods, search, autoscroll and download. Prefixes, colors and level detection are included. The dock layout is kept across restarts.
+- **Terminals:** local terminal, Shell and Attach on Pods, and a node shell on Nodes, as dock tabs with their own toolbars. Open them with the Terminal button or Ctrl+`.
+- **Port forwarding:** start forwards from Pods, Services and their ports, and see them on their own screen with a drawer and a running count. Forwards persist.
+- **Application shell:** command palette, Keyboard shortcuts dialog, About, header with a Help menu, and the macOS menu.
+- **Object actions:**
+  - force delete and force finalize;
+  - suspend and resume a Job;
+  - set the default IngressClass;
+  - save a ServiceAccount kubeconfig with a token;
+  - copy buttons in the drawer.
+- **Theme:** choose it with a segmented control.
+
+### In the core (screens follow in a later release)
+
+- **Tools:** finds helm and kubectl, or downloads the pinned versions, with progress.
+- **Helm:**
+  - repositories and chart search;
+  - releases with detail, values and history;
+  - install, upgrade, rollback and uninstall with previews.
+- **Metrics:**
+  - detects Prometheus or metrics-server for each cluster;
+  - queries Prometheus through the service proxy for clusters, nodes, workloads, pods and PVCs;
+  - reads metrics-server snapshots.
+- **Argo CD:** sync, roll back, terminate an operation, refresh, and delete an Application.
