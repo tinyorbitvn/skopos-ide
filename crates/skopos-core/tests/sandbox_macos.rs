@@ -4,13 +4,15 @@
 //! otherwise.
 #![cfg(target_os = "macos")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
-use std::net::TcpListener;
+use std::net::{IpAddr, Ipv4Addr, TcpListener, UdpSocket};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use skopos_core::agents::endpoint::{Endpoint, Listen};
+use skopos_core::agents::proxy::{self, ProxyConfig, Resolver};
 use skopos_core::agents::registry::AgentSpec;
 use skopos_core::agents::sandbox::env::{agent_env, proxy_url};
 use skopos_core::agents::sandbox::paths::{kubeconfig_files, real_path};
@@ -19,6 +21,9 @@ use skopos_core::agents::sandbox::{
     SandboxStatus, SpecInput,
 };
 use skopos_core::kubeconfig::SyncSource;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 /// Stands in for the app binary.
 const APP: &str = env!("CARGO_BIN_EXE_skopos-agent-host");
@@ -366,4 +371,117 @@ async fn the_agent_environment_holds_only_the_given_pairs() {
     assert_eq!(seen, given);
     assert_eq!(given.get("PROBE_SETTING").map(String::as_str), Some("on"));
     assert_eq!(given.get("HOME"), Some(&text(&machine.home)));
+}
+
+/// The token of the proxy URL `Machine::spec` gives the agent.
+const PROXY_TOKEN: &str = "proxy-token";
+/// The name the chat's proxy allows, and one off its list.
+const ALLOWED: &str = "api.example.com";
+const ELSEWHERE: &str = "elsewhere.example.org";
+/// The proxy's answers to an allowed and to a refused `CONNECT`.
+const ESTABLISHED: &str = "HTTP/1.1 200 Connection established\r\n\r\n";
+const FORBIDDEN: &str = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+/// Tries `$1:$2` directly and prints `direct rc=<nc's exit code>`; then, for each name from
+/// `$3` on, asks the proxy `$HTTPS_PROXY` names for a tunnel to its port 443 and prints
+/// `== <name>` and the raw answer up to the close.
+const CONNECT_EACH: &str = r#"login=${HTTPS_PROXY#http://}
+login=${login%@*}
+address=${HTTPS_PROXY##*@}
+auth=$(printf %s "$login" | base64)
+nc -w 5 "$1" "$2" </dev/null >/dev/null 2>&1
+echo "direct rc=$?"
+shift 2
+for name in "$@"; do
+  echo "== $name"
+  printf 'CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\nProxy-Authorization: Basic %s\r\n\r\n' \
+    "$name" "$name" "$auth" | nc -w 5 "${address%:*}" "${address##*:}"
+  echo
+done"#;
+
+/// The address this machine would send from, found without sending anything: connecting a
+/// UDP socket only picks a route. `None` when there is none, or only one the proxy refuses.
+fn local_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if proxy::address_allowed(IpAddr::V4(ip)) => Some(ip),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn a_sandboxed_agent_reaches_an_allowed_host_only_through_the_proxy() {
+    if !enabled().await {
+        return;
+    }
+    let Some(ip) = local_ipv4() else {
+        eprintln!("skipped: this machine has no non-loopback IPv4 address");
+        return;
+    };
+    let mut machine = machine();
+    // The chat's proxy, on a port that becomes the chat's proxy port: the profile allows it,
+    // and the agent's proxy URL names it.
+    let endpoint = Endpoint::bind(Listen::Tcp).await.unwrap();
+    machine.ports.proxy = endpoint.port().expect("a TCP endpoint has a port");
+    // The allowed host's stand-in: it answers each connection with `pong` and closes it.
+    let server = tokio::net::TcpListener::bind((ip, 0)).await.unwrap();
+    let server_port = server.local_addr().unwrap().port();
+    let (accepted, mut connections) = mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = server.accept().await {
+            let _ = stream.write_all(b"pong").await;
+            let _ = accepted.send(());
+        }
+    });
+    let config = ProxyConfig {
+        token: PROXY_TOKEN.to_owned(),
+        hosts: vec![ALLOWED.to_owned()],
+        resolve: Resolver::Fixed(HashMap::from([(ALLOWED.to_owned(), vec![IpAddr::V4(ip)])])),
+    };
+    let (reports, mut blocked) = mpsc::channel(16);
+    let cancel = CancellationToken::new();
+    let proxying = tokio::spawn(proxy::serve_for_test(
+        endpoint,
+        config,
+        reports,
+        cancel.clone(),
+        server_port,
+    ));
+
+    let args = [
+        ip.to_string(),
+        server_port.to_string(),
+        ALLOWED.to_owned(),
+        ELSEWHERE.to_owned(),
+        ELSEWHERE.to_owned(),
+    ];
+    let (code, stdout) = machine.run(&machine.probe(CONNECT_EACH, &args)).await;
+    cancel.cancel();
+    proxying.await.unwrap();
+    serving.abort();
+
+    // The profile refuses the server's address; the proxy tunnels to it for the allowed name only.
+    let (direct, answers) = stdout.split_once('\n').unwrap_or_default();
+    assert!(
+        direct.starts_with("direct rc=") && direct != "direct rc=0",
+        "{stdout}"
+    );
+    assert_eq!(
+        answers,
+        format!(
+            "== {ALLOWED}\n{ESTABLISHED}pong\n\
+             == {ELSEWHERE}\n{FORBIDDEN}\n== {ELSEWHERE}\n{FORBIDDEN}\n"
+        )
+    );
+    assert_eq!(code, Some(0));
+    assert_eq!(blocked.try_recv().ok().as_deref(), Some(ELSEWHERE));
+    assert!(
+        blocked.try_recv().is_err(),
+        "a refused name is reported once"
+    );
+    let mut tunnels = 0;
+    while connections.try_recv().is_ok() {
+        tunnels += 1;
+    }
+    assert_eq!(tunnels, 1, "only the proxy's tunnel reached the server");
 }

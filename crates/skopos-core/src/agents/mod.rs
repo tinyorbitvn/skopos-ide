@@ -4,7 +4,9 @@
 //! defaults (spec §2, §11).
 
 pub mod bridge;
+pub mod endpoint;
 pub mod modes;
+pub mod proxy;
 pub mod registry;
 pub mod sandbox;
 pub mod settings;
