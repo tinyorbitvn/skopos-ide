@@ -10,20 +10,35 @@ import { expect, test, vi } from "vitest";
 import { useUnsavedEdits } from "../../kinds/detail/unsavedEdits";
 import { DrawerShell, type DrawerShellProps } from "./DrawerShell";
 
-/** The drawer over its screen, beside a sidebar outside it, as the app lays them out. */
+/**
+ * The drawer over its screen in the app's root, as the app lays them out: the header, the
+ * sidebar and the tab strip above and beside it, the dock under it, and a second pane with a
+ * list of its own.
+ */
 function layout(
   over: Partial<DrawerShellProps>,
   onClose: () => void,
 ): React.JSX.Element {
   return (
     <>
+      <header data-testid="header">
+        <h1>SkoposIDE</h1>
+      </header>
       <nav data-testid="sidebar">
         <button type="button">Pods</button>
       </nav>
+      <div role="tablist" aria-label="Tabs">
+        <button type="button" role="tab" aria-selected="true">
+          Things
+        </button>
+      </div>
       <div data-testid="screen" style={{ position: "relative" }}>
-        <h2 data-testid="screen-title">Things</h2>
-        <div data-keeps-drawer="">
+        <div data-testid="toolbar">
+          <h2 data-testid="screen-title">Things</h2>
           <button type="button">Filter</button>
+        </div>
+        <div data-keeps-drawer="">
+          <button type="button">Node a</button>
         </div>
         <table
           // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the list's table, as VirtualTable draws it.
@@ -40,6 +55,7 @@ function layout(
             </tr>
           </tbody>
         </table>
+        <p data-testid="empty-space" />
         <DrawerShell
           label="Thing details"
           testId="thing-drawer"
@@ -52,6 +68,24 @@ function layout(
         >
           {over.children ?? <p>Body</p>}
         </DrawerShell>
+      </div>
+      <div data-testid="other-pane" style={{ position: "relative" }}>
+        <div data-keeps-drawer="">
+          <button type="button">Node b</button>
+        </div>
+        <table
+          // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: the list's table, as VirtualTable draws it.
+          role="grid"
+        >
+          <tbody>
+            <tr>
+              <td>cache</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div data-testid="dock">
+        <button type="button">Logs</button>
       </div>
     </>
   );
@@ -74,7 +108,7 @@ function click(el: Element, button = 0) {
   if (button === 0) fireEvent.click(el);
 }
 
-const dimmed = () => screen.getByTestId("screen-title");
+const dimmed = () => screen.getByTestId("empty-space");
 
 function Editing(props: { unsaved: boolean }) {
   useUnsavedEdits(props.unsaved);
@@ -126,19 +160,40 @@ test("a click on the dimmed screen around the drawer closes it, as Close does", 
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
-test("a click inside the drawer or outside its screen, as on the sidebar, leaves it open", () => {
+test.each([
+  ["the sidebar", () => screen.getByRole("button", { name: "Pods" })],
+  ["a tab", () => screen.getByRole("tab", { name: "Things" })],
+  ["the header", () => screen.getByRole("heading", { name: "SkoposIDE" })],
+  ["the dock", () => screen.getByRole("button", { name: "Logs" })],
+  ["the list's title", () => screen.getByTestId("screen-title")],
+  ["the list's toolbar", () => screen.getByRole("button", { name: "Filter" })],
+  ["a column header", () => screen.getByRole("columnheader", { name: "Name" })],
+  [
+    "a row of another pane's list",
+    () => screen.getByRole("cell", { name: "cache" }),
+  ],
+  [
+    "a part of another pane that opens a drawer",
+    () => screen.getByRole("button", { name: "Node b" }),
+  ],
+])("a click anywhere outside the drawer, as on %s, closes it", (_, target) => {
+  const { onClose } = show();
+  click(target());
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test("a click inside the drawer leaves it open", () => {
   const { onClose } = show();
   click(screen.getByText("Body"));
   click(screen.getByRole("button", { name: "Act" }));
-  click(screen.getByRole("button", { name: "Pods" }));
+  click(screen.getByRole("heading", { name: "web" }));
   expect(onClose).not.toHaveBeenCalled();
 });
 
-test("a click on a row, the table's header or the toolbar leaves it open, as they work with it", () => {
+test("a click on a row of its own list, or on a part that shows its object in the drawer, leaves it open", () => {
   const { onClose } = show();
   click(screen.getByRole("cell", { name: "db" }));
-  click(screen.getByRole("columnheader", { name: "Name" }));
-  click(screen.getByRole("button", { name: "Filter" }));
+  click(screen.getByRole("button", { name: "Node a" }));
   expect(onClose).not.toHaveBeenCalled();
 });
 
@@ -154,6 +209,14 @@ test("a click in a portal, such as a menu the drawer opened, leaves it open", ()
     ),
   });
   click(screen.getByRole("menuitem", { name: "Restart" }));
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+test("a press the body ignores while a modal menu or dialog is open leaves it open", () => {
+  const { onClose } = show();
+  // Radix makes the body ignore the pointer while a modal menu or dialog is open, so a press
+  // beside it lands on the root element and only closes that menu.
+  click(document.documentElement);
   expect(onClose).not.toHaveBeenCalled();
 });
 

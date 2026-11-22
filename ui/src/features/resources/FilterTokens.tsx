@@ -141,7 +141,6 @@ export function FilterTokens(props: FilterTokensProps): ReactElement | null {
       aria-label="Filters"
       className={styles.tokens}
       data-testid="filter-tokens"
-      data-keeps-drawer=""
     >
       {tokens.map((token, i) => {
         const text = filterText(token);

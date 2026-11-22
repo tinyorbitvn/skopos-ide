@@ -282,7 +282,7 @@ export function HelmReleasesScreen({ clusterId }: { clusterId: string }) {
 
   return (
     <div className={styles.screen} data-testid="helm-releases-screen">
-      <div className={styles.toolbar} data-keeps-drawer="">
+      <div className={styles.toolbar}>
         <h2 className={styles.title} data-testid="helm-releases-title">
           Releases
         </h2>

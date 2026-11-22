@@ -1150,17 +1150,37 @@ test("a click on the dimmed list beside the drawer closes it, and focus goes bac
   expect(document.activeElement).toBe(row("team-a", "web"));
 });
 
-test("a click on the toolbar, the row of filters or a column header leaves the drawer open", async () => {
+test.each([
+  ["the title", () => screen.getByTestId("resource-title")],
+  ["a column header", () => screen.getByRole("columnheader", { name: /Age/ })],
+  ["Columns", () => screen.getByTestId("columns-menu")],
+])(
+  "a click on the toolbar or the table's header, as on %s, closes the drawer",
+  async (_, target) => {
+    const fake = fakeBackend();
+    await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
+    fireEvent.click(row("team-a", "web") as HTMLElement);
+    await act(flush);
+    pointerClick(target());
+    await act(flush);
+    expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  },
+);
+
+test("a click on the filter box closes the drawer and leaves focus in the box", async () => {
   const fake = fakeBackend();
   await show(fake, [pod("web", "team-a")], DEPLOYMENTS);
   fireEvent.click(row("team-a", "web") as HTMLElement);
   await act(flush);
-  pointerClick(screen.getByTestId("resource-title"));
-  pointerClick(screen.getByRole("columnheader", { name: /Age/ }));
-  pointerClick(screen.getByTestId("columns-menu"));
+  const box = screen.getByTestId("resource-search");
+  // The press gives the box focus before the release closes the drawer.
+  fireEvent.pointerDown(box, { button: 0 });
+  box.focus();
+  fireEvent.pointerUp(box, { button: 0 });
+  fireEvent.click(box);
   await act(flush);
-  expect(screen.getByTestId("detail-drawer")).toBeTruthy();
-  expect(screen.getByTestId("detail-title").textContent).toBe("web");
+  expect(screen.queryByTestId("detail-drawer")).toBeNull();
+  expect(document.activeElement).toBe(box);
 });
 
 test("a click on another row while the drawer is open shows that row in the same drawer", async () => {
