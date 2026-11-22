@@ -32,10 +32,29 @@ const TYPES = {
 /**
  * The shots, in page order. `steps` runs in the board with the helpers of PAGE_HELPERS;
  * `clip` returns the area to capture: an element, or [element, x, y, width, height] for a
- * part of it in CSS pixels; `scale` overrides SCALE. The cards of a row share one shape:
- * 980 × 600 for the half cards and 640 × 600 for the third cards.
+ * part of it in CSS pixels; `scale` overrides SCALE. The hero and Themes pictures show the
+ * whole window. The cards of a row share one shape: 980 × 600 for the half cards and
+ * 640 × 600 for the third cards.
  */
 export const SHOTS = [
+  {
+    name: "canvas-pods-drawer-dark",
+    steps: `await openPodDrawer();`,
+    clip: "root()",
+  },
+  {
+    name: "canvas-pods-drawer-light",
+    steps: `
+      click("Search or run a command");
+      await waitFor(() => $(".sk-root [role=dialog] input"));
+      typeInto($(".sk-root [role=dialog] input"), "Theme");
+      await waitFor(() => has("Theme: Light"));
+      clickHas("Theme: Light");
+      await waitFor(() => $(".sk-root[data-theme=light]"));
+      await sleep(400);
+      await openPodDrawer();`,
+    clip: "root()",
+  },
   {
     name: "canvas-catalog",
     steps: "",
@@ -58,9 +77,7 @@ export const SHOTS = [
   {
     name: "canvas-logs",
     steps: `
-      await openPods();
-      clickRow("payments-api-7f9c5d-m4v8s");
-      await waitFor(() => q("Logs"));
+      await openPodDrawer();
       click("Logs");
       await waitFor(() => $("section.sk-dock [role=log]"));
       click("Close details");
@@ -79,9 +96,7 @@ export const SHOTS = [
   {
     name: "canvas-metrics",
     steps: `
-      await openPods();
-      clickRow("payments-api-7f9c5d-m4v8s");
-      await waitFor(() => q("Metrics"));
+      await openPodDrawer();
       click("Metrics");
       await sleep(1200);`,
     clip: `[$("aside.sk-drawer"), -220, 0, 640, 600]`,
@@ -171,6 +186,11 @@ function clickHas(text) {
   if (!el) throw new Error("no element with " + JSON.stringify(text));
   el.click();
 }
+// Types into a field the way a key press would, so the board's input handler sees it.
+function typeInto(input, text) {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, text);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
 const row = (text) => [...root().querySelectorAll("[role=row]")].find((r) => r.textContent.includes(text));
 function clickRow(text) {
   const r = row(text);
@@ -203,6 +223,12 @@ async function openPods() {
   await openCluster();
   await nav("Workloads", "Pods");
   await waitFor(() => row("payments-api-7f9c5d-m4v8s"));
+}
+async function openPodDrawer() {
+  await openPods();
+  clickRow("payments-api-7f9c5d-m4v8s");
+  await waitFor(() => q("Close details"));
+  await sleep(800);
 }
 `;
 

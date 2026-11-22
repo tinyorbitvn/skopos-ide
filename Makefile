@@ -1,4 +1,4 @@
-.PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens site-canvas-screens
+.PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens
 ifeq ($(shell uname -s),Linux)
 XVFB := xvfb-run -a --server-args="-screen 0 1600x1000x24"
 else
@@ -54,9 +54,7 @@ e2e-screens: e2e-build
 	SKOPOS_E2E_SPEC_SET=screens $(XVFB) pnpm -C e2e exec wdio run wdio.conf.ts
 site:
 	node scripts/build-site.mjs --out tmp/site
-site-screens: e2e-screens
-	scripts/site-screens.sh
-site-canvas-screens:
+site-screens:
 	node scripts/canvas-screens.mjs --canvas tmp/canvas --out site/images
 release:
 	scripts/release.sh bump $(VERSION)
