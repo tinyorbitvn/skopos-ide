@@ -6,6 +6,11 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Users & Groups:** Access Control lists the users and groups that RoleBindings and ClusterRoleBindings name, with their bindings, roles and scope. Kubernetes has no User or Group objects, so the list comes from those subjects. Search by name, pick users or groups, and show the `system:` names Kubernetes manages when you want them. A binding drawer's Subjects link each user and group there.
+- **Create a user with a client certificate:** Create user… makes a key on your machine, asks the cluster to sign a certificate for the user name and groups you give, and saves a kubeconfig that signs in with it. It can also bind a ClusterRole or a Role to the new user, cluster-wide or in one namespace. When you may not approve the request yourself, the dialog shows the `kubectl certificate approve` command to hand on and waits up to 15 minutes. The private key is written only into that kubeconfig. A certificate can't be revoked, so the dialog says how to take access away.
+- **Remove from bindings:** a user's or group's drawer removes it from every binding that names it, and deletes a binding it was the last subject of. The confirm lists what happens to each binding first, and a binding changed meanwhile is left as it was.
+- **CertificateSigningRequests:** the kind is listed under Access Control with its signer, requestor, duration and condition. A pending request can be approved or denied from its row or drawer, and the confirm shows the subject the certificate will carry, with a warning when it puts the holder in a `system:` group.
+
 ## [0.11.0] - 2026-11-22
 
 - **Close a drawer from anywhere outside it:** a click anywhere outside a drawer, such as on the sidebar, a tab, the header, the dock, the list's toolbar, a column header or the empty space under the rows, now closes it, where only the dimmed list around it did. A click on another row of the list, or on a node or a pod of the topology page, still shows it in the drawer, and a click in a menu or dialog the drawer opened leaves it open. When the click puts focus in a box, such as the filter box, focus stays there.
