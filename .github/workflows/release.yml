@@ -98,7 +98,10 @@ jobs:
             args: ""
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # The Apple signing secrets live in this environment, which only v* tags may use.
+    environment: release
+    # Notarization waits on Apple.
+    timeout-minutes: 90
     permissions:
       contents: write
     defaults:
@@ -118,6 +121,61 @@ jobs:
             echo "::error::the repository secret TAURI_SIGNING_PRIVATE_KEY is not set; see docs/releasing.md"
             exit 1
           fi
+      - name: The Apple signing secrets are set
+        if: runner.os == 'macOS'
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          API_KEY: ${{ secrets.APPLE_API_KEY }}
+          API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          ID: ${{ secrets.APPLE_ID }}
+          PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+        run: |
+          missing=()
+          [ -n "$CERTIFICATE" ] || missing+=("secret APPLE_CERTIFICATE")
+          [ -n "$CERTIFICATE_PASSWORD" ] || missing+=("secret APPLE_CERTIFICATE_PASSWORD")
+          [ -n "$TEAM_ID" ] || missing+=("variable APPLE_TEAM_ID")
+          [ -n "$SIGNING_IDENTITY" ] || missing+=("variable APPLE_SIGNING_IDENTITY")
+          if [ -n "$API_KEY" ]; then
+            [ -n "$API_ISSUER" ] || missing+=("secret APPLE_API_ISSUER")
+            [ -n "$API_PRIVATE_KEY" ] || missing+=("secret APPLE_API_PRIVATE_KEY")
+          elif [ -n "$ID" ]; then
+            [ -n "$PASSWORD" ] || missing+=("secret APPLE_PASSWORD")
+          else
+            missing+=("secrets APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_PRIVATE_KEY, or APPLE_ID and APPLE_PASSWORD")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            for name in "${missing[@]}"; do
+              echo "::error::the release environment lacks the $name; see docs/releasing.md"
+            done
+            exit 1
+          fi
+          # Pass the values to the later steps of this macOS build only, and only the
+          # notarization method in use: Tauri picks a method by which variables exist.
+          put() {
+            local delimiter
+            delimiter="EOF_$(openssl rand -hex 16)"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$delimiter" "$2" "$delimiter" >> "$GITHUB_ENV"
+          }
+          certificate="$(printf '%s' "$CERTIFICATE" | tr -d '[:space:]')"
+          echo "::add-mask::$certificate"
+          put APPLE_CERTIFICATE "$certificate"
+          put APPLE_CERTIFICATE_PASSWORD "$CERTIFICATE_PASSWORD"
+          put APPLE_SIGNING_IDENTITY "$SIGNING_IDENTITY"
+          put APPLE_TEAM_ID "$TEAM_ID"
+          if [ -n "$API_KEY" ]; then
+            key_path="$RUNNER_TEMP/AuthKey_$API_KEY.p8"
+            (umask 077 && printf '%s\n' "$API_PRIVATE_KEY" > "$key_path")
+            put APPLE_API_KEY "$API_KEY"
+            put APPLE_API_ISSUER "$API_ISSUER"
+            put APPLE_API_KEY_PATH "$key_path"
+          else
+            put APPLE_ID "$ID"
+            put APPLE_PASSWORD "$PASSWORD"
+          fi
       # Pinned to a commit: this step gets the updater signing key. Bump by hand.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # action-v0.6.2
         env:
@@ -129,14 +187,24 @@ jobs:
           # latest.json is built once, by the publish job, from all four builds.
           includeUpdaterJson: false
           args: ${{ matrix.args }} --config crates/skopos-app/tauri.conf.json --config crates/skopos-app/tauri.updater.conf.json
-      - name: Verify the macOS signature
+      # Tauri notarized and stapled the app and signed the dmg; the dmg itself is ours.
+      - name: Notarize and staple the dmg
         if: runner.os == 'macOS'
-        run: |
-          mount_point="$(mktemp -d)"
-          hdiutil attach target/*/release/bundle/dmg/*.dmg -nobrowse -readonly -mountpoint "$mount_point"
-          codesign --verify --deep --strict --verbose=2 "$mount_point/SkoposIDE.app"
-          codesign --display --verbose=2 "$mount_point/SkoposIDE.app"
-          hdiutil detach "$mount_point"
+        timeout-minutes: 45
+        run: node scripts/macos-trust.mjs notarize --dmg target/${{ matrix.rust-targets }}/release/bundle/dmg/*.dmg
+      - name: Check the macOS files
+        if: runner.os == 'macOS'
+        run: >-
+          node scripts/macos-trust.mjs check
+          --dmg target/${{ matrix.rust-targets }}/release/bundle/dmg/*.dmg
+          --updater target/${{ matrix.rust-targets }}/release/bundle/macos/SkoposIDE.app.tar.gz
+          --team "$APPLE_TEAM_ID"
+      # tauri-action uploaded the dmg before it was notarized.
+      - name: Replace the dmg in the draft
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" target/${{ matrix.rust-targets }}/release/bundle/dmg/*.dmg --clobber
 
   publish:
     needs: [verify, draft, build]

@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Signed and notarized on macOS:** the macOS app and disk image are signed with a Developer ID certificate and notarized by Apple, so they open without Open Anyway or `xattr`. After this update macOS may ask once more for the passwords SkoposIDE keeps in the Keychain; choose Always Allow. Later updates keep access.
+
 ## [0.11.0] - 2026-11-22
 
 - **Close a drawer from anywhere outside it:** a click anywhere outside a drawer, such as on the sidebar, a tab, the header, the dock, the list's toolbar, a column header or the empty space under the rows, now closes it, where only the dimmed list around it did. A click on another row of the list, or on a node or a pod of the topology page, still shows it in the drawer, and a click in a menu or dialog the drawer opened leaves it open. When the click puts focus in a box, such as the filter box, focus stays there.
