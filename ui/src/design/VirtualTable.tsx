@@ -18,6 +18,17 @@ import {
 import { compare } from "./DataTable";
 import styles from "./VirtualTable.module.css";
 
+/** What a filter reads from a column (column filter spec §4.1). */
+export interface ColumnFilter<T> {
+  /** The text the cell shows, or null when it shows "-" or nothing. */
+  text(row: T, now: number): string | null;
+  /** For `>` and `<`: a count, or a time in seconds. */
+  measure?: {
+    kind: "number" | "duration";
+    amount(row: T, now: number): number | null;
+  };
+}
+
 export interface TableColumn<T> {
   id: string;
   header: string;
@@ -33,6 +44,8 @@ export interface TableColumn<T> {
   defaultHidden?: boolean;
   /** Stays at the right edge while the table scrolls sideways. */
   stickyEnd?: boolean;
+  /** What a filter reads from the column; a column without it cannot be filtered. */
+  filter?: ColumnFilter<T>;
 }
 
 export type TableSort = { id: string; dir: "asc" | "desc" };
@@ -87,6 +100,23 @@ const TableNow = createContext(0);
 export function useNow(): number {
   const shared = useSyncExternalStore(subscribeClock, () => clockNow);
   return Math.max(shared, useContext(TableNow));
+}
+
+/**
+ * The shared clock while `active`, so a filter that reads ages follows them (column
+ * filter spec §3.7); otherwise the time `active` last turned on, with no timer.
+ */
+export function useNowWhile(active: boolean): number {
+  const subscribe = useCallback(
+    (listener: () => void) => (active ? subscribeClock(listener) : () => {}),
+    [active],
+  );
+  const shared = useSyncExternalStore(subscribe, () => clockNow);
+  const [since, setSince] = useState(Date.now);
+  useEffect(() => {
+    if (active) setSince(Date.now());
+  }, [active]);
+  return active ? Math.max(shared, since) : since;
 }
 
 /**
