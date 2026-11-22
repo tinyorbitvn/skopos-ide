@@ -188,6 +188,9 @@ MIT:
   `zbus-secret-service-keyring-store`: Copyright (c) 2016 keyring Developers
 - `arboard`: Copyright (c) 2022 The Arboard contributors
 - `arraydeque`: Copyright (c) 2018 Andy Lok
+- `asn1-rs`, `asn1-rs-derive`, `der-parser`, `oid-registry`, `rusticata-macros`, `x509-parser`:
+  Copyright (c) 2017 Pierre Chifflier
+- `asn1-rs-impl`: Author: Pierre Chifflier
 - `async-broadcast`: Copyright (c) 2020 Yoshua Wuyts
 - `async-channel`, `async-io`, `async-lock`, `async-process`, `async-task`, `fastrand`: Author:
   Stjepan Glavina
@@ -338,6 +341,7 @@ MIT:
 - `matchers`, `sharded-slab`: Copyright (c) 2019 Eliza Weisman
 - `memoffset`: Copyright (c) 2017 Gilad Naaman
 - `mime`: Copyright (c) 2014 Sean McArthur
+- `minimal-lexical`: Author: Alex Huszagh
 - `minisign-verify`: Copyright (c) 2019-2025 Frank Denis
 - `miniz_oxide`: Copyright 2013-2014 RAD Game Tools and Valve Software; Copyright 2010-2014 Rich
   Geldreich and Tenacious Software LLC; Copyright (c) 2017 Frommi; Copyright (c) 2017-2024
@@ -379,6 +383,7 @@ MIT:
 - `rand_core`: Copyrights in the Rand project are retained by their contributors. Copyright (c)
   2018-2026 The Rand Project Developers
 - `raw-window-handle`: Copyright (c) 2019 Osspial
+- `rcgen`: Copyright (c) 2019-2026 est31 <MTest31@outlook.com> and contributors
 - `reqwest`: Copyright (c) 2016-2026 Sean McArthur
 - `rfd`: Copyright (c) 2022 Bartłomiej Maryńczak
 - `rustc-hash`: Author: The Rust Project Developers
@@ -466,6 +471,7 @@ MIT:
 - `x11`, `x11-dl`: Authors: daggerbot, Erle Pereira, AltF02
 - `x11rb`, `x11rb-protocol`: Copyright 2019 x11rb Contributers
 - `xattr`: Copyright (c) 2015 Steven Allen
+- `yasna`: Copyright (c) 2016 Masaki Hara
 - `zbus`, `zbus_macros`, `zbus_names`, `zvariant`, `zvariant_derive`: Copyright (c) 2024 Zeeshan
   Ali Khan & zbus contributors
 - `zcheapstr`: Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors

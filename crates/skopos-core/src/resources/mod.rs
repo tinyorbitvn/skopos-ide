@@ -4,6 +4,8 @@ mod access;
 mod actions;
 mod apply;
 mod argocd;
+mod cert_user;
+mod csr;
 mod discovery;
 mod drain;
 mod hub;
@@ -24,6 +26,7 @@ pub use argocd::{
     ArgoRollbackOptions, ArgoSyncOptions, ArgoSyncResource, ArgoSyncStrategy,
     SYNC_WINDOWS_UNVERIFIED,
 };
+pub use csr::{certificate_request_describe, CertificateRequestInfo};
 pub(crate) use discovery::state_name;
 pub(crate) use drain::RunningDrain;
 pub use drain::{DrainEvent, DrainOptions, DrainOutcome, PodRef, SkipReason, SkippedPod};
