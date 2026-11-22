@@ -393,8 +393,19 @@ async fn a_requester_who_may_not_approve_waits_for_an_approver() {
         .await;
         let name = csr_name(&waiting);
 
+        // The approver holds only the approval rights, so the review says it cannot read the
+        // bindings, and still gives the uid to approve.
         let review = approver_core.csr_review(&approver_id, &name).await.unwrap();
-        assert_eq!(review.grants_error, None);
+        assert_eq!(review.info.common_name, "cert-user-b");
+        assert_eq!(review.grants, None);
+        assert!(
+            review
+                .grants_error
+                .as_deref()
+                .is_some_and(|m| m.contains("forbidden")),
+            "{:?}",
+            review.grants_error
+        );
         assert!(review.privileged.is_empty(), "{:?}", review.privileged);
         approver_core
             .csr_set_approval(&approver_id, &name, &review.uid, CsrDecision::Approve)
