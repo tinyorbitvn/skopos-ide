@@ -2,7 +2,12 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mockElementSize } from "../test/size";
-import { type TableColumn, useNow, VirtualTable } from "./VirtualTable";
+import {
+  type TableColumn,
+  useNow,
+  useNowWhile,
+  VirtualTable,
+} from "./VirtualTable";
 
 interface Row {
   id: string;
@@ -344,6 +349,35 @@ test("every clock reading comes from one shared 30 s timer", () => {
   const clear = vi.spyOn(globalThis, "clearInterval");
   unmount();
   expect(clear).toHaveBeenCalledTimes(1);
+});
+
+function FilterClock(props: { active: boolean }) {
+  return <span data-testid="filter-clock">{useNowWhile(props.active)}</span>;
+}
+
+test("useNowWhile follows the shared clock only while active, and starts at the current time", () => {
+  vi.useFakeTimers();
+  try {
+    const interval = vi.spyOn(globalThis, "setInterval");
+    const read = () => Number(screen.getByTestId("filter-clock").textContent);
+    const { rerender, unmount } = render(<FilterClock active={false} />);
+    expect(interval.mock.calls.filter((c) => c[1] === 30_000)).toHaveLength(0);
+    const first = read();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(read()).toBe(first);
+
+    rerender(<FilterClock active />);
+    expect(read()).toBe(first + 60_000);
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(read()).toBe(first + 90_000);
+    unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 interface Aged {
