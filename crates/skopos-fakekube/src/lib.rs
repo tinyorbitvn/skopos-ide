@@ -108,6 +108,8 @@ struct State_ {
     discovery_delay: Duration,
     /// How long a list of one namespace's objects waits before it is answered.
     namespaced_list_delay: Duration,
+    /// How long a create of each plural waits before it is answered.
+    create_delays: BTreeMap<String, Duration>,
     /// The lists of one namespace's objects waiting to be answered now, and the most ever.
     namespaced_lists: usize,
     most_namespaced_lists: usize,
@@ -417,6 +419,7 @@ impl FakeKube {
                 fail_discovery: None,
                 discovery_delay: Duration::ZERO,
                 namespaced_list_delay: Duration::ZERO,
+                create_delays: BTreeMap::new(),
                 namespaced_lists: 0,
                 most_namespaced_lists: 0,
                 eviction_failures: BTreeMap::new(),
@@ -581,6 +584,15 @@ impl FakeKube {
     /// test can see how many a client asks for at one time. `Duration::ZERO` clears it.
     pub fn delay_namespaced_lists(&self, delay: Duration) {
         self.inner.lock().namespaced_list_delay = delay;
+    }
+
+    /// Makes every create of `plural` wait `delay` before it is answered, so a test can act
+    /// while the create is in flight.
+    pub fn delay_creates(&self, plural: &str, delay: Duration) {
+        self.inner
+            .lock()
+            .create_delays
+            .insert(plural.to_owned(), delay);
     }
 
     /// The most lists of one namespace's objects that waited to be answered at one time.
@@ -1558,6 +1570,12 @@ async fn generic(
             tokio::time::sleep(delay).await;
         }
         s.lock().namespaced_lists -= 1;
+    }
+    if verb == "create" {
+        let delay = s.lock().create_delays.get(&res.plural).copied();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
     }
     match verb {
         "list" => list(&s, &res, &t, &q, &headers, uri.path()),

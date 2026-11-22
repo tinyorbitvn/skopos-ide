@@ -30,7 +30,7 @@ use crate::paths::AppPaths;
 use crate::portforward::{PortForward, PortForwards};
 use crate::prefs::{ClusterSettings, Prefs};
 use crate::quit::QuitWatch;
-use crate::resources::{ApiResourceInfo, RunningDrain, SingleFlight, WatchHub};
+use crate::resources::{ApiResourceInfo, RunningCertUser, RunningDrain, SingleFlight, WatchHub};
 use crate::secrets::{MemorySecretStore, SecretStore, Secrets};
 use crate::sessions::SessionRegistry;
 use crate::store::{JsonStore, StoreWarning};
@@ -110,6 +110,9 @@ struct Inner {
     topologies: Arc<TopologyHub>,
     drains: DashMap<(ClusterId, String), RunningDrain>,
     next_drain: AtomicU64,
+    /// The create runs of client-certificate users, by run id.
+    cert_users: DashMap<String, RunningCertUser>,
+    next_cert_user: AtomicU64,
     /// The discovery run of each cluster, shared by its `refresh` callers.
     discoveries: DashMap<ClusterId, Arc<SingleFlight<Vec<ApiResourceInfo>>>>,
     sessions: Arc<SessionRegistry>,
@@ -312,6 +315,8 @@ impl AppCore {
                 topologies: Arc::new(TopologyHub::default()),
                 drains: DashMap::new(),
                 next_drain: AtomicU64::new(1),
+                cert_users: DashMap::new(),
+                next_cert_user: AtomicU64::new(1),
                 discoveries: DashMap::new(),
                 sessions: Arc::new(SessionRegistry::default()),
                 #[cfg(unix)]
@@ -596,6 +601,15 @@ impl AppCore {
     pub(crate) fn next_drain_id(&self) -> String {
         let number = self.inner.next_drain.fetch_add(1, Ordering::Relaxed);
         format!("drain-{number}")
+    }
+
+    pub(crate) fn cert_users(&self) -> &DashMap<String, RunningCertUser> {
+        &self.inner.cert_users
+    }
+
+    pub(crate) fn next_cert_user_id(&self) -> String {
+        let number = self.inner.next_cert_user.fetch_add(1, Ordering::Relaxed);
+        format!("cert-user-{number}")
     }
 
     pub(crate) fn portforwards(&self) -> &Arc<PortForwards> {

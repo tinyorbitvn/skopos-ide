@@ -7,16 +7,23 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use k8s_openapi::api::certificates::v1::CertificateSigningRequest;
 use k8s_openapi::api::rbac::v1::{ClusterRoleBinding, RoleBinding};
+use k8s_openapi::jiff::Timestamp;
 use kube::Api;
 use serde_json::{json, Value};
 use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::resources::{
-    BindingKind, BindingRef, CsrDecision, RemovalOutcome, SubjectKind, SubjectRef,
+    certificate_request_describe, BindingKind, BindingRef, BoundBinding, CertUserEvent,
+    CertUserLimits, CertUserRequest, CertUserStep, CsrDecision, RemovalOutcome, RoleGrant,
+    RoleKind, SubjectKind, SubjectRef,
 };
 use skopos_fakekube::{DenyRule, FakeKube, FakeKubeConfig, FakeResource};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
 use tempfile::TempDir;
+use tokio::sync::mpsc;
 
 const SIGNER: &str = "kubernetes.io/kube-apiserver-client";
 const CSRS: &str = "certificatesigningrequests";
@@ -534,5 +541,697 @@ async fn a_forbidden_binding_fails_alone() {
         other => panic!("expected Failed, got {other:?}"),
     }
     assert_eq!(removals[1].outcome, RemovalOutcome::Deleted);
+    core.shutdown().await;
+}
+
+const FAST: CertUserLimits = CertUserLimits {
+    approval: Duration::from_secs(3),
+    issue: Duration::from_secs(2),
+};
+/// For tests that must not reach a limit.
+const SLOW: CertUserLimits = CertUserLimits {
+    approval: Duration::from_secs(60),
+    issue: Duration::from_secs(60),
+};
+const WEEK: u32 = 7 * 24 * 3600;
+const NO_APPROVAL: &str = "No one approved the request within 15 minutes. It was deleted.";
+const NO_CERTIFICATE: &str = "The cluster approved the request, but no certificate came within 60 seconds. Managed clusters, such as EKS, may not sign kube-apiserver-client requests.";
+
+fn new_user(user: &str, groups: &[&str], binding: Option<RoleGrant>) -> CertUserRequest {
+    CertUserRequest {
+        user_name: user.to_owned(),
+        groups: groups.iter().map(|g| (*g).to_owned()).collect(),
+        lifetime_seconds: WEEK,
+        binding,
+    }
+}
+
+fn grant(role_kind: RoleKind, role: &str, namespace: Option<&str>) -> RoleGrant {
+    RoleGrant {
+        role_kind,
+        role_name: role.to_owned(),
+        namespace: namespace.map(str::to_owned),
+    }
+}
+
+fn dest(root: &TempDir, file: &str) -> PathBuf {
+    root.path().join(file)
+}
+
+async fn start(
+    core: &AppCore,
+    id: &ClusterId,
+    request: CertUserRequest,
+    file: &Path,
+    owner: &str,
+    limits: CertUserLimits,
+) -> (String, mpsc::Receiver<CertUserEvent>) {
+    let (tx, rx) = mpsc::channel(64);
+    let run = core
+        .cert_user_create_start_with(id, request, file, tx, owner, limits)
+        .await
+        .unwrap();
+    (run, rx)
+}
+
+/// The next event, failing the test after 10 seconds.
+async fn next(rx: &mut mpsc::Receiver<CertUserEvent>) -> CertUserEvent {
+    tokio::time::timeout(Duration::from_secs(10), rx.recv())
+        .await
+        .expect("no event within 10 seconds")
+        .expect("the run ended without a last event")
+}
+
+fn is_last(event: &CertUserEvent) -> bool {
+    matches!(
+        event,
+        CertUserEvent::Done { .. } | CertUserEvent::Failed { .. } | CertUserEvent::Cancelled
+    )
+}
+
+fn waiting(event: &CertUserEvent) -> bool {
+    matches!(event, CertUserEvent::WaitingForApproval { .. })
+}
+
+/// The events up to the first that `stop` matches, which comes last.
+async fn until(
+    rx: &mut mpsc::Receiver<CertUserEvent>,
+    stop: impl Fn(&CertUserEvent) -> bool,
+) -> Vec<CertUserEvent> {
+    let mut events = Vec::new();
+    loop {
+        let event = next(rx).await;
+        let found = stop(&event);
+        assert!(found || !is_last(&event), "the run ended early: {event:?}");
+        events.push(event);
+        if found {
+            return events;
+        }
+    }
+}
+
+/// The events up to and with the last.
+async fn all(rx: &mut mpsc::Receiver<CertUserEvent>) -> Vec<CertUserEvent> {
+    until(rx, is_last).await
+}
+
+fn types(events: &[CertUserEvent]) -> Vec<String> {
+    events
+        .iter()
+        .map(|e| {
+            serde_json::to_value(e).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect()
+}
+
+fn csr_name(events: &[CertUserEvent]) -> String {
+    events
+        .iter()
+        .find_map(|e| match e {
+            CertUserEvent::Submitted { csr_name } => Some(csr_name.clone()),
+            _ => None,
+        })
+        .expect("no submitted event")
+}
+
+fn failure(events: &[CertUserEvent]) -> (CertUserStep, ErrorCode, String) {
+    match events.last() {
+        Some(CertUserEvent::Failed { step, error }) => (*step, error.code, error.message.clone()),
+        other => panic!("expected the run to fail, got {other:?}"),
+    }
+}
+
+fn saved_config(file: &Path) -> Value {
+    serde_yaml_ng::from_str(&std::fs::read_to_string(file).unwrap()).unwrap()
+}
+
+fn subject_of(request_der: &[u8]) -> (String, Vec<String>) {
+    let info = certificate_request_describe(&STANDARD.encode(request_der), None).unwrap();
+    (info.common_name, info.organizations)
+}
+
+#[tokio::test]
+async fn a_full_run_saves_a_kubeconfig_and_reports_the_real_expiry() {
+    let (core, fake, id, root) = connected(FakeKubeConfig::default()).await;
+    let file = dest(&root, "carol.kubeconfig");
+    let (_run, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &["devs", "oncall"], None),
+        &file,
+        "main",
+        FAST,
+    )
+    .await;
+    let events = all(&mut rx).await;
+
+    assert_eq!(
+        types(&events),
+        [
+            "started",
+            "started",
+            "submitted",
+            "started",
+            "approved",
+            "started",
+            "issued",
+            "started",
+            "saved",
+            "done"
+        ]
+    );
+    // The fake signer's certificate ends on 2030-01-01, not a week from now.
+    assert_eq!(
+        events.last(),
+        Some(&CertUserEvent::Done {
+            expires_at: "2030-01-01T00:00:00Z".into(),
+            binding: None
+        })
+    );
+
+    let name = csr_name(&events);
+    assert!(name.starts_with("carol-"), "{name}");
+    let csr = stored(&core, &id, &name)
+        .await
+        .expect("a saved run keeps its request");
+    assert_eq!(csr.spec.signer_name, SIGNER);
+    assert_eq!(csr.spec.usages, Some(vec!["client auth".to_owned()]));
+    assert_eq!(
+        csr.spec.expiration_seconds,
+        Some(i32::try_from(WEEK).unwrap())
+    );
+    assert_eq!(
+        subject_of(&csr.spec.request.0),
+        ("carol".into(), vec!["devs".into(), "oncall".into()])
+    );
+
+    let config = saved_config(&file);
+    assert_eq!(config["current-context"], "carol@fake");
+    assert_eq!(config["clusters"][0]["name"], "fake");
+    assert_eq!(
+        config["clusters"][0]["cluster"]["server"],
+        json!(fake.url())
+    );
+    assert_eq!(config["contexts"][0]["context"]["user"], "carol@fake");
+    assert!(config["contexts"][0]["context"].get("namespace").is_none());
+    let user = &config["users"][0]["user"];
+    let key = STANDARD
+        .decode(user["client-key-data"].as_str().unwrap())
+        .unwrap();
+    assert!(String::from_utf8(key)
+        .unwrap()
+        .starts_with("-----BEGIN PRIVATE KEY-----"));
+    let certificate = STANDARD
+        .decode(user["client-certificate-data"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(certificate, csr.status.unwrap().certificate.unwrap().0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_grant_makes_one_binding_for_the_exact_user_name() {
+    let (core, _fake, id, root) = connected(FakeKubeConfig::default()).await;
+    let edit = grant(RoleKind::ClusterRole, "edit", Some("payments"));
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], Some(edit)),
+        &dest(&root, "carol"),
+        "main",
+        FAST,
+    )
+    .await;
+    let events = all(&mut rx).await;
+
+    let carol_edit = BoundBinding {
+        kind: BindingKind::RoleBinding,
+        namespace: Some("payments".into()),
+        name: "carol-edit".into(),
+    };
+    assert_eq!(types(&events)[8..], ["saved", "started", "bound", "done"]);
+    assert_eq!(
+        events[events.len() - 2],
+        CertUserEvent::Bound {
+            binding: carol_edit.clone()
+        }
+    );
+    assert!(
+        matches!(events.last(), Some(CertUserEvent::Done { binding: Some(b), .. }) if *b == carol_edit)
+    );
+    assert_eq!(
+        saved_config(&dest(&root, "carol"))["contexts"][0]["context"]["namespace"],
+        "payments"
+    );
+    let client = core.cluster_client(&id).unwrap();
+    let made = Api::<RoleBinding>::namespaced(client.clone(), "payments")
+        .get("carol-edit")
+        .await
+        .unwrap();
+    assert_eq!(
+        (made.role_ref.kind.as_str(), made.role_ref.name.as_str()),
+        ("ClusterRole", "edit")
+    );
+    let subjects = made.subjects.unwrap();
+    assert_eq!(subjects.len(), 1);
+    assert_eq!(
+        (
+            subjects[0].kind.as_str(),
+            subjects[0].name.as_str(),
+            subjects[0].api_group.as_deref()
+        ),
+        ("User", "carol", Some(RBAC))
+    );
+
+    let view = grant(RoleKind::ClusterRole, "view", None);
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("dave", &[], Some(view)),
+        &dest(&root, "dave"),
+        "main",
+        FAST,
+    )
+    .await;
+    let dave_view = BoundBinding {
+        kind: BindingKind::ClusterRoleBinding,
+        namespace: None,
+        name: "dave-view".into(),
+    };
+    assert!(
+        matches!(all(&mut rx).await.last(), Some(CertUserEvent::Done { binding: Some(b), .. }) if *b == dave_view)
+    );
+    assert!(Api::<ClusterRoleBinding>::all(client.clone())
+        .get_opt("dave-view")
+        .await
+        .unwrap()
+        .is_some());
+
+    let reader = grant(RoleKind::Role, "payments-reader", Some("payments"));
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("erin", &[], Some(reader)),
+        &dest(&root, "erin"),
+        "main",
+        FAST,
+    )
+    .await;
+    all(&mut rx).await;
+    let made = Api::<RoleBinding>::namespaced(client, "payments")
+        .get("erin-payments-reader")
+        .await
+        .unwrap();
+    assert_eq!(
+        (made.role_ref.kind.as_str(), made.role_ref.name.as_str()),
+        ("Role", "payments-reader")
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_requester_who_may_not_approve_waits_and_carries_on_once_approved() {
+    let (core, fake, id, root) = connected(approval_denied()).await;
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &dest(&root, "carol"),
+        "main",
+        FAST,
+    )
+    .await;
+    let events = until(&mut rx, waiting).await;
+    let name = csr_name(&events);
+
+    let Some(CertUserEvent::WaitingForApproval { csr_name, deadline }) = events.last() else {
+        unreachable!()
+    };
+    assert_eq!(csr_name, &name);
+    assert!(!deadline.contains('.'), "whole seconds: {deadline}");
+    let left = deadline
+        .parse::<Timestamp>()
+        .unwrap()
+        .duration_since(Timestamp::now())
+        .as_secs();
+    assert!((1..=3).contains(&left), "{left}");
+
+    fake.decide_csr(&name, "Approved", "approved by an admin");
+    assert_eq!(
+        types(&all(&mut rx).await),
+        ["approved", "started", "issued", "started", "saved", "done"]
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_denied_request_fails_with_its_message_and_is_deleted() {
+    let (core, fake, id, root) = connected(approval_denied()).await;
+    let file = dest(&root, "carol");
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &file,
+        "main",
+        FAST,
+    )
+    .await;
+    let name = csr_name(&until(&mut rx, waiting).await);
+
+    fake.decide_csr(&name, "Denied", "Not today.");
+    let events = all(&mut rx).await;
+
+    assert_eq!(
+        failure(&events),
+        (
+            CertUserStep::Approve,
+            ErrorCode::Forbidden,
+            "The request was denied: Not today.".to_owned()
+        )
+    );
+    assert!(stored(&core, &id, &name).await.is_none());
+    assert!(!file.exists());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn no_approval_within_the_limit_fails_and_deletes_the_request() {
+    let (core, _fake, id, root) = connected(approval_denied()).await;
+    let started = Instant::now();
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &dest(&root, "carol"),
+        "main",
+        FAST,
+    )
+    .await;
+    let events = all(&mut rx).await;
+
+    assert!(started.elapsed() >= FAST.approval);
+    assert_eq!(
+        failure(&events),
+        (
+            CertUserStep::Approve,
+            ErrorCode::Internal,
+            NO_APPROVAL.to_owned()
+        )
+    );
+    assert!(stored(&core, &id, &csr_name(&events)).await.is_none());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_approved_request_with_no_certificate_fails_with_the_managed_cluster_hint() {
+    let cfg = FakeKubeConfig {
+        no_csr_signer: true,
+        ..FakeKubeConfig::default()
+    };
+    let (core, _fake, id, root) = connected(cfg).await;
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &dest(&root, "carol"),
+        "main",
+        FAST,
+    )
+    .await;
+    let events = all(&mut rx).await;
+
+    assert_eq!(types(&events)[4..6], ["approved", "started"]);
+    assert_eq!(
+        failure(&events),
+        (
+            CertUserStep::WaitForCertificate,
+            ErrorCode::Internal,
+            NO_CERTIFICATE.to_owned()
+        )
+    );
+    assert!(stored(&core, &id, &csr_name(&events)).await.is_none());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn cancelling_while_waiting_deletes_the_request() {
+    let (core, _fake, id, root) = connected(approval_denied()).await;
+    let file = dest(&root, "carol");
+    let (run, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &file,
+        "main",
+        SLOW,
+    )
+    .await;
+    let name = csr_name(&until(&mut rx, waiting).await);
+
+    core.cert_user_create_cancel(&run);
+
+    assert_eq!(next(&mut rx).await, CertUserEvent::Cancelled);
+    assert!(stored(&core, &id, &name).await.is_none());
+    assert!(!file.exists());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn cancelling_after_saving_keeps_the_file_and_the_request() {
+    let (core, fake, id, root) = connected(FakeKubeConfig::default()).await;
+    fake.delay_creates("rolebindings", Duration::from_secs(5));
+    let file = dest(&root, "carol");
+    let edit = grant(RoleKind::ClusterRole, "edit", Some("payments"));
+    let (run, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], Some(edit)),
+        &file,
+        "main",
+        SLOW,
+    )
+    .await;
+    let events = until(&mut rx, |e| {
+        *e == CertUserEvent::Started {
+            step: CertUserStep::Bind,
+        }
+    })
+    .await;
+
+    core.cert_user_create_cancel(&run);
+
+    assert_eq!(next(&mut rx).await, CertUserEvent::Cancelled);
+    assert!(file.exists());
+    assert!(stored(&core, &id, &csr_name(&events)).await.is_some());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_existing_binding_is_not_overwritten_and_the_file_stays() {
+    let (core, fake, id, root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert(
+        "rolebindings",
+        binding(Some("payments"), "carol-edit", json!([user("someone")])),
+    );
+    let file = dest(&root, "carol");
+    let edit = grant(RoleKind::ClusterRole, "edit", Some("payments"));
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], Some(edit)),
+        &file,
+        "main",
+        FAST,
+    )
+    .await;
+    let events = all(&mut rx).await;
+
+    match &events[events.len() - 2] {
+        CertUserEvent::BindingFailed { binding, error } => {
+            assert_eq!(binding.name, "carol-edit");
+            assert_eq!(error.code, ErrorCode::Conflict);
+        }
+        other => panic!("expected bindingFailed, got {other:?}"),
+    }
+    assert!(matches!(
+        events.last(),
+        Some(CertUserEvent::Done { binding: None, .. })
+    ));
+    assert!(file.exists());
+    let kept = Api::<RoleBinding>::namespaced(core.cluster_client(&id).unwrap(), "payments")
+        .get("carol-edit")
+        .await
+        .unwrap();
+    assert_eq!(subject_names(kept.subjects), ["User someone"]);
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_odd_user_name_keeps_its_text_and_gets_slugged_names() {
+    let (core, _fake, id, root) = connected(FakeKubeConfig::default()).await;
+    let file = dest(&root, "carol");
+    let edit = grant(RoleKind::ClusterRole, "edit", Some("payments"));
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("Carol.Smith@Corp", &[], Some(edit)),
+        &file,
+        "main",
+        FAST,
+    )
+    .await;
+    let events = all(&mut rx).await;
+
+    let name = csr_name(&events);
+    assert!(name.starts_with("carol-smith-corp-"), "{name}");
+    let csr = stored(&core, &id, &name).await.unwrap();
+    assert_eq!(subject_of(&csr.spec.request.0).0, "Carol.Smith@Corp");
+    let made = Api::<RoleBinding>::namespaced(core.cluster_client(&id).unwrap(), "payments")
+        .get("carol-smith-corp-edit")
+        .await
+        .unwrap();
+    assert_eq!(subject_names(made.subjects), ["User Carol.Smith@Corp"]);
+    assert_eq!(
+        saved_config(&file)["current-context"],
+        "Carol.Smith@Corp@fake"
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_request_deleted_while_waiting_fails_at_once() {
+    let (core, fake, id, root) = connected(approval_denied()).await;
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &dest(&root, "carol"),
+        "main",
+        SLOW,
+    )
+    .await;
+    let name = csr_name(&until(&mut rx, waiting).await);
+
+    let deleted = Instant::now();
+    fake.delete(CSRS, None, &name);
+    let events = all(&mut rx).await;
+
+    assert!(deleted.elapsed() < Duration::from_secs(5));
+    assert_eq!(
+        failure(&events),
+        (
+            CertUserStep::Approve,
+            ErrorCode::NotFound,
+            format!("the signing request {name} was deleted before a certificate was issued")
+        )
+    );
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_window_cancels_only_its_own_runs() {
+    let (core, fake, id, root) = connected(approval_denied()).await;
+    let (_, mut main) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &dest(&root, "carol"),
+        "main",
+        SLOW,
+    )
+    .await;
+    let (_, mut other) = start(
+        &core,
+        &id,
+        new_user("dave", &[], None),
+        &dest(&root, "dave"),
+        "other",
+        SLOW,
+    )
+    .await;
+    let carol = csr_name(&until(&mut main, waiting).await);
+    let dave = csr_name(&until(&mut other, waiting).await);
+
+    core.cert_user_create_cancel_owned("main");
+
+    assert_eq!(next(&mut main).await, CertUserEvent::Cancelled);
+    assert!(stored(&core, &id, &carol).await.is_none());
+    fake.decide_csr(&dave, "Approved", "approved by an admin");
+    assert!(matches!(
+        all(&mut other).await.last(),
+        Some(CertUserEvent::Done { .. })
+    ));
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_run_nobody_listens_to_stops_and_deletes_its_request() {
+    let (core, _fake, id, root) = connected(approval_denied()).await;
+    let (_, mut rx) = start(
+        &core,
+        &id,
+        new_user("carol", &[], None),
+        &dest(&root, "carol"),
+        "main",
+        SLOW,
+    )
+    .await;
+    let name = csr_name(&until(&mut rx, waiting).await);
+
+    drop(rx);
+
+    for _ in 0..50 {
+        if stored(&core, &id, &name).await.is_none() {
+            core.shutdown().await;
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the request {name} was not deleted");
+}
+
+#[tokio::test]
+async fn a_bad_request_or_destination_costs_nothing_on_the_cluster() {
+    let (core, fake, id, root) = connected(FakeKubeConfig::default()).await;
+    for (request, file) in [
+        (new_user("system:carol", &[], None), dest(&root, "carol")),
+        (
+            new_user("carol", &["devs", "devs"], None),
+            dest(&root, "carol"),
+        ),
+        (
+            new_user("carol", &[], None),
+            root.path().join("missing").join("carol"),
+        ),
+        (
+            new_user("carol", &[], None),
+            PathBuf::from("carol.kubeconfig"),
+        ),
+    ] {
+        let (tx, _rx) = mpsc::channel(8);
+        let error = core
+            .cert_user_create_start_with(&id, request, &file, tx, "main", FAST)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert!(!error.message.contains("missing"), "{}", error.message);
+    }
+    assert!(fake
+        .writes(
+            "POST",
+            "/apis/certificates.k8s.io/v1/certificatesigningrequests"
+        )
+        .is_empty());
     core.shutdown().await;
 }

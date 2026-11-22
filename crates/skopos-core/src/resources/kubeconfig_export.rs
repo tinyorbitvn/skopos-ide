@@ -112,7 +112,6 @@ pub(crate) fn write_kubeconfig(dest: &Path, text: &str) -> CoreResult<()> {
 
 /// A kubeconfig that signs in as `user` with a client certificate (spec §5.1.1). serde's
 /// own copies of the key are freed without wiping; the returned text is wiped.
-#[cfg_attr(not(test), expect(dead_code, reason = "the create run saves with it"))]
 pub(crate) fn client_cert_kubeconfig(
     source: &SourceCluster,
     user: &str,

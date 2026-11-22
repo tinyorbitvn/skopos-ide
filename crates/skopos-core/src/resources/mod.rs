@@ -28,7 +28,10 @@ pub use argocd::{
     ArgoRollbackOptions, ArgoSyncOptions, ArgoSyncResource, ArgoSyncStrategy,
     SYNC_WINDOWS_UNVERIFIED,
 };
-pub use cert_user::{CertUserRequest, RoleGrant, RoleKind};
+pub(crate) use cert_user::RunningCertUser;
+pub use cert_user::{
+    BoundBinding, CertUserEvent, CertUserLimits, CertUserRequest, CertUserStep, RoleGrant, RoleKind,
+};
 pub use csr::{certificate_request_describe, CertificateRequestInfo, CsrDecision};
 pub(crate) use discovery::state_name;
 pub(crate) use drain::RunningDrain;

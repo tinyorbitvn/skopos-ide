@@ -1,18 +1,12 @@
 //! Creating a user that signs in with a client certificate (spec 2026-11-22 §5.1).
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the create run uses the key and the request")
-)]
 mod csr;
-
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the create run uses the checks and the slugs")
-)]
 mod request;
+mod run;
 
 pub use request::{CertUserRequest, RoleGrant, RoleKind};
+pub(crate) use run::RunningCertUser;
+pub use run::{BoundBinding, CertUserEvent, CertUserLimits, CertUserStep};
 
 /// A request PEM for tests in other modules.
 #[cfg(test)]
