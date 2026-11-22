@@ -34,6 +34,7 @@ import {
   type FilterJoin,
   type MatchChip,
   matchChips,
+  NO_COLUMNS,
   type ObjectFilter,
   passes,
   typedFilter,
@@ -336,6 +337,7 @@ export function ResourceScreen(props: {
           tokens={tokens}
           onTokensChange={setTokens}
           index={filterIndex}
+          context={NO_COLUMNS}
           inputRef={filterBox}
         />
         {namespaced ? (

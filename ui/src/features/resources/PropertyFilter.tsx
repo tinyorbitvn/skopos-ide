@@ -9,7 +9,12 @@ import {
   useState,
 } from "react";
 import { Search } from "../../design/icons";
-import { type FilterIndex, type ObjectFilter, parseFilter } from "./filter";
+import {
+  type FilterContext,
+  type FilterIndex,
+  type ObjectFilter,
+  parseFilter,
+} from "./filter";
 import {
   type SuggestionOption,
   suggestionOptions,
@@ -18,9 +23,11 @@ import {
 import styles from "./PropertyFilter.module.css";
 
 /** The box's label, and its placeholder while there is no token (spec M14). */
-export const FILTER_LABEL = "Filter by name, namespace, label or annotation";
+export const FILTER_LABEL = "Filter by any column, label or annotation";
 
 export interface PropertyFilterProps {
+  /** The list's columns and the time a filter reads them at (column filter spec §4.3). */
+  context: FilterContext;
   text: string;
   onTextChange(text: string): void;
   tokens: readonly ObjectFilter[];
@@ -44,7 +51,10 @@ export function PropertyFilter(props: PropertyFilterProps): ReactElement {
   const listId = useId();
   const footId = useId();
   const [open, setOpen] = useState(false);
-  const suggestions = useMemo(() => suggestionsFor(text, index), [text, index]);
+  const suggestions = useMemo(
+    () => suggestionsFor(text, index, props.context),
+    [text, index, props.context],
+  );
   const options = useMemo(() => suggestionOptions(suggestions), [suggestions]);
   const position = useMemo(
     () => new Map(options.map((option, at) => [option, at])),
@@ -104,7 +114,7 @@ export function PropertyFilter(props: PropertyFilterProps): ReactElement {
           pick(option);
           return;
         }
-        const parsed = parseFilter(text);
+        const parsed = parseFilter(text, props.context);
         if (parsed !== null && parsed !== "incomplete") addToken(parsed);
         return;
       }
