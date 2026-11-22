@@ -16,6 +16,7 @@ import { ArrowLeftRightFillIcon } from "@thesvg/ui-react/arrow-left-right";
 import { ArrowRightFillIcon } from "@thesvg/ui-react/arrow-right";
 import { ArrowUpFillIcon } from "@thesvg/ui-react/arrow-up";
 import { ArrowUpDownFillIcon } from "@thesvg/ui-react/arrow-up-down";
+import { BadgeCheckFillIcon } from "@thesvg/ui-react/badge-check";
 import { BatchJobFillIcon } from "@thesvg/ui-react/batch-job";
 import { BlockStorageFillIcon } from "@thesvg/ui-react/block-storage";
 import { BlocksFillIcon } from "@thesvg/ui-react/blocks";
@@ -23,6 +24,7 @@ import { BookOpenFillIcon } from "@thesvg/ui-react/book-open";
 import { BoxFillIcon } from "@thesvg/ui-react/box";
 import { BoxesFillIcon } from "@thesvg/ui-react/boxes";
 import { CalendarClockFillIcon } from "@thesvg/ui-react/calendar-clock";
+import { CertificateFillIcon } from "@thesvg/ui-react/certificate";
 import { CheckFillIcon } from "@thesvg/ui-react/check";
 import { ChevronDownFillIcon } from "@thesvg/ui-react/chevron-down";
 import { ChevronLeftFillIcon } from "@thesvg/ui-react/chevron-left";
@@ -121,6 +123,9 @@ import { TrashFillIcon } from "@thesvg/ui-react/trash";
 import { TriangleAlertFillIcon } from "@thesvg/ui-react/triangle-alert";
 import { UnplugFillIcon } from "@thesvg/ui-react/unplug";
 import { UploadFillIcon } from "@thesvg/ui-react/upload";
+import { UserPlusFillIcon } from "@thesvg/ui-react/user-plus";
+import { UserXFillIcon } from "@thesvg/ui-react/user-x";
+import { UsersFillIcon } from "@thesvg/ui-react/users";
 import { XFillIcon } from "@thesvg/ui-react/x";
 import { ZapFillIcon } from "@thesvg/ui-react/zap";
 import {
@@ -238,6 +243,11 @@ export const ArrowRightLeft = /* @__PURE__ */ icon(
   "arrow-left-right",
   ArrowLeftRightFillIcon,
 );
+export const BadgeCheck = /* @__PURE__ */ icon(
+  "badge-check",
+  "badge-check",
+  BadgeCheckFillIcon,
+);
 export const BatchJob = /* @__PURE__ */ icon(
   "batch-job",
   "batch-job",
@@ -255,6 +265,11 @@ export const CalendarClock = /* @__PURE__ */ icon(
   "calendar-clock",
   "calendar-clock",
   CalendarClockFillIcon,
+);
+export const Certificate = /* @__PURE__ */ icon(
+  "certificate",
+  "certificate",
+  CertificateFillIcon,
 );
 export const Check = /* @__PURE__ */ icon("check", "check", CheckFillIcon);
 export const ChevronDown = /* @__PURE__ */ icon(
@@ -645,6 +660,13 @@ export const TriangleAlert = /* @__PURE__ */ icon(
   TriangleAlertFillIcon,
 );
 export const Unplug = /* @__PURE__ */ icon("unplug", "unplug", UnplugFillIcon);
+export const UserPlus = /* @__PURE__ */ icon(
+  "user-plus",
+  "user-plus",
+  UserPlusFillIcon,
+);
+export const UserX = /* @__PURE__ */ icon("user-x", "user-x", UserXFillIcon);
+export const Users = /* @__PURE__ */ icon("users", "users", UsersFillIcon);
 export const X = /* @__PURE__ */ icon("x", "x", XFillIcon);
 export const Zap = /* @__PURE__ */ icon("zap", "zap", ZapFillIcon);
 export const ZoomIn = /* @__PURE__ */ icon("zoom-in", "plus", PlusFillIcon);

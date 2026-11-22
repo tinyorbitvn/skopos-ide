@@ -22,8 +22,11 @@ export interface NavRoute {
   type: "route";
   label: string;
   path: string;
-  /** The `group/plural` the cluster must list for the route to show: Topology needs `/nodes`. */
-  requires?: string;
+  /**
+   * The `group/plural` the cluster must list for the route to show: Topology needs `/nodes`.
+   * With several, any one is enough.
+   */
+  requires?: string | readonly string[];
 }
 
 export type NavItem = NavResource | NavRoute;
@@ -276,6 +279,15 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: glyph("access"),
     items: [
       r("ServiceAccounts", "", "serviceaccounts"),
+      {
+        type: "route",
+        label: "Users & Groups",
+        path: "users-groups",
+        requires: [
+          "rbac.authorization.k8s.io/clusterrolebindings",
+          "rbac.authorization.k8s.io/rolebindings",
+        ],
+      },
       r("ClusterRoles", "rbac.authorization.k8s.io", "clusterroles"),
       r("Roles", "rbac.authorization.k8s.io", "roles"),
       r(
@@ -284,6 +296,11 @@ export const NAV_SECTIONS: NavSection[] = [
         "clusterrolebindings",
       ),
       r("RoleBindings", "rbac.authorization.k8s.io", "rolebindings"),
+      r(
+        "CertificateSigningRequests",
+        "certificates.k8s.io",
+        "certificatesigningrequests",
+      ),
     ],
   },
   {
@@ -398,10 +415,12 @@ function otherGatewayItems(resources: ApiResourceInfo[]): NavResource[] {
 export function visibleSections(resources: ApiResourceInfo[]): NavSection[] {
   const ok = listable(resources);
   // A route needs no resource to list, unless it names the one it requires.
-  const shows = (i: NavItem) =>
-    i.type === "route"
-      ? i.requires === undefined || ok.has(i.requires)
-      : ok.has(`${i.group}/${i.plural}`);
+  const shows = (i: NavItem) => {
+    if (i.type === "resource") return ok.has(`${i.group}/${i.plural}`);
+    if (i.requires === undefined) return true;
+    const needs = typeof i.requires === "string" ? [i.requires] : i.requires;
+    return needs.some((need) => ok.has(need));
+  };
   const gateway = otherGatewayItems(resources);
   return NAV_SECTIONS.map((section) => {
     let items = section.items.filter(shows);

@@ -85,3 +85,34 @@ export const NAMESPACES: ResourceRef = {
   kind: "Namespace",
   namespaced: false,
 };
+
+const RBAC = "rbac.authorization.k8s.io";
+
+export const CLUSTER_ROLE_BINDINGS: ResourceRef = {
+  group: RBAC,
+  version: "v1",
+  plural: "clusterrolebindings",
+  kind: "ClusterRoleBinding",
+  namespaced: false,
+};
+export const ROLE_BINDINGS: ResourceRef = {
+  group: RBAC,
+  version: "v1",
+  plural: "rolebindings",
+  kind: "RoleBinding",
+  namespaced: true,
+};
+export const CLUSTER_ROLES: ResourceRef = {
+  group: RBAC,
+  version: "v1",
+  plural: "clusterroles",
+  kind: "ClusterRole",
+  namespaced: false,
+};
+export const ROLES: ResourceRef = {
+  group: RBAC,
+  version: "v1",
+  plural: "roles",
+  kind: "Role",
+  namespaced: true,
+};
