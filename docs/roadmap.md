@@ -2,29 +2,12 @@
 
 Milestone A is specified in
 [`superpowers/specs/2026-11-05-skopos-milestone-a-design.md`](superpowers/specs/2026-11-05-skopos-milestone-a-design.md).
-Each milestone below gets its own spec and plans after Milestone A is complete and
-its acceptance checklist passes.
+The next milestone gets its own spec and plans.
 
-## Milestone B: ecosystem integrations
+## Next milestone
 
 | Area | Scope |
 |---|---|
-| GitOps | Flux: objects, sync status and reconcile actions. Argo CD moved into Milestone A on 2026-11-07 |
-| Gateway API | Gateways, routes, classes, with relationship views |
-| Policy | Admission policies and bindings |
-| Dynamic Resource Allocation | Device classes, resource claims, slices |
-| Cost | OpenCost-backed cost views |
 | Security | Image vulnerability scanning of running workloads |
-| Cloud | Discover clusters from AWS, Azure and Google Cloud accounts; account and credential handling |
-| Windows and layout | Detachable sub-windows, split-screen |
-| Tray | Tray icon listing the connected clusters, with connect and quit. Deferred from Milestone A F19 on 2026-11-10 |
-| CLI | `skopos` command: open clusters and resources from a shell |
-| MCP | Model Context Protocol server exposing cluster tools to AI agents |
-| Delivery | Code signing, notarization |
-
-## Milestone C: AI and extensions
-
-| Area | Scope |
-|---|---|
-| AI chat | Cluster-aware assistant using a user-supplied model API key, with explicit approval before any change |
+| Cost | OpenCost-backed cost views |
 | Extensions | Public extension API, sandboxed loading, extension preference pages |
