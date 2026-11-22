@@ -1,6 +1,6 @@
 //! The program a kubeconfig runs for credentials, and the fingerprint a consent is tied to.
 
-use kube::config::{AuthProviderConfig, ExecConfig, Kubeconfig};
+use kube::config::{AuthProviderConfig, Cluster, ExecConfig, Kubeconfig};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
@@ -155,6 +155,34 @@ fn put_invocation(hasher: &mut Sha256, invocation: Option<&Invocation>) {
     put_all(hasher, &extra);
 }
 
+fn put_setting(hasher: &mut Sha256, setting: Option<&str>) {
+    let Some(setting) = setting else {
+        hasher.update([0u8]);
+        return;
+    };
+    hasher.update([1u8]);
+    put(hasher, setting.as_bytes());
+}
+
+/// How the client checks who answers at the server, and what the connection passes through.
+/// With these changed, the same program's credentials can reach someone else at the same
+/// address. A certificate authority file counts by its path, like the program itself: what
+/// the file holds is not read.
+fn put_trust(hasher: &mut Sha256, cluster: Option<&Cluster>) {
+    // Leaving TLS verification on is the same whether the file says so or not.
+    let insecure = cluster.and_then(|c| c.insecure_skip_tls_verify) == Some(true);
+    hasher.update([u8::from(insecure)]);
+    let settings = [
+        cluster.and_then(|c| c.certificate_authority.as_deref()),
+        cluster.and_then(|c| c.certificate_authority_data.as_deref()),
+        cluster.and_then(|c| c.tls_server_name.as_deref()),
+        cluster.and_then(|c| c.proxy_url.as_deref()),
+    ];
+    for setting in settings {
+        put_setting(hasher, setting);
+    }
+}
+
 /// The program `kube` would run for the kubeconfig's user, or `None` when it runs none.
 pub(crate) fn exec_command(kubeconfig: &Kubeconfig) -> Option<ExecCommand> {
     let user = kubeconfig
@@ -163,16 +191,18 @@ pub(crate) fn exec_command(kubeconfig: &Kubeconfig) -> Option<ExecCommand> {
         .find_map(|named| named.auth_info.as_ref())?;
     let gcp = user.auth_provider.as_ref().and_then(gcp_invocation);
     let exec = user.exec.as_ref().and_then(exec_invocation);
-    let server = kubeconfig
+    let cluster = kubeconfig
         .clusters
         .iter()
-        .find_map(|named| named.cluster.as_ref())
+        .find_map(|named| named.cluster.as_ref());
+    let server = cluster
         .and_then(|cluster| cluster.server.clone())
         .unwrap_or_default();
 
     let mut hasher = Sha256::new();
     put(&mut hasher, FINGERPRINT_VERSION);
     put(&mut hasher, server.as_bytes());
+    put_trust(&mut hasher, cluster);
     // Both are encoded: a change to either must ask again, whichever one `kube` prefers.
     put_invocation(&mut hasher, gcp.as_ref());
     put_invocation(&mut hasher, exec.as_ref());
@@ -209,9 +239,14 @@ mod tests {
         cmd-args: \"config config-helper --format=json\", access-token: cached } } }";
 
     fn kubeconfig(server: &str, user: &str) -> Kubeconfig {
+        kubeconfig_of(&format!("{{ server: \"{server}\" }}"), user)
+    }
+
+    /// `cluster` is the whole cluster section, as a YAML flow mapping.
+    fn kubeconfig_of(cluster: &str, user: &str) -> Kubeconfig {
         let text = format!(
             "apiVersion: v1\nkind: Config\n\
-             clusters:\n- {{ name: c1, cluster: {{ server: \"{server}\" }} }}\n\
+             clusters:\n- {{ name: c1, cluster: {cluster} }}\n\
              users:\n- name: u1\n  user: {user}\n\
              contexts:\n- {{ name: one, context: {{ cluster: c1, user: u1 }} }}\n\
              current-context: one\n"
@@ -221,6 +256,14 @@ mod tests {
 
     fn fingerprint(server: &str, user: &str) -> String {
         exec_command(&kubeconfig(server, user)).unwrap().fingerprint
+    }
+
+    /// The fingerprint of `EXEC` at `https://x`, with one more setting on the cluster.
+    fn fingerprint_with(setting: &str) -> String {
+        let cluster = format!("{{ server: \"https://x\", {setting} }}");
+        exec_command(&kubeconfig_of(&cluster, EXEC))
+            .unwrap()
+            .fingerprint
     }
 
     #[test]
@@ -291,6 +334,64 @@ mod tests {
         assert_eq!(
             fingerprint("https://x", &refreshed),
             fingerprint("https://x", GCP)
+        );
+    }
+
+    #[test]
+    fn the_fingerprint_follows_how_the_cluster_is_trusted_and_reached() {
+        let changed = [
+            (
+                "TLS verification turned off",
+                "insecure-skip-tls-verify: true",
+            ),
+            (
+                "a certificate authority file",
+                "certificate-authority: /etc/ca.crt",
+            ),
+            (
+                "another certificate authority file",
+                "certificate-authority: /etc/other.crt",
+            ),
+            (
+                "certificate authority data",
+                "certificate-authority-data: Y2E=",
+            ),
+            ("a TLS server name", "tls-server-name: other.example"),
+            ("a proxy", "proxy-url: \"http://proxy.example:3128\""),
+        ];
+        // Each one differs from the plain cluster and from every other.
+        let mut seen = vec![fingerprint("https://x", EXEC)];
+        for (what, setting) in changed {
+            let fingerprint = fingerprint_with(setting);
+            assert!(!seen.contains(&fingerprint), "{what}");
+            seen.push(fingerprint);
+        }
+    }
+
+    #[test]
+    fn two_trust_settings_with_the_same_text_cannot_encode_alike() {
+        assert_ne!(
+            fingerprint_with("certificate-authority: same"),
+            fingerprint_with("certificate-authority-data: same")
+        );
+        assert_ne!(
+            fingerprint_with("tls-server-name: same"),
+            fingerprint_with("proxy-url: same")
+        );
+    }
+
+    #[test]
+    fn the_fingerprint_ignores_cluster_settings_that_change_neither() {
+        let base = fingerprint("https://x", EXEC);
+
+        // Saying that TLS verification stays on is the same as not saying it.
+        assert_eq!(fingerprint_with("insecure-skip-tls-verify: false"), base);
+        // Tools rewrite their own notes here, such as the time of the last start.
+        assert_eq!(
+            fingerprint_with(
+                "extensions: [{ name: cluster_info, extension: { last-update: \"today\" } }]"
+            ),
+            base
         );
     }
 

@@ -237,6 +237,32 @@ async fn a_changed_server_asks_again() {
 }
 
 #[tokio::test]
+async fn a_change_to_how_the_cluster_is_reached_asks_again() {
+    let s = core_with_plugin().await;
+    allow(&s.core, &s.id).await;
+    connected(&s.core, &s.id).await;
+    s.core.cluster_disconnect(&s.id).await.unwrap();
+    std::fs::remove_file(&s.marker).unwrap();
+    // The same server and program, now through a proxy and without checking who answers.
+    let text = config_text(&s.fake.url(), &plugin_user(&s.marker, "one")).replace(
+        "cluster: { server:",
+        "cluster: { insecure-skip-tls-verify: true, proxy-url: \"http://127.0.0.1:9\", server:",
+    );
+    assert!(text.contains("proxy-url"), "{text}");
+    std::fs::write(kube_config(&s.root), text).unwrap();
+
+    let state = s.core.cluster_connect(&s.id).await.unwrap();
+
+    let (kind, message) = failure(&state);
+    assert_eq!(kind, FailureKind::ExecNotAllowed, "{message}");
+    assert!(s.core.cluster_exec_request(&s.id).unwrap().changed);
+    assert!(
+        !s.marker.exists(),
+        "the plugin ran through the changed connection"
+    );
+}
+
+#[tokio::test]
 async fn a_change_elsewhere_in_the_file_does_not_ask_again() {
     let s = core_with_plugin().await;
     allow(&s.core, &s.id).await;

@@ -105,8 +105,8 @@ export function ExecConsentDialog() {
           </p>
           {shown.changed ? (
             <p className={styles.changed} data-testid="exec-consent-changed">
-              The program or the cluster address has changed since you allowed
-              it.
+              The program, the cluster address or its TLS and proxy settings
+              have changed since you allowed it.
             </p>
           ) : null}
           <dl className={styles.facts}>
@@ -154,9 +154,9 @@ export function ExecConsentDialog() {
             <dd>{`${shown.sourcePath} · context ${shown.contextName}`}</dd>
           </dl>
           <p className={styles.hint}>
-            Remembered for this cluster until the program, its arguments or the
-            cluster address change. You can stop allowing it in Cluster
-            settings.
+            Remembered for this cluster until the program, its arguments, the
+            cluster address or its TLS and proxy settings change. You can stop
+            allowing it in Cluster settings.
           </p>
         </>
       }

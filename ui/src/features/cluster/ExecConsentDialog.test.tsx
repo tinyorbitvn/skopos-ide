@@ -124,7 +124,7 @@ test("says so when what runs changed since it was allowed", async () => {
   await show({ cluster_exec_request: () => ({ ...REQUEST, changed: true }) });
 
   expect(screen.getByTestId("exec-consent-changed").textContent).toBe(
-    "The program or the cluster address has changed since you allowed it.",
+    "The program, the cluster address or its TLS and proxy settings have changed since you allowed it.",
   );
 });
 

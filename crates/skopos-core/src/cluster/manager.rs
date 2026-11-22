@@ -157,8 +157,8 @@ impl HeldExec {
         let command = &self.command.command;
         let message = if self.changed {
             format!(
-                "The program this kubeconfig runs for credentials (\"{command}\") or the \
-                 cluster address changed since you allowed it."
+                "The program this kubeconfig runs for credentials (\"{command}\"), the \
+                 cluster address or its TLS and proxy settings changed since you allowed it."
             )
         } else {
             format!(
