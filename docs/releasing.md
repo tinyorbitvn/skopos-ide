@@ -37,11 +37,16 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
       `CHANGELOG.md` has notes for that version.
    2. **ci:** the whole CI runs on the tagged commit. Nothing is built if it fails.
    3. **draft:** a draft release is made with those notes.
-   4. **build:** Linux, macOS arm64, macOS x64 and Windows builds are added to the draft. The
-      macOS signature is checked inside the dmg. Each build signs its updater files with the
-      updater key: the AppImage, the deb and the Windows setup exe get a `.sig`, and each macOS
-      build adds `SkoposIDE_aarch64.app.tar.gz` or `SkoposIDE_x64.app.tar.gz` and its `.sig`.
-      A build stops at once when the key's secret is not set.
+   4. **build:** Linux, macOS arm64, macOS x64 and Windows builds are added to the draft. Each
+      macOS build is signed with the Developer ID certificate and notarized by Apple: Tauri
+      signs, notarizes and staples the app and signs the dmg, then `scripts/macos-trust.mjs`
+      notarizes and staples the dmg, checks the dmg, the app inside it and the app in the
+      updater archive, and replaces the dmg in the draft (see
+      [macOS signing and notarization](#macos-signing-and-notarization)). Each build signs its
+      updater files with the updater key: the AppImage, the deb and the Windows setup exe get a
+      `.sig`, and each macOS build adds `SkoposIDE_aarch64.app.tar.gz` or
+      `SkoposIDE_x64.app.tar.gz` and its `.sig`. A build stops at once when the updater key's
+      secret, or on macOS an Apple secret, is not set.
    5. **publish:** once all four builds pass, `scripts/updater-manifest.mjs` builds
       `latest.json` from the draft's updater files and signatures and uploads it to the draft.
       The draft must then hold the five installers (AppImage, deb, arm64 and x64 dmg, Windows
@@ -82,6 +87,62 @@ Installed copies install only an update signed with the updater key.
 - Only the release build makes updater files (`--config crates/skopos-app/tauri.updater.conf.json`),
   so CI, e2e and local builds need no key.
 
+## macOS signing and notarization
+
+Release builds for macOS are signed with the maintainer's Developer ID Application certificate
+and notarized by Apple, so Gatekeeper opens them without Open Anyway or `xattr`. Local, CI and
+e2e builds keep the ad-hoc signature (`"signingIdentity": "-"` in `tauri.conf.json`); only the
+release build sets `APPLE_SIGNING_IDENTITY`. The app needs no entitlements.
+
+- The values live in the repository environment `release`, which only `v*` tags may use
+  (Settings › Environments › release › Deployment branches and tags). The build job names it.
+
+  | Name | Kind | Content |
+  | --- | --- | --- |
+  | `APPLE_CERTIFICATE` | secret | base64 of the exported Developer ID Application `.p12` |
+  | `APPLE_CERTIFICATE_PASSWORD` | secret | the `.p12` export password |
+  | `APPLE_API_ISSUER` | secret | App Store Connect issuer ID |
+  | `APPLE_API_KEY` | secret | App Store Connect key ID |
+  | `APPLE_API_PRIVATE_KEY` | secret | the text of `AuthKey_<key id>.p8` |
+  | `APPLE_ID`, `APPLE_PASSWORD` | secret | instead of the API key: the Apple ID and an app-specific password |
+  | `APPLE_TEAM_ID` | variable | the Team ID |
+  | `APPLE_SIGNING_IDENTITY` | variable | `Developer ID Application: <name> (<Team ID>)` |
+
+- The maintainer keeps the `.p12`, its password and the `.p8` in a password manager. Nobody
+  else handles them, and they are never committed.
+- "The Apple signing secrets are set" stops a macOS build when a value is missing, and passes
+  the values to the later steps of the macOS builds only. The build's last step, which runs even
+  after a failure, deletes the `.p8` and empties those values, so the post-steps of the setup
+  actions never see them.
+- "Check the macOS files" fails the build unless the dmg and both copies of the app (the one in
+  the dmg and the one the updater installs):
+  - are signed with Developer ID and the team's ID;
+  - carry a stapled ticket;
+  - pass Gatekeeper as `Notarized Developer ID`.
+
+  Both copies of the app must also use the hardened runtime with a secure timestamp and no
+  entitlements.
+
+  To check a downloaded release on a Mac:
+
+  ```sh
+  node scripts/macos-trust.mjs check --dmg SkoposIDE_<version>_aarch64.dmg \
+    --updater SkoposIDE_aarch64.app.tar.gz --team <Team ID>
+  ```
+
+  On a Mac the check never changes the Gatekeeper setting: with assessments off, its first check
+  fails and says how to turn them on. Only in GitHub Actions does it turn them on itself.
+
+- When Apple rejects a submission, the step prints Apple's log. Fix the cause on `main` and
+  move the tag (see [When a release fails](#when-a-release-fails)). When Apple is slow, the
+  notarize step stops after 45 minutes; re-run the failed jobs.
+- After a change to signing or notarization, cut the next version as a pre-release
+  (`vX.Y.Z-rc.1`) first, and open its dmg on a Mac before the stable release.
+- Before the certificate expires (the date is in the developer account), make a new Developer
+  ID Application certificate and replace `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD`.
+  Renew the Apple Developer Program membership every year. Revoke the certificate only if it
+  leaks: revoking it affects the releases signed with it.
+
 ## Testing an update by hand
 
 Do this for the first release that includes the updater, and again whenever the updater or the
@@ -92,8 +153,9 @@ release workflow changes.
 2. Publish the next release.
 3. In each copy, choose Help > Check for Updates…, then Install and Restart. Check that the app
    restarts into the new version with its windows and tabs as they were.
-4. On macOS, check that no Gatekeeper prompt appears. Note any Keychain prompts: an ad-hoc
-   signed build asks again for the passwords it keeps in the Keychain.
+4. On macOS, check that no Gatekeeper prompt appears. The first update from an ad-hoc signed
+   release to a Developer ID signed one may ask once for the passwords SkoposIDE keeps in the
+   Keychain; later updates must not ask.
 5. On the deb, check that cancelling the password prompt shows "The package was not installed.
    If you cancelled the password prompt, try again." and that Try Again works.
 
