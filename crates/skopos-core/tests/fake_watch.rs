@@ -729,8 +729,22 @@ async fn a_nodes_pods_and_a_table_of_every_pod_keep_their_own_watch() {
     assert_eq!(on_a.names(), ["one"]);
     assert_eq!(on_b.names(), ["two"]);
     assert_eq!(again.names(), ["one"]);
-    // One watch for each node and one for the table: the second drawer of a node shares.
-    assert_eq!(fake.watch_request_count(PODS), 3);
+    // One list for each node and one for the table: the second drawer of a node shares.
+    let mut lists = fake.list_field_selectors(PODS);
+    lists.sort();
+    assert_eq!(
+        lists,
+        [
+            None,
+            Some("spec.nodeName=node-a".to_owned()),
+            Some("spec.nodeName=node-b".to_owned()),
+        ]
+    );
+    // A watch follows each list, after its snapshot was sent.
+    eventually("a watch for each list", || {
+        fake.watch_request_count(PODS) == 3
+    })
+    .await;
 }
 
 /// When Pods may not be listed in every namespace, a node's Pods are picked the same way
