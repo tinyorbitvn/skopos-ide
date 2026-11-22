@@ -148,14 +148,7 @@ pub fn locate(
         };
     }
     let binary = tool.binary();
-    // A relative entry would depend on the app's working directory.
-    let on_path = search_path
-        .into_iter()
-        .flat_map(std::env::split_paths)
-        .filter(|folder| folder.is_absolute())
-        .map(|folder| folder.join(&binary))
-        .find(|candidate| is_executable(candidate));
-    if let Some(path) = on_path {
+    if let Some(path) = find_on_path(&binary, search_path) {
         return Located {
             source: ToolSource::Path,
             path: Some(path),
@@ -190,6 +183,22 @@ fn is_executable_file(metadata: &std::fs::Metadata) -> bool {
 /// A file this OS would run: on Unix, one with an execute bit.
 pub fn is_executable(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| is_executable_file(&metadata))
+}
+
+/// Where `name` runs from. A `name` with a `/` is a path, found when it is absolute and
+/// executable; any other name is the first executable `name` in the absolute folders of
+/// `path_var`. A relative path or entry would depend on the app's working directory.
+pub(crate) fn find_on_path(name: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
+    if name.contains('/') {
+        let path = PathBuf::from(name);
+        return (path.is_absolute() && is_executable(&path)).then_some(path);
+    }
+    path_var
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .filter(|folder| folder.is_absolute())
+        .map(|folder| folder.join(name))
+        .find(|candidate| is_executable(candidate))
 }
 
 /// `current` with `extra` added at the end, leaving out folders it already has, so the
@@ -866,6 +875,46 @@ mod tests {
         );
         let found = locate(ToolName::Helm, None, Some(OsStr::new(&relative)), None);
         assert_eq!(found.source, ToolSource::Missing);
+    }
+
+    #[test]
+    fn a_name_is_found_in_the_first_absolute_folder_that_has_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("empty");
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        std::fs::create_dir_all(&empty).unwrap();
+        let found = program(&first, "agent");
+        program(&second, "agent");
+        // A folder of that name is not a program.
+        std::fs::create_dir_all(empty.join("folder")).unwrap();
+        let path_var = std::env::join_paths([&empty, &first, &second]).unwrap();
+        let path_var = Some(path_var.as_os_str());
+
+        assert_eq!(find_on_path("agent", path_var), Some(found));
+        assert_eq!(find_on_path("other", path_var), None);
+        assert_eq!(find_on_path("folder", path_var), None);
+        assert_eq!(find_on_path("agent", None), None);
+    }
+
+    /// Unix paths: on Windows `/x` is not absolute.
+    #[cfg(unix)]
+    #[test]
+    fn a_name_with_a_slash_is_a_path_that_must_be_absolute_and_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = program(dir.path(), "agent");
+        let plain = dir.path().join("plain");
+        std::fs::write(&plain, "").unwrap();
+        // PATH is not searched for a path.
+        let path_var = Some(dir.path().as_os_str());
+
+        assert_eq!(
+            find_on_path(agent.to_str().unwrap(), None),
+            Some(agent.clone())
+        );
+        assert_eq!(find_on_path(plain.to_str().unwrap(), path_var), None);
+        assert_eq!(find_on_path("./agent", path_var), None);
+        assert_eq!(find_on_path(dir.path().to_str().unwrap(), path_var), None);
     }
 
     #[test]

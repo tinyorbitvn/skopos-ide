@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
+use crate::agents::registry::AgentProbes;
 use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState};
@@ -132,6 +133,8 @@ struct Inner {
     updates: Updates,
     /// The steps of the app's quit, once it has begun.
     quit: QuitWatch,
+    /// The agents' probe results of this app run (agents spec §4.2).
+    agent_probes: AgentProbes,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -318,6 +321,7 @@ impl AppCore {
                 startup_warnings: Mutex::new(warnings),
                 updates,
                 quit: QuitWatch::default(),
+                agent_probes: AgentProbes::default(),
             }),
         })
     }
@@ -650,6 +654,10 @@ impl AppCore {
 
     pub(crate) fn sessions(&self) -> &Arc<SessionRegistry> {
         &self.inner.sessions
+    }
+
+    pub(crate) fn agent_probes(&self) -> &AgentProbes {
+        &self.inner.agent_probes
     }
 
     pub fn set_connect_timeouts_for_test(&self, t: ConnectTimeouts) {
