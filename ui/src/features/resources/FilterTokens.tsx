@@ -12,6 +12,7 @@ import { ChevronDown, X } from "../../design/icons";
 import { Segmented } from "../../design/Segmented";
 import styles from "./FilterTokens.module.css";
 import {
+  columnOf,
   type FilterContext,
   type FilterJoin,
   type FilterOperator,
@@ -66,7 +67,12 @@ export function editedFilter(
   const trimmed = value.trim();
   if (operator === ">" || operator === "<") {
     if (trimmed === "") return null;
-    return measureValue(filter.property, trimmed, context) === null
+    // A column that left the list cannot say whether it counts or times, so the
+    // value stays as typed; the token matches again once the column is back.
+    const missing =
+      filter.property.type === "column" &&
+      columnOf(filter.property, context) === undefined;
+    return !missing && measureValue(filter.property, trimmed, context) === null
       ? "invalid"
       : { property: filter.property, operator, value: trimmed };
   }
@@ -292,6 +298,13 @@ function FilterEdit(props: {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [props.anchor]);
 
+  // The column's operators, and the token's own even when its column left the list,
+  // so the choice it has stays on screen (column filter spec §3.5).
+  const allowed = operatorsOf(filter.property, props.context);
+  const choices = allowed.includes(filter.operator)
+    ? allowed
+    : [...allowed, filter.operator];
+
   const apply = () => {
     const result = editedFilter(filter, operator, value, props.context);
     if (result === "invalid")
@@ -334,7 +347,7 @@ function FilterEdit(props: {
           label="Operator"
           size="sm"
           value={OPERATOR_IDS[operator]}
-          options={operatorsOf(filter.property, props.context).map((o) => ({
+          options={choices.map((o) => ({
             value: OPERATOR_IDS[o],
             label: o,
             hint: operatorName(o, filter.property, props.context),

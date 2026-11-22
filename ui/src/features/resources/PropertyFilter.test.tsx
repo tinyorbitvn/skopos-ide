@@ -1000,4 +1000,31 @@ describe("FilterTokens", () => {
     expect(byId("filter-token-0").getAttribute("data-missing")).toBe("false");
     expect(byId("filter-token-0").title).toBe("");
   });
+
+  test("a > or < token whose column left keeps its operator in the panel, and its edit as typed", () => {
+    render(<Row tokens={[AGE_UNDER_HOUR]} context={contextOf()} />);
+    const edit = openEdit(0);
+    expect(within(edit).getByText("age")).toBeTruthy();
+    const radios = within(edit).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.labels?.[0]?.textContent)).toEqual([
+      "=",
+      "!=",
+      ":",
+      "!:",
+      "<",
+    ]);
+    expect(radios.map((r) => r.checked)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+
+    fireEvent.change(valueBox(), { target: { value: "2h" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(screen.queryByTestId("filter-edit-error")).toBeNull();
+    expect(panel()).toBeNull();
+    expect(tokens()).toBe("age < 2h");
+  });
 });
