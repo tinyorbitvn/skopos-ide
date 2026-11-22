@@ -3,12 +3,15 @@
 //! only: on Windows every agent call refuses with `Unsupported` and the readers give the
 //! defaults (spec §2, §11).
 
+pub mod acp;
 pub mod approvals;
 pub mod bridge;
 pub mod diff;
 pub mod endpoint;
 pub mod mcp;
 pub mod modes;
+pub mod probe;
+pub mod prompt;
 pub mod proxy;
 pub mod registry;
 pub mod sandbox;

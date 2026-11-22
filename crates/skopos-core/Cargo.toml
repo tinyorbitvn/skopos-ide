@@ -39,7 +39,7 @@ tar = { version = "0.4", default-features = false }
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
 tracing.workspace = true
 ts-rs.workspace = true
 url = "2"
