@@ -127,7 +127,7 @@ jobs:
         with:
           releaseId: ${{ needs.draft.outputs.release-id }}
           # latest.json is built once, by the publish job, from all four builds.
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           args: ${{ matrix.args }} --config crates/skopos-app/tauri.conf.json --config crates/skopos-app/tauri.updater.conf.json
       - name: Verify the macOS signature
         if: runner.os == 'macOS'
