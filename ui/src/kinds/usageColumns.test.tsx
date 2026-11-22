@@ -265,3 +265,30 @@ test("a node's Disk is a bar of its root filesystem, and says when kubelets are 
     NO_ACCESS_TIP,
   );
 });
+
+test("CPU and Memory give a filter the text their cells show, and no measure", () => {
+  const usage = view([usageItem({ name: "web" })]);
+  const [cpu, memory] = usageColumns(usage, objectKey);
+  const shown = cells(usage, WEB);
+  expect(cpu.filter?.text(WEB, 0)).toBe(shown.cpu.textContent);
+  expect(memory.filter?.text(WEB, 0)).toBe(shown.memory.textContent);
+  expect(cpu.filter?.measure).toBeUndefined();
+  expect(cpu.filter?.text(IDLE, 0)).toBeNull();
+});
+
+test("a node's CPU and Memory give a filter the share their cells show", () => {
+  const [cpu, memory] = nodeUsageColumns(
+    nodeView([
+      usageItem({
+        namespace: null,
+        name: "node-1",
+        cpuCores: 0.5,
+        memoryBytes: 14 * 2 ** 30,
+      }),
+    ]),
+  );
+  expect(cpu.filter?.text(NODE, 0)).toBe("13%");
+  expect(memory.filter?.text(NODE, 0)).toBe("88%");
+  expect(cpu.filter?.measure).toBeUndefined();
+  expect(cpu.filter?.text({ metadata: { name: "node-2" } }, 0)).toBeNull();
+});

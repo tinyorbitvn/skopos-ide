@@ -1,6 +1,6 @@
 import type { TableColumn } from "../design/VirtualTable";
 import type { KubeObject } from "./objects";
-import { ageCell, ageSortValue } from "./registry";
+import { ageCell, ageFilter, ageSortValue } from "./registry";
 
 type Step =
   | { type: "key"; key: string }
@@ -149,10 +149,15 @@ interface PrinterColumn {
   priority?: number;
 }
 
+/** The number a cell shows, or null when it shows none. */
+function numberOf(text: string): number | null {
+  const number = text === "" ? Number.NaN : Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
 /** Sorts a number before everything else when it is missing or not a number. */
 function numberSortValue(text: string): number {
-  const number = text === "" ? Number.NaN : Number(text);
-  return Number.isFinite(number) ? number : Number.MIN_SAFE_INTEGER;
+  return numberOf(text) ?? Number.MIN_SAFE_INTEGER;
 }
 
 function toColumn(column: PrinterColumn): TableColumn<KubeObject> {
@@ -168,6 +173,7 @@ function toColumn(column: PrinterColumn): TableColumn<KubeObject> {
         ...base,
         width: 88,
         sortValue: (o) => ageSortValue(value(o)),
+        filter: ageFilter(value),
         render: (o) => ageCell(value(o)),
       };
     case "integer":
@@ -176,6 +182,10 @@ function toColumn(column: PrinterColumn): TableColumn<KubeObject> {
         ...base,
         width: 96,
         sortValue: (o) => numberSortValue(value(o)),
+        filter: {
+          text: (o) => value(o) || null,
+          measure: { kind: "number", amount: (o) => numberOf(value(o)) },
+        },
         render: value,
       };
     default:
@@ -183,6 +193,7 @@ function toColumn(column: PrinterColumn): TableColumn<KubeObject> {
         ...base,
         width: "minmax(120px, 1fr)",
         sortValue: value,
+        filter: { text: (o) => value(o) || null },
         render: value,
       };
   }
