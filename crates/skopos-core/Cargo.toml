@@ -8,7 +8,12 @@ license.workspace = true
 name = "skopos-agent-host"
 path = "src/bin/skopos-agent-host.rs"
 
+[[bin]]
+name = "skopos-fakeagent"
+path = "src/bin/skopos-fakeagent.rs"
+
 [dependencies]
+agent-client-protocol = { workspace = true, features = ["stdio"] }
 base64 = "0.22"
 dashmap.workspace = true
 futures.workspace = true
