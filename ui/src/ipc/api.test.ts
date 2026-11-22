@@ -2,6 +2,8 @@ import { Channel } from "@tauri-apps/api/core";
 import { expect, test } from "vitest";
 import { mockBackend } from "../test/ipc";
 import { api } from "./api";
+import type { ChatEvent } from "./generated/ChatEvent";
+import type { ChatScope } from "./generated/ChatScope";
 import type { GraphEvent } from "./generated/GraphEvent";
 import type { HelmInstallRequest } from "./generated/HelmInstallRequest";
 import type { HelmReleasesEvent } from "./generated/HelmReleasesEvent";
@@ -9,6 +11,7 @@ import type { HelmRepoAdd } from "./generated/HelmRepoAdd";
 import type { HelmUpgradeRequest } from "./generated/HelmUpgradeRequest";
 import type { MetricsTarget } from "./generated/MetricsTarget";
 import type { MoveOutcome } from "./generated/MoveOutcome";
+import type { ObjectRef } from "./generated/ObjectRef";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
 import type { ResourceRef } from "./generated/ResourceRef";
 import type { SessionEvent } from "./generated/SessionEvent";
@@ -571,4 +574,114 @@ test("a move between windows gives the core's outcome", async () => {
   await expect(
     api.windowTabMove("tab-1", { kind: "newWindow", x: 0, y: 0 }),
   ).resolves.toEqual(outcome);
+});
+
+const SCOPE: ChatScope = { clusters: ["c1"], global: false };
+const OBJECT: ObjectRef = {
+  cluster: "c1",
+  kind: "Deployment",
+  namespace: "shop",
+  name: "web",
+};
+
+test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
+  ["agents_status", () => api.agentsStatus(), {}],
+  ["agent_probe", () => api.agentProbe("claude"), { id: "claude" }],
+  [
+    "agent_custom_add",
+    () => api.agentCustomAdd("Fake", "/opt/fake/agent --acp"),
+    { name: "Fake", command: "/opt/fake/agent --acp" },
+  ],
+  [
+    "agent_custom_remove",
+    () => api.agentCustomRemove("custom-0a1b2c3d"),
+    { id: "custom-0a1b2c3d" },
+  ],
+  ["agent_default_set", () => api.agentDefaultSet("codex"), { id: "codex" }],
+  ["agent_prefs", () => api.agentPrefs(), {}],
+  [
+    "agent_domain_add",
+    () => api.agentDomainAdd("example.com"),
+    { domain: "example.com" },
+  ],
+  [
+    "agent_domain_remove",
+    () => api.agentDomainRemove("example.com"),
+    { domain: "example.com" },
+  ],
+  [
+    "agent_folder_add",
+    () => api.agentFolderAdd("~/work"),
+    { folder: "~/work" },
+  ],
+  [
+    "agent_folder_remove",
+    () => api.agentFolderRemove("~/work"),
+    { folder: "~/work" },
+  ],
+  [
+    "agent_sandbox_status",
+    () => api.agentSandboxStatus(true),
+    { refresh: true },
+  ],
+  [
+    "cluster_agent_changes_set",
+    () => api.clusterAgentChangesSet("c1", "readOnly"),
+    { id: "c1", changes: "readOnly" },
+  ],
+  [
+    "cluster_agent_settings",
+    () => api.clusterAgentSettings("c1"),
+    { id: "c1" },
+  ],
+  [
+    "chat_prompt",
+    () => api.chatPrompt("a1b2c3d4", "Why is web restarting?", OBJECT),
+    { chatId: "a1b2c3d4", text: "Why is web restarting?", object: OBJECT },
+  ],
+  [
+    "chat_prompt",
+    () => api.chatPrompt("a1b2c3d4", "And now?", null),
+    { chatId: "a1b2c3d4", text: "And now?", object: null },
+  ],
+  ["chat_stop", () => api.chatStop("a1b2c3d4"), { chatId: "a1b2c3d4" }],
+  ["chat_close", () => api.chatClose("a1b2c3d4"), { chatId: "a1b2c3d4" }],
+  [
+    "chat_answer",
+    () => api.chatAnswer("a1b2c3d4", "change-1", "approveForChat"),
+    { chatId: "a1b2c3d4", cardId: "change-1", answer: "approveForChat" },
+  ],
+  [
+    "chat_undo_standing",
+    () => api.chatUndoStanding("a1b2c3d4", "c1"),
+    { chatId: "a1b2c3d4", clusterId: "c1" },
+  ],
+  ["chat_list", () => api.chatList(SCOPE), { scope: SCOPE }],
+  ["chat_get", () => api.chatGet("a1b2c3d4"), { id: "a1b2c3d4" }],
+])(
+  "agents and chats: %s gets exactly its arguments",
+  async (cmd, run, args) => {
+    const backend = mockBackend({ [cmd]: () => null });
+    await run();
+    expect(backend.calls).toEqual([{ cmd, args }]);
+  },
+);
+
+test("chat_start gets the scope, the agent, the chat to continue and a channel, and gives the chat", async () => {
+  const events: ChatEvent[] = [];
+  const info = { chatId: "a1b2c3d4", agent: "claude", canLoad: true };
+  const backend = mockBackend({ chat_start: () => info });
+  await expect(
+    api.chatStart(SCOPE, "claude", null, (event) => events.push(event)),
+  ).resolves.toEqual(info);
+  const { onEvent, ...rest } = backend.callsTo("chat_start")[0] ?? {};
+  expect(rest).toEqual({ scope: SCOPE, agent: "claude", continueChat: null });
+  const channel = onEvent as Channel<ChatEvent>;
+  expect(channel).toBeInstanceOf(Channel);
+  channel.onmessage({ type: "working", working: true });
+  channel.onmessage({ type: "closed", reason: null });
+  expect(events).toEqual([
+    { type: "working", working: true },
+    { type: "closed", reason: null },
+  ]);
 });
