@@ -514,6 +514,7 @@ mod tests {
                 },
             ],
             command: None,
+            secrets: vec!["db".to_owned()],
             state: ChangeState::Approved {
                 at: "10:42".to_owned(),
                 standing: false,

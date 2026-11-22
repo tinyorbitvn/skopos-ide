@@ -32,6 +32,11 @@ pub struct ChangeCard {
     pub diff: Vec<DiffLine>,
     /// An exec's command, word by word.
     pub command: Option<Vec<String>>,
+    /// The Secrets the changed object reads, or the Pod an exec runs in reads, named while
+    /// Secret values are hidden from agents. Such a change always waits for the person: neither
+    /// `Don't ask` nor a standing approval covers it (spec §4.5).
+    #[serde(default)]
+    pub secrets: Vec<String>,
     pub state: ChangeState,
     /// `Deleted.` or `Exit code <n>` once applied. A rollout's line is the panel's (R5).
     pub result: Option<String>,
@@ -228,6 +233,7 @@ mod tests {
             summary: "Set a".to_owned(),
             diff: Vec::new(),
             command: None,
+            secrets: Vec::new(),
             state: ChangeState::Waiting,
             result: None,
             rollout: None,
@@ -317,6 +323,17 @@ mod tests {
         assert!(!approvals.standing(&stage));
         approvals.undo_standing(&prod);
         assert!(!approvals.standing(&prod));
+    }
+
+    #[test]
+    fn a_card_stored_before_it_named_secrets_reads_back_with_none() {
+        let mut stored = serde_json::to_value(card("c")).unwrap();
+        assert_eq!(stored["secrets"], json!([]));
+        stored.as_object_mut().unwrap().remove("secrets");
+        assert_eq!(
+            serde_json::from_value::<ChangeCard>(stored).unwrap(),
+            card("c")
+        );
     }
 
     #[test]
