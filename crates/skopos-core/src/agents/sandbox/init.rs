@@ -2,7 +2,8 @@
 //! Inside the sandbox's own network namespace it listens on `127.0.0.1:3128` and
 //! `127.0.0.1:3129` (R3) and forwards each connection to the proxy's and the MCP endpoint's Unix
 //! sockets, bound in at `/run/skopos`. Then it runs the agent as its child under a seccomp filter
-//! that refuses new Unix sockets and io_uring, and exits with the agent's code. The filter is
+//! that refuses new Unix sockets, datagram socket pairs and io_uring, and exits with the agent's
+//! code. The filter is
 //! installed in the child only, between fork and exec, so the bridge keeps its Unix sockets. It
 //! runs on plain threads, with no tokio runtime.
 
@@ -36,6 +37,9 @@ pub const USAGE: i32 = 2;
 const ACCEPT_PAUSE: Duration = Duration::from_millis(50);
 /// On x86_64 the x32 ABI reaches the same system calls with this bit set in their numbers.
 const X32_SYSCALL_BIT: i64 = 0x4000_0000;
+/// The bits of a socket type that name the type; the rest are `SOCK_NONBLOCK` and
+/// `SOCK_CLOEXEC` (the kernel's `SOCK_TYPE_MASK`).
+const SOCKET_TYPE_MASK: u64 = 0xf;
 
 /// Listens on both chat ports, keeps the agent from tracing the bridge, and runs `command`.
 pub fn run_agent_init(proxy_sock: &Path, mcp_sock: &Path, command: &[OsString]) -> i32 {
@@ -104,13 +108,25 @@ pub(crate) fn run_with(listeners: Vec<(TcpListener, PathBuf)>, command: &[OsStri
     }
 }
 
-/// The agent's filter (spec §4.6): `socket` with `AF_UNIX` and the io_uring calls fail with
-/// `EPERM`; everything else is allowed, `socketpair` among it, since runtimes use it for their
-/// children's pipes.
+/// The agent's filter (spec §4.6): `socket` with `AF_UNIX`, `socketpair` of datagrams, raw
+/// sockets (which a Unix pair turns into datagrams) or sequenced packets, and the io_uring calls
+/// fail with `EPERM`; everything else is allowed, stream socket pairs among it, since runtimes
+/// use them for their children's pipes. A datagram socket can send to a Unix socket by its
+/// path, which a stream pair cannot.
 pub fn agent_filter() -> Result<BpfProgram, BackendError> {
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
     for number in syscall_numbers(libc::SYS_socket) {
         rules.insert(number, vec![unix_domain()?]);
+    }
+    for number in syscall_numbers(libc::SYS_socketpair) {
+        rules.insert(
+            number,
+            vec![
+                socket_type(libc::SOCK_DGRAM)?,
+                socket_type(libc::SOCK_RAW)?,
+                socket_type(libc::SOCK_SEQPACKET)?,
+            ],
+        );
     }
     for call in [
         libc::SYS_io_uring_setup,
@@ -148,6 +164,17 @@ fn unix_domain() -> Result<SeccompRule, BackendError> {
         SeccompCmpArgLen::Dword,
         SeccompCmpOp::Eq,
         libc::AF_UNIX as u64,
+    )?])
+}
+
+/// Matches a call whose second argument, the socket type, is `kind`, whatever its
+/// `SOCK_NONBLOCK` and `SOCK_CLOEXEC` flags.
+fn socket_type(kind: libc::c_int) -> Result<SeccompRule, BackendError> {
+    SeccompRule::new(vec![SeccompCondition::new(
+        1,
+        SeccompCmpArgLen::Dword,
+        SeccompCmpOp::MaskedEq(SOCKET_TYPE_MASK),
+        kind as u64,
     )?])
 }
 
@@ -261,6 +288,15 @@ mod tests {
                 .map_err(|error| error.raw_os_error());
             let inet = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).is_ok();
             let pair = UnixStream::pair().is_ok();
+            let pairs: Vec<Option<i32>> = [
+                libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+                libc::SOCK_RAW,
+                libc::SOCK_SEQPACKET | libc::SOCK_NONBLOCK,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            ]
+            .into_iter()
+            .map(|kind| socket_pair(kind).err())
+            .collect();
             // SAFETY: a null parameter pointer; without the filter the kernel refuses it with
             // EFAULT before it reads anything.
             let uring = unsafe {
@@ -271,14 +307,41 @@ mod tests {
                 )
             };
             let uring_error = io::Error::last_os_error().raw_os_error();
-            (unix, inet, pair, uring, uring_error)
+            (unix, inet, pair, pairs, uring, uring_error)
         })
         .join()
         .unwrap();
         assert_eq!(
             seen,
-            (Err(Some(libc::EPERM)), true, true, -1, Some(libc::EPERM))
+            (
+                Err(Some(libc::EPERM)),
+                true,
+                true,
+                vec![
+                    Some(libc::EPERM),
+                    Some(libc::EPERM),
+                    Some(libc::EPERM),
+                    None
+                ],
+                -1,
+                Some(libc::EPERM)
+            )
         );
+    }
+
+    /// `socketpair(AF_UNIX, kind)`, closing the pair it makes, or the call's errno.
+    fn socket_pair(kind: libc::c_int) -> Result<(), i32> {
+        let mut fds = [-1; 2];
+        // SAFETY: `fds` has room for the two descriptors the call writes.
+        let made = unsafe { libc::socketpair(libc::AF_UNIX, kind, 0, fds.as_mut_ptr()) };
+        if made != 0 {
+            return Err(io::Error::last_os_error().raw_os_error().unwrap_or(0));
+        }
+        for fd in fds {
+            // SAFETY: the call made both descriptors and nothing else owns them.
+            unsafe { libc::close(fd) };
+        }
+        Ok(())
     }
 
     #[test]

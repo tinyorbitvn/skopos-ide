@@ -70,6 +70,7 @@ impl Fake {
             home: self.path("home"),
             read_write: Vec::new(),
             read_only: Vec::new(),
+            linked: Vec::new(),
             hidden_files: Vec::new(),
             env: vec![
                 ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),

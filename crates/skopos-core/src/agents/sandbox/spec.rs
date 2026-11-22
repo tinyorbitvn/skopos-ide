@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use super::paths::{install_root, interpreter_of, real_path};
+use super::paths::{install_roots, interpreter_of, real_path};
 use crate::agents::registry::AgentSpec;
 
 /// The proxy's socket in a chat's `run_dir` (Linux), bound into the sandbox at `/run/skopos`.
@@ -16,6 +16,22 @@ pub const MCP_SOCKET: &str = "mcp.sock";
 /// System folders that hold other programs' files and sockets, which the Linux sandbox gives an
 /// empty tmpfs as it does the home folder.
 pub const EMPTY_FOLDERS: [&str; 3] = ["/tmp", "/run", "/var/tmp"];
+/// Folders under the home folder that hold credentials or other programs' data. An install root
+/// never holds one: a `bin/` in a folder that does is shown alone, and a root that is one or
+/// holds one is left out.
+pub const PRIVATE_HOME_FOLDERS: [&str; 11] = [
+    ".config",
+    ".local/share",
+    ".cargo",
+    ".ssh",
+    ".gnupg",
+    ".kube",
+    ".docker",
+    ".aws",
+    ".azure",
+    ".gcloud",
+    "Library",
+];
 
 /// The local ports of a chat's proxy and MCP endpoint as the agent reaches them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,9 +59,14 @@ pub struct SandboxSpec {
     /// `run_dir/tmp`, the agent's `TMPDIR`.
     pub tmp_dir: PathBuf,
     pub home: PathBuf,
+    /// Real paths.
     pub read_write: Vec<PathBuf>,
+    /// Real paths.
     pub read_only: Vec<PathBuf>,
-    /// Kubeconfig files by their real paths, covered although the rest of the system shows.
+    /// Paths given through a link that the Linux sandbox shows its real path at too.
+    pub linked: Vec<LinkedPath>,
+    /// Kubeconfig files to cover although the rest of the system shows: their real paths, and
+    /// their paths under each `linked` path.
     pub hidden_files: Vec<PathBuf>,
     /// The agent's whole environment.
     pub env: Vec<(String, String)>,
@@ -67,6 +88,7 @@ impl fmt::Debug for SandboxSpec {
             .field("home", &self.home)
             .field("read_write", &self.read_write)
             .field("read_only", &self.read_only)
+            .field("linked", &self.linked)
             .field("hidden_files", &self.hidden_files)
             .field("env", &env)
             .field("app_binary", &self.app_binary)
@@ -74,6 +96,17 @@ impl fmt::Debug for SandboxSpec {
             .field("args", &self.args)
             .finish()
     }
+}
+
+/// A path given through a link that lies under a folder the Linux sandbox covers with tmpfs,
+/// so that the link does not show there: bubblewrap binds the real path at it too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedPath {
+    /// The path as given.
+    pub path: PathBuf,
+    /// Its real path, in `read_write` or `read_only`.
+    pub target: PathBuf,
+    pub writable: bool,
 }
 
 /// What `build_spec` needs to know about one chat.
@@ -93,16 +126,18 @@ pub struct SpecInput<'a> {
     pub env: Vec<(String, String)>,
 }
 
-/// The sandbox of one chat:
+/// The sandbox of one chat, each path by its real path:
 /// - read-write: the agent's folder, its settings paths that exist, and `run_dir/tmp`;
 /// - read-only: the install roots of the agent's install paths, of the interpreters their `#!`
 ///   lines name, and of the app binary, then the person's folders;
+/// - linked: those given through a link the Linux sandbox would not show;
 /// - hidden: the kubeconfig files that exist and lie outside the home folder, or inside a path
-///   the agent may read.
+///   the agent may read, wherever the sandbox shows them.
 ///
 /// A path that holds the home folder or one of `EMPTY_FOLDERS`, such as an install root of `/`
-/// or a folder `/home`, is left out: showing it would undo their cover. The program runs from
-/// its real path, which the install roots show.
+/// or a folder `/home`, is left out: showing it would undo their cover. So is an install root
+/// that holds one of `PRIVATE_HOME_FOLDERS`, the agent's folder or the run folder. The program
+/// runs from its real path, which the install roots show.
 pub fn build_spec(input: SpecInput<'_>) -> SandboxSpec {
     let SpecInput {
         agent,
@@ -116,28 +151,38 @@ pub fn build_spec(input: SpecInput<'_>) -> SandboxSpec {
         env,
     } = input;
     let covered = covered_folders(home);
+    let kept = kept_folders(&covered, home, &agent_dir, &run_dir);
     let tmp_dir = run_dir.join("tmp");
-    let mut read_write = vec![agent_dir.clone()];
-    for settings in agent.settings.iter().filter(|path| path.exists()) {
-        allow(&mut read_write, settings.clone(), &covered);
+    let mut links: Vec<LinkedPath> = Vec::new();
+    let mut read_write = Vec::new();
+    let writable = agent
+        .settings
+        .iter()
+        .filter(|path| path.exists())
+        .cloned()
+        .chain([tmp_dir.clone()]);
+    for path in std::iter::once(agent_dir.clone()).chain(writable) {
+        allow(&mut read_write, &mut links, path, &covered, true);
     }
-    read_write.push(tmp_dir.clone());
     let mut read_only = Vec::new();
     for installed in agent
         .install_paths
         .iter()
         .chain(std::iter::once(&app_binary))
     {
-        allow(&mut read_only, install_root(installed), &covered);
-        if let Some(interpreter) = interpreter_of(installed, path_var.as_deref()) {
-            allow(&mut read_only, install_root(&interpreter), &covered);
+        let interpreter = interpreter_of(installed, path_var.as_deref());
+        for file in std::iter::once(installed).chain(interpreter.as_ref()) {
+            for root in install_roots(file, &kept) {
+                allow(&mut read_only, &mut links, root, &kept, false);
+            }
         }
     }
     for folder in folders {
-        allow(&mut read_only, folder, &covered);
+        allow(&mut read_only, &mut links, folder, &covered, false);
     }
-    let allowed: Vec<&PathBuf> = read_write.iter().chain(&read_only).collect();
-    let hidden_files = hidden_files(&kubeconfigs, home, &allowed);
+    let bound: Vec<PathBuf> = read_write.iter().chain(&read_only).cloned().collect();
+    let linked = linked_paths(links, &covered, &bound);
+    let hidden_files = hidden_files(&kubeconfigs, home, &bound, &linked);
     SandboxSpec {
         agent_dir,
         run_dir,
@@ -145,6 +190,7 @@ pub fn build_spec(input: SpecInput<'_>) -> SandboxSpec {
         home: home.to_path_buf(),
         read_write,
         read_only,
+        linked,
         hidden_files,
         env,
         app_binary,
@@ -153,52 +199,142 @@ pub fn build_spec(input: SpecInput<'_>) -> SandboxSpec {
     }
 }
 
-/// The home folder and `EMPTY_FOLDERS`, as given and by their real paths.
+/// The home folder and `EMPTY_FOLDERS`, as given and by their real paths, and on macOS the
+/// temporary folders its sandbox keeps from the agent.
 fn covered_folders(home: &Path) -> Vec<PathBuf> {
     let mut covered = vec![home.to_path_buf(), real_path(home)];
     for folder in EMPTY_FOLDERS {
         covered.push(PathBuf::from(folder));
         covered.push(real_path(Path::new(folder)));
     }
+    #[cfg(target_os = "macos")]
+    covered.extend(super::macos::temp_folders());
     covered
 }
 
-/// Adds `path` once, unless it holds one of the covered folders.
-fn allow(list: &mut Vec<PathBuf>, path: PathBuf, covered: &[PathBuf]) {
+/// What an install root must not hold: the covered folders, `PRIVATE_HOME_FOLDERS` under the
+/// home folder as given and by its real path, the agent's folder and the run folder.
+fn kept_folders(
+    covered: &[PathBuf],
+    home: &Path,
+    agent_dir: &Path,
+    run_dir: &Path,
+) -> Vec<PathBuf> {
+    let mut kept = covered.to_vec();
+    for home in [home.to_path_buf(), real_path(home)] {
+        kept.extend(PRIVATE_HOME_FOLDERS.iter().map(|folder| home.join(folder)));
+    }
+    for folder in [agent_dir, run_dir] {
+        kept.push(folder.to_path_buf());
+        kept.push(real_path(folder));
+    }
+    kept
+}
+
+/// Adds `path`'s real path once, unless it holds one of `covered`, and when `path` is not its
+/// real path, notes it in `links`.
+fn allow(
+    list: &mut Vec<PathBuf>,
+    links: &mut Vec<LinkedPath>,
+    path: PathBuf,
+    covered: &[PathBuf],
+    writable: bool,
+) {
     let real = real_path(&path);
     if covered
         .iter()
         .any(|folder| folder.starts_with(&path) || folder.starts_with(&real))
     {
         tracing::warn!(
-            "{} holds the home folder or a temporary folder, so the agent sandbox leaves it out",
+            "{} holds a folder the agent sandbox keeps from the agent, so it leaves it out",
             path.display()
         );
         return;
     }
-    if !list.contains(&path) {
-        list.push(path);
+    push_once(list, real.clone());
+    let link = LinkedPath {
+        path,
+        target: real,
+        writable,
+    };
+    if link.path != link.target && !links.contains(&link) {
+        links.push(link);
     }
 }
 
-/// The real paths of the kubeconfig files that exist and lie outside the home folder, or inside
-/// a path the agent may read.
-fn hidden_files(kubeconfigs: &[PathBuf], home: &Path, allowed: &[&PathBuf]) -> Vec<PathBuf> {
+/// The `links` the Linux sandbox would not show by themselves: those whose first link lies
+/// under one of `covered`, which tmpfs hides, and inside none of `bound` or of the paths kept
+/// before them. Any other link shows in the sandbox and leads to its real path, which is bound;
+/// binding at the link too would stop bubblewrap, which cannot follow an absolute link while it
+/// builds the sandbox.
+fn linked_paths(links: Vec<LinkedPath>, covered: &[PathBuf], bound: &[PathBuf]) -> Vec<LinkedPath> {
+    let mut kept: Vec<LinkedPath> = Vec::new();
+    for link in links {
+        let Some(first) = first_link(&link.path) else {
+            continue;
+        };
+        let under_tmpfs = covered.iter().any(|folder| first.starts_with(folder));
+        let shown = bound
+            .iter()
+            .chain(kept.iter().map(|known| &known.path))
+            .any(|path| first.starts_with(path));
+        if under_tmpfs && !shown {
+            kept.push(link);
+        }
+    }
+    kept
+}
+
+/// The first folder or file along `path`, from the root down, that is a link.
+fn first_link(path: &Path) -> Option<PathBuf> {
+    let mut prefix = PathBuf::new();
+    for component in path.components() {
+        prefix.push(component);
+        let is_link = std::fs::symlink_metadata(&prefix)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false);
+        if is_link {
+            return Some(prefix);
+        }
+    }
+    None
+}
+
+/// The kubeconfig files that exist and lie outside the home folder, or inside a `bound` path,
+/// at every path the sandbox shows them: their real paths, and their paths under each `linked`
+/// path whose real path holds them.
+fn hidden_files(
+    kubeconfigs: &[PathBuf],
+    home: &Path,
+    bound: &[PathBuf],
+    linked: &[LinkedPath],
+) -> Vec<PathBuf> {
     let homes = [home.to_path_buf(), real_path(home)];
-    let allowed: Vec<PathBuf> = allowed.iter().map(|path| real_path(path)).collect();
     let mut hidden: Vec<PathBuf> = Vec::new();
     for file in kubeconfigs {
         let real = real_path(file);
-        if !real.is_file() || hidden.contains(&real) {
+        if !real.is_file() {
             continue;
         }
         let in_home = homes.iter().any(|home| real.starts_with(home));
-        let in_allowed = allowed.iter().any(|path| real.starts_with(path));
-        if !in_home || in_allowed {
-            hidden.push(real);
+        let in_bound = bound.iter().any(|path| real.starts_with(path));
+        if in_home && !in_bound {
+            continue;
+        }
+        push_once(&mut hidden, real.clone());
+        for link in linked {
+            if let Ok(rest) = real.strip_prefix(&link.target) {
+                push_once(&mut hidden, link.path.join(rest));
+            }
         }
     }
     hidden
+}
+
+fn push_once(list: &mut Vec<PathBuf>, path: PathBuf) {
+    if !list.contains(&path) {
+        list.push(path);
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +456,39 @@ mod tests {
     }
 
     #[test]
+    fn install_roots_under_home_never_hold_a_private_folder() {
+        let layout = layout();
+        let (root, home) = (&layout.root, &layout.home);
+        let programs = [
+            home.join(".local/bin/agent"),
+            home.join(".cargo/bin/codex"),
+            home.join(".pyenv/versions/3.12/bin/python3"),
+            home.join(".config/agent-cli"),
+            root.join("data/agents/bin/helper"),
+        ];
+        for program in &programs {
+            write(program, "");
+        }
+        write(&root.join("app/bin/skopos-ide"), "");
+        let mut agent = test_agent(&programs[0]);
+        agent.install_paths = programs.to_vec();
+        let spec = build_spec(input(&agent, &layout));
+        // `~/.local` holds `~/.local/share` and `~/.cargo` is private, so their `bin/` folders
+        // are shown alone; `~/.config` itself is left out; `data/agents` holds the agent's
+        // folder and the run folder.
+        assert_eq!(
+            spec.read_only,
+            [
+                home.join(".local/bin"),
+                home.join(".cargo/bin"),
+                home.join(".pyenv/versions/3.12"),
+                root.join("data/agents/bin"),
+                root.join("app"),
+            ]
+        );
+    }
+
+    #[test]
     fn kubeconfig_files_outside_home_are_covered() {
         let layout = layout();
         let (root, home) = (&layout.root, &layout.home);
@@ -376,6 +545,74 @@ mod tests {
         ];
         let spec = build_spec(chat);
         assert_eq!(spec.hidden_files, [layout.home.join("src/shop/kubeconfig")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kubeconfig_in_a_folder_reached_through_a_link_is_covered_at_both_paths() {
+        let layout = layout();
+        let real = layout.root.join("srv/shop");
+        write(&real.join("kubeconfig"), "kubeconfig");
+        std::os::unix::fs::symlink(&real, layout.home.join("shop")).unwrap();
+        let agent = test_agent(&layout.root.join("agent/bin/agent"));
+        let mut chat = input(&agent, &layout);
+        chat.folders = vec![layout.home.join("shop")];
+        chat.kubeconfigs = vec![layout.home.join("shop/kubeconfig")];
+        let spec = build_spec(chat);
+        assert!(spec.read_only.contains(&real), "{:?}", spec.read_only);
+        assert_eq!(
+            spec.linked,
+            [LinkedPath {
+                path: layout.home.join("shop"),
+                target: real.clone(),
+                writable: false,
+            }]
+        );
+        assert_eq!(
+            spec.hidden_files,
+            [real.join("kubeconfig"), layout.home.join("shop/kubeconfig")]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_link_under_a_covered_folder_and_outside_every_bound_path_is_linked() {
+        let layout = layout();
+        let (root, home) = (&layout.root, &layout.home);
+        for folder in [
+            "srv/shop/inner",
+            "srv/work/inner",
+            "srv/plain",
+            "home/bound",
+        ] {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+        }
+        let symlink = |target: &str, at: PathBuf| {
+            std::os::unix::fs::symlink(root.join(target), at).unwrap();
+        };
+        // Hidden by the home's tmpfs, and bound nowhere above.
+        symlink("srv/shop", home.join("shop"));
+        // Outside the covered folders, so the link itself shows.
+        symlink("srv/work", root.join("work"));
+        // Inside a bound folder, which shows the link.
+        symlink("srv/plain", home.join("bound/plain"));
+        let link = |path: PathBuf| LinkedPath {
+            target: real_path(&path),
+            path,
+            writable: false,
+        };
+        let links = vec![
+            link(home.join("shop")),
+            link(root.join("work/inner")),
+            link(home.join("bound/plain")),
+            // Through a link kept just before.
+            link(home.join("shop/inner")),
+        ];
+        let bound = [home.join("bound"), root.join("srv/shop")];
+        assert_eq!(
+            linked_paths(links, std::slice::from_ref(home), &bound),
+            [link(home.join("shop"))]
+        );
     }
 
     #[test]

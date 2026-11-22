@@ -11,22 +11,38 @@ use crate::tools::find_on_path;
 /// How much of a file is read to find its `#!` line.
 const FIRST_LINE_LIMIT: u64 = 512;
 
-/// The folder the sandbox shows for an installed file, found from the file's real path: the
+/// The folders the sandbox shows for an installed file, found from the file's real path: the
 /// npm package it belongs to when it lies in a `node_modules` folder, since the package's code
-/// and dependencies sit around it; the folder above `bin/` when it sits in a `bin/`; else its
-/// own folder.
-pub fn install_root(path: &Path) -> PathBuf {
+/// and dependencies sit around it; the folder above `bin/` when it sits in a `bin/`, since an
+/// interpreter's libraries sit beside its `bin/`, unless that folder holds one of `kept`, as
+/// `~/.local` holds `~/.local/share`: then the `bin/` and the `lib/` and `libexec/` beside it
+/// that hold none of `kept`; else its own folder.
+pub fn install_roots(path: &Path, kept: &[PathBuf]) -> Vec<PathBuf> {
     let real = real_path(path);
     if let Some(package) = node_package(&real) {
-        return package;
+        return vec![package];
     }
     let Some(folder) = real.parent() else {
-        return real;
+        return vec![real];
     };
-    match (folder.file_name(), folder.parent()) {
-        (Some(name), Some(above)) if name == "bin" => above.to_path_buf(),
-        _ => folder.to_path_buf(),
+    let (Some(name), Some(above)) = (folder.file_name(), folder.parent()) else {
+        return vec![folder.to_path_buf()];
+    };
+    let holds_kept = |path: &Path| kept.iter().any(|kept| kept.starts_with(path));
+    if name != "bin" {
+        return vec![folder.to_path_buf()];
     }
+    if !holds_kept(above) {
+        return vec![above.to_path_buf()];
+    }
+    let mut roots = vec![folder.to_path_buf()];
+    for beside in ["lib", "libexec"] {
+        let path = real_path(&above.join(beside));
+        if path.is_dir() && !holds_kept(&path) && !roots.contains(&path) {
+            roots.push(path);
+        }
+    }
+    roots
 }
 
 /// The path with every link resolved, or the path itself when it cannot be resolved, as for a
@@ -141,7 +157,7 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
-    /// A temp folder and its real path, which is how `install_root` gives paths.
+    /// A temp folder and its real path, which is how `install_roots` gives paths.
     fn root() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let root = real_path(dir.path());
@@ -153,7 +169,27 @@ mod tests {
         let (_dir, root) = root();
         let tool = root.join("opt/tool/bin/tool");
         write(&tool, "");
-        assert_eq!(install_root(&tool), root.join("opt/tool"));
+        assert_eq!(install_roots(&tool, &[]), [root.join("opt/tool")]);
+    }
+
+    #[test]
+    fn a_bin_folder_whose_folder_above_holds_a_kept_folder_comes_with_its_libraries() {
+        let (_dir, root) = root();
+        // `pip install --user`: the script in `~/.local/bin`, its modules in `~/.local/lib`.
+        let tool = root.join("home/.local/bin/tool");
+        write(&tool, "");
+        write(
+            &root.join("home/.local/lib/python3.12/site-packages/tool.py"),
+            "",
+        );
+        let kept = [root.join("home/.local/share"), root.join("home")];
+        assert_eq!(
+            install_roots(&tool, &kept),
+            [root.join("home/.local/bin"), root.join("home/.local/lib")]
+        );
+        let other = root.join("home/bin/tool");
+        write(&other, "");
+        assert_eq!(install_roots(&other, &kept), [root.join("home/bin")]);
     }
 
     #[test]
@@ -161,7 +197,10 @@ mod tests {
         let (_dir, root) = root();
         let claude = root.join("share/claude/versions/2.1.0");
         write(&claude, "");
-        assert_eq!(install_root(&claude), root.join("share/claude/versions"));
+        assert_eq!(
+            install_roots(&claude, &[])[0],
+            root.join("share/claude/versions")
+        );
     }
 
     #[test]
@@ -173,11 +212,11 @@ mod tests {
         write(&plain, "");
         write(&scoped, "");
         assert_eq!(
-            install_root(&plain),
+            install_roots(&plain, &[])[0],
             root.join("lib/node_modules/opencode-ai")
         );
         assert_eq!(
-            install_root(&scoped),
+            install_roots(&scoped, &[])[0],
             root.join("lib/node_modules/@agentclientprotocol/claude-agent-acp")
         );
     }
@@ -185,7 +224,7 @@ mod tests {
     #[test]
     fn a_missing_file_keeps_its_own_path() {
         assert_eq!(
-            install_root(Path::new("/nonexistent-skopos/tool/bin/tool")),
+            install_roots(Path::new("/nonexistent-skopos/tool/bin/tool"), &[])[0],
             PathBuf::from("/nonexistent-skopos/tool")
         );
     }
@@ -200,7 +239,7 @@ mod tests {
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::os::unix::fs::symlink(&claude, root.join("bin/claude")).unwrap();
         assert_eq!(
-            install_root(&root.join("bin/claude")),
+            install_roots(&root.join("bin/claude"), &[])[0],
             root.join("share/claude/versions")
         );
         // npm's relative link in bin/ to the package's script.
@@ -212,7 +251,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            install_root(&root.join("bin/codex-acp")),
+            install_roots(&root.join("bin/codex-acp"), &[])[0],
             root.join("lib/node_modules/@agentclientprotocol/codex-acp")
         );
     }

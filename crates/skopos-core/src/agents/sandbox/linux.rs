@@ -32,15 +32,21 @@ const STATUS_ARGS: [&str; 7] = [
     "true",
 ];
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
+/// Variables glibc drops from the environment of a setuid program, which bubblewrap is on some
+/// systems. Their values are paths, never secrets, so they also go in as arguments, which
+/// bubblewrap sets after it starts.
+const SECURE_MODE_DROPS: [&str; 3] = ["TMPDIR", "TZDIR", "LOCPATH"];
 const STATUS_OUTPUT_LIMIT: usize = 16 * 1024;
 
 /// Spec §4.6's arguments, in order: the namespaces (all of them, a user namespace, no nested
 /// ones) and a new session; the system read-only with fresh `/dev` and `/proc`; empty tmpfs
 /// folders over `/tmp`, `/run`, `/var/tmp` and the home folder, the home last so a home under
 /// one of the others (as in tests) still gets its own; the agent's paths bound back, writable
-/// ones first; `/dev/null` over each hidden file; the runtime folder at `/run/skopos`; only the
-/// spec's environment; the agent's folder as the working directory; then the app binary's
-/// `--agent-init` with the two sockets, `--` and the agent's command.
+/// ones first, then each linked path from its real path; `/dev/null` over each hidden file; the
+/// runtime folder at `/run/skopos`; `SECURE_MODE_DROPS` from the spec's environment; the
+/// agent's folder as the working directory; then the app binary's `--agent-init` with the two
+/// sockets, `--` and the agent's command. The rest of the environment is not in the arguments,
+/// which any process of the person's can read: `bwrap_command` gives it.
 pub fn bwrap_args(spec: &SandboxSpec) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     for flag in [
@@ -60,16 +66,23 @@ pub fn bwrap_args(spec: &SandboxSpec) -> Vec<OsString> {
     }
     add(&mut args, &[os("--tmpfs"), spec.home.as_os_str()]);
     // The `-try` forms skip a path that has gone by the time the sandbox starts.
-    for path in &spec.read_write {
-        add(
-            &mut args,
-            &[os("--bind-try"), path.as_os_str(), path.as_os_str()],
-        );
+    for (flag, paths) in [
+        ("--bind-try", &spec.read_write),
+        ("--ro-bind-try", &spec.read_only),
+    ] {
+        for path in paths {
+            add(&mut args, &[os(flag), path.as_os_str(), path.as_os_str()]);
+        }
     }
-    for path in &spec.read_only {
+    for link in &spec.linked {
+        let flag = if link.writable {
+            "--bind-try"
+        } else {
+            "--ro-bind-try"
+        };
         add(
             &mut args,
-            &[os("--ro-bind-try"), path.as_os_str(), path.as_os_str()],
+            &[os(flag), link.target.as_os_str(), link.path.as_os_str()],
         );
     }
     for file in &spec.hidden_files {
@@ -86,9 +99,10 @@ pub fn bwrap_args(spec: &SandboxSpec) -> Vec<OsString> {
             os(SANDBOX_RUN_DIR),
         ],
     );
-    add(&mut args, &[os("--clearenv")]);
     for (name, value) in &spec.env {
-        add(&mut args, &[os("--setenv"), os(name), os(value)]);
+        if SECURE_MODE_DROPS.contains(&name.as_str()) {
+            add(&mut args, &[os("--setenv"), os(name), os(value)]);
+        }
     }
     add(&mut args, &[os("--chdir"), spec.agent_dir.as_os_str()]);
     let run_dir = Path::new(SANDBOX_RUN_DIR);
@@ -117,16 +131,25 @@ fn os(text: &str) -> &OsStr {
     OsStr::new(text)
 }
 
-/// `bwrap` with `bwrap_args`, found on the app's `PATH`. bubblewrap gets no environment of its
-/// own: it needs none, and `--clearenv` would keep its `PWD`.
+/// `bwrap` with `bwrap_args`, found on the app's `PATH`, with only the spec's environment,
+/// which bubblewrap passes on to `--agent-init` and the agent: kept out of the arguments, the
+/// chat's token and provider keys stay out of `/proc/<pid>/cmdline`.
 pub fn bwrap_command(spec: &SandboxSpec) -> CoreResult<Command> {
     let path = std::env::var_os("PATH");
     let bwrap = find_on_path("bwrap", path.as_deref())
         .ok_or_else(|| IpcError::new(ErrorCode::ToolMissing, NOT_INSTALLED))?;
+    Ok(command_at(&bwrap, spec))
+}
+
+/// `bwrap_command` with the `bwrap` at `bwrap`.
+fn command_at(bwrap: &Path, spec: &SandboxSpec) -> Command {
     let mut command = Command::new(bwrap);
-    command.env_clear().args(bwrap_args(spec));
+    command
+        .env_clear()
+        .envs(spec.env.iter().map(|(name, value)| (name, value)))
+        .args(bwrap_args(spec));
     configure(&mut command);
-    Ok(command)
+    command
 }
 
 /// Whether bubblewrap, found on the app's `PATH`, can start a sandbox here.
@@ -178,6 +201,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
+    use crate::agents::sandbox::spec::LinkedPath;
 
     const DATA: &str = "/home/u/.local/share/dev.skopos.SkoposIDE/agents";
     const PACKAGE: &str =
@@ -197,6 +221,7 @@ mod tests {
                 PathBuf::from("/usr"),
                 PathBuf::from("/opt/SkoposIDE"),
             ],
+            linked: Vec::new(),
             hidden_files: vec![PathBuf::from("/etc/skopos-test/config")],
             env: vec![
                 ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
@@ -264,16 +289,6 @@ mod tests {
             "--ro-bind",
             run.as_str(),
             "/run/skopos",
-            "--clearenv",
-            "--setenv",
-            "PATH",
-            "/usr/bin:/bin",
-            "--setenv",
-            "HOME",
-            "/home/u",
-            "--setenv",
-            "TERM",
-            "dumb",
             "--chdir",
             work.as_str(),
             "--",
@@ -286,6 +301,78 @@ mod tests {
             "--verbose",
         ];
         assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn linked_paths_are_bound_from_their_real_paths_after_the_others() {
+        let mut spec = fixed_spec();
+        spec.linked = vec![
+            LinkedPath {
+                path: PathBuf::from("/home/u/.claude"),
+                target: PathBuf::from("/home/u/dotfiles/claude"),
+                writable: true,
+            },
+            LinkedPath {
+                path: PathBuf::from("/home/u/shop"),
+                target: PathBuf::from("/srv/shop"),
+                writable: false,
+            },
+        ];
+        let args: Vec<String> = bwrap_args(&spec)
+            .into_iter()
+            .map(|arg| arg.into_string().unwrap())
+            .collect();
+        let at = args
+            .windows(3)
+            .position(|window| window == ["--ro-bind-try", "/opt/SkoposIDE", "/opt/SkoposIDE"])
+            .unwrap();
+        assert_eq!(
+            args[at + 3..at + 9],
+            [
+                "--bind-try",
+                "/home/u/dotfiles/claude",
+                "/home/u/.claude",
+                "--ro-bind-try",
+                "/srv/shop",
+                "/home/u/shop",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_environment_is_given_to_bwrap_and_kept_out_of_its_arguments() {
+        let mut spec = fixed_spec();
+        let tmp = spec.tmp_dir.display().to_string();
+        spec.env.extend([
+            ("ANTHROPIC_API_KEY".to_owned(), "sk-ant-secret".to_owned()),
+            ("TMPDIR".to_owned(), tmp.clone()),
+        ]);
+        let args: Vec<String> = bwrap_args(&spec)
+            .into_iter()
+            .map(|arg| arg.into_string().unwrap())
+            .collect();
+        for word in ["--clearenv", "ANTHROPIC_API_KEY", "TERM", "dumb"] {
+            assert!(!args.iter().any(|arg| arg == word), "{word} is an argument");
+        }
+        // Only `TMPDIR`, which a setuid bubblewrap would drop, goes in as an argument too.
+        let set: Vec<&[String]> = args
+            .windows(3)
+            .filter(|window| window[0] == "--setenv")
+            .collect();
+        assert_eq!(set, [["--setenv".to_owned(), "TMPDIR".to_owned(), tmp]]);
+        assert!(!args.iter().any(|arg| arg.contains("sk-ant-secret")));
+        let command = command_at(Path::new("/usr/bin/bwrap"), &spec);
+        let envs: Vec<(String, String)> = command
+            .as_std()
+            .get_envs()
+            .filter_map(|(name, value)| {
+                Some((name.to_str()?.to_owned(), value?.to_str()?.to_owned()))
+            })
+            .collect();
+        assert_eq!(envs.len(), spec.env.len());
+        for pair in &spec.env {
+            assert!(envs.contains(pair), "{pair:?} missing");
+        }
     }
 
     /// A `bwrap` in `dir/bin` running `body`, and a `PATH` of that folder alone.
