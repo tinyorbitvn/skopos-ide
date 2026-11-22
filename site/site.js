@@ -2,7 +2,8 @@
  * Points the hero's and the call to action's Download buttons at the installer for the
  * visitor's system, and marks that system's card in the download section. The page works
  * without this script: both buttons then lead to the download section and no card is marked.
- * The targets come from the download section's own links; nothing is fetched.
+ * The targets come from the download section's own links; nothing is fetched. It also opens
+ * the feature pictures larger in a dialog (initLightbox).
  */
 (function (global) {
   "use strict";
@@ -118,8 +119,55 @@
     });
   }
 
-  global.SkoposSite = { detectOs, detectArch, pickDownload, init };
+  // Lets each feature picture open larger in the page's #lightbox dialog, on a click or on
+  // Enter or Space, with its alt text as the caption. Escape, the close button or a click
+  // beside the picture closes it and gives the focus back to the picture. Without the script,
+  // or without dialog support, the pictures stay as they are. Returns how many it set up.
+  function initLightbox(doc) {
+    const dialog = doc.getElementById("lightbox");
+    if (!dialog || typeof dialog.showModal !== "function") return 0;
+    const pictures = Array.from(doc.querySelectorAll(".card__media img"));
+    if (pictures.length === 0) return 0;
+    const figure = dialog.querySelector(".lightbox__figure");
+    const caption = dialog.querySelector(".lightbox__caption");
+    const big = doc.createElement("img");
+    big.className = "lightbox__img";
+    figure.insertBefore(big, caption);
+    let opener = null;
+    const open = (picture) => {
+      const alt = picture.getAttribute("alt") || "";
+      opener = picture;
+      big.setAttribute("src", picture.currentSrc || picture.getAttribute("src"));
+      big.setAttribute("alt", alt);
+      caption.textContent = alt;
+      dialog.showModal();
+    };
+    for (const picture of pictures) {
+      picture.setAttribute("tabindex", "0");
+      picture.setAttribute("role", "button");
+      picture.setAttribute("aria-haspopup", "dialog");
+      picture.setAttribute("aria-label", `Enlarge: ${picture.getAttribute("alt") || "picture"}`);
+      picture.addEventListener("click", () => open(picture));
+      picture.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        open(picture);
+      });
+    }
+    dialog.querySelector(".lightbox__close").addEventListener("click", () => dialog.close());
+    // The dialog covers the window, so a click beside the picture lands on the dialog itself.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      if (opener) opener.focus();
+    });
+    return pictures.length;
+  }
+
+  global.SkoposSite = { detectOs, detectArch, pickDownload, init, initLightbox };
   if (typeof document !== "undefined" && typeof navigator !== "undefined") {
     init(document, navigator);
+    initLightbox(document);
   }
 })(globalThis);
