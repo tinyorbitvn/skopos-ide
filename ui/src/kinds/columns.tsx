@@ -32,6 +32,7 @@ export function textColumn(
     width: options.width ?? "minmax(100px, 1fr)",
     defaultHidden: options.defaultHidden,
     sortValue: (o) => get(o) ?? "",
+    filter: { text: (o) => get(o) || null },
     render: (o) => {
       const value = get(o);
       return value ? <span title={value}>{value}</span> : "-";
@@ -51,6 +52,10 @@ export function numberColumn(
     width: 88,
     defaultHidden: options.defaultHidden,
     sortValue: (o) => get(o) ?? 0,
+    filter: {
+      text: (o) => String(get(o) ?? 0),
+      measure: { kind: "number", amount: (o) => get(o) ?? 0 },
+    },
     render: (o) => String(get(o) ?? 0),
   };
 }
@@ -64,6 +69,7 @@ export function statusColumn(
     header: options.header ?? "Status",
     width: 140,
     sortValue: (o) => get(o).label,
+    filter: { text: (o) => get(o).label },
     render: (o) => {
       const { label, tone } = get(o);
       return <Badge tone={tone}>{label}</Badge>;

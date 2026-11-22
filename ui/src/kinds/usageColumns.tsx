@@ -44,6 +44,12 @@ function usageColumn(
     header,
     width: 88,
     sortValue: value,
+    filter: {
+      text: (row) => {
+        const n = value(row);
+        return n === null ? null : format(n);
+      },
+    },
     render: (row) => {
       const n = value(row);
       return (
@@ -118,6 +124,14 @@ export function shareColumn(
     sortValue: (row) => {
       const share = get(row);
       return percentOf(share) ?? share?.used ?? null;
+    },
+    filter: {
+      text: (row) => {
+        const share = get(row);
+        if (share === null) return null;
+        const percent = percentOf(share);
+        return percent === null ? format(share.used) : `${percent}%`;
+      },
     },
     render: (row) => {
       const share = get(row);

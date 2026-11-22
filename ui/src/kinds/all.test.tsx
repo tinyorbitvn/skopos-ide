@@ -226,3 +226,18 @@ test("every kind of the plan is registered", () => {
     "storage.k8s.io/storageclasses",
   ]);
 });
+
+test.each(registeredKinds())(
+  "$group/$plural: every column can be filtered, and its filter survives a sparse object",
+  ({ group, plural, spec }) => {
+    const columns = spec.columns?.(infoFor(group, plural)) ?? [];
+    expect(columns.filter((c) => !c.filter).map((c) => c.id)).toEqual([]);
+    const now = Date.now();
+    for (const object of SPARSE) {
+      for (const c of columns) {
+        c.filter?.text(object, now);
+        c.filter?.measure?.amount(object, now);
+      }
+    }
+  },
+);

@@ -10,6 +10,7 @@ import {
 import { Chips, Facts, ObjectLink, Part } from "../detail/parts";
 import { formatAge, type KubeObject } from "../objects";
 import {
+  ageFilter,
   ageSortValue,
   type DetailProps,
   type KindAction,
@@ -58,6 +59,17 @@ export function jobDurationText(o: KubeObject, now: number): string {
   if (!startTime) return "";
   const done = o.status?.completionTime;
   return formatAge(startTime, done ? Date.parse(done) : now);
+}
+
+/** A Job's run so far, or to its completion, in whole seconds; null before it starts. */
+export function jobDurationSeconds(o: KubeObject, now: number): number | null {
+  const start = Date.parse(o.status?.startTime ?? "");
+  if (Number.isNaN(start)) return null;
+  const end = Date.parse(o.status?.completionTime ?? "");
+  return Math.max(
+    0,
+    Math.floor(((Number.isNaN(end) ? now : end) - start) / 1000),
+  );
 }
 
 export function cronStatus(o: KubeObject): StatusInfo {
@@ -218,6 +230,13 @@ registerKind("batch", "jobs", {
         header: "Duration",
         width: 100,
         sortValue: durationMs,
+        filter: {
+          text: (o, now) => {
+            const text = jobDurationText(o, now);
+            return text === "" || text === "-" ? null : text;
+          },
+          measure: { kind: "duration", amount: jobDurationSeconds },
+        },
         render: (o) => <Duration object={o} />,
       },
     ),
@@ -244,6 +263,7 @@ registerKind("batch", "cronjobs", {
         header: "Last schedule",
         width: 120,
         sortValue: (o) => ageSortValue(o.status?.lastScheduleTime),
+        filter: ageFilter((o) => o.status?.lastScheduleTime),
         render: (o) => <LastSchedule from={o.status?.lastScheduleTime} />,
       },
     ),

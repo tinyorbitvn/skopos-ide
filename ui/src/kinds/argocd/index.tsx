@@ -34,6 +34,12 @@ function titledColumn(
     header,
     width: "minmax(120px, 1fr)",
     sortValue: get,
+    filter: {
+      text: (o) => {
+        const text = get(o);
+        return text === NONE || text === "" ? null : text;
+      },
+    },
     render: (o) => <span title={title(o)}>{get(o)}</span>,
   };
 }
@@ -44,6 +50,13 @@ const generatedColumn: TableColumn<KubeObject> = {
   width: 110,
   // Null sorts last in both directions, like the "—" it shows.
   sortValue: (o) => generatedCount(o),
+  filter: {
+    text: (o) => {
+      const count = generatedCount(o);
+      return count === null ? null : String(count);
+    },
+    measure: { kind: "number", amount: (o) => generatedCount(o) },
+  },
   render: (o) => {
     const count = generatedCount(o);
     return count === null ? NONE : String(count);

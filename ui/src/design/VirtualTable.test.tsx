@@ -2,7 +2,12 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mockElementSize } from "../test/size";
-import { type TableColumn, useNow, VirtualTable } from "./VirtualTable";
+import {
+  type TableColumn,
+  useNow,
+  useNowWhile,
+  VirtualTable,
+} from "./VirtualTable";
 
 interface Row {
   id: string;
@@ -344,6 +349,64 @@ test("every clock reading comes from one shared 30 s timer", () => {
   const clear = vi.spyOn(globalThis, "clearInterval");
   unmount();
   expect(clear).toHaveBeenCalledTimes(1);
+});
+
+function FilterClock(props: { active: boolean }) {
+  return <span data-testid="filter-clock">{useNowWhile(props.active)}</span>;
+}
+
+test("useNowWhile follows the shared clock only while active, and starts at the current time", () => {
+  vi.useFakeTimers();
+  try {
+    const interval = vi.spyOn(globalThis, "setInterval");
+    const read = () => Number(screen.getByTestId("filter-clock").textContent);
+    const { rerender, unmount } = render(<FilterClock active={false} />);
+    expect(interval.mock.calls.filter((c) => c[1] === 30_000)).toHaveLength(0);
+    const first = read();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(read()).toBe(first);
+
+    rerender(<FilterClock active />);
+    expect(read()).toBe(first + 60_000);
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(read()).toBe(first + 90_000);
+    unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+/** Records the time each render of `useNowWhile` returns. */
+function NowProbe(props: { active: boolean; seen: number[] }) {
+  props.seen.push(useNowWhile(props.active));
+  return null;
+}
+
+test("useNowWhile reads the current time in the very render that turns it on", () => {
+  vi.useFakeTimers();
+  // Later than any time the shared clock kept from earlier tests.
+  vi.setSystemTime(Date.parse("2030-01-01T00:00:00Z"));
+  try {
+    const seen: number[] = [];
+    const { rerender, unmount } = render(
+      <NowProbe active={false} seen={seen} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    const start = Date.now();
+    seen.length = 0;
+    rerender(<NowProbe active seen={seen} />);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((now) => now === start)).toBe(true);
+    unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 interface Aged {

@@ -1,11 +1,23 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useMemo, useRef, useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { TableColumn } from "../../design/VirtualTable";
+import type { ResourceRef } from "../../ipc/generated/ResourceRef";
+import {
+  baseColumns,
+  numberColumn,
+  statusColumn,
+  textColumn,
+} from "../../kinds/columns";
 import type { KubeObject } from "../../kinds/objects";
+import { defaultColumns } from "../../kinds/registry";
+import { filterColumns } from "./columnFilter";
 import { FilterTokens } from "./FilterTokens";
 import {
   buildFilterIndex,
+  type FilterContext,
   type FilterJoin,
+  filterContext,
   filterText,
   LAST_APPLIED,
   type ObjectFilter,
@@ -42,12 +54,59 @@ const label = (
   value: string,
 ) => ({ property: { type: "label", key }, operator, value }) as ObjectFilter;
 
-function Harness(props: { objects?: KubeObject[]; tokens?: ObjectFilter[] }) {
+const NOW = Date.parse("2026-11-22T12:00:00Z");
+const POD_REF: ResourceRef = {
+  group: "",
+  version: "v1",
+  plural: "pods",
+  kind: "Pod",
+  namespaced: true,
+};
+/** Name and Namespace only, so the tests of labels and annotations read as before. */
+const NAME_COLUMNS = defaultColumns(POD_REF).filter((c) => c.id !== "age");
+const POD_COLUMNS = baseColumns(
+  POD_REF,
+  statusColumn((o) => ({ label: o.status?.phase ?? "Unknown", tone: "ok" })),
+  numberColumn("restarts", "Restarts", (o) => o.status?.restarts),
+  textColumn("ip", "IP", (o) => o.status?.podIP),
+);
+const PODS: KubeObject[] = [
+  {
+    metadata: { name: "web-1", namespace: "shop" },
+    status: { phase: "Running", restarts: 2, podIP: "10.0.0.1" },
+  },
+  {
+    metadata: { name: "web-2", namespace: "shop" },
+    status: { phase: "Running", podIP: "10.0.0.2" },
+  },
+  {
+    metadata: { name: "db-1", namespace: "ops" },
+    status: { phase: "Pending" },
+  },
+];
+
+function contextOf(
+  columns: TableColumn<KubeObject>[] = NAME_COLUMNS,
+  hidden: string[] = [],
+): FilterContext {
+  return filterContext(filterColumns(columns, hidden), NOW);
+}
+
+function Harness(props: {
+  objects?: KubeObject[];
+  tokens?: ObjectFilter[];
+  columns?: TableColumn<KubeObject>[];
+  hidden?: string[];
+}) {
   const [text, setText] = useState("");
   const [tokens, setTokens] = useState<ObjectFilter[]>(props.tokens ?? []);
+  const context = useMemo(
+    () => contextOf(props.columns, props.hidden),
+    [props.columns, props.hidden],
+  );
   const index = useMemo(
-    () => buildFilterIndex(props.objects ?? OBJECTS),
-    [props.objects],
+    () => buildFilterIndex(props.objects ?? OBJECTS, context),
+    [props.objects, context],
   );
   return (
     <>
@@ -57,6 +116,7 @@ function Harness(props: { objects?: KubeObject[]; tokens?: ObjectFilter[] }) {
         tokens={tokens}
         onTokensChange={setTokens}
         index={index}
+        context={context}
       />
       <output data-testid="tokens">{tokens.map(filterText).join(" | ")}</output>
       <button type="button">elsewhere</button>
@@ -128,9 +188,7 @@ describe("PropertyFilter", () => {
     expect(input.getAttribute("role")).toBe("combobox");
     expect(input.getAttribute("aria-autocomplete")).toBe("list");
     expect(input.getAttribute("aria-label")).toBe(FILTER_LABEL);
-    expect(input.placeholder).toBe(
-      "Filter by name, namespace, label or annotation",
-    );
+    expect(input.placeholder).toBe("Filter by any column, label or annotation");
     expect(input.getAttribute("aria-expanded")).toBe("false");
     expect(input.getAttribute("aria-controls")).toBeNull();
     expect(list()).toBeNull();
@@ -149,10 +207,10 @@ describe("PropertyFilter", () => {
     expect(list()?.getAttribute("role")).toBe("listbox");
     expect(groups()).toEqual([
       [
-        "Properties",
+        "Columns",
         [
-          ["Name", "Property"],
-          ["Namespace", "Property"],
+          ["Name", "Column"],
+          ["Namespace", "Column"],
         ],
       ],
       [
@@ -177,7 +235,7 @@ describe("PropertyFilter", () => {
       ],
     ]);
     expect(foot()).toBe(
-      "Pick a property or a key, or press Enter to search names, namespaces and labels",
+      "Pick a column or a key, or press Enter to search every column and label",
     );
   });
 
@@ -187,7 +245,7 @@ describe("PropertyFilter", () => {
     type("ti");
     expect(optionTexts()).toEqual(['Use: "ti"', "label:tier"]);
     const use = within(list() as HTMLElement).getAllByRole("option")[0];
-    expect(use.lastElementChild?.textContent).toBe("Name, namespace or label");
+    expect(use.lastElementChild?.textContent).toBe("Any column or label");
 
     type("NAME");
     expect(optionTexts()).toEqual(['Use: "NAME"', "Name", "Namespace"]);
@@ -268,7 +326,7 @@ describe("PropertyFilter", () => {
     expect(tokens()).toBe("label:tier = web");
     expect(box().value).toBe("");
     expect(document.activeElement).toBe(box());
-    expect(groups()[0][0]).toBe("Properties");
+    expect(groups()[0][0]).toBe("Columns");
   });
 
   test("Any value comes first for a label or annotation with : or !: and nothing typed", () => {
@@ -472,15 +530,134 @@ describe("PropertyFilter", () => {
     expect(document.activeElement).toBe(box());
     expect(list()).not.toBeNull();
   });
+
+  test("the Columns group lists every column in table order, the hidden ones too", () => {
+    render(<Harness objects={PODS} columns={POD_COLUMNS} hidden={["ip"]} />);
+    focusBox();
+    expect(groups()[0]).toEqual([
+      "Columns",
+      [
+        ["Name", "Column"],
+        ["Namespace", "Column"],
+        ["Status", "Column"],
+        ["Restarts", "Column"],
+        ["IP", "Hidden column"],
+        ["Age", "Column"],
+      ],
+    ]);
+    type("re");
+    expect(groups()[0][1].map(([main]) => main)).toEqual(["Restarts"]);
+  });
+
+  test("a column's operators: four for text, > and < for numbers, Longer and Shorter than for times", () => {
+    render(<Harness objects={PODS} columns={POD_COLUMNS} />);
+    focusBox();
+    type("Sta");
+    pick("Status");
+    expect(box().value).toBe("status ");
+    expect(groups()[0][1].map(([main]) => main)).toEqual([
+      "=",
+      "!=",
+      ":",
+      "!:",
+    ]);
+    expect(foot()).toBe("Choose how status compares");
+
+    type("restarts ");
+    expect(groups()[0][1]).toEqual([
+      ["=", "Equals"],
+      ["!=", "Does not equal"],
+      [":", "Contains"],
+      ["!:", "Does not contain"],
+      [">", "Greater than"],
+      ["<", "Less than"],
+    ]);
+
+    type("age ");
+    expect(groups()[0][1].slice(4)).toEqual([
+      [">", "Longer than"],
+      ["<", "Shorter than"],
+    ]);
+  });
+
+  test("a column's values come with their counts; a time column lists none", () => {
+    render(<Harness objects={PODS} columns={POD_COLUMNS} />);
+    focusBox();
+    type("status = ");
+    expect(groups()).toEqual([
+      [
+        "Values of status",
+        [
+          ["Running", "2"],
+          ["Pending", "1"],
+        ],
+      ],
+    ]);
+    expect(foot()).toBe("Enter adds the filter");
+    pick("Running");
+    expect(tokens()).toBe("status = Running");
+
+    type("age = ");
+    expect(optionTexts()).toEqual([]);
+    expect(foot()).toBe("Type the text the column shows, such as 3d");
+
+    type("ip : ");
+    expect(optionTexts()[0]).toBe("Any value");
+  });
+
+  test("> and < offer the value only when it is a number or a time, and say what to type", () => {
+    render(<Harness objects={PODS} columns={POD_COLUMNS} />);
+    focusBox();
+    type("age < ");
+    expect(optionTexts()).toEqual([]);
+    expect(foot()).toBe("Type a time such as 30m, 2h or 7d");
+    type("age < abc");
+    expect(optionTexts()).toEqual([]);
+    expect(foot()).toBe("Type a time such as 30m, 2h or 7d");
+    key("Enter");
+    expect(tokens()).toBe("");
+    type("age < 1h");
+    expect(optionTexts()).toEqual(['Use: "1h"']);
+    expect(foot()).toBe("Enter adds the filter");
+    key("Enter");
+    expect(tokens()).toBe("age < 1h");
+
+    type("restarts > many");
+    expect(foot()).toBe("Type a number");
+  });
+
+  test("an operator the property does not take says which it takes", () => {
+    render(<Harness objects={PODS} columns={POD_COLUMNS} />);
+    focusBox();
+    type("status > 1");
+    expect(optionTexts()).toEqual([]);
+    expect(foot()).toBe("status takes =, !=, : and !:");
+    key("Enter");
+    expect(tokens()).toBe("");
+  });
+
+  test("a key typed in capitals adds the column's token", () => {
+    render(<Harness objects={PODS} columns={POD_COLUMNS} />);
+    focusBox();
+    type("STATUS = Running");
+    key("Enter");
+    expect(tokens()).toBe("status = Running");
+  });
 });
 
 /** The box and the row of tokens, wired as `ResourceScreen` wires them. */
-function Row(props: { tokens: ObjectFilter[]; text?: string }) {
+function Row(props: {
+  tokens: ObjectFilter[];
+  text?: string;
+  context?: FilterContext;
+}) {
   const [text, setText] = useState(props.text ?? "");
   const [tokens, setTokens] = useState<ObjectFilter[]>(props.tokens);
   const [join, setJoin] = useState<FilterJoin>("and");
   const inputRef = useRef<HTMLInputElement>(null);
-  const index = useMemo(() => buildFilterIndex(OBJECTS), []);
+  const own = useMemo(() => contextOf(), []);
+  const context = props.context ?? own;
+  const index = useMemo(() => buildFilterIndex(OBJECTS, context), [context]);
   return (
     <>
       <PropertyFilter
@@ -489,6 +666,7 @@ function Row(props: { tokens: ObjectFilter[]; text?: string }) {
         tokens={tokens}
         onTokensChange={setTokens}
         index={index}
+        context={context}
         inputRef={inputRef}
       />
       <FilterTokens
@@ -503,6 +681,7 @@ function Row(props: { tokens: ObjectFilter[]; text?: string }) {
         shown={2}
         total={3}
         onFocusBox={() => inputRef.current?.focus()}
+        context={context}
       />
       <output data-testid="tokens">{tokens.map(filterText).join(" | ")}</output>
       <output data-testid="join">{join}</output>
@@ -740,5 +919,112 @@ describe("FilterTokens", () => {
     openEdit(0);
     fireEvent.click(byId("filter-token-edit-0"));
     expect(panel()).toBeNull();
+  });
+
+  const AGE_UNDER_HOUR: ObjectFilter = {
+    property: { type: "column", key: "age" },
+    operator: "<",
+    value: "1h",
+  };
+
+  test("a column token's panel names its header and offers its column's operators", () => {
+    render(<Row tokens={[AGE_UNDER_HOUR]} context={contextOf(POD_COLUMNS)} />);
+    const edit = openEdit(0);
+    expect(within(edit).getByText("Age")).toBeTruthy();
+    const radios = within(edit).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.labels?.[0]?.textContent)).toEqual([
+      "=",
+      "!=",
+      ":",
+      "!:",
+      ">",
+      "<",
+    ]);
+    expect(radios.map((r) => r.checked)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(byId("filter-edit-operator-greater")).toBeTruthy();
+  });
+
+  test("an invalid time keeps the panel open with the error under the value", () => {
+    render(<Row tokens={[AGE_UNDER_HOUR]} context={contextOf(POD_COLUMNS)} />);
+    openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "soon" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(panel()).toBeTruthy();
+    expect(byId("filter-edit-error").textContent).toBe(
+      "Type a time such as 30m, 2h or 7d",
+    );
+    expect(valueBox().getAttribute("aria-invalid")).toBe("true");
+    expect(tokens()).toBe("age < 1h");
+
+    fireEvent.change(valueBox(), { target: { value: "2h" } });
+    expect(screen.queryByTestId("filter-edit-error")).toBeNull();
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("age < 2h");
+    expect(panel()).toBeNull();
+  });
+
+  test("an empty value on : keeps a column token as any value", () => {
+    const ip: ObjectFilter = {
+      property: { type: "column", key: "ip" },
+      operator: ":",
+      value: "10.",
+    };
+    render(<Row tokens={[ip]} context={contextOf(POD_COLUMNS)} />);
+    openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("ip :");
+  });
+
+  test("a token whose column left the list takes the warning tone, and loses it when the column is back", () => {
+    const cpu: ObjectFilter = {
+      property: { type: "column", key: "restarts" },
+      operator: ">",
+      value: "0",
+    };
+    const { rerender } = render(<Row tokens={[cpu]} context={contextOf()} />);
+    const token = byId("filter-token-0");
+    expect(token.getAttribute("data-missing")).toBe("true");
+    expect(token.title).toBe("This list has no column restarts");
+    expect(within(openEdit(0)).getByText("restarts")).toBeTruthy();
+    fireEvent.click(byId("filter-edit-cancel"));
+
+    rerender(<Row tokens={[cpu]} context={contextOf(POD_COLUMNS)} />);
+    expect(byId("filter-token-0").getAttribute("data-missing")).toBe("false");
+    expect(byId("filter-token-0").title).toBe("");
+  });
+
+  test("a > or < token whose column left keeps its operator in the panel, and its edit as typed", () => {
+    render(<Row tokens={[AGE_UNDER_HOUR]} context={contextOf()} />);
+    const edit = openEdit(0);
+    expect(within(edit).getByText("age")).toBeTruthy();
+    const radios = within(edit).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.labels?.[0]?.textContent)).toEqual([
+      "=",
+      "!=",
+      ":",
+      "!:",
+      "<",
+    ]);
+    expect(radios.map((r) => r.checked)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+
+    fireEvent.change(valueBox(), { target: { value: "2h" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(screen.queryByTestId("filter-edit-error")).toBeNull();
+    expect(panel()).toBeNull();
+    expect(tokens()).toBe("age < 2h");
   });
 });

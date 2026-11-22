@@ -8,11 +8,12 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { Toaster } from "../../design";
+import { type ColumnFilter, Toaster } from "../../design";
 import { Box } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
+import { baseColumns, statusColumn, textColumn } from "../../kinds/columns";
 import type { KubeObject } from "../../kinds/objects";
 import { type DeleteDialogProps, registerKind } from "../../kinds/registry";
 import { resetCatalogForTest } from "../../stores/catalog";
@@ -1734,4 +1735,133 @@ test("Minimize while a linked object is shown docks the linked object", async ()
       "dock-details-kind",
     ).textContent,
   ).toBe("Namespace");
+});
+
+const FILTERABLES = info({
+  group: "kinds.test",
+  plural: "filterables",
+  kind: "Filterable",
+});
+
+/** A kind with Status, a hidden IP and Node; `nodeFilter` replaces Node's filter alone, not its cell. */
+function registerFilterables(nodeFilter?: ColumnFilter<KubeObject>) {
+  const node = textColumn("node", "Node", (o) => o.spec?.nodeName);
+  registerKind("kinds.test", "filterables", {
+    columns: (i) =>
+      baseColumns(
+        i.resource,
+        statusColumn((o) => ({
+          label: o.status?.phase ?? "Unknown",
+          tone: "ok",
+        })),
+        textColumn("ip", "IP", (o) => o.status?.podIP, { defaultHidden: true }),
+        nodeFilter ? { ...node, filter: nodeFilter } : node,
+      ),
+  });
+}
+
+function filterable(
+  name: string,
+  over: { phase?: string; ip?: string; node?: string; ageMs?: number } = {},
+): KubeObject {
+  return {
+    metadata: {
+      name,
+      namespace: "ns",
+      resourceVersion: "1",
+      creationTimestamp: new Date(
+        Date.now() - (over.ageMs ?? 60_000),
+      ).toISOString(),
+    },
+    spec: { nodeName: over.node },
+    status: { phase: over.phase, podIP: over.ip },
+  };
+}
+
+function typeInBox(text: string) {
+  fireEvent.change(screen.getByTestId("resource-search"), {
+    target: { value: text },
+  });
+}
+
+test("free text reads every column, and a match through a hidden one shows a chip", async () => {
+  registerFilterables();
+  const fake = fakeBackend();
+  await show(
+    fake,
+    [
+      filterable("a", { phase: "Running", ip: "10.0.0.5", node: "n1" }),
+      filterable("b", { phase: "Pending", ip: "10.0.0.6", node: "n2" }),
+    ],
+    FILTERABLES,
+  );
+  typeInBox("10.0.0.5");
+  expect(row("ns", "b")).toBeNull();
+  expect(chipTitles(row("ns", "a"))).toEqual(["column ip=10.0.0.5"]);
+
+  typeInBox("n2");
+  expect(row("ns", "a")).toBeNull();
+  expect(chipTitles(row("ns", "b"))).toEqual([]);
+});
+
+test("column tokens narrow the rows, and > and < compare times", async () => {
+  registerFilterables();
+  const fake = fakeBackend();
+  await show(
+    fake,
+    [
+      filterable("young", { phase: "Running", ageMs: 30 * 60_000 }),
+      filterable("old", { phase: "Pending", ageMs: 3 * 86_400_000 }),
+    ],
+    FILTERABLES,
+  );
+  addToken("status = Running");
+  expect(row("ns", "young")).toBeTruthy();
+  expect(row("ns", "old")).toBeNull();
+  expect(
+    screen.getByTestId("filter-token-edit-0").getAttribute("aria-label"),
+  ).toBe("Edit filter status = Running");
+
+  fireEvent.click(screen.getByTestId("filter-clear"));
+  addToken("age > 1d");
+  expect(row("ns", "young")).toBeNull();
+  expect(row("ns", "old")).toBeTruthy();
+});
+
+test("typing reads each row's columns once, not again on every keystroke", async () => {
+  // A spy on the filter alone: the cell's own render reads the node too, on every render.
+  const nodeText = vi.fn((o: KubeObject) => o.spec?.nodeName ?? null);
+  registerFilterables({ text: nodeText });
+  const fake = fakeBackend();
+  await show(
+    fake,
+    [filterable("a", { node: "n1" }), filterable("b", { node: "n2" })],
+    FILTERABLES,
+  );
+  typeInBox("n");
+  await act(flush);
+  const after = nodeText.mock.calls.length;
+  typeInBox("n1");
+  typeInBox("n1x");
+  typeInBox("n1");
+  expect(nodeText.mock.calls.length).toBe(after);
+  expect(row("ns", "a")).toBeTruthy();
+  expect(row("ns", "b")).toBeNull();
+});
+
+test("a typed time filter follows the clock: a row leaves age < 1m once it is a minute old", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  try {
+    registerFilterables();
+    const fake = fakeBackend();
+    await show(fake, [filterable("fresh", { ageMs: 45_000 })], FILTERABLES);
+    typeInBox("age < 1m");
+    expect(row("ns", "fresh")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(row("ns", "fresh")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });

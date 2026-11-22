@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`). Releases before 0.6.0 have their notes 
 
 ## [Unreleased]
 
+- **Filter by any column:** a list's filter box now searches every column, the hidden ones too, so typing a status, a node, an IP or an age finds the rows that show it. Name a column to filter by it alone, as in `status = Running`, `node : worker-1` or `ip !: 10.244`, and compare numbers and times with `>` and `<`, as in `restarts > 0` or `age < 1h`. The suggestions list the columns, their operators and their values, and a row that matched through a hidden column says so beside its name. Text that starts with a column's name, such as `node=worker`, now filters that column; `label:node = worker` still finds the label.
+
 ## [0.10.0] - 2026-11-21
 
 - **A sidebar closer to its design:** sections start closed, except the one that holds the page on screen, and each cluster keeps the ones you open; the Argo CD branch starts closed too. Rows use the label type with brighter kind names, and section icons are dimmer than their names except on the current page. With no cluster picked, the switcher says "Pick a cluster" instead of a line cut short, and the version under its name drops build metadata (v1.37.0, not v1.37.0+rke2r1). Once the sidebar is scrolled, a hairline under the switcher marks where its rows go instead of leaving one cut in half. The cluster menu opens just under the switcher, the collapse handle has a border, and the rail and its flyouts have the design's spacing. The hotbar and the sidebar take the design's glass colour, a pale blue in the light theme and a deep navy in the dark one, instead of plain grey.
