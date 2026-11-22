@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Metrics setup · SkoposIDE docs</title>
+<meta name="description" content="What a Kubernetes cluster must expose before the SkoposIDE metrics charts show data: metrics-server or a Prometheus-compatible API, the cluster's metrics settings, the metrics each chart reads and how to check them.">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body id="top">
+{{sprite}}
+<a class="skip" href="#main">Skip to content</a>
+<div class="frame" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="wrap nav__bar">
+    <a class="brand" href="../index.html">
+      <img src="../icon.svg" alt="" width="28" height="28">
+      <span class="brand__name">SkoposIDE</span>
+    </a>
+    <nav class="nav__links" aria-label="Sections">
+      <a href="../index.html#features">Features</a>
+      <a href="../index.html#download">Download</a>
+      <a href="../index.html#roadmap">Roadmap</a>
+      <a href="metrics.html" aria-current="page">Docs</a>
+      <a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a>
+    </nav>
+    <div class="nav__actions">
+      <a class="quiet nav__source" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Source</a>
+      <a class="button button--primary button--sm" href="../index.html#download"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download<svg class="icon icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="wrap doc">
+  <p class="overline overline--accent">Docs</p>
+  <h1 class="doc__title">Metrics setup</h1>
+  <p class="doc__lead">SkoposIDE draws its CPU, memory, disk, network and control plane charts from what the cluster already runs: metrics-server, or a Prometheus-compatible API such as Prometheus or Grafana Mimir. This page lists the settings, the metrics each chart reads and how to check them.</p>
+
+  <nav class="doc__toc" aria-label="On this page">
+    <p class="overline">On this page</p>
+    <ol>
+      <li><a href="#where">Where metrics show</a></li>
+      <li><a href="#sources">Pick a source</a></li>
+      <li><a href="#settings">The cluster's metrics settings</a></li>
+      <li><a href="#metrics">The metrics each chart reads</a></li>
+      <li><a href="#install">Install a source</a></li>
+      <li><a href="#check">Check the cluster</a></li>
+      <li><a href="#messages">Messages and what to check</a></li>
+    </ol>
+  </nav>
+
+  <section class="doc__section" id="where" aria-labelledby="where-title">
+    <h2 id="where-title">Where metrics show</h2>
+    <ul class="ticks">
+      <li>The cluster overview: CPU, memory and Pods against the cluster's capacity, the top namespaces and Pods, and the control plane charts.</li>
+      <li>The Metrics tab of the details drawer, for Pods, workloads such as Deployments and StatefulSets, Nodes and PersistentVolumeClaims. Pick 1h, 6h, 24h or 7d, as a chart or a table.</li>
+      <li>The CPU and Memory columns of the Pods and Nodes lists.</li>
+    </ul>
+    <p>Each panel names its source on its first line, for example <code>Prometheus observability/prometheus-operated:9090, autodetected, through the API server proxy</code>, so you can see which backend answered.</p>
+  </section>
+
+  <section class="doc__section" id="sources" aria-labelledby="sources-title">
+    <h2 id="sources-title">Pick a source</h2>
+    <p>Each cluster has one metrics source, chosen in its settings under <strong>Metrics</strong>. The default, Detect, finds one by itself.</p>
+    <div class="doc__table">
+      <table>
+        <thead><tr><th scope="col">Choice</th><th scope="col">What it reads</th><th scope="col">What you get</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Detect</th><td>A Prometheus Service in the cluster, else the <code>metrics.k8s.io</code> API</td><td>Whatever it finds, as below</td></tr>
+          <tr><th scope="row">Prometheus or Mimir in the cluster</th><td>A Service you name, queried through the Kubernetes API server's service proxy</td><td>Every chart, with history from 1 hour to 7 days</td></tr>
+          <tr><th scope="row">Prometheus-compatible URL</th><td>An HTTP API outside the cluster, such as Mimir or Grafana Cloud, reached directly</td><td>Every chart, with history</td></tr>
+          <tr><th scope="row">metrics-server only</th><td>The <code>metrics.k8s.io</code> API of metrics-server</td><td>Current CPU and memory only, sampled every 15 s while the panel is open; no history, disk, network or control plane</td></tr>
+          <tr><th scope="row">None</th><td>Nothing</td><td>No metrics for this cluster</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>How Detect chooses</h3>
+    <ol class="doc__steps">
+      <li>It lists the Services of every namespace you can read. When listing across namespaces is forbidden, it lists each namespace you can access.</li>
+      <li>It keeps the Prometheus candidates, best first:
+        <ul>
+          <li>label <code>app=kube-prometheus-stack-prometheus</code>, port <code>http-web</code> (kube-prometheus-stack);</li>
+          <li>label <code>operated-prometheus=true</code>, port <code>web</code> (the Prometheus Operator's <code>prometheus-operated</code>);</li>
+          <li>labels <code>app.kubernetes.io/name=prometheus</code> and <code>app.kubernetes.io/component=server</code>, port <code>http</code> (the <code>prometheus</code> Helm chart);</li>
+          <li>label <code>app.kubernetes.io/name=prometheus</code> alone.</li>
+        </ul>
+        Within a tier, the <code>monitoring</code> namespace comes first. Without the tier's port name it takes a port named <code>web</code>, <code>http</code> or <code>http-web</code>, then port 9090, then the first port.</li>
+      <li>It asks each candidate <code>/api/v1/query?query=up</code> through the service proxy and takes the first one that answers within 5 s.</li>
+      <li>With no Prometheus answering, it uses metrics-server when the API server serves <code>/apis/metrics.k8s.io/v1beta1</code>. Otherwise the cluster has no metrics.</li>
+    </ol>
+    <p>The choice is kept for 10 minutes. Retry in the Metrics panel, or reconnecting the cluster, detects again. Detect never finds a URL outside the cluster: choose Prometheus-compatible URL for that.</p>
+  </section>
+
+  <section class="doc__section" id="settings" aria-labelledby="settings-title">
+    <h2 id="settings-title">The cluster's metrics settings</h2>
+    <p>Open a cluster's settings from its row menu in the catalog (<strong>Settings</strong>), or with the <strong>Cluster settings</strong> button that metrics notes show. The settings stay in SkoposIDE, in <code>clusters.json</code> in its configuration folder; your kubeconfig is not changed. Passwords and tokens go to the operating system's keychain, never to that file.</p>
+    <figure class="doc__figure">
+      <img {{image:canvas-settings-metrics.png}} alt="The Metrics part of a cluster's settings, with Prometheus or Mimir in the cluster chosen and its Namespace, Service, Port, Scheme, Path prefix, Tenant and Cluster label fields" loading="lazy" decoding="async">
+      <figcaption>The Metrics settings on the design canvas, with Prometheus or Mimir in the cluster chosen.</figcaption>
+    </figure>
+
+    <h3>Prometheus or Mimir in the cluster</h3>
+    <div class="doc__table">
+      <table>
+        <thead><tr><th scope="col">Field</th><th scope="col">What to enter</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Namespace</th><td>The Service's namespace, a lowercase DNS label such as <code>monitoring</code>.</td></tr>
+          <tr><th scope="row">Service</th><td>The Service's name, such as <code>prometheus-operated</code> or <code>kube-prometheus-stack-prometheus</code>.</td></tr>
+          <tr><th scope="row">Port</th><td>The Service port, 1 to 65535, such as <code>9090</code>.</td></tr>
+          <tr><th scope="row">Scheme</th><td>HTTP or HTTPS: how the API server's proxy talks to the Service.</td></tr>
+          <tr><th scope="row">Path prefix</th><td>Empty for Prometheus. <code>/prometheus</code> for Mimir and other APIs served under a path. It starts with <code>/</code>.</td></tr>
+          <tr><th scope="row">Tenant</th><td>Sent as the <code>X-Scope-OrgID</code> header, for Mimir and other multi-tenant APIs. Empty for none. Up to 150 letters, digits and <code>! - _ . * ' ( )</code>.</td></tr>
+          <tr><th scope="row">Cluster label</th><td>A label name and value, such as <code>cluster</code> = <code>prod</code>, added to every query. Set it when one backend holds the metrics of several clusters. Both or neither.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Queries go to <code>/api/v1/namespaces/&lt;namespace&gt;/services/[&lt;scheme&gt;:]&lt;service&gt;:&lt;port&gt;/proxy&lt;path prefix&gt;/api/v1/query_range</code> on the API server, with your own kubeconfig credentials. You need <code>get</code> on <code>services/proxy</code> in that namespace, and <code>create</code> too for very long queries, which go as a POST.</p>
+
+    <h3>Prometheus-compatible URL</h3>
+    <div class="doc__table">
+      <table>
+        <thead><tr><th scope="col">Field</th><th scope="col">What to enter</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">URL</th><td>The API's base, the part before <code>/api/v1</code>, such as <code>https://mimir.example.com/prometheus</code>. http or https with a host, without a user name, query or fragment.</td></tr>
+          <tr><th scope="row">Tenant</th><td>As above, sent as <code>X-Scope-OrgID</code>.</td></tr>
+          <tr><th scope="row">Cluster label</th><td>As above. Usually needed here, since a shared backend holds many clusters.</td></tr>
+          <tr><th scope="row">Authentication</th><td>None, Basic (username and password), Bearer (token) or Client certificate (certificate and key files). Basic and Bearer need https, except to localhost; a client certificate always needs https.</td></tr>
+          <tr><th scope="row">CA file</th><td>A PEM file to trust for a private certificate authority. Optional.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Certificate, key and CA files are absolute paths to PEM files, read when you save.</p>
+  </section>
+
+  <section class="doc__section" id="metrics" aria-labelledby="metrics-title">
+    <h2 id="metrics-title">The metrics each chart reads</h2>
+    <p>With Prometheus or a URL, the charts read these series. They come from the usual exporters: cAdvisor through the kubelet, kube-state-metrics, node-exporter and the API server. kube-prometheus-stack, and the <code>prometheus</code> chart with its default subcharts, scrape all of them.</p>
+    <div class="doc__table">
+      <table>
+        <thead><tr><th scope="col">Chart</th><th scope="col">Series</th><th scope="col">Exported by</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Pod and workload CPU</th><td><code>container_cpu_usage_seconds_total</code></td><td>kubelet (cAdvisor)</td></tr>
+          <tr><th scope="row">Pod and workload memory</th><td><code>container_memory_working_set_bytes</code></td><td>kubelet (cAdvisor)</td></tr>
+          <tr><th scope="row">Pod network</th><td><code>container_network_receive_bytes_total</code>, <code>container_network_transmit_bytes_total</code></td><td>kubelet (cAdvisor)</td></tr>
+          <tr><th scope="row">Pod filesystem</th><td><code>container_fs_reads_bytes_total</code>, <code>container_fs_writes_bytes_total</code>, <code>container_fs_usage_bytes</code></td><td>kubelet (cAdvisor)</td></tr>
+          <tr><th scope="row">Requests and limits</th><td><code>kube_pod_container_resource_requests</code>, <code>kube_pod_container_resource_limits</code>, <code>kube_pod_status_phase</code></td><td>kube-state-metrics</td></tr>
+          <tr><th scope="row">Cluster and Node CPU</th><td><code>node_cpu_seconds_total</code></td><td>node-exporter</td></tr>
+          <tr><th scope="row">Cluster and Node memory</th><td><code>node_memory_MemTotal_bytes</code>, <code>node_memory_MemAvailable_bytes</code></td><td>node-exporter</td></tr>
+          <tr><th scope="row">Disk</th><td><code>node_filesystem_size_bytes</code>, <code>node_filesystem_avail_bytes</code> for <code>/</code>, else <code>/var</code></td><td>node-exporter</td></tr>
+          <tr><th scope="row">Which Node a series is from</th><td><code>node_uname_info</code> (its <code>nodename</code> label)</td><td>node-exporter</td></tr>
+          <tr><th scope="row">Capacity and Pods</th><td><code>kube_node_status_allocatable</code>, <code>kube_node_status_capacity</code>, <code>kube_pod_info</code></td><td>kube-state-metrics</td></tr>
+          <tr><th scope="row">Volume usage</th><td><code>kubelet_volume_stats_used_bytes</code>, <code>kubelet_volume_stats_capacity_bytes</code></td><td>kubelet</td></tr>
+          <tr><th scope="row">API requests and latency</th><td><code>apiserver_request_total</code>, <code>apiserver_request_duration_seconds_bucket</code></td><td>API server</td></tr>
+          <tr><th scope="row">etcd latency and size</th><td><code>etcd_request_duration_seconds_bucket</code>, <code>apiserver_storage_size_bytes</code> or <code>etcd_db_total_size_in_bytes</code></td><td>API server</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="ticks">
+      <li>Container series need the labels <code>namespace</code>, <code>pod</code> and <code>container</code>; kube-state-metrics series need <code>namespace</code>, <code>pod</code> and <code>node</code>. Node series are matched to their Node through the <code>instance</code> label they share with <code>node_uname_info</code>.</li>
+      <li>Ranges: 1h at a 1 minute step, 6h at 5 minutes, 24h at 15 minutes, 7d at 1 hour. Rates use a window of 2 minutes or the step, whichever is longer, so scrape at least every minute.</li>
+      <li>A chart without its series shows "No samples in this range." The other charts still draw.</li>
+    </ul>
+  </section>
+
+  <section class="doc__section" id="install" aria-labelledby="install-title">
+    <h2 id="install-title">Install a source</h2>
+    <p>Any one of these is enough. Detect finds each of them with no settings. SkoposIDE can install the charts from its Helm screens too.</p>
+    <h3>metrics-server: current CPU and memory</h3>
+    <pre class="doc__code"><code>kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml</code></pre>
+    <p>On clusters whose kubelets have self-signed serving certificates, such as kind, add <code>--kubelet-insecure-tls</code> to the metrics-server container's arguments.</p>
+    <h3>kube-prometheus-stack: every chart</h3>
+    <pre class="doc__code"><code>helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace</code></pre>
+    <h3>Grafana Mimir or another shared backend</h3>
+    <p>Have each cluster's Prometheus or agent add an external label such as <code>cluster: prod</code> to what it sends. Then choose Prometheus-compatible URL, or Prometheus or Mimir in the cluster with Path prefix <code>/prometheus</code>, and set Tenant and Cluster label to match.</p>
+  </section>
+
+  <section class="doc__section" id="check" aria-labelledby="check-title">
+    <h2 id="check-title">Check the cluster</h2>
+    <p>Run these with the same kubeconfig context SkoposIDE uses. Replace <code>monitoring</code>, the Service and the port with yours.</p>
+    <h3>metrics-server</h3>
+    <pre class="doc__code"><code>kubectl get apiservice v1beta1.metrics.k8s.io    # AVAILABLE must be True
+kubectl top nodes
+kubectl top pods -A</code></pre>
+    <h3>Prometheus through the API server</h3>
+    <pre class="doc__code"><code>kubectl get services -A -l app.kubernetes.io/name=prometheus
+kubectl auth can-i get services/proxy -n monitoring
+kubectl get --raw '/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=up'</code></pre>
+    <p>The answer is JSON with <code>"status":"success"</code>. Then ask for one series of each exporter; an empty <code>result</code> means that exporter is missing or not scraped:</p>
+    <pre class="doc__code"><code>…/proxy/api/v1/query?query=count(container_cpu_usage_seconds_total)
+…/proxy/api/v1/query?query=count(kube_pod_container_resource_requests)
+…/proxy/api/v1/query?query=count(node_cpu_seconds_total)
+…/proxy/api/v1/query?query=count(apiserver_request_total)</code></pre>
+    <h3>A URL with a tenant and a cluster label</h3>
+    <pre class="doc__code"><code>curl -H 'X-Scope-OrgID: team-a' \
+  'https://mimir.example.com/prometheus/api/v1/query?query=count(up%7Bcluster%3D%22prod%22%7D)'</code></pre>
+  </section>
+
+  <section class="doc__section" id="messages" aria-labelledby="messages-title">
+    <h2 id="messages-title">Messages and what to check</h2>
+    <div class="doc__table">
+      <table>
+        <thead><tr><th scope="col">The panel says</th><th scope="col">Check</th></tr></thead>
+        <tbody>
+          <tr><td>No metrics provider answers in ‹cluster›: there is no Prometheus Service and the metrics.k8s.io API is not served.</td><td>Install metrics-server or Prometheus, or choose a source in the settings.</td></tr>
+          <tr><td>Metrics are off: the metrics provider is None in the cluster settings.</td><td>Choose another source under Metrics.</td></tr>
+          <tr><td>Reading Prometheus needs permission to get services/proxy in namespace ‹namespace›</td><td>Ask for <code>get</code> and <code>create</code> on <code>services/proxy</code> in that namespace.</td></tr>
+          <tr><td>Mimir needs a tenant: set Tenant in this cluster's metrics settings.</td><td>Set Tenant.</td></tr>
+          <tr><td>‹host› has no Prometheus API at ‹URL›: check the path.</td><td>The URL or Path prefix, often <code>/prometheus</code>.</td></tr>
+          <tr><td>‹host› refused the credentials (HTTP 401).</td><td>Authentication: the username, password, token or certificate.</td></tr>
+          <tr><td>Prometheus did not answer within 15s</td><td>The Service, port and scheme; the Pods behind the Service.</td></tr>
+          <tr><td>the service answered, but not like Prometheus</td><td>The port or Path prefix points at something else.</td></tr>
+          <tr><td>No samples for tenant ‹tenant› with ‹label›: check the tenant and the cluster label in the cluster settings.</td><td>Tenant and Cluster label must match what the backend stores.</td></tr>
+          <tr><td>Pods, disk and control plane history need Prometheus: metrics-server reports only the current CPU and memory.</td><td>Expected with metrics-server. Install Prometheus for history.</td></tr>
+          <tr><td>Collecting samples: metrics-server is read every 15 s, the next sample arrives in ‹n› s.</td><td>Nothing: the chart fills while it is open.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <p class="footer__bottom"><span>Copyright The SkoposIDE Authors · Apache-2.0</span><span class="mono">latest: {{release.tag}} · {{release.isoDate}}</span></p>
+  </div>
+</footer>
+</body>
+</html>

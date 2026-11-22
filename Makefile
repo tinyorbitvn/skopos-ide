@@ -54,7 +54,7 @@ e2e-screens: e2e-build
 	SKOPOS_E2E_SPEC_SET=screens $(XVFB) pnpm -C e2e exec wdio run wdio.conf.ts
 site:
 	node scripts/build-site.mjs --out tmp/site
-site-screens: e2e-screens
-	scripts/site-screens.sh
+site-screens:
+	node scripts/canvas-screens.mjs --canvas tmp/canvas --out site/images
 release:
 	scripts/release.sh bump $(VERSION)

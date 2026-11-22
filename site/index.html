@@ -28,6 +28,7 @@
       <a href="#features">Features</a>
       <a href="#download">Download</a>
       <a href="#roadmap">Roadmap</a>
+      <a href="docs/metrics.html">Docs</a>
       <a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a>
     </nav>
     <div class="nav__actions">
@@ -54,7 +55,7 @@
     </div>
     <div class="wrap hero__shot">
       <figure class="shot shot--fade">
-        <img {{image:pods-drawer-dark.png}} alt="SkoposIDE with the Pods of the kind-skopos-e2e cluster and the details drawer of its etcd Pod">
+        <img {{image:canvas-pods-drawer-dark.png}} alt="SkoposIDE with the Pods of the prod-eu-west cluster and the details drawer of a payments-api Pod">
       </figure>
     </div>
   </section>
@@ -89,7 +90,7 @@
           </ul>
         </div>
         <figure class="card__media">
-          <img {{image:catalog-dark.png}} alt="The catalog with the kind-skopos-e2e cluster" loading="lazy" decoding="async">
+          <img {{image:canvas-catalog.png}} alt="The catalog: kubeconfig contexts in folders, each with its source, distribution and connection state" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -105,7 +106,7 @@
           </ul>
         </div>
         <figure class="card__media">
-          <img {{image:dock-yaml-dark.png}} alt="An edit tab with the YAML of the screens ConfigMap and the API docs of its kind beside it" loading="lazy" decoding="async">
+          <img {{image:canvas-yaml.png}} alt="The Deployments list above an edit tab in the dock: the YAML of Deployment payments-api and the API docs of its kind beside it" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -120,36 +121,8 @@
             <li>Port forwards from the details drawer</li>
           </ul>
         </div>
-        <figure class="card__media mock" id="mock-dock" role="img" aria-label="The Pods list with the dock below it: tabs for a container's logs, a shell and a port forward, with the logs tab open">
-          <div class="mock__bar"><strong>Pods</strong><span>payments</span></div>
-          <div class="mock__row mock__row--selected"><span class="mock__name">api-7d9c6b5f8-x2kqp</span><span class="mock__muted">1/1</span><span class="badge badge--ok badge--dot">Running</span></div>
-          <div class="mock-dock">
-            <div class="mock-dock__tabs">
-              <span class="mock-dock__tab mock-dock__tab--active"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-scroll-text"/></svg>Logs · api-7d9c6b5f8-x2kqp</span>
-              <span class="mock-dock__tab"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-terminal"/></svg>Shell · ledger-0</span>
-              <span class="mock-dock__tab"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-arrow-right-left"/></svg>Port forward · 8080 → 80</span>
-            </div>
-            <div class="mock-dock__toolbar">
-              <span class="mock__select">Container api<svg class="icon icon--xs" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
-              <span class="mock__toggle"><span class="mock__switch"></span>Follow</span>
-              <span>Timestamps</span>
-              <span class="mock__search"><svg class="icon icon--xs" aria-hidden="true"><use href="#i-search"/></svg>Search logs</span>
-            </div>
-            <div class="mock-dock__logs">
-              <p><span class="mock-dock__time">09:12:04.118</span><span class="mock-dock__level">INFO</span><span>listening on :8080</span></p>
-              <p><span class="mock-dock__time">09:12:04.352</span><span class="mock-dock__level">INFO</span><span>connected to ledger-0.ledger:5432</span></p>
-              <p><span class="mock-dock__time">09:12:05.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.9ms</span></p>
-              <p><span class="mock-dock__time">09:12:07.611</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 41ms</span></p>
-              <p><span class="mock-dock__time">09:12:07.902</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 38ms</span></p>
-              <p><span class="mock-dock__time">09:12:09.447</span><span class="mock-dock__level mock-dock__level--warn">WARN</span><span>ledger write slow, retrying (attempt 2)</span></p>
-              <p><span class="mock-dock__time">09:12:09.501</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 57ms</span></p>
-              <p><span class="mock-dock__time">09:12:10.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.8ms</span></p>
-              <p><span class="mock-dock__time">09:12:12.388</span><span class="mock-dock__level">INFO</span><span>GET /v1/payments/8c41 200 6ms</span></p>
-              <p><span class="mock-dock__time">09:12:13.115</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 44ms</span></p>
-              <p><span class="mock-dock__time">09:12:15.020</span><span class="mock-dock__level">INFO</span><span>GET /healthz 200 0.9ms</span></p>
-              <p><span class="mock-dock__time">09:12:15.734</span><span class="mock-dock__level">INFO</span><span>POST /v1/payments 201 39ms</span></p>
-            </div>
-          </div>
+        <figure class="card__media">
+          <img {{image:canvas-logs.png}} alt="The Pods list with the dock below it, showing the logs of a payments-api Pod with Follow and Timestamps on" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -164,81 +137,8 @@
             <li>Export as PNG or PDF</li>
           </ul>
         </div>
-        <figure class="card__media mock mock--page mock--fit" id="mock-map" role="img" aria-label="Resource map: an Argo CD Application owns Deployment api, its ReplicaSet and three Pods; Service api selects the Pods; ServiceAccount api is bound to Role pod-reader through RoleBinding api-read">
-          <div class="mock__bar mock__bar--tool">
-            <svg class="icon" aria-hidden="true"><use href="#i-network"/></svg>
-            <strong>Resource map</strong>
-            <span class="mock__mono">payments</span>
-            <span class="mock__actions"><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-image"/></svg>PNG</span><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-file-text"/></svg>PDF</span></span>
-          </div>
-          <svg class="mock-map" viewBox="0 0 680 356" aria-hidden="true">
-            <g class="map-owns">
-              <path d="M144 70 H180"/>
-              <path d="M308 70 H344"/>
-              <path d="M472 70 C496 70 496 34 520 34"/>
-              <path d="M472 70 C496 70 496 92 520 92"/>
-              <path d="M472 70 C496 70 496 150 520 150"/>
-              <path d="M16 336 H40"/>
-            </g>
-            <g class="map-selects">
-              <path d="M472 170 C500 170 496 40 520 40"/>
-              <path d="M472 170 C500 170 496 98 520 98"/>
-              <path d="M472 170 C500 170 496 156 520 156"/>
-              <path d="M92 336 H116"/>
-            </g>
-            <g class="map-grants">
-              <path d="M144 262 H180"/>
-              <path d="M308 262 H344"/>
-              <path d="M472 262 H520"/>
-              <path d="M178 336 H202"/>
-            </g>
-            <g class="map-nodes">
-              <rect x="16" y="48" width="128" height="44" rx="8"/>
-              <rect class="map-focus" x="180" y="48" width="128" height="44" rx="8"/>
-              <rect x="344" y="48" width="128" height="44" rx="8"/>
-              <rect x="344" y="148" width="128" height="44" rx="8"/>
-              <rect x="520" y="16" width="144" height="40" rx="8"/>
-              <rect x="520" y="74" width="144" height="40" rx="8"/>
-              <rect x="520" y="132" width="144" height="40" rx="8"/>
-              <rect x="16" y="240" width="128" height="44" rx="8"/>
-              <rect x="180" y="240" width="128" height="44" rx="8"/>
-              <rect x="344" y="240" width="128" height="44" rx="8"/>
-            </g>
-            <rect class="map-rule" x="520" y="244" width="144" height="36" rx="18"/>
-            <g class="map-dots">
-              <circle cx="533" cy="36" r="3.5"/>
-              <circle cx="533" cy="94" r="3.5"/>
-              <circle cx="533" cy="152" r="3.5"/>
-            </g>
-            <g class="map-kind">
-              <text x="28" y="65">APPLICATION</text>
-              <text x="192" y="65">DEPLOYMENT</text>
-              <text x="356" y="65">REPLICASET</text>
-              <text x="356" y="165">SERVICE</text>
-              <text x="28" y="257">SERVICEACCOUNT</text>
-              <text x="192" y="257">ROLEBINDING</text>
-              <text x="356" y="257">ROLE</text>
-            </g>
-            <g class="map-name">
-              <text x="28" y="81">payments</text>
-              <text x="192" y="81">api</text>
-              <text x="356" y="81">api-7d9c6b5f8</text>
-              <text x="356" y="181">api</text>
-              <text class="map-pod" x="543" y="40">api-…-x2kqp</text>
-              <text class="map-pod" x="543" y="98">api-…-m8wzt</text>
-              <text class="map-pod" x="543" y="156">api-…-r5n2c</text>
-              <text x="28" y="273">api</text>
-              <text x="192" y="273">api-read</text>
-              <text x="356" y="273">pod-reader</text>
-            </g>
-            <text class="map-rule-text" x="536" y="266">get, list, watch pods</text>
-            <text class="map-note" x="16" y="306">Used by 3 Pods</text>
-            <g class="map-legend">
-              <text x="46" y="339">Owns</text>
-              <text x="122" y="339">Selects</text>
-              <text x="208" y="339">Grants access</text>
-            </g>
-          </svg>
+        <figure class="card__media">
+          <img {{image:canvas-map.png}} alt="The resource map of prod-eu-west: load balancers, Services, Deployments and their Pods, grouped by namespace" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -252,34 +152,10 @@
             <li>A cluster label for backends that hold several clusters</li>
             <li>Errors and empty answers say which setting to check</li>
           </ul>
+          <a class="card__link" href="docs/metrics.html">What a cluster needs for metrics<svg class="icon icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
         </div>
-        <figure class="card__media mock" id="mock-metrics" role="img" aria-label="The Metrics tab of Deployment api: CPU at 0.21 cores under its 0.25 core request and memory at 182 MiB under its 256 MiB limit over 6 hours, with the source line naming Prometheus, the tenant and the cluster label">
-          <div class="mock-metrics__head"><span class="overline">Deployment</span><span class="mock__title">api</span></div>
-          <div class="mock-metrics__tabs">
-            <span>Overview</span><span>Pods</span><span>YAML</span><span class="mock-metrics__tab--active">Metrics</span><span>Map</span>
-            <span class="mock__segmented"><span>1h</span><span class="mock__segmented-on">6h</span><span>24h</span></span>
-          </div>
-          <div class="mock-metrics__charts">
-            <div class="mock-chart">
-              <span class="mock-chart__title">CPU</span>
-              <span class="mock-chart__value"><strong>0.21</strong> cores · request 0.25</span>
-              <svg viewBox="0 0 280 150" preserveAspectRatio="none" aria-hidden="true">
-                <path class="chart-limit" d="M0 37 H280" vector-effect="non-scaling-stroke"/>
-                <path class="chart-area" d="M0 150 L0 96 L12 92 L24 98 L36 88 L48 84 L60 90 L72 76 L84 70 L96 78 L108 66 L120 72 L132 58 L144 62 L156 54 L168 66 L180 60 L192 70 L204 64 L216 52 L228 58 L240 50 L252 62 L264 56 L280 60 L280 150 Z"/>
-                <path class="chart-line" d="M0 96 L12 92 L24 98 L36 88 L48 84 L60 90 L72 76 L84 70 L96 78 L108 66 L120 72 L132 58 L144 62 L156 54 L168 66 L180 60 L192 70 L204 64 L216 52 L228 58 L240 50 L252 62 L264 56 L280 60" vector-effect="non-scaling-stroke"/>
-              </svg>
-            </div>
-            <div class="mock-chart">
-              <span class="mock-chart__title">Memory</span>
-              <span class="mock-chart__value"><strong>182</strong> MiB · limit 256 MiB</span>
-              <svg viewBox="0 0 280 150" preserveAspectRatio="none" aria-hidden="true">
-                <path class="chart-limit" d="M0 22 H280" vector-effect="non-scaling-stroke"/>
-                <path class="chart-area" d="M0 150 L0 82 L20 80 L40 78 L60 79 L80 74 L100 72 L120 73 L140 68 L160 66 L180 67 L200 62 L220 60 L240 61 L260 57 L280 55 L280 150 Z"/>
-                <path class="chart-line" d="M0 82 L20 80 L40 78 L60 79 L80 74 L100 72 L120 73 L140 68 L160 66 L180 67 L200 62 L220 60 L240 61 L260 57 L280 55" vector-effect="non-scaling-stroke"/>
-              </svg>
-            </div>
-          </div>
-          <p class="mock-metrics__source">source: prometheus in the cluster · monitoring/prometheus:9090 · tenant team-payments · cluster=prod-eu</p>
+        <figure class="card__media">
+          <img {{image:canvas-metrics.png}} alt="The Metrics tab of a Pod's details: CPU and memory over the last hour against their requests and limits, read from Prometheus through the API server proxy" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -294,46 +170,46 @@
             <li>Sync an Application from the app</li>
           </ul>
         </div>
-        <figure class="card__media mock mock--page mock--padded mock--fit" id="mock-apps" role="img" aria-label="Three Helm releases with their charts and revisions, all deployed, and three Argo CD Applications with their sync state and health, beside a Sync button">
-          <div class="mock-table">
-            <div class="mock-table__head"><svg class="icon" aria-hidden="true"><use href="#i-package"/></svg><strong>Helm releases</strong><span class="mock__count">3</span></div>
-            <div class="mock-table__row"><span class="mock__name">ingress-nginx</span><span class="mock-table__ns">ingress</span><span class="mock-table__chart">ingress-nginx-4.11.3</span><span class="mock-table__rev">7</span><span class="badge badge--ok badge--dot">Deployed</span></div>
-            <div class="mock-table__row"><span class="mock__name">cert-manager</span><span class="mock-table__ns">cert-manager</span><span class="mock-table__chart">cert-manager-v1.16.1</span><span class="mock-table__rev">4</span><span class="badge badge--ok badge--dot">Deployed</span></div>
-            <div class="mock-table__row"><span class="mock__name">prometheus</span><span class="mock-table__ns">monitoring</span><span class="mock-table__chart">kube-prometheus-stack-65.1.0</span><span class="mock-table__rev">12</span><span class="badge badge--ok badge--dot">Deployed</span></div>
-          </div>
-          <div class="mock-table">
-            <div class="mock-table__head"><svg class="icon" aria-hidden="true"><use href="#i-git-branch"/></svg><strong>Argo CD Applications</strong><span class="mock__count">3</span><span class="mock__actions"><span class="mock__button"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-refresh-cw"/></svg>Sync</span></span></div>
-            <div class="mock-table__row"><span class="mock__name">payments</span><span class="mock-table__path">apps/payments</span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Synced</span></span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Healthy</span></span></div>
-            <div class="mock-table__row"><span class="mock__name">shop</span><span class="mock-table__path">apps/shop</span><span class="mock-table__badge"><span class="badge badge--warn badge--dot">OutOfSync</span></span><span class="mock-table__badge"><span class="badge badge--danger badge--dot">Degraded</span></span></div>
-            <div class="mock-table__row"><span class="mock__name">platform</span><span class="mock-table__path">platform/base</span><span class="mock-table__badge"><span class="badge badge--ok badge--dot">Synced</span></span><span class="mock-table__badge"><span class="badge badge--dot">Progressing</span></span></div>
-          </div>
+        <figure class="card__media card__media--stack">
+          <img {{image:canvas-helm.png}} alt="Five Helm releases with their charts, app versions, revisions and status" loading="lazy" decoding="async">
+          <img {{image:canvas-argo.png}} alt="Seven Argo CD Applications with their sync state and health" loading="lazy" decoding="async">
         </figure>
       </article>
 
-      <article class="card card--third card--small">
+      <article class="card card--third">
         <div class="card__text">
           <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-table"/></svg></span>
           <h3 class="card__title">Live resource tables</h3>
           <p>Each kind has its own columns, status and actions, such as scale, restart and node drain. Lists follow the cluster as it changes.</p>
         </div>
+        <figure class="card__media">
+          <img {{image:canvas-pods.png}} alt="The Pods of prod-eu-west with their namespace, readiness, status and restarts" loading="lazy" decoding="async">
+        </figure>
       </article>
 
-      <article class="card card--third card--small">
+      <article class="card card--third">
         <div class="card__text">
           <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-cpu"/></svg></span>
           <h3 class="card__title">Tauri 2 and a Rust core</h3>
           <p>A Rust core and a React UI in a native shell. The Windows installer is {{asset:x64-setup.exe:size}}.</p>
         </div>
+        <figure class="card__media">
+          <img {{image:canvas-about.png}} alt="The About dialog: version, build, the Tauri runtime and the open-source components with their licenses" loading="lazy" decoding="async">
+        </figure>
       </article>
 
-      <article class="card card--third card--small">
+      <article class="card card--third">
         <div class="card__text">
           <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-command"/></svg></span>
           <h3 class="card__title">Keyboard first</h3>
           <p>A command palette and shortcuts for every view, from switching clusters to opening a shell.</p>
         </div>
+        <figure class="card__media">
+          <img {{image:canvas-palette.png}} alt="The command palette: commands with their shortcuts, then the clusters with their state" loading="lazy" decoding="async">
+        </figure>
       </article>
     </div>
+    <p class="bento__note">The pictures on this page come from the app's design canvas, which shows every screen with sample clusters.</p>
   </section>
 
   <div class="rule" aria-hidden="true"><svg class="rule__star rule__star--start"><use href="#frame-star"/></svg><svg class="rule__star rule__star--end"><use href="#frame-star"/></svg></div>
@@ -349,7 +225,7 @@
         <p class="themes__text">SkoposIDE follows your system theme, or keeps the one you pick in Preferences. The same Pods list, in the light theme.</p>
       </div>
       <figure class="shot themes__shot" data-theme="light">
-        <img {{image:pods-drawer-light.png}} alt="The same Pods list and details drawer in the light theme" loading="lazy" decoding="async">
+        <img {{image:canvas-pods-drawer-light.png}} alt="The same Pods list and details drawer in the light theme" loading="lazy" decoding="async">
       </figure>
     </div>
   </section>
@@ -431,24 +307,12 @@
     <p class="section__lead">The plan lives in <a href="https://github.com/vanlongme/skopos-ide/blob/main/docs/roadmap.md">docs/roadmap.md</a> and changes as work lands.</p>
     <div class="milestones">
       <article class="milestone">
-        <p class="overline overline--accent">Milestone B</p>
-        <h3 class="milestone__title">Ecosystem integrations</h3>
+        <p class="overline overline--accent">Next milestone</p>
+        <h3 class="milestone__title">Security, cost and extensions</h3>
         <dl class="milestone__items">
-          <div><dt>GitOps</dt><dd>Flux objects, sync status and reconcile</dd></div>
-          <div><dt>Policy</dt><dd>Admission policies and bindings</dd></div>
+          <div><dt>Security</dt><dd>Image vulnerability scanning of running workloads</dd></div>
           <div><dt>Cost</dt><dd>OpenCost-backed cost views</dd></div>
-          <div><dt>Security</dt><dd>Image vulnerability scanning</dd></div>
-          <div><dt>Cloud</dt><dd>Clusters from AWS, Azure and Google Cloud accounts</dd></div>
-          <div><dt>CLI and MCP</dt><dd>A skopos command and an MCP server for AI agents</dd></div>
-          <div><dt>Delivery</dt><dd>Code signing and notarization</dd></div>
-        </dl>
-      </article>
-      <article class="milestone">
-        <p class="overline overline--accent">Milestone C</p>
-        <h3 class="milestone__title">AI and extensions</h3>
-        <dl class="milestone__items">
-          <div><dt>AI chat</dt><dd>A cluster-aware assistant on your own model API key, asking before any change</dd></div>
-          <div><dt>Extensions</dt><dd>A public extension API with sandboxed loading</dd></div>
+          <div><dt>Extensions</dt><dd>A public extension API, sandboxed loading and extension preference pages</dd></div>
         </dl>
       </article>
     </div>
@@ -484,6 +348,7 @@
         <li><a href="#features">Features</a></li>
         <li><a href="#download">Download</a></li>
         <li><a href="#roadmap">Roadmap</a></li>
+        <li><a href="docs/metrics.html">Metrics setup</a></li>
         <li><a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a></li>
       </ul>
     </nav>
