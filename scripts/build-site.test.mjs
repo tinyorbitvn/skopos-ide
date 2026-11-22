@@ -564,13 +564,14 @@ describe("page", () => {
     assert.ok(html.includes('<script src="ribbon.js" defer></script>'));
   });
 
-  test("lays the features out as thirteen cards, each with its canvas picture", () => {
+  test("lays the features out as fourteen cards, each with its canvas picture", () => {
     const cards = [...html.matchAll(/<article class="card ([^"]+)">([\s\S]*?)<\/article>/g)];
     assert.deepEqual(
       cards.map((m) => m[1]),
       [
         "card--half",
         "card--half",
+        "card--wide",
         "card--half",
         "card--half",
         "card--third",
@@ -684,7 +685,7 @@ describe("page", () => {
 
   test("describes each canvas picture in its alt text", () => {
     const imgs = [...template.matchAll(/<img \{\{image:(canvas-[a-z-]+\.png)\}\} alt="([^"]*)"/g)];
-    assert.equal(imgs.length, 16);
+    assert.equal(imgs.length, 17);
     for (const [, name, alt] of imgs) assert.ok(alt.length >= 40, name);
   });
 
@@ -693,6 +694,15 @@ describe("page", () => {
     assert.ok(names.includes("canvas-pods-drawer-dark.png"));
     assert.ok(names.includes("canvas-pods-drawer-light.png"));
     for (const name of names) assert.match(name, /^canvas-[a-z-]+\.png$/);
+  });
+
+  test("holds a closed lightbox dialog with a named close button for site.js", () => {
+    const dialog = /<dialog class="lightbox" id="lightbox" aria-label="Enlarged picture">([\s\S]*?)<\/dialog>/.exec(template);
+    assert.ok(dialog, "the dialog");
+    assert.doesNotMatch(dialog[0], /\sopen[\s>]/);
+    assert.match(dialog[1], /<button class="lightbox__close" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"\/><\/svg><\/button>/);
+    assert.match(dialog[1], /<figcaption class="lightbox__caption" aria-hidden="true"><\/figcaption>/);
+    assert.ok(html.includes('<symbol id="i-x"'), "the close icon is in the sprite");
   });
 
   test("links the metrics docs from the menu, the metrics card and the footer", () => {

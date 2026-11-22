@@ -350,6 +350,120 @@ describe("site.js", () => {
     assert.doesNotMatch(CODE, /fetch\(|XMLHttpRequest|sendBeacon|WebSocket|import\(/);
   });
 
+  describe("initLightbox", () => {
+    // A node with attributes and the listeners site.js adds.
+    function node(attrs = {}) {
+      return {
+        attrs: { ...attrs },
+        listeners: {},
+        className: "",
+        textContent: "",
+        focused: 0,
+        getAttribute(name) {
+          return Object.hasOwn(this.attrs, name) ? this.attrs[name] : null;
+        },
+        setAttribute(name, value) {
+          this.attrs[name] = String(value);
+        },
+        addEventListener(type, fn) {
+          (this.listeners[type] ??= []).push(fn);
+        },
+        fire(type, event = {}) {
+          for (const fn of this.listeners[type] ?? []) fn({ target: this, preventDefault() {}, ...event });
+        },
+        focus() {
+          this.focused += 1;
+        },
+      };
+    }
+
+    // The lightbox dialog of site/index.html and two feature pictures.
+    function lightboxPage({ showModal = true } = {}) {
+      const close = node({ "aria-label": "Close" });
+      const caption = node();
+      const figure = node();
+      figure.inserted = [];
+      figure.insertBefore = (child, before) => figure.inserted.push([child, before]);
+      const dialog = node();
+      dialog.opened = 0;
+      if (showModal) {
+        dialog.showModal = () => {
+          dialog.opened += 1;
+        };
+      }
+      dialog.close = () => dialog.fire("close");
+      dialog.querySelector = (selector) =>
+        ({ ".lightbox__figure": figure, ".lightbox__caption": caption, ".lightbox__close": close })[selector] ?? null;
+      const pictures = [
+        node({ src: "images/canvas-map.png", alt: "The resource map of prod-eu-west" }),
+        node({ src: "images/canvas-pods.png", alt: "The Pods of prod-eu-west" }),
+      ];
+      return {
+        dialog,
+        close,
+        caption,
+        figure,
+        pictures,
+        getElementById: (id) => (id === "lightbox" ? dialog : null),
+        querySelectorAll: (selector) => (selector === ".card__media img" ? pictures : []),
+        createElement: () => node(),
+      };
+    }
+
+    test("leaves the pictures alone without the dialog or without dialog support", () => {
+      const site = loadSite();
+      const old = lightboxPage({ showModal: false });
+      assert.equal(site.initLightbox(old), 0);
+      assert.equal(old.pictures[0].getAttribute("role"), null);
+      const none = lightboxPage();
+      none.getElementById = () => null;
+      assert.equal(site.initLightbox(none), 0);
+    });
+
+    test("makes each picture a button that opens it larger with its alt text as the caption", () => {
+      const doc = lightboxPage();
+      assert.equal(loadSite().initLightbox(doc), 2);
+      const [map, pods] = doc.pictures;
+      assert.deepEqual(plain(map.attrs), {
+        src: "images/canvas-map.png",
+        alt: "The resource map of prod-eu-west",
+        tabindex: "0",
+        role: "button",
+        "aria-haspopup": "dialog",
+        "aria-label": "Enlarge: The resource map of prod-eu-west",
+      });
+      const [[big, before]] = doc.figure.inserted;
+      assert.equal(before, doc.caption);
+      assert.equal(big.className, "lightbox__img");
+
+      pods.fire("click");
+      assert.equal(doc.dialog.opened, 1);
+      assert.equal(big.getAttribute("src"), "images/canvas-pods.png");
+      assert.equal(big.getAttribute("alt"), "The Pods of prod-eu-west");
+      assert.equal(doc.caption.textContent, "The Pods of prod-eu-west");
+
+      map.fire("keydown", { key: "Enter" });
+      map.fire("keydown", { key: " " });
+      map.fire("keydown", { key: "a" });
+      assert.equal(doc.dialog.opened, 3);
+      assert.equal(big.getAttribute("src"), "images/canvas-map.png");
+    });
+
+    test("closes on the close button or beside the picture and gives the focus back", () => {
+      const doc = lightboxPage();
+      loadSite().initLightbox(doc);
+      const [map] = doc.pictures;
+      map.fire("click");
+      doc.close.fire("click");
+      assert.equal(map.focused, 1);
+      map.fire("click");
+      doc.dialog.fire("click", { target: doc.figure });
+      assert.equal(map.focused, 1, "a click on the picture keeps it open");
+      doc.dialog.fire("click");
+      assert.equal(map.focused, 2);
+    });
+  });
+
   test("starts by itself only where there is a document", () => {
     for (const [globals, starts] of [
       [["document", "navigator"], true],

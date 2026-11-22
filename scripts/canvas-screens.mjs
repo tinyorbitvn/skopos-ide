@@ -75,6 +75,18 @@ export const SHOTS = [
     clip: `[$(".sh-work"), 0, $(".sh-work").offsetHeight - 626, $(".sh-work").offsetWidth, 626]`,
   },
   {
+    name: "canvas-split",
+    steps: `
+      await openPods();
+      click("Split right");
+      await waitFor(() => document.querySelectorAll(".sk-root section.sh-pane").length === 2);
+      await sleep(400);
+      click("Overview");
+      await waitFor(() => has("Capacity") && document.querySelectorAll(".sk-root section.sh-pane").length === 2);
+      await sleep(1500);`,
+    clip: `[$(".sh-work"), 12, 0, $(".sh-work").offsetWidth - 12, $(".sh-work").offsetHeight]`,
+  },
+  {
     name: "canvas-overview",
     steps: `
       await openCluster();
