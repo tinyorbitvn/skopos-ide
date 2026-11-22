@@ -419,10 +419,16 @@ spec:
     const once = (ids: string[]) =>
       ids.filter((id) => id.startsWith(`resource-row-${NS}-once-`));
 
+    // Every pod of the fixture runs: the Job's pod runs the pause image, which never exits.
     await searchResources("status = Running");
     await expectRows(
-      "the web pods, without the finished job's pod",
-      (ids) => web(ids).length === 2 && once(ids).length === 0,
+      "every pod of the fixture",
+      (ids) => web(ids).length === 2 && once(ids).length === 1,
+    );
+    await searchResources("status != Running");
+    await expectRows(
+      "none of the fixture's pods",
+      (ids) => web(ids).length === 0 && once(ids).length === 0,
     );
 
     await searchResources("age < 1d");
@@ -452,6 +458,10 @@ spec:
     );
     await chip.waitForExist({ timeout: 10000 });
     expect(await chip.getAttribute("title")).toBe(`column ip=${ip}`);
+
+    // Naming the hidden column keeps only the pod that shows exactly that IP.
+    await searchResources(`ip = ${ip}`);
+    await expectRowsExactly([rowId(NS, name)]);
 
     await searchResources("");
   });
