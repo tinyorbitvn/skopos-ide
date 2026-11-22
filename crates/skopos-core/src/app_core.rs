@@ -425,8 +425,10 @@ impl AppCore {
     }
 
     /// A metrics setting that needs no password or token deletes the saved one (spec I50).
+    /// The agent settings are tidied, or refused, as `ClusterAgentSettings::normalized` says.
     pub fn cluster_settings_set(&self, id: &ClusterId, mut s: ClusterSettings) -> CoreResult<()> {
         s.metrics_provider = s.metrics_provider.normalized()?;
+        s.agent = s.agent.normalized()?;
         let metrics_changed = self.cluster_settings_get(id).metrics_provider != s.metrics_provider;
         let needs_secret = s.metrics_provider.needs_secret();
         self.inner.clusters.update(|all| {
@@ -443,6 +445,19 @@ impl AppCore {
         // Entries carry the display name and icon.
         let _ = self.inner.events.send(CoreEvent::CatalogChanged);
         Ok(())
+    }
+
+    /// Changes one cluster's saved settings with none of `cluster_settings_set`'s side
+    /// effects: no event, and the metrics caches and the keychain are left alone.
+    pub(crate) fn cluster_settings_update(
+        &self,
+        id: &ClusterId,
+        f: impl FnOnce(&mut ClusterSettings),
+    ) -> CoreResult<()> {
+        self.inner.clusters.try_update(|all| {
+            f(all.entry(id.clone()).or_default());
+            Ok(())
+        })
     }
 
     /// The pinned clusters in the catalog right now. Others stay saved, so a
@@ -650,7 +665,18 @@ impl AppCore {
         self.inner.prefs.get()
     }
 
-    /// Saves `p` and applies its sync sources immediately.
+    /// Changes the saved preferences in place; an error from `f` leaves them as they were.
+    /// For the fields the kubeconfig sync does not read, such as the agent settings.
+    pub(crate) fn prefs_try_update<R>(
+        &self,
+        f: impl FnOnce(&mut Prefs) -> CoreResult<R>,
+    ) -> CoreResult<R> {
+        self.inner.prefs.try_update(f)
+    }
+
+    /// Saves `p` and applies its sync sources immediately. The agent settings stay as
+    /// saved: only the agent calls change them, so a page that read the preferences before
+    /// one of those calls cannot undo it.
     pub fn prefs_set(&self, p: Prefs) -> CoreResult<()> {
         let p = p.normalized()?;
         // Cluster ids hash the path, so a relative one would change between launches.
@@ -667,7 +693,10 @@ impl AppCore {
         }
         let sync = lock(&self.inner.sync);
         let sources = p.sync_sources.clone();
-        self.inner.prefs.update(|prefs| *prefs = p)?;
+        self.inner.prefs.update(|prefs| {
+            let agents = std::mem::take(&mut prefs.agents);
+            *prefs = Prefs { agents, ..p };
+        })?;
         if let Some(sync) = sync.as_ref() {
             sync.set_sources(all_sources(&self.inner.pasted, sources));
         }
