@@ -3,6 +3,8 @@
 //! only: on Windows every agent call refuses with `Unsupported` and the readers give the
 //! defaults (spec §2, §11).
 
+pub mod bridge;
+pub mod modes;
 pub mod registry;
 pub mod sandbox;
 pub mod settings;

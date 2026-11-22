@@ -6,6 +6,8 @@
 
 pub mod env;
 #[cfg(target_os = "linux")]
+pub mod init;
+#[cfg(target_os = "linux")]
 pub mod linux;
 pub mod paths;
 pub mod spec;
