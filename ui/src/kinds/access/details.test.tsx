@@ -68,8 +68,23 @@ test("a binding to a ClusterRole links to the ClusterRole without a namespace", 
   expect(role).toContain("/clusterroles?");
   expect(role).toContain("object=/admin");
   expect(href("ServiceAccount sa")).toContain("object=other/sa");
-  expect(screen.getByText("alice")).toBeTruthy();
-  expect(screen.queryByRole("link", { name: /alice/ })).toBeNull();
+  expect(href("User alice")).toBe("/cluster/c/users-groups?subject=User:alice");
+});
+
+test("a group subject links to Users & Groups; a kind without a screen stays text", () => {
+  show(RoleBindingDetail, {
+    metadata: { name: "b", namespace: "d" },
+    roleRef: { kind: "ClusterRole", name: "view" },
+    subjects: [
+      { kind: "Group", name: "system:masters" },
+      { kind: "Robot", name: "r2" },
+    ],
+  });
+  expect(href("Group system:masters")).toBe(
+    "/cluster/c/users-groups?subject=Group:system:masters",
+  );
+  expect(screen.getByText("r2")).toBeTruthy();
+  expect(screen.queryByRole("link", { name: /r2/ })).toBeNull();
 });
 
 test("a binding to a Role links within its namespace", () => {

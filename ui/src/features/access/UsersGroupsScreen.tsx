@@ -11,6 +11,7 @@ import {
   type TableColumn,
   VirtualTable,
 } from "../../design";
+import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { CLUSTER_ROLE_BINDINGS, ROLE_BINDINGS } from "../../kinds/refs";
 import {
   type ResourceListState,
@@ -21,6 +22,8 @@ import { useClusterContext } from "../cluster/ClusterLayout";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import styles from "../resources/ResourceScreen.module.css";
 import own from "./access.module.css";
+import { RemoveSubjectDialog } from "./RemoveSubjectDialog";
+import { SubjectDrawer } from "./SubjectDrawer";
 import {
   collectSubjects,
   filterSubjects,
@@ -95,13 +98,22 @@ function partialNote(
 }
 
 /** The Users and Groups that bindings name (spec 2026-11-22 §5.3). */
-export function UsersGroupsScreen({ clusterId }: { clusterId: string }) {
+export function UsersGroupsScreen({
+  clusterId,
+  resources,
+}: {
+  clusterId: string;
+  resources: ApiResourceInfo[];
+}) {
   const [namespaces] = useUiState<string[]>(namespaceFilterKey(clusterId), []);
   const clusterBindings = useResourceList(clusterId, CLUSTER_ROLE_BINDINGS);
   const roleBindings = useResourceList(clusterId, ROLE_BINDINGS, namespaces);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<KindFilter>("all");
   const [showSystem, setShowSystem] = useState(false);
+  // The entry as it was when Remove was pressed, so the confirm sends the versions shown.
+  const [removing, setRemoving] = useState<SubjectEntry | null>(null);
+
   const [params, setParams] = useSearchParams();
   const all = useMemo(
     () => collectSubjects(clusterBindings.items, roleBindings.items),
@@ -220,13 +232,36 @@ export function UsersGroupsScreen({ clusterId }: { clusterId: string }) {
       ) : null}
       <div className={styles.body}>
         <div className={styles.main}>{body}</div>
+        {opened ? (
+          <SubjectDrawer
+            key={opened.key}
+            clusterId={clusterId}
+            resources={resources}
+            subject={opened}
+            onRemove={() => setRemoving(opened)}
+            onClose={() => open(null)}
+          />
+        ) : null}
       </div>
+      {removing ? (
+        <RemoveSubjectDialog
+          clusterId={clusterId}
+          subject={removing}
+          onClose={() => setRemoving(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
 /** The route inside a connected cluster's layout. */
 export function UsersGroupsRoute() {
-  const { clusterId } = useClusterContext();
-  return <UsersGroupsScreen key={clusterId} clusterId={clusterId} />;
+  const { clusterId, resources } = useClusterContext();
+  return (
+    <UsersGroupsScreen
+      key={clusterId}
+      clusterId={clusterId}
+      resources={resources}
+    />
+  );
 }
