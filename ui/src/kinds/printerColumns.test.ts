@@ -157,3 +157,24 @@ test("columnsFromCrd maps a date type to age format", () => {
     started.sortValue?.(object) as number,
   );
 });
+
+test("columnsFromCrd gives a filter the text, the number and the age of each type", () => {
+  const now = Date.parse("2026-11-22T12:00:00Z");
+  const [size, phase, , started] = columnsFromCrd(crd, "v1");
+  const object = widget(
+    { size: 9 },
+    { phase: "Running", startTime: "2026-11-22T11:00:00Z" },
+  );
+  expect(phase.filter?.text(object, now)).toBe("Running");
+  expect(phase.filter?.text(widget({}), now)).toBeNull();
+  expect(phase.filter?.measure).toBeUndefined();
+  expect(size.filter?.text(object, now)).toBe("9");
+  expect(size.filter?.measure?.kind).toBe("number");
+  expect(size.filter?.measure?.amount(object, now)).toBe(9);
+  expect(size.filter?.measure?.amount(widget({}), now)).toBeNull();
+  expect(started.filter?.text(object, now)).toBe("1h");
+  expect(started.filter?.measure?.kind).toBe("duration");
+  expect(started.filter?.measure?.amount(object, now)).toBe(3600);
+  expect(started.filter?.text(widget({}), now)).toBeNull();
+  expect(started.filter?.measure?.amount(widget({}), now)).toBeNull();
+});

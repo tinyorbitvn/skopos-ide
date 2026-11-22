@@ -1,6 +1,10 @@
 import { type ComponentType, createElement, type ReactNode } from "react";
 import type { IconComponent } from "../design/icons";
-import { type TableColumn, useNow } from "../design/VirtualTable";
+import {
+  type ColumnFilter,
+  type TableColumn,
+  useNow,
+} from "../design/VirtualTable";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../ipc/generated/ResourceRef";
 import { formatAge, type KubeObject } from "./objects";
@@ -161,6 +165,32 @@ export function ageSortValue(from: string | undefined): number {
   return Number.isNaN(time) ? 0 : -time;
 }
 
+/** Whole seconds from an ISO time to `now`, or null when it is not a time. */
+export function secondsSince(
+  from: string | undefined,
+  now: number,
+): number | null {
+  const time = from ? Date.parse(from) : Number.NaN;
+  if (Number.isNaN(time)) return null;
+  return Math.max(0, Math.floor((now - time) / 1000));
+}
+
+/** The filter of a "time since" column: the age its cell shows and its seconds (column filter spec §4.2). */
+export function ageFilter(
+  get: (o: KubeObject) => string | undefined,
+): ColumnFilter<KubeObject> {
+  return {
+    text: (o, now) => {
+      const age = formatAge(get(o), now);
+      return age === "-" ? null : age;
+    },
+    measure: {
+      kind: "duration",
+      amount: (o, now) => secondsSince(get(o), now),
+    },
+  };
+}
+
 function text(value: string): ReactNode {
   return createElement("span", { title: value }, value);
 }
@@ -174,6 +204,7 @@ export function defaultColumns(
     header: "Name",
     width: "minmax(200px, 2fr)",
     sortValue: (o) => o.metadata.name,
+    filter: { text: (o) => o.metadata.name },
     render: (o) => text(o.metadata.name),
   };
   const namespace: TableColumn<KubeObject> = {
@@ -181,6 +212,7 @@ export function defaultColumns(
     header: "Namespace",
     width: "minmax(120px, 1fr)",
     sortValue: (o) => o.metadata.namespace ?? "",
+    filter: { text: (o) => o.metadata.namespace || null },
     render: (o) => text(o.metadata.namespace ?? ""),
   };
   const age: TableColumn<KubeObject> = {
@@ -188,6 +220,7 @@ export function defaultColumns(
     header: "Age",
     width: 88,
     sortValue: (o) => ageSortValue(o.metadata.creationTimestamp),
+    filter: ageFilter((o) => o.metadata.creationTimestamp),
     render: (o) => ageCell(o.metadata.creationTimestamp),
   };
   return resource.namespaced ? [name, namespace, age] : [name, age];

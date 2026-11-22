@@ -52,3 +52,25 @@ test("a status column shows a badge and sorts by its label", () => {
   expect(screen.getByText("Running")).toBeTruthy();
   expect(column.sortValue?.(object)).toBe("Running");
 });
+
+test("the helpers give a filter the text their cells show", () => {
+  const scheduled = { metadata: { name: "x" }, spec: { nodeName: "w1" } };
+  const node = textColumn("node", "Node", (o) => o.spec?.nodeName);
+  expect(node.filter?.text(scheduled, 0)).toBe("w1");
+  expect(node.filter?.text(object, 0)).toBeNull();
+  expect(node.filter?.measure).toBeUndefined();
+
+  const restarts = numberColumn(
+    "restarts",
+    "Restarts",
+    (o) => o.spec?.restarts,
+  );
+  expect(restarts.filter?.text(object, 0)).toBe("0");
+  expect(restarts.filter?.measure?.kind).toBe("number");
+  expect(
+    restarts.filter?.measure?.amount({ ...object, spec: { restarts: 3 } }, 0),
+  ).toBe(3);
+
+  const status = statusColumn(() => ({ label: "Running", tone: "ok" }));
+  expect(status.filter?.text(object, 0)).toBe("Running");
+});
