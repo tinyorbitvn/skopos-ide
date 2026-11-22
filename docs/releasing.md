@@ -111,12 +111,17 @@ release build sets `APPLE_SIGNING_IDENTITY`. The app needs no entitlements.
 - The maintainer keeps the `.p12`, its password and the `.p8` in a password manager. Nobody
   else handles them, and they are never committed.
 - "The Apple signing secrets are set" stops a macOS build when a value is missing, and passes
-  the values to the later steps of the macOS builds only.
-- "Check the macOS files" fails the build unless the dmg and both copies of the app:
+  the values to the later steps of the macOS builds only. The build's last step, which runs even
+  after a failure, deletes the `.p8` and empties those values, so the post-steps of the setup
+  actions never see them.
+- "Check the macOS files" fails the build unless the dmg and both copies of the app (the one in
+  the dmg and the one the updater installs):
   - are signed with Developer ID and the team's ID;
-  - use the hardened runtime with a secure timestamp and no entitlements;
   - carry a stapled ticket;
   - pass Gatekeeper as `Notarized Developer ID`.
+
+  Both copies of the app must also use the hardened runtime with a secure timestamp and no
+  entitlements.
 
   To check a downloaded release on a Mac:
 
@@ -124,6 +129,9 @@ release build sets `APPLE_SIGNING_IDENTITY`. The app needs no entitlements.
   node scripts/macos-trust.mjs check --dmg SkoposIDE_<version>_aarch64.dmg \
     --updater SkoposIDE_aarch64.app.tar.gz --team <Team ID>
   ```
+
+  On a Mac the check never changes the Gatekeeper setting: with assessments off, its first check
+  fails and says how to turn them on. Only in GitHub Actions does it turn them on itself.
 
 - When Apple rejects a submission, the step prints Apple's log. Fix the cause on `main` and
   move the tag (see [When a release fails](#when-a-release-fails)). When Apple is slow, the

@@ -332,7 +332,11 @@ describe("checkRelease", () => {
     assert.ok(calls.some((call) => call.startsWith(`hdiutil attach ${DMG} -nobrowse -readonly -mountpoint `)));
     assert.ok(calls.some((call) => call.startsWith("hdiutil detach ")));
     assert.ok(calls.some((call) => call.startsWith(`tar -xzf ${ARCHIVE} -C `)));
-    assert.equal(calls.filter((call) => call.startsWith("codesign --display --verbose=4")).length, 2);
+    assert.ok(calls.includes(`codesign --display --verbose=4 ${DMG}`));
+    assert.equal(calls.filter((call) => call.startsWith("codesign --display --verbose=4")).length, 3);
+    for (const name of ["signed with Developer ID Application", `team ${TEAM}`]) {
+      assert.ok(results.some((result) => result.name === `${DMG}: ${name}` && result.ok), name);
+    }
     assert.ok(results.some((result) => result.name.startsWith(`SkoposIDE.app in ${DMG}: `)));
     assert.ok(results.some((result) => result.name.startsWith(`SkoposIDE.app in ${ARCHIVE}: `)));
   });
@@ -345,7 +349,7 @@ describe("checkRelease", () => {
         () => ok(++statusCalls === 1 ? "assessments disabled\n" : "assessments enabled\n"),
       ],
     ]);
-    const results = checkRelease(run, options);
+    const results = checkRelease(run, { ...options, ci: true });
     assert.ok(calls.includes("sudo spctl --master-enable"));
     assert.equal(results[0].name, "Gatekeeper assessments are enabled");
     assert.equal(results[0].ok, true);
@@ -353,9 +357,31 @@ describe("checkRelease", () => {
 
   test("fails when Gatekeeper assessments stay off", () => {
     const { run } = fakeRun([["spctl --status", ok("assessments disabled\n")]]);
-    const [first] = checkRelease(run, options);
+    const [first] = checkRelease(run, { ...options, ci: true });
     assert.equal(first.name, "Gatekeeper assessments are enabled");
     assert.equal(first.ok, false);
+  });
+
+  test("leaves Gatekeeper alone on a person's Mac and says how to turn it on", () => {
+    const { run, calls } = fakeRun([["spctl --status", ok("assessments disabled\n")]]);
+    const [first] = checkRelease(run, options);
+    assert.ok(!calls.some((call) => call.startsWith("sudo")));
+    assert.equal(first.name, "Gatekeeper assessments are enabled");
+    assert.equal(first.ok, false);
+    assert.match(first.detail, /sudo spctl --master-enable/);
+  });
+
+  test("fails a dmg that another team signed", () => {
+    const { run } = fakeRun([
+      [`codesign --display --verbose=4 ${DMG}`, ok("", SIGNED.replaceAll(TEAM, "ZZZZZ99999"))],
+    ]);
+    assert.deepEqual(failing(checkRelease(run, options), ""), [`${DMG}: team ${TEAM}`]);
+  });
+
+  test("fails an ad-hoc signed dmg", () => {
+    const { run } = fakeRun([[`codesign --display --verbose=4 ${DMG}`, ok("", ADHOC)]]);
+    const failed = failing(checkRelease(run, options), "");
+    assert.ok(failed.includes(`${DMG}: signed with Developer ID Application`));
   });
 
   test("reports a dmg that does not mount and still checks the updater archive", () => {
@@ -372,6 +398,41 @@ describe("checkRelease", () => {
     const { run, calls } = fakeRun([["codesign --verify --deep", fail(1, "", "invalid")]]);
     checkRelease(run, options);
     assert.ok(calls.some((call) => call.startsWith("hdiutil detach ")));
+  });
+
+  test("removes its temporary folders", () => {
+    const own = fs.mkdtempSync(path.join(os.tmpdir(), "macos-trust-clean-"));
+    try {
+      checkRelease(fakeRun().run, { ...options, tmp: own });
+      checkRelease(fakeRun([["hdiutil attach", fail(1)]]).run, { ...options, tmp: own });
+      checkRelease(fakeRun([["tar -xzf", fail(2)]]).run, { ...options, tmp: own });
+      assert.deepEqual(fs.readdirSync(own), []);
+    } finally {
+      fs.rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps a mount folder that still holds the dmg's files", () => {
+    const own = fs.mkdtempSync(path.join(os.tmpdir(), "macos-trust-busy-"));
+    try {
+      const { run } = fakeRun([
+        [
+          "hdiutil attach",
+          (line) => {
+            fs.writeFileSync(path.join(line.split(" ").at(-1), "file"), "");
+            return ok();
+          },
+        ],
+        ["hdiutil detach", fail(16, "", "hdiutil: couldn't unmount - Resource busy")],
+      ]);
+      checkRelease(run, { ...options, tmp: own });
+      const left = fs.readdirSync(own);
+      assert.equal(left.length, 1);
+      assert.ok(left[0].startsWith("dmg-"));
+      assert.deepEqual(fs.readdirSync(path.join(own, left[0])), ["file"]);
+    } finally {
+      fs.rmSync(own, { recursive: true, force: true });
+    }
   });
 
   test("reports an updater archive that does not extract", () => {
@@ -426,12 +487,28 @@ describe("notarizeDmg", () => {
       ["notarytool submit", fail(1, '{"id":"abc","status":"In Progress"}')],
     ]);
     assert.throws(() => notarizeDmg(run, DMG, API_ENV, () => {}), /In Progress/);
+    assert.ok(calls.some((call) => call.startsWith("xcrun notarytool log abc --key ")));
     assert.ok(!calls.some((call) => call.startsWith("xcrun stapler")));
   });
 
-  test("fails when stapling fails", () => {
-    const { run } = fakeRun([["stapler staple", fail(65, "", "Could not validate ticket")]]);
+  test("fails when stapling fails three times, waiting between tries", () => {
+    const { run, calls } = fakeRun([["stapler staple", fail(65, "", "Could not validate ticket")]]);
     assert.throws(() => notarizeDmg(run, DMG, API_ENV, () => {}), /stapler could not staple/);
+    assert.equal(calls.filter((call) => call === `xcrun stapler staple ${DMG}`).length, 3);
+    assert.equal(calls.filter((call) => call === "sleep 20").length, 2);
+  });
+
+  test("staples on a later try while Apple's ticket is still on its way", () => {
+    let tries = 0;
+    const { run, calls } = fakeRun([
+      ["stapler staple", () => (++tries === 1 ? fail(65, "", "Record not found") : ok())],
+    ]);
+    const lines = [];
+    notarizeDmg(run, DMG, API_ENV, (line) => lines.push(line));
+    assert.equal(tries, 2);
+    assert.equal(calls.filter((call) => call === "sleep 20").length, 1);
+    assert.match(lines.join("\n"), /Record not found/);
+    assert.match(lines.join("\n"), /ticket stapled/);
   });
 
   test("runs nothing without credentials", () => {
@@ -453,6 +530,23 @@ describe("cli", () => {
     ]) {
       assert.throws(() => cli(argv, { ...quiet, run }), /usage: node scripts\/macos-trust\.mjs/);
     }
+  });
+
+  test("names the extra argument when a glob matches a second dmg", () => {
+    const { run } = fakeRun();
+    const argv = ["check", "--dmg", DMG, "other.dmg", "--updater", ARCHIVE, "--team", TEAM];
+    assert.throws(() => cli(argv, { ...quiet, run }), /'other\.dmg'[\s\S]*usage: node scripts/);
+  });
+
+  test("turns Gatekeeper on only inside GitHub Actions", () => {
+    const argv = ["check", "--dmg", DMG, "--updater", ARCHIVE, "--team", TEAM];
+    const off = () => fakeRun([["spctl --status", ok("assessments disabled\n")]]);
+    const local = off();
+    assert.throws(() => cli(argv, { ...quiet, run: local.run, env: {}, tmp }));
+    assert.ok(!local.calls.some((call) => call.startsWith("sudo")));
+    const actions = off();
+    assert.throws(() => cli(argv, { ...quiet, run: actions.run, env: { GITHUB_ACTIONS: "true" }, tmp }));
+    assert.ok(actions.calls.includes("sudo spctl --master-enable"));
   });
 
   test("prints one ok line per check for a good release", () => {

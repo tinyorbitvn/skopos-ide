@@ -12,6 +12,8 @@ import { parseArgs } from "node:util";
 export const APP = "SkoposIDE.app";
 export const NOTARIZED = "Notarized Developer ID";
 export const NOTARY_TIMEOUT = "40m";
+const STAPLE_ATTEMPTS = 3;
+const STAPLE_WAIT_SECONDS = 20;
 const USAGE = [
   "usage: node scripts/macos-trust.mjs notarize --dmg <file>",
   "       node scripts/macos-trust.mjs check --dmg <file> --updater <app.tar.gz> --team <team id>",
@@ -126,13 +128,9 @@ function gatekeeperAccepts(run, type, file, extra = []) {
   return { ok, detail: output(result) };
 }
 
-/** Checks one copy of the app; `label` starts each result's name. */
-export function checkApp(run, app, team, label) {
-  const results = [];
-  const add = (name, ok, detail) => results.push({ name: `${label}: ${name}`, ok, detail });
-  const verify = run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
-  add("codesign verifies the signature", verify.status === 0, output(verify));
-  const display = run("codesign", ["--display", "--verbose=4", app]);
+/** Adds the Developer ID and team checks every signed file gets, and returns its signature. */
+function checkSigner(run, file, team, add) {
+  const display = run("codesign", ["--display", "--verbose=4", file]);
   const shown = output(display);
   const signature = parseSignature(shown);
   const developerId =
@@ -141,6 +139,16 @@ export function checkApp(run, app, team, label) {
     (signature.authority ?? "").startsWith("Developer ID Application:");
   add("signed with Developer ID Application", developerId, shown);
   add(`team ${team}`, signature.team === team, shown);
+  return { signature, shown };
+}
+
+/** Checks one copy of the app; `label` starts each result's name. */
+export function checkApp(run, app, team, label) {
+  const results = [];
+  const add = (name, ok, detail) => results.push({ name: `${label}: ${name}`, ok, detail });
+  const verify = run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
+  add("codesign verifies the signature", verify.status === 0, output(verify));
+  const { signature, shown } = checkSigner(run, app, team, add);
   add("hardened runtime", signature.flags.includes("runtime"), shown);
   add("secure timestamp", signature.timestamp !== null, shown);
   const entitlements = run("codesign", ["--display", "--entitlements", "-", "--xml", app]);
@@ -157,10 +165,18 @@ export function checkApp(run, app, team, label) {
   return results;
 }
 
-/** Gatekeeper must be on for spctl to prove anything; turn it on when the runner has it off. */
-export function ensureGatekeeper(run) {
+/**
+ * Gatekeeper must be on for spctl to prove anything. On CI the check turns it on when the runner
+ * has it off; on a person's Mac it never changes the setting, and says how to.
+ */
+export function ensureGatekeeper(run, ci) {
   const name = "Gatekeeper assessments are enabled";
-  if (gatekeeperEnabled(output(run("spctl", ["--status"])))) return { name, ok: true, detail: "" };
+  const before = output(run("spctl", ["--status"]));
+  if (gatekeeperEnabled(before)) return { name, ok: true, detail: "" };
+  if (!ci) {
+    const how = "This check leaves the setting alone. To check here, run: sudo spctl --master-enable";
+    return { name, ok: false, detail: `${before}\n${how}`.trim() };
+  }
   const enable = run("sudo", ["spctl", "--master-enable"]);
   const status = output(run("spctl", ["--status"]));
   return { name, ok: gatekeeperEnabled(status), detail: `${output(enable)}\n${status}`.trim() };
@@ -173,6 +189,7 @@ export function checkDmg(run, dmg, team, tmp) {
   const add = (name, ok, detail) => results.push({ name: `${label}: ${name}`, ok, detail });
   const verify = run("codesign", ["--verify", "--strict", "--verbose=2", dmg]);
   add("codesign verifies the signature", verify.status === 0, output(verify));
+  checkSigner(run, dmg, team, add);
   const staple = run("xcrun", ["stapler", "validate", dmg]);
   add("stapled ticket", staple.status === 0, output(staple));
   const gatekeeper = gatekeeperAccepts(run, "open", dmg, [
@@ -183,31 +200,48 @@ export function checkDmg(run, dmg, team, tmp) {
   const mount = fs.mkdtempSync(path.join(tmp, "dmg-"));
   const attach = run("hdiutil", ["attach", dmg, "-nobrowse", "-readonly", "-mountpoint", mount]);
   add("mounts", attach.status === 0, output(attach));
-  if (attach.status !== 0) return results;
+  if (attach.status !== 0) {
+    removeEmptyFolder(mount);
+    return results;
+  }
   try {
     results.push(...checkApp(run, path.join(mount, APP), team, `${APP} in ${label}`));
   } finally {
     if (run("hdiutil", ["detach", mount]).status !== 0) {
       run("hdiutil", ["detach", "-force", mount]);
     }
+    removeEmptyFolder(mount);
   }
   return results;
+}
+
+/** Removes a folder only when it is empty: one that is still a mount point keeps its files. */
+function removeEmptyFolder(dir) {
+  try {
+    fs.rmdirSync(dir);
+  } catch {
+    // Still mounted or not empty; leaving it is the safe outcome.
+  }
 }
 
 /** Checks the app the updater installs, from its archive. */
 export function checkUpdater(run, archive, team, tmp) {
   const label = path.basename(archive);
   const dir = fs.mkdtempSync(path.join(tmp, "updater-"));
-  const extract = run("tar", ["-xzf", archive, "-C", dir]);
-  const extracted = { name: `${label}: extracts`, ok: extract.status === 0, detail: output(extract) };
-  if (!extracted.ok) return [extracted];
-  return [extracted, ...checkApp(run, path.join(dir, APP), team, `${APP} in ${label}`)];
+  try {
+    const extract = run("tar", ["-xzf", archive, "-C", dir]);
+    const extracted = { name: `${label}: extracts`, ok: extract.status === 0, detail: output(extract) };
+    if (!extracted.ok) return [extracted];
+    return [extracted, ...checkApp(run, path.join(dir, APP), team, `${APP} in ${label}`)];
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /** Every check of spec §4.3, in the order the log prints them. */
-export function checkRelease(run, { dmg, updater, team, tmp }) {
+export function checkRelease(run, { dmg, updater, team, tmp, ci = false }) {
   return [
-    ensureGatekeeper(run),
+    ensureGatekeeper(run, ci),
     ...checkDmg(run, dmg, team, tmp),
     ...checkUpdater(run, updater, team, tmp),
   ];
@@ -234,8 +268,16 @@ export function notarizeDmg(run, dmg, env, log) {
     log(output(run("xcrun", ["notarytool", "log", id, ...auth])));
     throw new Error(`Apple did not accept ${name}: ${status}`);
   }
-  const staple = run("xcrun", ["stapler", "staple", dmg]);
-  if (staple.status !== 0) throw new Error(`stapler could not staple ${name}: ${output(staple)}`);
+  // Right after Accepted, the ticket may not have reached Apple's ticket service yet.
+  for (let attempt = 1; ; attempt++) {
+    const staple = run("xcrun", ["stapler", "staple", dmg]);
+    if (staple.status === 0) break;
+    if (attempt === STAPLE_ATTEMPTS) {
+      throw new Error(`stapler could not staple ${name}: ${output(staple)}`);
+    }
+    log(`${name}: stapler failed, trying again in ${STAPLE_WAIT_SECONDS}s: ${output(staple)}`);
+    run("sleep", [String(STAPLE_WAIT_SECONDS)]);
+  }
   log(`${name}: ticket stapled`);
 }
 
@@ -254,8 +296,8 @@ export function cli(
         team: { type: "string" },
       },
     }));
-  } catch {
-    throw new Error(USAGE);
+  } catch (error) {
+    throw new Error(`${error.message}\n${USAGE}`);
   }
   if (command === "notarize" && values.dmg) {
     notarizeDmg(run, values.dmg, env, log);
@@ -267,6 +309,7 @@ export function cli(
       updater: values.updater,
       team: values.team,
       tmp,
+      ci: env.GITHUB_ACTIONS === "true",
     });
     for (const result of results) {
       log(`${result.ok ? "ok  " : "FAIL"} ${result.name}`);

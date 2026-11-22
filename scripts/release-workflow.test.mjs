@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -146,7 +148,7 @@ test("the Apple secrets step exports values safely and only the notarization met
     "put APPLE_PASSWORD",
     "fi",
   ]);
-  assert.match(apple, /::error::the release environment lacks the \$name; see docs\/releasing\.md/);
+  assert.match(apple, /::error::the release environment \$problem; see docs\/releasing\.md/);
 });
 
 test("after tauri-action the macOS legs notarize the dmg, check every file, then replace the dmg", () => {
@@ -176,4 +178,143 @@ test("after tauri-action the macOS legs notarize the dmg, check every file, then
 test("local, CI and e2e builds stay ad-hoc signed, with no entitlements", () => {
   const { macOS } = JSON.parse(read("crates", "skopos-app", "tauri.conf.json")).bundle;
   assert.deepEqual(macOS, { signingIdentity: "-" });
+});
+
+test("the last build step deletes the .p8 and empties every Apple secret, even after a failure", () => {
+  const build = job("build");
+  const exported = [
+    ...step(build, "The Apple signing secrets are set").matchAll(/^ +put (APPLE_[A-Z_]+) /gm),
+  ].map((match) => match[1]);
+  const variables = ["APPLE_SIGNING_IDENTITY", "APPLE_TEAM_ID"];
+  const secrets = exported.filter((name) => !variables.includes(name));
+  assert.equal(secrets.length, 7);
+  const scrub = step(build, "Remove the Apple secrets from the job");
+  assert.ok(build.trimEnd().endsWith(scrub.trimEnd()), "it is the build job's last step");
+  assert.match(scrub, /^ {8}if: always\(\) && runner\.os == 'macOS'$/m);
+  assert.match(scrub, /rm -f -- "\$APPLE_API_KEY_PATH"/);
+  for (const name of secrets) {
+    assert.match(scrub, new RegExp(`^ +echo "${name}="$`, "m"), `${name} is not emptied`);
+  }
+  assert.ok(!scrub.includes("secrets."));
+});
+
+/** A step's `run: |` block, without its indent. */
+function runBlock(stepText) {
+  const lines = stepText.split("\n");
+  const start = lines.findIndex((line) => /^ {8}run: \|$/.test(line));
+  assert.ok(start >= 0, "no run block");
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() !== "" && !line.startsWith(" ".repeat(10))) break;
+    body.push(line.slice(10));
+  }
+  return body.join("\n");
+}
+
+/** Reads a $GITHUB_ENV file as the runner does: `NAME=value` lines and `NAME<<DELIMITER` blocks. */
+function parseGithubEnv(text) {
+  const values = {};
+  const lines = text.split("\n");
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line === "") continue;
+    const block = line.match(/^([A-Z_]+)<<(.+)$/);
+    if (block) {
+      const end = lines.indexOf(block[2], index + 1);
+      assert.ok(end > index, `no closing delimiter for ${block[1]}`);
+      values[block[1]] = lines.slice(index + 1, end).join("\n");
+      index = end;
+    } else {
+      const at = line.indexOf("=");
+      values[line.slice(0, at)] = line.slice(at + 1);
+    }
+  }
+  return values;
+}
+
+// The release steps run on macOS only; Windows paths would need translating for Git Bash.
+const noBash =
+  (process.platform === "win32" || spawnSync("bash", ["-c", "command -v openssl"]).status !== 0) &&
+  "needs bash and openssl on a POSIX system";
+
+/** Runs one step's script as the runner would, with a fresh $GITHUB_ENV and $RUNNER_TEMP. */
+function runStep(name, env, prepare = () => {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-step-"));
+  try {
+    const githubEnv = path.join(dir, "github-env");
+    fs.writeFileSync(githubEnv, "");
+    prepare(dir);
+    const script = runBlock(step(job("build"), name));
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
+      env: { PATH: process.env.PATH, GITHUB_ENV: githubEnv, RUNNER_TEMP: dir, ...env(dir) },
+      encoding: "utf8",
+    });
+    const exported = parseGithubEnv(fs.readFileSync(githubEnv, "utf8"));
+    const keyPath = exported.APPLE_API_KEY_PATH;
+    const key = keyPath ? fs.readFileSync(keyPath, "utf8") : undefined;
+    const keyMode = keyPath ? fs.statSync(keyPath).mode & 0o777 : undefined;
+    return { ...result, exported, key, keyMode, files: fs.readdirSync(dir) };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----";
+const SECRETS = {
+  CERTIFICATE: "QUJD\nREVG\r\n",
+  CERTIFICATE_PASSWORD: "pa<<EOF\nss",
+  TEAM_ID: "ABCDE12345",
+  SIGNING_IDENTITY: "Developer ID Application: Example (ABCDE12345)",
+  API_KEY: "K1",
+  API_ISSUER: "issuer",
+  API_PRIVATE_KEY: PRIVATE_KEY,
+};
+const secretsStep = (values) => runStep("The Apple signing secrets are set", () => values);
+
+test("the Apple secrets step strips and masks the certificate and keeps odd values intact", { skip: noBash }, () => {
+  const result = secretsStep(SECRETS);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^::add-mask::QUJDREVG$/m);
+  assert.deepEqual(result.exported, {
+    APPLE_CERTIFICATE: "QUJDREVG",
+    APPLE_CERTIFICATE_PASSWORD: "pa<<EOF\nss",
+    APPLE_SIGNING_IDENTITY: "Developer ID Application: Example (ABCDE12345)",
+    APPLE_TEAM_ID: "ABCDE12345",
+    APPLE_API_KEY: "K1",
+    APPLE_API_ISSUER: "issuer",
+    APPLE_API_KEY_PATH: result.exported.APPLE_API_KEY_PATH,
+  });
+  assert.match(result.exported.APPLE_API_KEY_PATH, /AuthKey_K1\.p8$/);
+  assert.equal(result.key, `${PRIVATE_KEY}\n`);
+  assert.equal(result.keyMode, 0o600);
+});
+
+test("the Apple secrets step refuses a certificate that is only whitespace", { skip: noBash }, () => {
+  const result = secretsStep({ ...SECRETS, CERTIFICATE: " \n\r\n" });
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stdout,
+    /^::error::the release environment lacks the secret APPLE_CERTIFICATE; see docs\/releasing\.md$/m,
+  );
+  assert.deepEqual(result.exported, {});
+});
+
+test("the Apple secrets step refuses a Team ID that is not 10 letters and digits", { skip: noBash }, () => {
+  for (const team of ["ABCDE12345 ", "", "abcde12345"]) {
+    const result = secretsStep({ ...SECRETS, TEAM_ID: team });
+    assert.equal(result.status, 1, JSON.stringify(team));
+    assert.match(result.stdout, /^::error::the release environment needs the variable APPLE_TEAM_ID set to the 10-character Team ID; see docs\/releasing\.md$/m);
+    assert.deepEqual(result.exported, {});
+  }
+});
+
+test("the scrub step deletes the .p8 and empties the Apple values", { skip: noBash }, () => {
+  const result = runStep(
+    "Remove the Apple secrets from the job",
+    (dir) => ({ APPLE_API_KEY_PATH: path.join(dir, "AuthKey_K1.p8") }),
+    (dir) => fs.writeFileSync(path.join(dir, "AuthKey_K1.p8"), PRIVATE_KEY),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!result.files.includes("AuthKey_K1.p8"));
+  assert.deepEqual(Object.values(result.exported), ["", "", "", "", "", "", ""]);
 });
