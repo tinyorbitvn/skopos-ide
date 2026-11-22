@@ -192,7 +192,7 @@ export function PortForwardsScreen({ clusterId }: { clusterId: string }) {
 
   return (
     <div className={styles.screen} data-testid="port-forwards-screen">
-      <div className={styles.toolbar} data-keeps-drawer="">
+      <div className={styles.toolbar}>
         <h2 className={styles.title} data-testid="pf-title">
           Port Forwarding
         </h2>

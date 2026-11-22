@@ -5,7 +5,7 @@ import type { PortForward } from "../../ipc/generated/PortForward";
 import { resourcePath } from "../../kinds/nav";
 import { CopyRow } from "../details/CopyRow";
 import styles from "../details/DetailDrawer.module.css";
-import { DrawerShell } from "../details/DrawerShell";
+import { DrawerShell, shouldReturnFocus } from "../details/DrawerShell";
 import bar from "../resources/ObjectActionBar.module.css";
 import { ForwardStatus } from "./ForwardStatus";
 import { forwardActions } from "./forwardActions";
@@ -27,12 +27,18 @@ export function PortForwardDrawer(props: {
   const { kind, namespace, name } = forward.target;
   const drawerRef = useRef<HTMLElement>(null);
 
-  // As in the object drawer: focus comes in on open and goes back where it was.
+  // As in the object drawer: focus comes in on open and goes back where it was, unless a
+  // click outside that closed it gave focus to another part.
   useEffect(() => {
     const before = document.activeElement;
     drawerRef.current?.focus();
     return () => {
-      if (before instanceof HTMLElement && before.isConnected) before.focus();
+      if (
+        before instanceof HTMLElement &&
+        before.isConnected &&
+        shouldReturnFocus()
+      )
+        before.focus();
     };
   }, []);
 

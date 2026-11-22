@@ -3,6 +3,7 @@ import {
   type ReactNode,
   type Ref,
   type RefObject,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -44,15 +45,11 @@ export interface DrawerShellProps {
 }
 
 /**
- * Where a click on the dimmed screen is not one outside, as these parts work with the drawer
- * open:
- * - the drawer itself;
- * - a body row of a list's table, where a click shows that row in the drawer instead;
- * - the table's header, which sorts and resizes the columns;
- * - a part marked `data-keeps-drawer`, such as a list's toolbar and its row of filters.
+ * The rows of the drawer's own screen, where a click shows that row's object in the drawer
+ * instead of closing it: a body row of the list's table, and a part marked
+ * `data-keeps-drawer`, such as a node's card and its pods on the topology page.
  */
-const KEEPS_OPEN =
-  '[data-drawer], [data-keeps-drawer], [role="grid"] thead, [role="grid"] tbody tr';
+const ROWS = '[data-keeps-drawer], [role="grid"] tbody tr';
 
 /** What the dim covers: its containing block, the screen that owns the drawer. */
 function dimmedScreen(dim: HTMLElement): HTMLElement | null {
@@ -63,16 +60,29 @@ function dimmedScreen(dim: HTMLElement): HTMLElement | null {
 }
 
 /**
- * Closes the drawer on a click of the primary button on the dimmed screen around it, as
- * Close does. The dim lets clicks through, so a row of the list behind still shows in the
- * drawer, and the list's toolbar and column headers still work; those clicks are not ones
- * outside (`KEEPS_OPEN`). The press and the release must both land
- * outside, so a resize drag or a text selection that ends there does not count. A portal
- * (a menu, a dialog, a tooltip) and the rest of the window (the sidebar, the dock) lie
- * outside the screen, and unsaved edits keep the drawer open.
+ * The child of the body that holds `el`: the app's root. Menus, dialogs, selects and
+ * tooltips draw in portals beside it.
+ */
+function appRoot(el: HTMLElement): Element | null {
+  const body = el.ownerDocument.body;
+  let at: Element = el;
+  while (at.parentElement && at.parentElement !== body) at = at.parentElement;
+  return at.parentElement === body ? at : null;
+}
+
+/**
+ * Closes the drawer on a click of the primary button anywhere outside it, as Close does:
+ * on the dimmed screen around it, the list's toolbar and column headers, the sidebar, the
+ * tab strip, the header, the dock or another pane. The dim lets clicks through, so a row of
+ * the list behind still shows in the drawer (`ROWS`). The press and the release
+ * must both land outside, so a resize drag or a text selection that ends there does not
+ * count. A portal (a menu, a dialog, a select, a tooltip) lies outside the app's root, as
+ * does the page itself, which a press beside a modal menu or dialog lands on, and unsaved
+ * edits keep the drawer open.
  */
 function useCloseOnClickOutside(
   dim: RefObject<HTMLDivElement | null>,
+  frame: RefObject<HTMLElement | null>,
   unsaved: ReadonlySet<object>,
   onClose: () => void,
 ): void {
@@ -81,13 +91,14 @@ function useCloseOnClickOutside(
   useEffect(() => {
     const outside = (e: PointerEvent): boolean => {
       const target = e.target;
+      const drawer = frame.current;
+      if (e.button !== 0 || !(target instanceof Element) || !drawer)
+        return false;
+      if (drawer.contains(target) || !appRoot(drawer)?.contains(target))
+        return false;
+      const row = target.closest(ROWS);
       const screen = dim.current ? dimmedScreen(dim.current) : null;
-      return (
-        e.button === 0 &&
-        target instanceof Element &&
-        screen?.contains(target) === true &&
-        target.closest(KEEPS_OPEN) === null
-      );
+      return !(row && screen?.contains(row));
     };
     let pressed = false;
     const onDown = (e: PointerEvent) => {
@@ -110,21 +121,40 @@ function useCloseOnClickOutside(
       window.removeEventListener("pointerup", onUp, true);
       window.removeEventListener("pointercancel", onCancel, true);
     };
-  }, [dim, unsaved]);
+  }, [dim, frame, unsaved]);
+}
+
+/**
+ * True when a closing drawer should hand focus back to what had it before: unless focus
+ * moved on to a part outside, such as the filter box, the sidebar's search or a terminal in
+ * the dock that a click closed it from. Focus in the drawer goes to the body as it goes.
+ */
+export function shouldReturnFocus(): boolean {
+  const now = document.activeElement;
+  return now === null || now === document.body || !now.isConnected;
 }
 
 /**
  * The frame every drawer shares (spec H12–H17): a dimmed screen under a floating panel
  * with a resize handle on its left border, a band with the kind, the actions and Close,
- * the title under them, then the drawer's own tabs and content. A click on the dimmed
- * screen closes it, unless a part inside holds unsaved edits (`useUnsavedEdits`).
+ * the title under them, then the drawer's own tabs and content. A click anywhere outside
+ * closes it, unless a part inside holds unsaved edits (`useUnsavedEdits`).
  */
 export function DrawerShell(props: DrawerShellProps) {
-  const { onClose } = props;
+  const { onClose, ref } = props;
   const [width, setWidth] = usePaneSize(DRAWER_PANE);
   const dim = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLElement>(null);
+  const setFrame = useCallback(
+    (el: HTMLElement | null) => {
+      frame.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) ref.current = el;
+    },
+    [ref],
+  );
   const [unsaved] = useState(() => new Set<object>());
-  useCloseOnClickOutside(dim, unsaved, onClose);
+  useCloseOnClickOutside(dim, frame, unsaved, onClose);
   const onKeyDown = props.closeOnEscape
     ? (e: KeyboardEvent<HTMLElement>) => {
         if (e.key !== "Escape") return;
@@ -144,7 +174,7 @@ export function DrawerShell(props: DrawerShellProps) {
         data-testid={props.dimTestId ?? `${props.testId}-dim`}
       />
       <aside
-        ref={props.ref}
+        ref={setFrame}
         tabIndex={-1}
         className={styles.overlay}
         aria-label={props.label}

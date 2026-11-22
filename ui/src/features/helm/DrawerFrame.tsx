@@ -1,10 +1,11 @@
 import { type ReactNode, useEffect, useRef } from "react";
-import { DrawerShell } from "../details/DrawerShell";
+import { DrawerShell, shouldReturnFocus } from "../details/DrawerShell";
 import bar from "../resources/ObjectActionBar.module.css";
 
 /**
  * A Helm drawer in the frame every drawer shares: focus comes in on open and goes back on
- * close, and Escape inside the drawer or a click on the dim around it closes it.
+ * close (`shouldReturnFocus`), and Escape inside the drawer or a click anywhere outside it
+ * closes it.
  */
 export function DrawerFrame(props: {
   label: string;
@@ -23,7 +24,12 @@ export function DrawerFrame(props: {
     const before = document.activeElement;
     drawerRef.current?.focus();
     return () => {
-      if (before instanceof HTMLElement && before.isConnected) before.focus();
+      if (
+        before instanceof HTMLElement &&
+        before.isConnected &&
+        shouldReturnFocus()
+      )
+        before.focus();
     };
   }, []);
   return (

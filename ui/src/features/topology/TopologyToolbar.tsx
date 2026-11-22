@@ -34,7 +34,7 @@ export function TopologyToolbar(props: {
     ),
   ];
   return (
-    <div className={styles.toolbar} data-keeps-drawer="">
+    <div className={styles.toolbar}>
       <h2 className={styles.title}>Node topology</h2>
       {props.count === null ? null : (
         <span className={styles.count} data-testid="topology-count">

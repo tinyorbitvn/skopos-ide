@@ -307,7 +307,7 @@ describe("the details drawer on a real cluster", () => {
     await closeDrawer();
   });
 
-  it("a row click shows that row, the toolbar leaves it open and a click on the dim beside it closes it", async () => {
+  it("a row click shows that row, and a click anywhere else outside the drawer closes it", async () => {
     await openPod(0);
     const [, other] = await rowIds();
     // The real pointer, as the driver's element click sends no pointer events. The row is
@@ -315,20 +315,67 @@ describe("the details drawer on a real cluster", () => {
     await pointerClickAt(await shown(other), 80);
     const name = other.slice(`resource-row-${NS}-`.length);
     await showing("Pod", (t) => t.includes(name), `Pod ${name}`);
-    // The toolbar works with the drawer open: a click there leaves it shown.
-    await pointerClick(await shown("resource-title"));
-    await browser.pause(300);
-    await shown("detail-drawer");
     // The empty space under the few rows of the list, clear of the drawer on the right.
     const list = await shown("resource-screen");
     await pointerClickAt(list, 40, (await list.getSize()).height - 30);
+    await gone("detail-drawer");
+    // Parts of the list and of the window around it, none of which navigates: the list's
+    // title, the window's header, the empty end of the tab strip and the status bar.
+    const spots: [string, () => Promise<void>][] = [
+      [
+        "the list's title",
+        async () => pointerClick(await shown("resource-title")),
+      ],
+      ["the header", async () => pointerClick(await shown("header-title"))],
+      [
+        "the tab strip",
+        async () => {
+          const strip = await $(
+            '[role="tablist"][aria-label="Tabs of pane 1"]',
+          );
+          await pointerClickAt(strip, (await strip.getSize()).width - 12);
+        },
+      ],
+      [
+        "the status bar",
+        async () => pointerClick(await shown("status-focused")),
+      ],
+    ];
+    for (const [where, press] of spots) {
+      await openPod(0);
+      await press();
+      await until(
+        async () => !(await byTestId("detail-drawer").isExisting()),
+        `a click on ${where} left the drawer open`,
+      );
+    }
+  });
+
+  it("a click in the drawer's menu, or beside it while the menu is open, leaves the drawer open", async () => {
+    await openPod(0);
+    await pointerClick(await shown("detail-more-actions"));
+    const menu = await $('[role="menu"]');
+    await menu.waitForDisplayed({ timeout: 10000 });
+    // The menu's top padding, clear of its items: inside the portal, not on an action.
+    await pointerClickAt(menu, (await menu.getSize()).width / 2, 3);
+    await browser.pause(300);
+    await shown("detail-drawer");
+    // A press beside an open menu closes the menu only.
+    await pointerClick(await shown("header-title"));
+    await until(
+      async () => (await $$('[role="menu"]').length) === 0,
+      "the menu never closed",
+    );
+    await shown("detail-drawer");
+    await pointerClick(await shown("header-title"));
     await gone("detail-drawer");
   });
 
   it("copies a container's image from its row, without the hints that wrap it", async () => {
     await openPod(0);
     const toggle = await shown("detail-section-toggle-containers");
-    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    if ((await toggle.getAttribute("aria-expanded")) === "false")
+      await toggle.click();
     const copy = await shown("copy-field-image");
     await copy.click();
     await until(
@@ -337,9 +384,11 @@ describe("the details drawer on a real cluster", () => {
     );
     // Read back through the app's clipboard plugin, as the terminal's paste does.
     const text: string = await browser.execute(() => {
-      const tauri = (window as unknown as {
-        __TAURI_INTERNALS__: { invoke(cmd: string): Promise<string> };
-      }).__TAURI_INTERNALS__;
+      const tauri = (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke(cmd: string): Promise<string> };
+        }
+      ).__TAURI_INTERNALS__;
       return tauri
         .invoke("plugin:clipboard-manager|read_text")
         .catch((e: unknown) => `error: ${e}`);
