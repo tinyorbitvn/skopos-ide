@@ -112,11 +112,13 @@ export function useNowWhile(active: boolean): number {
     [active],
   );
   const shared = useSyncExternalStore(subscribe, () => clockNow);
-  const [since, setSince] = useState(Date.now);
-  useEffect(() => {
-    if (active) setSince(Date.now());
-  }, [active]);
-  return active ? Math.max(shared, since) : since;
+  // The time `active` last changed, taken in the render that changes it, so the first
+  // filter never reads a clock up to 30 s old (column filter spec §4.4).
+  const since = useRef({ active, at: Date.now() });
+  if (since.current.active !== active) {
+    since.current = { active, at: Date.now() };
+  }
+  return active ? Math.max(shared, since.current.at) : since.current.at;
 }
 
 /**

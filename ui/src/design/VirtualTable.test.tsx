@@ -380,6 +380,35 @@ test("useNowWhile follows the shared clock only while active, and starts at the 
   }
 });
 
+/** Records the time each render of `useNowWhile` returns. */
+function NowProbe(props: { active: boolean; seen: number[] }) {
+  props.seen.push(useNowWhile(props.active));
+  return null;
+}
+
+test("useNowWhile reads the current time in the very render that turns it on", () => {
+  vi.useFakeTimers();
+  // Later than any time the shared clock kept from earlier tests.
+  vi.setSystemTime(Date.parse("2030-01-01T00:00:00Z"));
+  try {
+    const seen: number[] = [];
+    const { rerender, unmount } = render(
+      <NowProbe active={false} seen={seen} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    const start = Date.now();
+    seen.length = 0;
+    rerender(<NowProbe active seen={seen} />);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((now) => now === start)).toBe(true);
+    unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 interface Aged {
   id: string;
   created: string;
