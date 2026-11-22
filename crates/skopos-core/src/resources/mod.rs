@@ -17,6 +17,7 @@ mod single_flight;
 mod trim;
 mod types;
 
+pub(crate) use actions::{restartable, scalable};
 pub use actions::{DataChange, SecretChange, SecretData, SecretValue};
 pub use apply::ApplyResult;
 pub use argocd::{

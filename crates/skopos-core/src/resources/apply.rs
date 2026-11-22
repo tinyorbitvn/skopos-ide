@@ -159,7 +159,7 @@ pub(super) fn parse_documents(yaml: &str) -> CoreResult<Vec<Value>> {
 
 /// An identity field of another type is an error, not an absent field: an unquoted
 /// `namespace: 123` must not send the object to the default namespace.
-fn check_identity_types(document: &Value) -> Result<(), String> {
+pub(super) fn check_identity_types(document: &Value) -> Result<(), String> {
     for (pointer, field) in IDENTITY_FIELDS {
         match document.pointer(pointer) {
             None | Some(Value::Null | Value::String(_)) => {}
