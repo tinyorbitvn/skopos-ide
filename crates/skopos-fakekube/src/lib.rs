@@ -1524,7 +1524,7 @@ async fn generic(
         "get" => get_one(&s, &res, &t),
         "create" => create(&s, &res, &t, &body),
         "update" => update(&s, &res, &t, &body),
-        "patch" => patch(&s, &res, &t, &headers, &body),
+        "patch" => patch(&s, &res, &t, &headers, &body, &q),
         _ => delete_one(&s, &res, &t, &body),
     }
 }
@@ -1910,7 +1910,17 @@ fn update(s: &Shared, res: &FakeResource, t: &Target, body: &[u8]) -> Response {
     json_ok(stored)
 }
 
-fn patch(s: &Shared, res: &FakeResource, t: &Target, headers: &HeaderMap, body: &[u8]) -> Response {
+/// A merge patch or a server-side apply. With `dryRun=All` the answer is what would be stored,
+/// and nothing is stored or sent to watches (R7).
+fn patch(
+    s: &Shared,
+    res: &FakeResource,
+    t: &Target,
+    headers: &HeaderMap,
+    body: &[u8],
+    q: &BTreeMap<String, String>,
+) -> Response {
+    let dry_run = q.get("dryRun").is_some_and(|v| v == "All");
     let ctype = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -1976,6 +1986,11 @@ fn patch(s: &Shared, res: &FakeResource, t: &Target, headers: &HeaderMap, body: 
         }
         let mut obj = patch_doc;
         set_identity(&mut obj, res, t, &key.1);
+        if dry_run {
+            obj["apiVersion"] = json!(res.api_version());
+            obj["kind"] = json!(res.kind);
+            return json_code(StatusCode::CREATED, obj);
+        }
         let (stored, _) = s.commit(&mut st, res, obj);
         return json_code(StatusCode::CREATED, stored);
     };
@@ -1993,6 +2008,9 @@ fn patch(s: &Shared, res: &FakeResource, t: &Target, headers: &HeaderMap, body: 
     merged["metadata"]["resourceVersion"] = current["metadata"]["resourceVersion"].clone();
     if merged == current {
         return json_ok(current);
+    }
+    if dry_run {
+        return json_ok(merged);
     }
     let (stored, _) = s.commit(&mut st, res, merged);
     json_ok(stored)
@@ -2336,4 +2354,83 @@ async fn rules_review(State(s): State<Shared>, Json(mut review): Json<Value>) ->
         review["kind"] = json!("SelfSubjectRulesReview");
     }
     json_code(StatusCode::CREATED, review)
+}
+
+#[cfg(test)]
+mod dry_run_tests {
+    use k8s_openapi::api::core::v1::ConfigMap;
+    use kube::api::{Patch, PatchParams};
+    use kube::config::{KubeConfigOptions, Kubeconfig};
+    use kube::{Api, Client, Config};
+    use serde_json::json;
+
+    use super::{FakeKube, FakeKubeConfig};
+
+    async fn configmaps(fake: &FakeKube, dir: &std::path::Path) -> Api<ConfigMap> {
+        let path = dir.join("config");
+        fake.write_kubeconfig(&path, "fake").unwrap();
+        let kubeconfig = Kubeconfig::read_from(&path).unwrap();
+        let options = KubeConfigOptions {
+            context: Some("fake".into()),
+            ..Default::default()
+        };
+        let config = Config::from_custom_kubeconfig(kubeconfig, &options)
+            .await
+            .unwrap();
+        Api::namespaced(Client::try_from(config).unwrap(), "default")
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_patch_answers_with_the_patched_object_and_stores_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeKube::start(FakeKubeConfig::default()).await.unwrap();
+        fake.upsert(
+            "configmaps",
+            json!({ "metadata": { "name": "c", "namespace": "default" }, "data": { "a": "one" } }),
+        );
+        let api = configmaps(&fake, dir.path()).await;
+        let before = api.get("c").await.unwrap();
+        let answer = api
+            .patch(
+                "c",
+                &PatchParams::default().dry_run(),
+                &Patch::Merge(json!({ "data": { "a": "two" } })),
+            )
+            .await
+            .unwrap();
+        assert_eq!(answer.data.unwrap()["a"], "two");
+        let after = api.get("c").await.unwrap();
+        assert_eq!(after.data.unwrap()["a"], "one");
+        assert_eq!(
+            after.metadata.resource_version,
+            before.metadata.resource_version
+        );
+        let writes = fake.writes("PATCH", "/api/v1/namespaces/default/configmaps/c");
+        assert_eq!(
+            writes[0].query.get("dryRun").map(String::as_str),
+            Some("All")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_apply_of_a_new_object_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = FakeKube::start(FakeKubeConfig::default()).await.unwrap();
+        let api = configmaps(&fake, dir.path()).await;
+        let answer = api
+            .patch(
+                "made",
+                &PatchParams::apply("skopos-test").dry_run(),
+                &Patch::Apply(json!({
+                    "apiVersion": "v1", "kind": "ConfigMap",
+                    "metadata": { "name": "made", "namespace": "default" },
+                    "data": { "a": "one" },
+                })),
+            )
+            .await
+            .unwrap();
+        assert_eq!(answer.metadata.name.as_deref(), Some("made"));
+        assert_eq!(answer.data.unwrap()["a"], "one");
+        assert!(api.get_opt("made").await.unwrap().is_none());
+    }
 }
