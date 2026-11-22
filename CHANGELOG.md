@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.12.0-rc.1] - 2026-11-22
+
 - **Signed and notarized on macOS:** the macOS app and disk image are signed with a Developer ID certificate and notarized by Apple, so they open without Open Anyway or `xattr`. After this update macOS may ask once more for the passwords SkoposIDE keeps in the Keychain; choose Always Allow. Later updates keep access.
 
 ## [0.11.0] - 2026-11-22
