@@ -74,3 +74,23 @@ test("the helpers give a filter the text their cells show", () => {
   const status = statusColumn(() => ({ label: "Running", tone: "ok" }));
   expect(status.filter?.text(object, 0)).toBe("Running");
 });
+
+test("Name, Namespace and Age give a filter the name, the namespace and the age", () => {
+  const now = Date.parse("2026-11-22T12:00:00Z");
+  const [name, namespace, age] = baseColumns(POD);
+  const pod = {
+    metadata: {
+      name: "web",
+      namespace: "shop",
+      creationTimestamp: "2026-11-22T10:30:00Z",
+    },
+  };
+  expect(name.filter?.text(pod, now)).toBe("web");
+  expect(namespace.filter?.text(pod, now)).toBe("shop");
+  expect(namespace.filter?.text(object, now)).toBeNull();
+  expect(age.filter?.text(pod, now)).toBe("1h30m");
+  expect(age.filter?.measure?.kind).toBe("duration");
+  expect(age.filter?.measure?.amount(pod, now)).toBe(5400);
+  expect(age.filter?.text(object, now)).toBeNull();
+  expect(age.filter?.measure?.amount(object, now)).toBeNull();
+});
