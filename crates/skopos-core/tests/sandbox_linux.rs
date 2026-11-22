@@ -254,11 +254,12 @@ async fn the_agent_cannot_read_a_kubeconfig_outside_home() {
     assert_eq!(spec.hidden_files, [machine.outside.join("kube/config")]);
     let (code, stdout) = run(&spec).await;
     assert_eq!(code, Some(0));
-    // The kubeconfig reads as empty; the file beside it and the person's folder read as usual.
+    // The kubeconfig cannot be opened, since bwrap binds `/dev/null` over it without device
+    // access; the file beside it and the person's folder read as usual.
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
         [
-            format!("{}=", files[0]),
+            format!("{}=refused", files[0]),
             format!("{}=notes", files[1]),
             format!("{}=readme", files[2]),
         ]
@@ -297,15 +298,15 @@ async fn a_kubeconfig_in_a_folder_reached_through_a_link_stays_hidden() {
     let spec = machine.spec_with("/bin/sh", sh_words(PRINT_EACH, &files), folders);
     let (code, stdout) = run(&spec).await;
     assert_eq!(code, Some(0));
-    // Through either link and at its real path, the kubeconfig is covered; the file beside it
-    // reads.
+    // Through either link and at its real path, the kubeconfig cannot be opened; the file beside
+    // it reads.
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
         [
-            format!("{}=", files[0]),
+            format!("{}=refused", files[0]),
             format!("{}=notes", files[1]),
-            format!("{}=", files[2]),
-            format!("{}=", files[3]),
+            format!("{}=refused", files[2]),
+            format!("{}=refused", files[3]),
         ]
     );
 }

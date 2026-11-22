@@ -1,7 +1,7 @@
 //! Where an agent's install lies, the interpreter a script names, and the kubeconfig files the
 //! app knows (spec §4.6). The sandbox lets the agent read its install and hides those files.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
@@ -10,6 +10,8 @@ use crate::tools::find_on_path;
 
 /// How much of a file is read to find its `#!` line.
 const FIRST_LINE_LIMIT: u64 = 512;
+/// The most links followed on the way to one path, the Linux kernel's own limit.
+const LINK_HOPS: usize = 40;
 
 /// The folders the sandbox shows for an installed file, found from the file's real path: the
 /// npm package it belongs to when it lies in a `node_modules` folder, since the package's code
@@ -49,6 +51,49 @@ pub fn install_roots(path: &Path, kept: &[PathBuf]) -> Vec<PathBuf> {
 /// path that does not exist.
 pub fn real_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The links a lookup of `path` reads, each once and in the order met, each at its real place
+/// (the links of the folders above it resolved, `..` taken after them, as the kernel does).
+/// Seatbelt refuses a lookup through a link that sits in a folder it hides, even when the link
+/// leads to an allowed folder, so the macOS profile lets the agent read these links (spec §4.6).
+pub fn links_on_the_way(path: &Path) -> Vec<PathBuf> {
+    let mut links: Vec<PathBuf> = Vec::new();
+    let mut pending: Vec<OsString> = parts_reversed(path);
+    let mut current = PathBuf::new();
+    let mut hops = 0;
+    while let Some(part) = pending.pop() {
+        if part == OsStr::new(".") {
+            continue;
+        }
+        if part == OsStr::new("..") {
+            current.pop();
+            continue;
+        }
+        let next = current.join(&part);
+        match std::fs::read_link(&next) {
+            Ok(target) if hops < LINK_HOPS => {
+                hops += 1;
+                if !links.contains(&next) {
+                    links.push(next);
+                }
+                if target.is_absolute() {
+                    current = PathBuf::new();
+                }
+                pending.extend(parts_reversed(&target));
+            }
+            _ => current = next,
+        }
+    }
+    links
+}
+
+/// The parts of `path`, last first, so that popping takes them in order.
+fn parts_reversed(path: &Path) -> Vec<OsString> {
+    path.components()
+        .rev()
+        .map(|part| part.as_os_str().to_owned())
+        .collect()
 }
 
 /// `<prefix>/node_modules/<name>` or `<prefix>/node_modules/@<scope>/<name>` above `path`, at the path's first
@@ -226,6 +271,42 @@ mod tests {
         assert_eq!(
             install_roots(Path::new("/nonexistent-skopos/tool/bin/tool"), &[])[0],
             PathBuf::from("/nonexistent-skopos/tool")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_links_on_the_way_to_a_path_are_given_at_their_real_places_in_the_order_met() {
+        use std::os::unix::fs::symlink;
+        let (_dir, root) = root();
+        let kube = root.join("outside/kube");
+        std::fs::create_dir_all(&kube).unwrap();
+        std::fs::create_dir_all(root.join("home/real")).unwrap();
+        // home/shop → b → outside/kube; home/through → real, and real/up → ../shop.
+        symlink("b", root.join("home/shop")).unwrap();
+        symlink(&kube, root.join("home/b")).unwrap();
+        symlink("real", root.join("home/through")).unwrap();
+        symlink("../shop", root.join("home/real/up")).unwrap();
+        assert_eq!(
+            links_on_the_way(&root.join("home/shop/config")),
+            [root.join("home/shop"), root.join("home/b")]
+        );
+        assert_eq!(
+            links_on_the_way(&root.join("home/through/up/config")),
+            [
+                root.join("home/through"),
+                root.join("home/real/up"),
+                root.join("home/shop"),
+                root.join("home/b"),
+            ]
+        );
+        assert!(links_on_the_way(&kube.join("config")).is_empty());
+        assert!(links_on_the_way(&root.join("home/missing/config")).is_empty());
+        symlink("loop", root.join("home/loop")).unwrap();
+        assert_eq!(
+            links_on_the_way(&root.join("home/loop/config")),
+            [root.join("home/loop")],
+            "a loop ends, and each link is given once"
         );
     }
 
