@@ -17,6 +17,7 @@ mod patch;
 mod sanitize;
 mod service_account;
 mod single_flight;
+mod subjects;
 mod trim;
 mod types;
 
@@ -42,6 +43,9 @@ pub use patch::PatchKind;
 pub use sanitize::strip_for_list;
 pub use service_account::SavedKubeconfig;
 pub(crate) use single_flight::SingleFlight;
+pub use subjects::{
+    BindingKind, BindingRef, RemovalOutcome, SubjectKind, SubjectRef, SubjectRemoval,
+};
 pub use types::{
     ApiResourceInfo, ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus, SNAPSHOT_PART_BYTES,
     SNAPSHOT_PART_ROWS,
