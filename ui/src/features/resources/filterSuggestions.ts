@@ -7,6 +7,7 @@ import {
   keyCounts,
   type ObjectFilter,
   OPERATORS,
+  operatorsOf,
   propertyAlone,
   propertyText,
   takesAnyValue,
@@ -146,7 +147,9 @@ function operatorStage(property: FilterProperty): Suggestions {
     groups: [
       {
         heading: "Operators",
-        options: OPERATORS.map((o) => ({
+        options: OPERATORS.filter((o) =>
+          operatorsOf(property).includes(o.operator),
+        ).map((o) => ({
           key: o.operator,
           text: o.operator,
           hint: o.name,
