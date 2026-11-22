@@ -11,6 +11,9 @@ pub(crate) use workload::workload_selector;
 use std::sync::Arc;
 use std::time::Duration;
 
+use k8s_openapi::api::core::v1::Pod;
+use kube::api::LogParams;
+use kube::Api;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -463,6 +466,39 @@ impl AppCore {
     /// start later. `0` restores the real cap.
     pub fn set_log_stream_cap_for_test(&self, cap: usize) {
         self.sessions().set_log_stream_cap(cap);
+    }
+
+    /// The last `tail_lines` lines of one container's log, read once and not followed,
+    /// each with the kubelet's timestamp in front. `container` may be left out when the
+    /// Pod has one; `previous` reads the container that ran before the last restart.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn pod_logs_text(
+        &self,
+        id: &ClusterId,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+        previous: bool,
+        tail_lines: u32,
+        since_seconds: Option<u32>,
+    ) -> CoreResult<Vec<String>> {
+        check_name(namespace, "namespace")?;
+        check_name(pod, "name")?;
+        if let Some(container) = container {
+            check_name(container, "container name")?;
+        }
+        let client = self.cluster_client(id)?;
+        let pods: Api<Pod> = Api::namespaced(client, namespace);
+        let params = LogParams {
+            container: container.map(str::to_owned),
+            previous,
+            timestamps: true,
+            tail_lines: Some(i64::from(tail_lines)),
+            since_seconds: since_seconds.map(i64::from),
+            ..LogParams::default()
+        };
+        let text = pods.logs(pod, &params).await?;
+        Ok(text.lines().map(str::to_owned).collect())
     }
 }
 
