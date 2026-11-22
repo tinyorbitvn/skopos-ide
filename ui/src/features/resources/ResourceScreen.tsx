@@ -403,6 +403,7 @@ export function ResourceScreen(props: {
         shown={rows.length}
         total={namespaceRows.length}
         onFocusBox={() => filterBox.current?.focus()}
+        context={NO_COLUMNS}
       />
 
       <div className={styles.body}>

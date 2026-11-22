@@ -646,12 +646,17 @@ describe("PropertyFilter", () => {
 });
 
 /** The box and the row of tokens, wired as `ResourceScreen` wires them. */
-function Row(props: { tokens: ObjectFilter[]; text?: string }) {
+function Row(props: {
+  tokens: ObjectFilter[];
+  text?: string;
+  context?: FilterContext;
+}) {
   const [text, setText] = useState(props.text ?? "");
   const [tokens, setTokens] = useState<ObjectFilter[]>(props.tokens);
   const [join, setJoin] = useState<FilterJoin>("and");
   const inputRef = useRef<HTMLInputElement>(null);
-  const context = useMemo(() => contextOf(), []);
+  const own = useMemo(() => contextOf(), []);
+  const context = props.context ?? own;
   const index = useMemo(() => buildFilterIndex(OBJECTS, context), [context]);
   return (
     <>
@@ -676,6 +681,7 @@ function Row(props: { tokens: ObjectFilter[]; text?: string }) {
         shown={2}
         total={3}
         onFocusBox={() => inputRef.current?.focus()}
+        context={context}
       />
       <output data-testid="tokens">{tokens.map(filterText).join(" | ")}</output>
       <output data-testid="join">{join}</output>
@@ -913,5 +919,85 @@ describe("FilterTokens", () => {
     openEdit(0);
     fireEvent.click(byId("filter-token-edit-0"));
     expect(panel()).toBeNull();
+  });
+
+  const AGE_UNDER_HOUR: ObjectFilter = {
+    property: { type: "column", key: "age" },
+    operator: "<",
+    value: "1h",
+  };
+
+  test("a column token's panel names its header and offers its column's operators", () => {
+    render(<Row tokens={[AGE_UNDER_HOUR]} context={contextOf(POD_COLUMNS)} />);
+    const edit = openEdit(0);
+    expect(within(edit).getByText("Age")).toBeTruthy();
+    const radios = within(edit).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((r) => r.labels?.[0]?.textContent)).toEqual([
+      "=",
+      "!=",
+      ":",
+      "!:",
+      ">",
+      "<",
+    ]);
+    expect(radios.map((r) => r.checked)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(byId("filter-edit-operator-greater")).toBeTruthy();
+  });
+
+  test("an invalid time keeps the panel open with the error under the value", () => {
+    render(<Row tokens={[AGE_UNDER_HOUR]} context={contextOf(POD_COLUMNS)} />);
+    openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "soon" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(panel()).toBeTruthy();
+    expect(byId("filter-edit-error").textContent).toBe(
+      "Type a time such as 30m, 2h or 7d",
+    );
+    expect(valueBox().getAttribute("aria-invalid")).toBe("true");
+    expect(tokens()).toBe("age < 1h");
+
+    fireEvent.change(valueBox(), { target: { value: "2h" } });
+    expect(screen.queryByTestId("filter-edit-error")).toBeNull();
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("age < 2h");
+    expect(panel()).toBeNull();
+  });
+
+  test("an empty value on : keeps a column token as any value", () => {
+    const ip: ObjectFilter = {
+      property: { type: "column", key: "ip" },
+      operator: ":",
+      value: "10.",
+    };
+    render(<Row tokens={[ip]} context={contextOf(POD_COLUMNS)} />);
+    openEdit(0);
+    fireEvent.change(valueBox(), { target: { value: "" } });
+    fireEvent.click(byId("filter-edit-apply"));
+    expect(tokens()).toBe("ip :");
+  });
+
+  test("a token whose column left the list takes the warning tone, and loses it when the column is back", () => {
+    const cpu: ObjectFilter = {
+      property: { type: "column", key: "restarts" },
+      operator: ">",
+      value: "0",
+    };
+    const { rerender } = render(<Row tokens={[cpu]} context={contextOf()} />);
+    const token = byId("filter-token-0");
+    expect(token.getAttribute("data-missing")).toBe("true");
+    expect(token.title).toBe("This list has no column restarts");
+    expect(within(openEdit(0)).getByText("restarts")).toBeTruthy();
+    fireEvent.click(byId("filter-edit-cancel"));
+
+    rerender(<Row tokens={[cpu]} context={contextOf(POD_COLUMNS)} />);
+    expect(byId("filter-token-0").getAttribute("data-missing")).toBe("false");
+    expect(byId("filter-token-0").title).toBe("");
   });
 });
