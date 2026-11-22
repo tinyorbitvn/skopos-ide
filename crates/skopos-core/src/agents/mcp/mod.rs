@@ -2,6 +2,7 @@
 //! read tools, and the seam where the change tools and their gate join.
 
 pub mod cards;
+pub mod changes;
 pub mod kinds;
 pub mod server;
 mod tools;

@@ -24,11 +24,27 @@ struct SkoposServer {
     ctx: Arc<ToolContext>,
 }
 
+/// Every tool this chat offers: the reads, then the changes (spec §4.4).
 fn tool_list(ctx: &ToolContext) -> Vec<Tool> {
+    let mut tools = read_tool_list(ctx);
+    tools.extend(super::changes::change_tools(ctx));
+    tools
+}
+
+fn read_tool_list(ctx: &ToolContext) -> Vec<Tool> {
     read_tools(&ctx.scope)
 }
 
+/// Runs one tool call. A change tool goes to the gate whether or not this chat lists it, so a
+/// call to one that a setting took away is refused there with that setting's text (spec §4.5).
 async fn dispatch(ctx: &ToolContext, name: &str, args: JsonObject) -> CallToolResult {
+    if super::changes::is_change_tool(name) {
+        return super::changes::call_change_tool(ctx, name, args).await;
+    }
+    dispatch_read(ctx, name, args).await
+}
+
+async fn dispatch_read(ctx: &ToolContext, name: &str, args: JsonObject) -> CallToolResult {
     match call_read(ctx, name, args).await {
         Some(result) => result,
         None => CallToolResult::error(vec![ContentBlock::text(format!("Unknown tool {name}."))]),
