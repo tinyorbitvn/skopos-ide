@@ -19,6 +19,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
 use axum::{Json, Router};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
@@ -55,6 +57,9 @@ pub struct FakeKubeConfig {
     pub deny_cluster_wide: Vec<DenyRule>,
     /// SelfSubjectAccessReview and SelfSubjectRulesReview answer 500.
     pub fail_access_reviews: bool,
+    /// The fake signer issues no certificate after approval, as on a managed cluster that
+    /// does not sign `kubernetes.io/kube-apiserver-client` requests.
+    pub no_csr_signer: bool,
     /// SelfSubjectRulesReview lists no rules and says `incomplete`, as when a webhook
     /// authorizer grants access.
     pub incomplete_rules_reviews: bool,
@@ -505,6 +510,42 @@ impl FakeKube {
             panic!("upsert: resource {plural} is not served");
         };
         self.inner.commit(&mut st, &res, obj);
+    }
+
+    /// Records a decision on a CertificateSigningRequest as another approver would, and lets
+    /// the fake signer act on an approval. Panics when the request does not exist.
+    pub fn decide_csr(&self, name: &str, condition: &str, message: &str) {
+        let mut st = self.inner.lock();
+        let res = st
+            .resources
+            .get("certificatesigningrequests")
+            .cloned()
+            .expect("certificatesigningrequests is not served");
+        let mut csr = st
+            .objects
+            .get(&res.plural)
+            .and_then(|m| m.get(&(String::new(), name.to_owned())))
+            .cloned()
+            .unwrap_or_else(|| panic!("no request {name}"));
+        if !csr["status"].is_object() {
+            csr["status"] = json!({});
+        }
+        if !csr["status"]["conditions"].is_array() {
+            csr["status"]["conditions"] = json!([]);
+        }
+        if let Some(all) = csr["status"]["conditions"].as_array_mut() {
+            all.push(json!({
+                "type": condition,
+                "status": "True",
+                "reason": "DecidedInTest",
+                "message": message,
+                "lastUpdateTime": "2026-11-22T00:00:00Z",
+            }));
+        }
+        if !self.inner.cfg.no_csr_signer {
+            sign_if_approved(&mut csr);
+        }
+        self.inner.commit(&mut st, &res, csr);
     }
 
     /// Deletes an object and emits DELETED. Unknown objects are ignored.
@@ -1529,7 +1570,61 @@ async fn generic(
     }
 }
 
-/// The subresources the fake knows: `scale`, `eviction` and `log`.
+fn has_condition(csr: &Value, kind: &str) -> bool {
+    csr.pointer("/status/conditions")
+        .and_then(Value::as_array)
+        .is_some_and(|all| {
+            all.iter()
+                .any(|c| c["type"] == kind && c["status"] == "True")
+        })
+}
+
+/// Plays the cluster's signer. An approved request gets a certificate for its own key,
+/// signed by a throwaway CA. The certificate is valid until 2030-01-01 whatever the
+/// request asked for, as a signer that caps lifetimes would do.
+fn sign_if_approved(csr: &mut Value) {
+    if !has_condition(csr, "Approved")
+        || has_condition(csr, "Denied")
+        || has_condition(csr, "Failed")
+        || csr.pointer("/status/certificate").is_some()
+    {
+        return;
+    }
+    let certificate = csr
+        .pointer("/spec/request")
+        .and_then(Value::as_str)
+        .and_then(|text| STANDARD.decode(text).ok())
+        .and_then(|pem| String::from_utf8(pem).ok())
+        .and_then(|pem| issue(&pem).ok());
+    match certificate {
+        Some(pem) => csr["status"]["certificate"] = json!(STANDARD.encode(pem)),
+        None => {
+            if !csr["status"]["conditions"].is_array() {
+                csr["status"]["conditions"] = json!([]);
+            }
+            if let Some(all) = csr["status"]["conditions"].as_array_mut() {
+                all.push(json!({
+                    "type": "Failed",
+                    "status": "True",
+                    "reason": "FakeSignerFailed",
+                    "message": "the fake signer cannot read the request",
+                }));
+            }
+        }
+    }
+}
+
+fn issue(request_pem: &str) -> Result<String, rcgen::Error> {
+    let mut request = rcgen::CertificateSigningRequestParams::from_pem(request_pem)?;
+    request.params.not_before = rcgen::date_time_ymd(2025, 1, 1);
+    request.params.not_after = rcgen::date_time_ymd(2030, 1, 1);
+    let mut ca = rcgen::CertificateParams::default();
+    ca.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let issuer = rcgen::Issuer::new(ca, rcgen::KeyPair::generate()?);
+    Ok(request.signed_by(&issuer)?.pem())
+}
+
+/// The subresources the fake knows: `approval`, `scale`, `eviction`, `token` and `log`.
 #[allow(clippy::too_many_arguments)]
 fn subresource(
     s: &Shared,
@@ -1567,6 +1662,42 @@ fn subresource(
                     "expirationTimestamp": "2030-01-01T00:00:00Z",
                 },
             }))
+        }
+        ("approval", "PUT", "certificatesigningrequests") => {
+            let doc = match parse_object(body) {
+                Ok(v) => v,
+                Err(r) => return *r,
+            };
+            let mut st = s.lock();
+            let Some(mut current) = st
+                .objects
+                .get(&res.plural)
+                .and_then(|m| m.get(&key))
+                .cloned()
+            else {
+                return not_found_object(res, &key.1);
+            };
+            let sent = doc
+                .pointer("/metadata/resourceVersion")
+                .and_then(Value::as_str);
+            let now = current
+                .pointer("/metadata/resourceVersion")
+                .and_then(Value::as_str);
+            if sent.is_some_and(|rv| Some(rv) != now) {
+                return conflict(res, &key.1);
+            }
+            if !current["status"].is_object() {
+                current["status"] = json!({});
+            }
+            current["status"]["conditions"] = doc
+                .pointer("/status/conditions")
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            if !s.cfg.no_csr_signer {
+                sign_if_approved(&mut current);
+            }
+            let (stored, _) = s.commit(&mut st, res, current);
+            json_ok(stored)
         }
         ("scale", "PATCH", "deployments" | "statefulsets" | "replicasets") => {
             let is_merge = headers

@@ -28,7 +28,7 @@ pub use argocd::{
     SYNC_WINDOWS_UNVERIFIED,
 };
 pub use cert_user::{CertUserRequest, RoleGrant, RoleKind};
-pub use csr::{certificate_request_describe, CertificateRequestInfo};
+pub use csr::{certificate_request_describe, CertificateRequestInfo, CsrDecision};
 pub(crate) use discovery::state_name;
 pub(crate) use drain::RunningDrain;
 pub use drain::{DrainEvent, DrainOptions, DrainOutcome, PodRef, SkipReason, SkippedPod};

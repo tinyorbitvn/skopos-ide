@@ -3,13 +3,21 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use k8s_openapi::jiff::Timestamp;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use x509_parser::prelude::*;
 use x509_parser::public_key::PublicKey;
 
-use super::ops::invalid;
+use super::ops::{invalid, is_path_segment};
+use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
+use crate::kubeconfig::ClusterId;
+use k8s_openapi::api::certificates::v1::{
+    CertificateSigningRequest, CertificateSigningRequestCondition,
+};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+use kube::api::PostParams;
+use kube::Api;
 
 /// What the CSR drawer shows of a request and its certificate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -177,5 +185,82 @@ mod tests {
             error.message,
             "the API server returned a certificate that cannot be read"
         );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum CsrDecision {
+    Approve,
+    Deny,
+}
+
+/// Approves or denies a request, as `kubectl certificate approve` does: a PUT to
+/// `/approval`, which needs `update` there, carrying the version read. A request that
+/// changed meanwhile is read again once.
+pub(crate) async fn set_approval(
+    api: &Api<CertificateSigningRequest>,
+    name: &str,
+    decision: CsrDecision,
+) -> CoreResult<()> {
+    let (kind, reason, message) = match decision {
+        CsrDecision::Approve => ("Approved", "ApprovedInSkoposIDE", "Approved in SkoposIDE"),
+        CsrDecision::Deny => ("Denied", "DeniedInSkoposIDE", "Denied in SkoposIDE"),
+    };
+    let mut retried = false;
+    loop {
+        let mut csr = api.get(name).await?;
+        let conditions = csr
+            .status
+            .get_or_insert_with(Default::default)
+            .conditions
+            .get_or_insert_with(Vec::new);
+        let decided = conditions
+            .iter()
+            .find(|c| c.status == "True" && (c.type_ == "Approved" || c.type_ == "Denied"));
+        if let Some(decided) = decided {
+            let word = if decided.type_ == "Approved" {
+                "approved"
+            } else {
+                "denied"
+            };
+            return Err(IpcError::new(
+                ErrorCode::Conflict,
+                format!("the request was already {word}"),
+            ));
+        }
+        conditions.push(CertificateSigningRequestCondition {
+            type_: kind.to_owned(),
+            status: "True".to_owned(),
+            reason: Some(reason.to_owned()),
+            message: Some(message.to_owned()),
+            last_update_time: Some(Time(Timestamp::now())),
+            ..CertificateSigningRequestCondition::default()
+        });
+        match api
+            .replace_subresource("approval", name, &PostParams::default(), &csr)
+            .await
+            .map_err(IpcError::from)
+        {
+            Ok(_) => return Ok(()),
+            Err(error) if error.code == ErrorCode::Conflict && !retried => retried = true,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+impl AppCore {
+    /// Approves or denies another's CertificateSigningRequest (spec §5.4).
+    pub async fn csr_set_approval(
+        &self,
+        id: &ClusterId,
+        name: &str,
+        decision: CsrDecision,
+    ) -> CoreResult<()> {
+        if !is_path_segment(name) {
+            return Err(invalid("the request name is not valid"));
+        }
+        let api: Api<CertificateSigningRequest> = Api::all(self.cluster_client(id)?);
+        set_approval(&api, name, decision).await
     }
 }
