@@ -3,6 +3,7 @@
 //! setting changed during a chat applies to the next call; it does not rest on the agent's own
 //! permission prompts. A change tool reaches the gate whether or not the chat lists it.
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -534,12 +535,19 @@ impl ChatGate {
             target,
             settings,
         } = prepared;
-        let decision = if matches!(settings.changes, AgentChanges::DontAsk) {
-            Decision::WithoutAsking { standing: false }
+        // A change that lets a workload read a hidden Secret always asks (spec §4.5).
+        let unasked = if !card.secrets.is_empty() {
+            None
+        } else if matches!(settings.changes, AgentChanges::DontAsk) {
+            Some(false)
         } else if self.approvals.standing(&cluster.id) {
-            Decision::WithoutAsking { standing: true }
+            Some(true)
         } else {
-            match self.approvals.ask(card.clone()).await {
+            None
+        };
+        let decision = match unasked {
+            Some(standing) => Decision::WithoutAsking { standing },
+            None => match self.approvals.ask(card.clone()).await {
                 ChangeAnswerOrStop::Answer(ChangeAnswer::Approve) => {
                     Decision::Approved { standing: false }
                 }
@@ -553,7 +561,7 @@ impl ChatGate {
                 ChangeAnswerOrStop::Stopped => {
                     return self.ended(card, ChangeState::Stopped, STOPPED).await
                 }
-            }
+            },
         };
         match self.apply(&cluster.id, &tool, &target).await {
             Ok(done) => {
@@ -708,6 +716,8 @@ impl ChatGate {
     }
 
     /// Step 4: the card, from the live object and, for apply and patch, a server-side dry run.
+    /// With Secret values hidden, the card names the Secrets the changed object reads, or the
+    /// Pod an exec runs in reads.
     async fn preview(
         &self,
         cluster: &ScopeCluster,
@@ -721,6 +731,9 @@ impl ChatGate {
         let kind = target.resource.kind.clone();
         let path = object_path(namespace, &target.name);
         let mut command = None;
+        // What the workload reads once the change is applied: the changed object, or the Pod
+        // an exec runs in.
+        let mut reads = Value::Null;
         let (title, diff) = match tool {
             ChangeTool::Apply { yaml } => {
                 let before = self.live(id, target).await?;
@@ -731,10 +744,11 @@ impl ChatGate {
                     .map_err(message)?;
                 let verb = if before.is_some() { "Change" } else { "Create" };
                 let before = before.unwrap_or(Value::Null);
-                (
-                    format!("{verb} {kind} {path}"),
-                    trimmed_diff(before, after, reveal),
-                )
+                let diff = trimmed_diff(before, after.clone(), reveal);
+                if !diff.is_empty() {
+                    reads = after;
+                }
+                (format!("{verb} {kind} {path}"), diff)
             }
             ChangeTool::Patch {
                 patch, patch_type, ..
@@ -753,10 +767,11 @@ impl ChatGate {
                     )
                     .await
                     .map_err(message)?;
-                (
-                    format!("Change {kind} {path}"),
-                    trimmed_diff(before, after, reveal),
-                )
+                let diff = trimmed_diff(before, after.clone(), reveal);
+                if !diff.is_empty() {
+                    reads = after;
+                }
+                (format!("Change {kind} {path}"), diff)
             }
             ChangeTool::Scale { replicas, .. } => {
                 if !scalable(&target.resource) {
@@ -793,7 +808,7 @@ impl ChatGate {
                         "Give the command as a list of words, such as [\"ls\", \"/\"].".to_owned(),
                     );
                 }
-                self.existing(id, target).await?;
+                reads = self.existing(id, target).await?;
                 command = Some(words.clone());
                 (format!("Run a command in Pod {path}"), Vec::new())
             }
@@ -805,6 +820,11 @@ impl ChatGate {
             summary: one_line(summary),
             diff,
             command,
+            secrets: if reveal {
+                Vec::new()
+            } else {
+                secret_names(&reads)
+            },
             state: ChangeState::Waiting,
             result: None,
             rollout: rollout_of(id, tool, target),
@@ -979,6 +999,49 @@ fn one_line(summary: &str) -> String {
         .collect()
 }
 
+/// The Secrets an object reads, by name and sorted, wherever its Pod spec sits: env
+/// `secretKeyRef`, `envFrom` `secretRef`, `secret` volumes and projected sources, any other
+/// `…SecretRef`, and `{kind: Secret, name}` references (spec §4.5). Image pull Secrets are left
+/// out, since only the kubelet reads them.
+fn secret_names(object: &Value) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    add_secret_names(object, &mut names);
+    names.into_iter().collect()
+}
+
+fn add_secret_names(value: &Value, names: &mut BTreeSet<String>) {
+    match value {
+        Value::Object(map) => {
+            if map.get("kind").and_then(Value::as_str) == Some("Secret") {
+                add_name(map.get("name"), names);
+            }
+            for (key, inner) in map {
+                match key.as_str() {
+                    "secret" => {
+                        add_name(inner.get("secretName").or_else(|| inner.get("name")), names)
+                    }
+                    "secretKeyRef" | "secretRef" => add_name(inner.get("name"), names),
+                    other if other.ends_with("SecretRef") => add_name(inner.get("name"), names),
+                    _ => {}
+                }
+                add_secret_names(inner, names);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                add_secret_names(item, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn add_name(name: Option<&Value>, names: &mut BTreeSet<String>) {
+    if let Some(name) = name.and_then(Value::as_str).filter(|name| !name.is_empty()) {
+        names.insert(name.to_owned());
+    }
+}
+
 fn diff_line(kind: DiffKind, text: String) -> DiffLine {
     DiffLine { kind, text }
 }
@@ -1090,6 +1153,45 @@ mod tests {
         assert_eq!(one_line("  Scale api to 3  \nbecause"), "Scale api to 3");
         assert_eq!(one_line(&"x".repeat(250)).chars().count(), 200);
         assert_eq!(one_line(""), "");
+    }
+
+    #[test]
+    fn the_secrets_an_object_reads_are_found_wherever_its_pod_spec_sits() {
+        let cron_job = json!({
+            "metadata": {
+                "name": "backup",
+                "managedFields": [{ "fieldsV1": { "f:spec": { "f:secretKeyRef": {} } } }],
+            },
+            "spec": { "jobTemplate": { "spec": { "template": { "spec": {
+                "imagePullSecrets": [{ "name": "registry" }],
+                "containers": [{
+                    "name": "main",
+                    "env": [
+                        { "name": "DB", "valueFrom": { "secretKeyRef": { "name": "db", "key": "url" } } },
+                        { "name": "MODE", "valueFrom": { "configMapKeyRef": { "name": "settings", "key": "mode" } } },
+                    ],
+                    "envFrom": [{ "secretRef": { "name": "api-keys" } }, { "configMapRef": { "name": "plain" } }],
+                }],
+                "volumes": [
+                    { "name": "tls", "secret": { "secretName": "tls" } },
+                    { "name": "all", "projected": { "sources": [
+                        { "secret": { "name": "db" } },
+                        { "serviceAccountToken": { "path": "token" } },
+                    ] } },
+                    { "name": "csi", "csi": { "driver": "d", "nodePublishSecretRef": { "name": "csi-creds" } } },
+                ],
+            } } } } },
+        });
+        assert_eq!(
+            secret_names(&cron_job),
+            ["api-keys", "csi-creds", "db", "tls"]
+        );
+
+        let release = json!({ "spec": { "valuesFrom": [{ "kind": "Secret", "name": "values" }] } });
+        assert_eq!(secret_names(&release), ["values"]);
+        let plain = json!({ "data": { "secret": "x", "secretRef": "y" }, "spec": { "secret": { "optional": true } } });
+        assert!(secret_names(&plain).is_empty());
+        assert!(secret_names(&Value::Null).is_empty());
     }
 
     #[test]

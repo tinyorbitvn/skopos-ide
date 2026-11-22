@@ -725,6 +725,159 @@ async fn hidden_secret_values_refuse_secret_changes() {
     assert!(!failed, "{text}");
 }
 
+const POD_READER: &str = "/api/v1/namespaces/default/pods/reader";
+const READER: &str = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: reader\n  namespace: default\nspec:\n  containers:\n  - name: main\n    image: busybox\n    env:\n    - name: DB\n      valueFrom:\n        secretKeyRef:\n          name: db\n          key: url\n  volumes:\n  - name: tls\n    secret:\n      secretName: tls\n";
+
+fn reads_db(command: Option<&str>) -> Value {
+    let mut container = json!({
+        "name": "main", "image": "busybox",
+        "env": [{ "name": "DB", "valueFrom": { "secretKeyRef": { "name": "db", "key": "url" } } }],
+    });
+    if let Some(command) = command {
+        container["command"] = json!([command]);
+    }
+    json!({ "containers": [container] })
+}
+
+/// A patch of Deployment `web` that runs `command`, which can print the Secret it reads.
+fn print_db_args(command: &str) -> Value {
+    json!({
+        "kind": "Deployment", "namespace": "default", "name": "web",
+        "patch": { "spec": { "template": { "spec": reads_db(Some(command)) } } },
+        "patch_type": "merge", "summary": "Print the environment",
+    })
+}
+
+fn names(list: &[&str]) -> Vec<String> {
+    list.iter().map(|name| (*name).to_owned()).collect()
+}
+
+#[tokio::test]
+async fn hidden_secret_values_always_ask_for_a_change_that_lets_a_workload_read_a_secret() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    fake.upsert("configmaps", configmap("default", "c", "one"));
+    fake.upsert(
+        "deployments",
+        json!({
+            "metadata": { "name": "web", "namespace": "default" },
+            "spec": { "replicas": 1, "template": { "spec": reads_db(None) } },
+        }),
+    );
+    set_changes(&core, &id, AgentChanges::DontAsk);
+    let mut chat = Chat::start(&core, &id, false).await;
+
+    let call = chat.call_in_background(
+        "apply_object",
+        json!({ "yaml": READER, "summary": "Add reader" }),
+    );
+    let waiting = chat.next_card().await;
+    assert_eq!(waiting.state, ChangeState::Waiting, "Don't ask still asks");
+    assert_eq!(waiting.title, "Create Pod default/reader");
+    assert_eq!(waiting.secrets, names(&["db", "tls"]));
+    assert_eq!(dry_runs(&fake, POD_READER), [Some("All".to_owned())]);
+    chat.approvals
+        .answer(&waiting.id, ChangeAnswer::Approve)
+        .unwrap();
+    assert!(!call.await.unwrap().0);
+    assert!(matches!(
+        chat.next_card().await.state,
+        ChangeState::Approved {
+            standing: false,
+            ..
+        }
+    ));
+
+    let (failed, text) = chat
+        .call("patch_object", patch_args("default", "c", "two"))
+        .await;
+    assert!(!failed, "{text}");
+    let plain = chat.next_card().await;
+    assert_eq!(
+        plain.state,
+        ChangeState::AppliedWithoutAsking { standing: false }
+    );
+    assert!(plain.secrets.is_empty());
+
+    let call = chat.call_in_background("patch_object", print_db_args("env"));
+    let waiting = chat.next_card().await;
+    assert_eq!(
+        waiting.state,
+        ChangeState::Waiting,
+        "a change to a workload that already reads a Secret asks too"
+    );
+    assert_eq!(waiting.secrets, names(&["db"]));
+    chat.approvals
+        .answer(&waiting.id, ChangeAnswer::ApproveForChat)
+        .unwrap();
+    assert!(!call.await.unwrap().0);
+    chat.next_card().await;
+    assert!(chat.approvals.standing(&id));
+
+    let call = chat.call_in_background("patch_object", print_db_args("printenv"));
+    let waiting = chat.next_card().await;
+    assert_eq!(
+        waiting.state,
+        ChangeState::Waiting,
+        "a standing approval doesn't cover it"
+    );
+    chat.approvals
+        .answer(&waiting.id, ChangeAnswer::Deny)
+        .unwrap();
+    assert_eq!(call.await.unwrap(), (true, DENIED.to_owned()));
+    assert_eq!(chat.next_card().await.state, ChangeState::Denied);
+
+    set_agent(
+        &core,
+        &id,
+        ClusterAgentSettings {
+            changes: AgentChanges::DontAsk,
+            secret_values: true,
+            ..ClusterAgentSettings::default()
+        },
+    );
+    let (failed, text) = chat.call("patch_object", print_db_args("set")).await;
+    assert!(!failed, "{text}");
+    let done = chat.next_card().await;
+    assert_eq!(
+        done.state,
+        ChangeState::AppliedWithoutAsking { standing: false },
+        "readable Secret values need no question"
+    );
+    assert!(done.secrets.is_empty());
+}
+
+#[tokio::test]
+async fn hidden_secret_values_always_ask_before_a_command_in_a_pod_that_reads_a_secret() {
+    let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    fake.upsert(
+        "pods",
+        json!({
+            "metadata": { "name": "p", "namespace": "default" },
+            "spec": reads_db(None),
+            "status": { "phase": "Running" },
+        }),
+    );
+    set_agent(
+        &core,
+        &id,
+        ClusterAgentSettings {
+            changes: AgentChanges::DontAsk,
+            exec: true,
+            ..ClusterAgentSettings::default()
+        },
+    );
+    let mut chat = Chat::start(&core, &id, false).await;
+    let call = chat.call_in_background("exec", exec_args("default"));
+    let waiting = chat.next_card().await;
+    assert_eq!(waiting.state, ChangeState::Waiting);
+    assert_eq!(waiting.title, "Run a command in Pod default/p");
+    assert_eq!(waiting.secrets, names(&["db"]));
+    chat.approvals
+        .answer(&waiting.id, ChangeAnswer::Deny)
+        .unwrap();
+    assert_eq!(call.await.unwrap(), (true, DENIED.to_owned()));
+}
+
 #[tokio::test]
 async fn a_namespace_limit_refuses_changes_outside_it_and_to_cluster_scoped_objects() {
     let (core, fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
