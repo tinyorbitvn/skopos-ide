@@ -14,6 +14,8 @@ export function Input({
   help,
   id,
   className,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
   ...rest
 }: InputProps) {
   const auto = useId();
@@ -34,8 +36,8 @@ export function Input({
         className={[styles.input, error ? styles.invalid : "", className]
           .filter(Boolean)
           .join(" ")}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? errorId : showHelp ? helpId : undefined}
+        aria-invalid={error ? true : ariaInvalid}
+        aria-describedby={error ? errorId : showHelp ? helpId : ariaDescribedBy}
       />
       {error ? (
         <span id={errorId} role="alert" className={styles.error}>
