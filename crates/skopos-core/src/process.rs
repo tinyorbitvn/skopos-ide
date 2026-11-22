@@ -360,8 +360,9 @@ fn take_line(pending: &mut Vec<u8>) -> Option<Vec<u8>> {
     (pending.len() > MAX_LINE).then(|| pending.drain(..MAX_LINE).collect())
 }
 
-/// Asks the process to stop, then kills it after `grace`.
-async fn stop(child: &mut Child, grace: Duration) {
+/// Asks the process to stop, then kills it after `grace`. On Unix the whole process group
+/// gets the signals.
+pub(crate) async fn stop(child: &mut Child, grace: Duration) {
     if terminate_group(child, grace).await {
         return;
     }
