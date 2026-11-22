@@ -677,8 +677,15 @@ describe("page", () => {
 
   test("describes each canvas picture in its alt text", () => {
     const imgs = [...template.matchAll(/<img \{\{image:(canvas-[a-z-]+\.png)\}\} alt="([^"]*)"/g)];
-    assert.equal(imgs.length, 10);
+    assert.equal(imgs.length, 12);
     for (const [, name, alt] of imgs) assert.ok(alt.length >= 40, name);
+  });
+
+  test("takes every picture, the hero and Themes ones too, from the design canvas", () => {
+    const names = [...template.matchAll(/\{\{image:([^}]+)\}\}/g)].map((m) => m[1]);
+    assert.ok(names.includes("canvas-pods-drawer-dark.png"));
+    assert.ok(names.includes("canvas-pods-drawer-light.png"));
+    for (const name of names) assert.match(name, /^canvas-[a-z-]+\.png$/);
   });
 
   test("links the metrics docs from the menu, the metrics card and the footer", () => {

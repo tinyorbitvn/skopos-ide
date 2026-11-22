@@ -109,9 +109,7 @@ The project site at https://vanlongme.github.io/skopos-ide/ is built from `site/
   installer is missing from the release, the build stops and the live site stays as it was.
 - When you cut a release, remove the `next-release` marks in `site/index.html` for what the
   release ships, and mark new features under `## [Unreleased]` that the page shows.
-- `make site-screens` refreshes the hero and theme screenshots in `site/images/` from the e2e
-  `screens` spec (Docker, kind and the WebKit driver).
-- `make site-canvas-screens` refreshes the feature pictures (`site/images/canvas-*.png`) from the
+- `make site-screens` refreshes the site's pictures (`site/images/canvas-*.png`) from the
   main board of the SkoposIDE Screens design canvas, App.dc.html ("Whole application"). It
   renders the board in headless Chrome or Chromium (set `CHROME` if it is not on `PATH`), clicks
   through it and cuts each picture out; `scripts/canvas-screens.mjs` lists the shots. The board
