@@ -2,9 +2,8 @@
 
 Source-available (PolyForm Shield 1.0.0, not open source) desktop Kubernetes IDE for Linux, macOS
 and Windows. Tauri 2 + Rust core + React.
-Spec: `docs/superpowers/specs/2026-11-05-skopos-milestone-a-design.md` (kept locally, not in git);
-each later feature has its own spec beside it. Later work: `docs/roadmap.md`. CI and releases:
-`docs/releasing.md`.
+Specs (Milestone A and one per later feature) are kept locally, not in git. Later work:
+`docs/roadmap.md`. CI and releases: `docs/releasing.md`.
 
 ## Product
 
@@ -25,8 +24,7 @@ each later feature has its own spec beside it. Later work: `docs/roadmap.md`. CI
 - **Tools and updates:** managed `helm` and `kubectl` downloads; signed in-app updates.
 - **AI agents:** chats with the agent CLIs the person installed (Claude Code, Codex, OpenCode,
   Gemini CLI, custom) over ACP, in an OS sandbox, reaching clusters only through the app's tools.
-  Core, commands and sandbox are in; the panel is next
-  (`docs/superpowers/specs/2026-11-22-skopos-ai-agents-design.md`).
+  Core, commands and sandbox are in; the panel is next.
 
 ## Binding rules
 
@@ -110,7 +108,7 @@ each later feature has its own spec beside it. Later work: `docs/roadmap.md`. CI
 - **Commits:** English, `type(scope): subject` (`feat`, `fix`, `perf`, `test`, `docs`, `chore`,
   `ci`, `refactor`; scopes such as `ui`, `core`, `e2e`, `agents`, `changelog`, `site`), no
   `Co-Authored-By` trailer. `main` is the only long-lived branch. Never commit
-  `docs/superpowers/` or `ui/tsconfig.tsbuildinfo`.
+  `ui/tsconfig.tsbuildinfo`.
 - **Release notes:** Add release notes under `## [Unreleased]` in `CHANGELOG.md`: one bullet per
   user-visible change, `**A short title:**` then what the person now sees. At release, remove
   the `next-release` marks in `site/index.html` for what it ships.
