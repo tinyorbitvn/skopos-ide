@@ -36,7 +36,14 @@ test("only the release build makes updater files, through an extra configuration
     build,
     /^ {10}args: \$\{\{ matrix\.args \}\} --config crates\/skopos-app\/tauri\.conf\.json --config crates\/skopos-app\/tauri\.updater\.conf\.json$/m,
   );
-  assert.match(build, /^ {10}uploadUpdaterJson: false$/m);
+  assert.match(build, /^ {10}includeUpdaterJson: false$/m);
+  assert.doesNotMatch(build, /uploadUpdaterJson/);
+});
+
+test("the bundle targets include the macOS app, which the updater archive is made from", () => {
+  const { targets } = JSON.parse(read("crates", "skopos-app", "tauri.conf.json")).bundle;
+  assert.ok(targets.includes("app"), `bundle.targets ${JSON.stringify(targets)} leaves out "app"`);
+  assert.ok(targets.includes("dmg"));
 });
 
 test("the build signs with the repository secrets, after checking the key is set", () => {
