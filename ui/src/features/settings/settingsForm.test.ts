@@ -199,6 +199,22 @@ test("Restore defaults is an empty draft with no icon, no namespaces and Detect"
   expect(settingsFrom(emptyDraft())).toEqual(clusterSettings());
 });
 
+test("saving gives the cluster's agent settings back as they were", () => {
+  const saved = clusterSettings({
+    displayName: "Prod",
+    agent: {
+      changes: "dontAsk",
+      namespaces: ["ingest", "shop"],
+      secretValues: true,
+      exec: false,
+      defaultAgent: "codex",
+      notes: "Deploys go through Argo CD.",
+    },
+  });
+  expect(settingsFrom(draftFrom(saved), saved.agent)).toEqual(saved);
+  expect(settingsFrom(draftFrom(saved)).agent).toEqual(clusterSettings().agent);
+});
+
 test("accessible namespaces split on commas and spaces, de-duplicate, and name every bad entry", () => {
   expect(splitNamespaces("shop, default  shop,,Bad_NS -x\n")).toEqual([
     "shop",

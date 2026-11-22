@@ -1,4 +1,5 @@
 import { IpcFailure } from "../../ipc/client";
+import type { ClusterAgentSettings } from "../../ipc/generated/ClusterAgentSettings";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { LabelMatcher } from "../../ipc/generated/LabelMatcher";
 import type { MetricsProvider } from "../../ipc/generated/MetricsProvider";
@@ -494,8 +495,24 @@ function providerSetting(draft: SettingsDraft): MetricsProviderSetting {
   }
 }
 
-/** The settings to save, normalised as the core saves them: trimmed, empty text as null. */
-export function settingsFrom(draft: SettingsDraft): ClusterSettings {
+/** What the core saves for a cluster whose agent settings were never changed. */
+const AGENT_DEFAULTS: ClusterAgentSettings = {
+  changes: "ask",
+  namespaces: null,
+  secretValues: false,
+  exec: false,
+  defaultAgent: null,
+  notes: "",
+};
+
+/**
+ * The settings to save, normalised as the core saves them: trimmed, empty text as null.
+ * The page shows no agent settings, so `agent` goes back as it was saved.
+ */
+export function settingsFrom(
+  draft: SettingsDraft,
+  agent: ClusterAgentSettings = AGENT_DEFAULTS,
+): ClusterSettings {
   return {
     displayName: textOrNull(draft.displayName),
     icon: draft.icon,
@@ -505,6 +522,7 @@ export function settingsFrom(draft: SettingsDraft): ClusterSettings {
     proxyUrl: textOrNull(draft.proxyUrl),
     nodeShellImage: textOrNull(draft.nodeShellImage),
     metricsProvider: providerSetting(draft),
+    agent,
   };
 }
 

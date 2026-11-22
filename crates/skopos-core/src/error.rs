@@ -266,6 +266,7 @@ pub enum ErrorCode {
     InvalidInput,
     ToolMissing,
     Cancelled,
+    Unsupported,
     Internal,
 }
 

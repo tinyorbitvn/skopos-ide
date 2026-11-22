@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
+use crate::agents::registry::AgentProbes;
 use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState};
@@ -112,7 +113,14 @@ struct Inner {
     /// The discovery run of each cluster, shared by its `refresh` callers.
     discoveries: DashMap<ClusterId, Arc<SingleFlight<Vec<ApiResourceInfo>>>>,
     sessions: Arc<SessionRegistry>,
+    /// The running chats and the stored ones (agents spec §4.8).
+    #[cfg(unix)]
+    chats: crate::agents::chat::Chats,
     home: PathBuf,
+    /// The app's data folder; agents keep their folders and run folders under it.
+    data: PathBuf,
+    /// R2: chats and probes start agents without the sandbox. Tests only.
+    agent_sandbox_off: std::sync::atomic::AtomicBool,
     portforwards: Arc<PortForwards>,
     tools: Tools,
     helm: Helm,
@@ -132,6 +140,8 @@ struct Inner {
     updates: Updates,
     /// The steps of the app's quit, once it has begun.
     quit: QuitWatch,
+    /// The agents' probe results of this app run (agents spec §4.2).
+    agent_probes: AgentProbes,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -304,7 +314,11 @@ impl AppCore {
                 next_drain: AtomicU64::new(1),
                 discoveries: DashMap::new(),
                 sessions: Arc::new(SessionRegistry::default()),
+                #[cfg(unix)]
+                chats: crate::agents::chat::Chats::new(&paths.data),
                 home: paths.home.clone(),
+                data: paths.data.clone(),
+                agent_sandbox_off: std::sync::atomic::AtomicBool::new(false),
                 portforwards: Arc::new(PortForwards::new(portforward_definitions, events.clone())),
                 tools: Tools::new(&paths.data),
                 helm,
@@ -318,6 +332,7 @@ impl AppCore {
                 startup_warnings: Mutex::new(warnings),
                 updates,
                 quit: QuitWatch::default(),
+                agent_probes: AgentProbes::default(),
             }),
         })
     }
@@ -425,8 +440,10 @@ impl AppCore {
     }
 
     /// A metrics setting that needs no password or token deletes the saved one (spec I50).
+    /// The agent settings are tidied, or refused, as `ClusterAgentSettings::normalized` says.
     pub fn cluster_settings_set(&self, id: &ClusterId, mut s: ClusterSettings) -> CoreResult<()> {
         s.metrics_provider = s.metrics_provider.normalized()?;
+        s.agent = s.agent.normalized()?;
         let metrics_changed = self.cluster_settings_get(id).metrics_provider != s.metrics_provider;
         let needs_secret = s.metrics_provider.needs_secret();
         self.inner.clusters.update(|all| {
@@ -443,6 +460,19 @@ impl AppCore {
         // Entries carry the display name and icon.
         let _ = self.inner.events.send(CoreEvent::CatalogChanged);
         Ok(())
+    }
+
+    /// Changes one cluster's saved settings with none of `cluster_settings_set`'s side
+    /// effects: no event, and the metrics caches and the keychain are left alone.
+    pub(crate) fn cluster_settings_update(
+        &self,
+        id: &ClusterId,
+        f: impl FnOnce(&mut ClusterSettings),
+    ) -> CoreResult<()> {
+        self.inner.clusters.try_update(|all| {
+            f(all.entry(id.clone()).or_default());
+            Ok(())
+        })
     }
 
     /// The pinned clusters in the catalog right now. Others stay saved, so a
@@ -576,6 +606,23 @@ impl AppCore {
         &self.inner.home
     }
 
+    /// The app's data folder.
+    pub(crate) fn data_dir(&self) -> &Path {
+        &self.inner.data
+    }
+
+    /// R2: chats and probes that start after this call run their agent directly, without the
+    /// sandbox, with the same environment, proxy and MCP endpoint. Tests only, like
+    /// `set_log_stream_cap_for_test`.
+    pub fn agent_sandbox_off_for_test(&self) {
+        self.inner.agent_sandbox_off.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether `agent_sandbox_off_for_test` was called.
+    pub(crate) fn agent_sandbox_off(&self) -> bool {
+        self.inner.agent_sandbox_off.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn tools(&self) -> &Tools {
         &self.inner.tools
     }
@@ -637,6 +684,15 @@ impl AppCore {
         &self.inner.sessions
     }
 
+    #[cfg(unix)]
+    pub(crate) fn chats(&self) -> &crate::agents::chat::Chats {
+        &self.inner.chats
+    }
+
+    pub(crate) fn agent_probes(&self) -> &AgentProbes {
+        &self.inner.agent_probes
+    }
+
     pub fn set_connect_timeouts_for_test(&self, t: ConnectTimeouts) {
         self.inner.connections.set_timeouts(t);
     }
@@ -650,7 +706,18 @@ impl AppCore {
         self.inner.prefs.get()
     }
 
-    /// Saves `p` and applies its sync sources immediately.
+    /// Changes the saved preferences in place; an error from `f` leaves them as they were.
+    /// For the fields the kubeconfig sync does not read, such as the agent settings.
+    pub(crate) fn prefs_try_update<R>(
+        &self,
+        f: impl FnOnce(&mut Prefs) -> CoreResult<R>,
+    ) -> CoreResult<R> {
+        self.inner.prefs.try_update(f)
+    }
+
+    /// Saves `p` and applies its sync sources immediately. The agent settings stay as
+    /// saved: only the agent calls change them, so a page that read the preferences before
+    /// one of those calls cannot undo it.
     pub fn prefs_set(&self, p: Prefs) -> CoreResult<()> {
         let p = p.normalized()?;
         // Cluster ids hash the path, so a relative one would change between launches.
@@ -667,7 +734,10 @@ impl AppCore {
         }
         let sync = lock(&self.inner.sync);
         let sources = p.sync_sources.clone();
-        self.inner.prefs.update(|prefs| *prefs = p)?;
+        self.inner.prefs.update(|prefs| {
+            let agents = std::mem::take(&mut prefs.agents);
+            *prefs = Prefs { agents, ..p };
+        })?;
         if let Some(sync) = sync.as_ref() {
             sync.set_sources(all_sources(&self.inner.pasted, sources));
         }

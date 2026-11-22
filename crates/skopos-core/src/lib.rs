@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod app_core;
 pub mod app_info;
 pub mod blocking;

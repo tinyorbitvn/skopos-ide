@@ -10,12 +10,14 @@ mod hub;
 mod names;
 mod object_watch;
 mod ops;
+mod patch;
 mod sanitize;
 mod service_account;
 mod single_flight;
 mod trim;
 mod types;
 
+pub(crate) use actions::{restartable, scalable};
 pub use actions::{DataChange, SecretChange, SecretData, SecretValue};
 pub use apply::ApplyResult;
 pub use argocd::{
@@ -31,6 +33,7 @@ pub(crate) use names::NAMES_TTL;
 pub use names::{ObjectName, ObjectNames};
 pub(crate) use ops::{invalid, is_path_segment};
 pub use ops::{InvolvedRef, Propagation};
+pub use patch::PatchKind;
 pub use sanitize::strip_for_list;
 pub use service_account::SavedKubeconfig;
 pub(crate) use single_flight::SingleFlight;

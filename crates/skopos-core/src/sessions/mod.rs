@@ -27,6 +27,7 @@ use ts_rs::TS;
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 
+pub use exec::ExecOutput;
 pub(crate) use flow::FlowControl;
 pub(crate) use logs::workload_selector;
 pub use logs::{LogDownload, LogEndReason, LogEvent, LogLine, LogMarker, LogOptions, LogTarget};

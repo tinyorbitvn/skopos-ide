@@ -4,7 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "skopos-agent-host"
+path = "src/bin/skopos-agent-host.rs"
+
+[[bin]]
+name = "skopos-fakeagent"
+path = "src/bin/skopos-fakeagent.rs"
+
 [dependencies]
+agent-client-protocol = { workspace = true, features = ["stdio"] }
 base64 = "0.22"
 dashmap.workspace = true
 futures.workspace = true
@@ -19,16 +28,18 @@ png = "0.18"
 portable-pty = "0.9"
 regex.workspace = true
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy", "stream"] }
+rmcp.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
 sha2.workspace = true
+shell-words = "1.1.1"
 tar = { version = "0.4", default-features = false }
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
 tracing.workspace = true
 ts-rs.workspace = true
 url = "2"
@@ -36,6 +47,9 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = "0.5"
 
 [dev-dependencies]
 axum.workspace = true
