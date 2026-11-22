@@ -2,6 +2,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
   Badge,
+  Button,
   EmptyState,
   ErrorNotice,
   Input,
@@ -11,6 +12,7 @@ import {
   type TableColumn,
   VirtualTable,
 } from "../../design";
+import { UserPlus } from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import { CLUSTER_ROLE_BINDINGS, ROLE_BINDINGS } from "../../kinds/refs";
 import {
@@ -22,6 +24,7 @@ import { useClusterContext } from "../cluster/ClusterLayout";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import styles from "../resources/ResourceScreen.module.css";
 import own from "./access.module.css";
+import { CreateUserDialog } from "./CreateUserDialog";
 import { RemoveSubjectDialog } from "./RemoveSubjectDialog";
 import { SubjectDrawer } from "./SubjectDrawer";
 import {
@@ -113,6 +116,7 @@ export function UsersGroupsScreen({
   const [showSystem, setShowSystem] = useState(false);
   // The entry as it was when Remove was pressed, so the confirm sends the versions shown.
   const [removing, setRemoving] = useState<SubjectEntry | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const [params, setParams] = useSearchParams();
   const all = useMemo(
@@ -162,6 +166,15 @@ export function UsersGroupsScreen({
         <EmptyState
           title="No bindings name a user or group"
           body="Create a user with a client certificate, or bind a role to a user or group."
+          action={
+            <Button
+              variant="primary"
+              onClick={() => setCreating(true)}
+              data-testid="ug-empty-create"
+            >
+              Create user…
+            </Button>
+          }
         />
       </div>
     );
@@ -220,6 +233,15 @@ export function UsersGroupsScreen({
           testId="ug-system"
         />
         <div className={styles.grow} />
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => setCreating(true)}
+          data-testid="ug-create"
+        >
+          <UserPlus size={14} aria-hidden="true" />
+          Create user…
+        </Button>
       </div>
       <p className={own.lead} data-testid="ug-lead">
         {LEAD}
@@ -248,6 +270,12 @@ export function UsersGroupsScreen({
           clusterId={clusterId}
           subject={removing}
           onClose={() => setRemoving(null)}
+        />
+      ) : null}
+      {creating ? (
+        <CreateUserDialog
+          clusterId={clusterId}
+          onClose={() => setCreating(false)}
         />
       ) : null}
     </div>

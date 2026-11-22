@@ -381,3 +381,13 @@ test("system names cannot be removed, and the button says why", async () => {
     "Kubernetes manages system users and groups",
   );
 });
+
+test("Create user… opens the dialog, from the toolbar and from the empty state", async () => {
+  await show({ cluster: [], namespaced: [] });
+  fireEvent.click(screen.getByTestId("ug-empty-create"));
+  expect(screen.getByTestId("cu-dialog")).toBeTruthy();
+  fireEvent.click(screen.getByTestId("cu-cancel"));
+  expect(screen.queryByTestId("cu-dialog")).toBeNull();
+  fireEvent.click(screen.getByTestId("ug-create"));
+  expect(screen.getByTestId("cu-dialog")).toBeTruthy();
+});
