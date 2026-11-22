@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CertificateRequestInfo } from "../../ipc/generated/CertificateRequestInfo";
+import type { CsrReview } from "../../ipc/generated/CsrReview";
 import { Facts, Part, SimpleTable } from "../detail/parts";
 import type { KubeObject } from "../objects";
 import type { DetailProps } from "../registry";
@@ -84,30 +85,47 @@ export function CsrDetail({ object }: DetailProps) {
   );
 }
 
-/** The Approve confirm's body: what the certificate will say, and who asked. */
-export function ApproveBody(props: {
-  object: KubeObject;
-  info: CertificateRequestInfo;
-}) {
-  const { object, info } = props;
-  const spec = object.spec ?? {};
-  const system = info.organizations.filter((o) => o.startsWith("system:"));
+/** The Approve confirm's body: what the certificate will say, who asked, and the access the
+ * user and its groups already have. All of it is from the one read the approval is bound to. */
+export function ApproveBody({ review }: { review: CsrReview }) {
   return (
     <>
       <Facts
         items={[
-          ["Subject", subjectText(info)],
-          ["Signer", text(spec.signerName)],
-          ["Requestor", text(spec.username)],
-          ["Duration", durationText(spec.expirationSeconds)],
+          ["Subject", subjectText(review.info)],
+          ["Signer", text(review.signer)],
+          ["Requestor", text(review.requestor)],
+          ["Duration", durationText(review.expirationSeconds)],
         ]}
       />
-      {system.length > 0 ? (
-        <p role="alert" data-testid="csr-approve-system">
-          This certificate puts its holder in {system.join(", ")}. Approve only
-          requests you expect.
+      {review.privileged.length > 0 ? (
+        <p role="alert" data-testid="csr-approve-privileged">
+          This certificate gives its holder the access of{" "}
+          {review.privileged.join(", ")}. Approve only requests you expect.
         </p>
       ) : null}
+      {review.grants === null ? (
+        <p data-testid="csr-approve-grants-error">
+          Could not read the bindings that name this user and its groups:{" "}
+          {review.grantsError}
+        </p>
+      ) : (
+        <>
+          <p>Bindings that already name this user or its groups</p>
+          <SimpleTable
+            testId="csr-approve-grants"
+            headers={["Binding", "Subject", "Role"]}
+            rows={review.grants.map((g) => [
+              g.binding.kind === "RoleBinding"
+                ? `RoleBinding ${g.binding.namespace ?? ""}/${g.binding.name}`
+                : `ClusterRoleBinding ${g.binding.name}`,
+              `${g.subject.kind} ${g.subject.name}`,
+              `${g.roleKind} ${g.roleName}`,
+            ])}
+            empty="None yet."
+          />
+        </>
+      )}
     </>
   );
 }

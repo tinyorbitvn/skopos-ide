@@ -393,8 +393,11 @@ async fn a_requester_who_may_not_approve_waits_for_an_approver() {
         .await;
         let name = csr_name(&waiting);
 
+        let review = approver_core.csr_review(&approver_id, &name).await.unwrap();
+        assert_eq!(review.grants_error, None);
+        assert!(review.privileged.is_empty(), "{:?}", review.privileged);
         approver_core
-            .csr_set_approval(&approver_id, &name, CsrDecision::Approve)
+            .csr_set_approval(&approver_id, &name, &review.uid, CsrDecision::Approve)
             .await
             .unwrap();
 

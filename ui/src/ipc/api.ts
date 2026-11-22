@@ -28,6 +28,7 @@ import type { ConnectionLogEntry } from "./generated/ConnectionLogEntry";
 import type { ConnectionState } from "./generated/ConnectionState";
 import type { ControlPlane } from "./generated/ControlPlane";
 import type { CsrDecision } from "./generated/CsrDecision";
+import type { CsrReview } from "./generated/CsrReview";
 import type { DataChange } from "./generated/DataChange";
 import type { DrainEvent } from "./generated/DrainEvent";
 import type { DrainOptions } from "./generated/DrainOptions";
@@ -431,8 +432,14 @@ export const api = {
       subject,
       bindings,
     }),
-  csrSetApproval: (clusterId: string, name: string, decision: CsrDecision) =>
-    call<void>("csr_set_approval", { clusterId, name, decision }),
+  csrSetApproval: (
+    clusterId: string,
+    name: string,
+    uid: string,
+    decision: CsrDecision,
+  ) => call<void>("csr_set_approval", { clusterId, name, uid, decision }),
+  csrReview: (clusterId: string, name: string) =>
+    call<CsrReview>("csr_review", { clusterId, name }),
   certificateRequestDescribe: (request: string, certificate: string | null) =>
     call<CertificateRequestInfo>("certificate_request_describe", {
       request,

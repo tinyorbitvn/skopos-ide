@@ -32,7 +32,9 @@ pub(crate) use cert_user::RunningCertUser;
 pub use cert_user::{
     BoundBinding, CertUserEvent, CertUserLimits, CertUserRequest, CertUserStep, RoleGrant, RoleKind,
 };
-pub use csr::{certificate_request_describe, CertificateRequestInfo, CsrDecision};
+pub use csr::{
+    certificate_request_describe, CertificateRequestInfo, CsrDecision, CsrReview, IdentityGrant,
+};
 pub(crate) use discovery::state_name;
 pub(crate) use drain::RunningDrain;
 pub use drain::{DrainEvent, DrainOptions, DrainOutcome, PodRef, SkipReason, SkippedPod};

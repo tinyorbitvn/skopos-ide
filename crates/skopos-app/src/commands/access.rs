@@ -5,7 +5,7 @@ use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::resources::{
     certificate_request_describe as describe, BindingRef, CertUserEvent, CertUserRequest,
-    CertificateRequestInfo, CsrDecision, SubjectRef, SubjectRemoval,
+    CertificateRequestInfo, CsrDecision, CsrReview, SubjectRef, SubjectRemoval,
 };
 use skopos_core::save_file;
 use tauri::ipc::Channel;
@@ -72,15 +72,25 @@ pub async fn access_subject_remove(
 }
 
 #[tauri::command]
+pub async fn csr_review(
+    state: State<'_, AppState>,
+    cluster_id: ClusterId,
+    name: String,
+) -> Result<CsrReview, IpcError> {
+    state.core.csr_review(&cluster_id, &name).await
+}
+
+#[tauri::command]
 pub async fn csr_set_approval(
     state: State<'_, AppState>,
     cluster_id: ClusterId,
     name: String,
+    uid: String,
     decision: CsrDecision,
 ) -> Result<(), IpcError> {
     state
         .core
-        .csr_set_approval(&cluster_id, &name, decision)
+        .csr_set_approval(&cluster_id, &name, &uid, decision)
         .await
 }
 

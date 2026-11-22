@@ -9,14 +9,16 @@ use x509_parser::prelude::*;
 use x509_parser::public_key::PublicKey;
 
 use super::ops::{invalid, is_path_segment};
+use super::subjects::{BindingKind, BindingRef, SubjectKind, SubjectRef};
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use k8s_openapi::api::certificates::v1::{
     CertificateSigningRequest, CertificateSigningRequestCondition,
 };
+use k8s_openapi::api::rbac::v1::{ClusterRoleBinding, RoleBinding, RoleRef, Subject};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
-use kube::api::PostParams;
+use kube::api::{ListParams, PostParams};
 use kube::Api;
 
 /// What the CSR drawer shows of a request and its certificate.
@@ -76,12 +78,20 @@ pub fn certificate_request_describe(
     request: &str,
     certificate: Option<&str>,
 ) -> CoreResult<CertificateRequestInfo> {
-    let unreadable = || invalid("the signing request cannot be read");
-    let der = STANDARD
+    let request = STANDARD
         .decode(request)
-        .ok()
-        .and_then(|pem| pem_contents(&pem))
-        .ok_or_else(unreadable)?;
+        .map_err(|_| invalid("the signing request cannot be read"))?;
+    let certificate = certificate
+        .map(|text| STANDARD.decode(text))
+        .transpose()
+        .map_err(|_| invalid("the certificate cannot be read"))?;
+    describe_pem(&request, certificate.as_deref())
+}
+
+/// [`certificate_request_describe`] of the PEM texts, as the typed object holds them.
+fn describe_pem(request: &[u8], certificate: Option<&[u8]>) -> CoreResult<CertificateRequestInfo> {
+    let unreadable = || invalid("the signing request cannot be read");
+    let der = pem_contents(request).ok_or_else(unreadable)?;
     let (_, parsed) = X509CertificationRequest::from_der(&der).map_err(|_| unreadable())?;
     let info = &parsed.certification_request_info;
     let value_unreadable =
@@ -106,14 +116,9 @@ pub fn certificate_request_describe(
                 .map_err(|_| value_unreadable())
         })
         .collect::<CoreResult<Vec<_>>>()?;
-    let not_after = match certificate {
-        None => None,
-        Some(text) => {
-            let unreadable = || invalid("the certificate cannot be read");
-            let pem = STANDARD.decode(text).map_err(|_| unreadable())?;
-            Some(certificate_expiry(&pem).map_err(|_| unreadable())?)
-        }
-    };
+    let not_after = certificate
+        .map(|pem| certificate_expiry(pem).map_err(|_| invalid("the certificate cannot be read")))
+        .transpose()?;
     Ok(CertificateRequestInfo {
         common_name,
         organizations,
@@ -225,6 +230,65 @@ mod tests {
         assert_eq!(info.common_name, "");
     }
 
+    fn grant(kind: SubjectKind, name: &str, role_kind: &str, role_name: &str) -> IdentityGrant {
+        IdentityGrant {
+            binding: BindingRef {
+                kind: BindingKind::ClusterRoleBinding,
+                namespace: None,
+                name: format!("{name}-binding"),
+                resource_version: "1".into(),
+            },
+            subject: SubjectRef {
+                kind,
+                name: name.into(),
+            },
+            role_kind: role_kind.into(),
+            role_name: role_name.into(),
+        }
+    }
+
+    fn requested(user: &str, groups: &[&str]) -> CertificateRequestInfo {
+        CertificateRequestInfo {
+            common_name: user.into(),
+            organizations: groups.iter().map(|g| g.to_string()).collect(),
+            key_algorithm: "ECDSA P-256".into(),
+            not_after: None,
+        }
+    }
+
+    #[test]
+    fn system_names_and_the_kubeadm_admins_are_privileged() {
+        let info = requested(
+            "system:kube-controller-manager",
+            &["devs", "system:nodes", "kubeadm:cluster-admins"],
+        );
+        assert_eq!(
+            privileged(&info, Some(&[])),
+            [
+                "system:kube-controller-manager",
+                "system:nodes",
+                "kubeadm:cluster-admins"
+            ]
+        );
+        // The kubeadm group as a user name is only a name.
+        assert!(privileged(&requested("kubeadm:cluster-admins", &[]), None).is_empty());
+    }
+
+    #[test]
+    fn a_name_bound_to_cluster_admin_is_privileged_by_its_own_kind() {
+        let info = requested("carol", &["admins", "devs"]);
+        let grants = [
+            grant(SubjectKind::Group, "admins", "ClusterRole", "cluster-admin"),
+            grant(SubjectKind::Group, "devs", "ClusterRole", "edit"),
+            // A Role of that name in a namespace is not the ClusterRole.
+            grant(SubjectKind::User, "carol", "Role", "cluster-admin"),
+            // A user with a group's name is not that group.
+            grant(SubjectKind::User, "devs", "ClusterRole", "cluster-admin"),
+        ];
+        assert_eq!(privileged(&info, Some(&grants)), ["admins"]);
+        assert!(privileged(&info, None).is_empty());
+    }
+
     #[test]
     fn what_does_not_parse_is_refused_without_quoting_it() {
         let garbage = STANDARD.encode("not a request");
@@ -258,12 +322,162 @@ pub enum CsrDecision {
     Deny,
 }
 
-/// Approves or denies a request, as `kubectl certificate approve` does: a PUT to
-/// `/approval`, which needs `update` there, carrying the version read. A request that
-/// changed meanwhile is read again once.
+/// What the Approve confirm shows, all from one read of the request (spec §5.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct CsrReview {
+    /// The request read. Approving with it fails if the request was replaced since.
+    pub uid: String,
+    pub signer: String,
+    pub requestor: String,
+    pub expiration_seconds: Option<i32>,
+    pub info: CertificateRequestInfo,
+    /// The bindings that already name the requested user or one of its groups; `None` when
+    /// they cannot be read, and `grants_error` says why.
+    pub grants: Option<Vec<IdentityGrant>>,
+    pub grants_error: Option<String>,
+    /// The requested user and groups that hold privileged access, in the subject's order: a
+    /// `system:` name, `kubeadm:cluster-admins`, or one a binding gives the ClusterRole
+    /// `cluster-admin`.
+    pub privileged: Vec<String>,
+}
+
+/// A binding that names the requested user or one of its groups.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityGrant {
+    pub binding: BindingRef,
+    pub subject: SubjectRef,
+    pub role_kind: String,
+    pub role_name: String,
+}
+
+/// The group kubeadm binds to `cluster-admin`. The API server refuses `system:masters` in
+/// requests to this signer, but not this group.
+const KUBEADM_ADMINS: &str = "kubeadm:cluster-admins";
+
+/// Adds a grant for each subject of one binding that is the requested user or one of its
+/// groups.
+fn add_grants(
+    grants: &mut Vec<IdentityGrant>,
+    binding: BindingRef,
+    subjects: Option<&[Subject]>,
+    role: &RoleRef,
+    info: &CertificateRequestInfo,
+) {
+    for subject in subjects.unwrap_or_default() {
+        let kind = match subject.kind.as_str() {
+            "User" if !info.common_name.is_empty() && subject.name == info.common_name => {
+                SubjectKind::User
+            }
+            "Group" if info.organizations.contains(&subject.name) => SubjectKind::Group,
+            _ => continue,
+        };
+        grants.push(IdentityGrant {
+            binding: binding.clone(),
+            subject: SubjectRef {
+                kind,
+                name: subject.name.clone(),
+            },
+            role_kind: role.kind.clone(),
+            role_name: role.name.clone(),
+        });
+    }
+}
+
+/// The ClusterRoleBindings, then the RoleBindings of every namespace, that name the requested
+/// user or one of its groups.
+async fn grants_naming(
+    client: &kube::Client,
+    info: &CertificateRequestInfo,
+) -> CoreResult<Vec<IdentityGrant>> {
+    let mut grants = Vec::new();
+    let everything = ListParams::default();
+    for binding in Api::<ClusterRoleBinding>::all(client.clone())
+        .list(&everything)
+        .await?
+    {
+        let reference = BindingRef {
+            kind: BindingKind::ClusterRoleBinding,
+            namespace: None,
+            name: binding.metadata.name.clone().unwrap_or_default(),
+            resource_version: binding
+                .metadata
+                .resource_version
+                .clone()
+                .unwrap_or_default(),
+        };
+        let subjects = binding.subjects.as_deref();
+        add_grants(&mut grants, reference, subjects, &binding.role_ref, info);
+    }
+    for binding in Api::<RoleBinding>::all(client.clone())
+        .list(&everything)
+        .await?
+    {
+        let reference = BindingRef {
+            kind: BindingKind::RoleBinding,
+            namespace: binding.metadata.namespace.clone(),
+            name: binding.metadata.name.clone().unwrap_or_default(),
+            resource_version: binding
+                .metadata
+                .resource_version
+                .clone()
+                .unwrap_or_default(),
+        };
+        let subjects = binding.subjects.as_deref();
+        add_grants(&mut grants, reference, subjects, &binding.role_ref, info);
+    }
+    Ok(grants)
+}
+
+/// See [`CsrReview::privileged`].
+fn privileged(info: &CertificateRequestInfo, grants: Option<&[IdentityGrant]>) -> Vec<String> {
+    let requested = std::iter::once((SubjectKind::User, &info.common_name)).chain(
+        info.organizations
+            .iter()
+            .map(|group| (SubjectKind::Group, group)),
+    );
+    let mut out: Vec<String> = Vec::new();
+    for (kind, name) in requested {
+        if name.is_empty() || out.contains(name) {
+            continue;
+        }
+        let cluster_admin = grants.unwrap_or_default().iter().any(|g| {
+            g.subject.kind == kind
+                && g.subject.name == *name
+                && g.role_kind == "ClusterRole"
+                && g.role_name == "cluster-admin"
+        });
+        if name.starts_with("system:")
+            || (kind == SubjectKind::Group && name == KUBEADM_ADMINS)
+            || cluster_admin
+        {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+fn replaced() -> IpcError {
+    IpcError::new(
+        ErrorCode::Conflict,
+        "the request was replaced since you reviewed it",
+    )
+}
+
+/// Approves or denies the request `name` whose uid is `uid`, as `kubectl certificate approve`
+/// does: a PUT to `/approval`, which needs `update` there, carrying the version read. A request
+/// that changed meanwhile is read again once.
+///
+/// A request's spec cannot change, so the uid pins what was reviewed. A request with another
+/// uid was deleted and made again under the same name, perhaps for someone else, and is left as
+/// it is.
 pub(crate) async fn set_approval(
     api: &Api<CertificateSigningRequest>,
     name: &str,
+    uid: &str,
     decision: CsrDecision,
 ) -> CoreResult<()> {
     let (kind, reason, message) = match decision {
@@ -273,6 +487,9 @@ pub(crate) async fn set_approval(
     let mut retried = false;
     loop {
         let mut csr = api.get(name).await?;
+        if csr.metadata.uid.as_deref() != Some(uid) {
+            return Err(replaced());
+        }
         let conditions = csr
             .status
             .get_or_insert_with(Default::default)
@@ -313,17 +530,59 @@ pub(crate) async fn set_approval(
 }
 
 impl AppCore {
-    /// Approves or denies another's CertificateSigningRequest (spec §5.4).
+    /// Reads another's CertificateSigningRequest for the Approve confirm (spec §5.4): what it
+    /// asks for, and the access its user and groups already have.
+    pub async fn csr_review(&self, id: &ClusterId, name: &str) -> CoreResult<CsrReview> {
+        if !is_path_segment(name) {
+            return Err(invalid("the request name is not valid"));
+        }
+        let client = self.cluster_client(id)?;
+        let csr = Api::<CertificateSigningRequest>::all(client.clone())
+            .get(name)
+            .await?;
+        let uid = csr.metadata.uid.clone().ok_or_else(|| {
+            IpcError::new(
+                ErrorCode::Internal,
+                "the API server gave the request no uid",
+            )
+        })?;
+        let certificate = csr
+            .status
+            .as_ref()
+            .and_then(|status| status.certificate.as_ref())
+            .map(|certificate| certificate.0.as_slice())
+            .filter(|certificate| !certificate.is_empty());
+        let info = describe_pem(&csr.spec.request.0, certificate)?;
+        let (grants, grants_error) = match grants_naming(&client, &info).await {
+            Ok(grants) => (Some(grants), None),
+            Err(error) => (None, Some(error.message)),
+        };
+        let privileged = privileged(&info, grants.as_deref());
+        Ok(CsrReview {
+            uid,
+            signer: csr.spec.signer_name,
+            requestor: csr.spec.username.unwrap_or_default(),
+            expiration_seconds: csr.spec.expiration_seconds,
+            info,
+            grants,
+            grants_error,
+            privileged,
+        })
+    }
+
+    /// Approves or denies another's CertificateSigningRequest (spec §5.4), the one with the
+    /// uid the person reviewed.
     pub async fn csr_set_approval(
         &self,
         id: &ClusterId,
         name: &str,
+        uid: &str,
         decision: CsrDecision,
     ) -> CoreResult<()> {
         if !is_path_segment(name) {
             return Err(invalid("the request name is not valid"));
         }
         let api: Api<CertificateSigningRequest> = Api::all(self.cluster_client(id)?);
-        set_approval(&api, name, decision).await
+        set_approval(&api, name, uid, decision).await
     }
 }

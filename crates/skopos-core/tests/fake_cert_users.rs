@@ -87,6 +87,31 @@ async fn stored(core: &AppCore, id: &ClusterId, name: &str) -> Option<Certificat
         .unwrap()
 }
 
+async fn uid(core: &AppCore, id: &ClusterId, name: &str) -> String {
+    stored(core, id, name).await.unwrap().metadata.uid.unwrap()
+}
+
+/// A pending request from kubernetes-admin for `CN=<user>, O=<group>`, for a day.
+fn requesting(name: &str, user: &str, group: &str) -> Value {
+    let key = rcgen::KeyPair::generate().unwrap();
+    let mut params = rcgen::CertificateParams::default();
+    let mut subject = rcgen::DistinguishedName::new();
+    subject.push(rcgen::DnType::CommonName, user);
+    subject.push(rcgen::DnType::OrganizationName, group);
+    params.distinguished_name = subject;
+    let request = params.serialize_request(&key).unwrap().pem().unwrap();
+    json!({
+        "metadata": { "name": name },
+        "spec": {
+            "request": STANDARD.encode(request),
+            "signerName": SIGNER,
+            "usages": ["client auth"],
+            "username": "kubernetes-admin",
+            "expirationSeconds": 86400,
+        },
+    })
+}
+
 /// (type, reason, message) of each condition.
 fn conditions(csr: &CertificateSigningRequest) -> Vec<(String, Option<String>, Option<String>)> {
     csr.status
@@ -103,9 +128,14 @@ async fn approving_adds_the_condition_and_the_signer_issues() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
     fake.upsert(CSRS, pending("alice-1"));
 
-    core.csr_set_approval(&id, "alice-1", CsrDecision::Approve)
-        .await
-        .unwrap();
+    core.csr_set_approval(
+        &id,
+        "alice-1",
+        &uid(&core, &id, "alice-1").await,
+        CsrDecision::Approve,
+    )
+    .await
+    .unwrap();
 
     let csr = stored(&core, &id, "alice-1").await.unwrap();
     assert_eq!(
@@ -134,9 +164,14 @@ async fn approval_is_a_put_that_needs_update_only() {
     let (core, fake, id, _root) = connected(cfg).await;
     fake.upsert(CSRS, pending("alice-1"));
 
-    core.csr_set_approval(&id, "alice-1", CsrDecision::Approve)
-        .await
-        .unwrap();
+    core.csr_set_approval(
+        &id,
+        "alice-1",
+        &uid(&core, &id, "alice-1").await,
+        CsrDecision::Approve,
+    )
+    .await
+    .unwrap();
 
     let writes = fake.writes("PUT", APPROVAL_OF_ALICE);
     assert_eq!(writes.len(), 1);
@@ -153,9 +188,14 @@ async fn denying_adds_denied_and_issues_nothing() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
     fake.upsert(CSRS, pending("alice-1"));
 
-    core.csr_set_approval(&id, "alice-1", CsrDecision::Deny)
-        .await
-        .unwrap();
+    core.csr_set_approval(
+        &id,
+        "alice-1",
+        &uid(&core, &id, "alice-1").await,
+        CsrDecision::Deny,
+    )
+    .await
+    .unwrap();
 
     let csr = stored(&core, &id, "alice-1").await.unwrap();
     assert_eq!(
@@ -175,12 +215,22 @@ async fn a_decided_request_is_refused_with_conflict() {
     let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
     fake.upsert(CSRS, pending("alice-1"));
     fake.upsert(CSRS, pending("bob-1"));
-    core.csr_set_approval(&id, "alice-1", CsrDecision::Approve)
-        .await
-        .unwrap();
-    core.csr_set_approval(&id, "bob-1", CsrDecision::Deny)
-        .await
-        .unwrap();
+    core.csr_set_approval(
+        &id,
+        "alice-1",
+        &uid(&core, &id, "alice-1").await,
+        CsrDecision::Approve,
+    )
+    .await
+    .unwrap();
+    core.csr_set_approval(
+        &id,
+        "bob-1",
+        &uid(&core, &id, "bob-1").await,
+        CsrDecision::Deny,
+    )
+    .await
+    .unwrap();
 
     for (name, decision, word) in [
         ("alice-1", CsrDecision::Approve, "approved"),
@@ -188,7 +238,7 @@ async fn a_decided_request_is_refused_with_conflict() {
         ("bob-1", CsrDecision::Approve, "denied"),
     ] {
         let error = core
-            .csr_set_approval(&id, name, decision)
+            .csr_set_approval(&id, name, &uid(&core, &id, name).await, decision)
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::Conflict);
@@ -203,18 +253,157 @@ async fn a_request_changed_meanwhile_is_read_again_once() {
     fake.upsert(CSRS, pending("alice-1"));
     fake.fail_next_writes_to(CSRS, "alice-1", 409, 1);
 
-    core.csr_set_approval(&id, "alice-1", CsrDecision::Approve)
-        .await
-        .unwrap();
+    core.csr_set_approval(
+        &id,
+        "alice-1",
+        &uid(&core, &id, "alice-1").await,
+        CsrDecision::Approve,
+    )
+    .await
+    .unwrap();
     assert_eq!(fake.writes("PUT", APPROVAL_OF_ALICE).len(), 2);
 
     fake.upsert(CSRS, pending("alice-1"));
     fake.fail_next_writes_to(CSRS, "alice-1", 409, 2);
     let error = core
-        .csr_set_approval(&id, "alice-1", CsrDecision::Approve)
+        .csr_set_approval(
+            &id,
+            "alice-1",
+            &uid(&core, &id, "alice-1").await,
+            CsrDecision::Approve,
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::Conflict);
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_request_replaced_under_the_same_name_is_left_as_it_is() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert(CSRS, pending("alice-1"));
+    let reviewed = uid(&core, &id, "alice-1").await;
+    fake.delete(CSRS, None, "alice-1");
+    fake.upsert(CSRS, pending("alice-1"));
+    assert_ne!(uid(&core, &id, "alice-1").await, reviewed);
+
+    for decision in [CsrDecision::Approve, CsrDecision::Deny] {
+        let error = core
+            .csr_set_approval(&id, "alice-1", &reviewed, decision)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::Conflict);
+        assert_eq!(
+            error.message,
+            "the request was replaced since you reviewed it"
+        );
+    }
+    assert!(fake.writes("PUT", APPROVAL_OF_ALICE).is_empty());
+    assert!(conditions(&stored(&core, &id, "alice-1").await.unwrap()).is_empty());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_review_reads_the_request_and_the_bindings_that_name_it() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert(CSRS, requesting("carol-1", "carol", "admins"));
+    let mut admins = binding(None, "admins-all", json!([group("admins")]));
+    admins["roleRef"]["name"] = json!("cluster-admin");
+    fake.upsert("clusterrolebindings", admins);
+    fake.upsert(
+        "clusterrolebindings",
+        binding(None, "others", json!([group("others"), user("dave")])),
+    );
+    fake.upsert(
+        "rolebindings",
+        binding(Some("payments"), "carol-view", json!([user("carol")])),
+    );
+
+    let review = core.csr_review(&id, "carol-1").await.unwrap();
+    assert_eq!(review.uid, uid(&core, &id, "carol-1").await);
+    assert_eq!(review.signer, SIGNER);
+    assert_eq!(review.requestor, "kubernetes-admin");
+    assert_eq!(review.expiration_seconds, Some(86400));
+    assert_eq!(review.info.common_name, "carol");
+    assert_eq!(review.info.organizations, ["admins"]);
+    let grants: Vec<_> = review
+        .grants
+        .unwrap()
+        .into_iter()
+        .map(|g| {
+            (
+                g.binding.kind,
+                g.binding.namespace,
+                g.binding.name,
+                g.subject,
+                g.role_name,
+            )
+        })
+        .collect();
+    assert_eq!(
+        grants,
+        [
+            (
+                BindingKind::ClusterRoleBinding,
+                None,
+                "admins-all".to_owned(),
+                SubjectRef {
+                    kind: SubjectKind::Group,
+                    name: "admins".into()
+                },
+                "cluster-admin".to_owned()
+            ),
+            (
+                BindingKind::RoleBinding,
+                Some("payments".to_owned()),
+                "carol-view".to_owned(),
+                SubjectRef {
+                    kind: SubjectKind::User,
+                    name: "carol".into()
+                },
+                "view".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(review.grants_error, None);
+    assert_eq!(review.privileged, ["admins"]);
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_review_without_access_to_bindings_says_why_and_still_flags_system_names() {
+    let cfg = FakeKubeConfig {
+        deny: vec![DenyRule {
+            verb: "list".into(),
+            plural: "clusterrolebindings".into(),
+            namespace: None,
+        }],
+        ..FakeKubeConfig::default()
+    };
+    let (core, fake, id, _root) = connected(cfg).await;
+    fake.upsert(CSRS, requesting("sched-1", "system:kube-scheduler", "devs"));
+
+    let review = core.csr_review(&id, "sched-1").await.unwrap();
+    assert_eq!(review.grants, None);
+    assert!(review.grants_error.is_some_and(|m| !m.is_empty()));
+    assert_eq!(review.privileged, ["system:kube-scheduler"]);
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_review_of_a_request_that_cannot_be_read_is_refused() {
+    let (core, fake, id, _root) = connected(FakeKubeConfig::default()).await;
+    fake.upsert(
+        CSRS,
+        json!({
+            "metadata": { "name": "bad-1" },
+            "spec": { "request": STANDARD.encode("not a request"), "signerName": SIGNER, "usages": [] },
+        }),
+    );
+    let error = core.csr_review(&id, "bad-1").await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    let error = core.csr_review(&id, "a/b").await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidInput);
     core.shutdown().await;
 }
 
@@ -224,7 +413,12 @@ async fn a_forbidden_approval_is_forbidden() {
     fake.upsert(CSRS, pending("alice-1"));
 
     let error = core
-        .csr_set_approval(&id, "alice-1", CsrDecision::Approve)
+        .csr_set_approval(
+            &id,
+            "alice-1",
+            &uid(&core, &id, "alice-1").await,
+            CsrDecision::Approve,
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::Forbidden);
@@ -251,7 +445,7 @@ async fn the_fake_signer_can_be_off_and_others_can_decide() {
 async fn a_bad_name_is_refused_before_any_request() {
     let (core, _fake, id, _root) = connected(FakeKubeConfig::default()).await;
     let error = core
-        .csr_set_approval(&id, "a/b", CsrDecision::Approve)
+        .csr_set_approval(&id, "a/b", "", CsrDecision::Approve)
         .await
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidInput);

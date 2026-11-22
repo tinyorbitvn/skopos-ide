@@ -3,7 +3,7 @@ import { BadgeCheck, CircleX } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { KindAction } from "../registry";
 import { ApproveBody } from "./CsrDetail";
-import { describeRequest, isPending } from "./csr";
+import { isPending } from "./csr";
 
 // No `requires`: approval is a subresource with its own signer check, and the API server
 // answers for it, as for TokenRequest.
@@ -15,15 +15,17 @@ export const approveCsrAction: KindAction = {
   visible: isPending,
   run: async (ctx, o) => {
     const name = o.metadata.name;
-    const info = await describeRequest(o);
+    // One read for the confirm, and the approval is bound to its uid: a request deleted and
+    // made again under the same name is not approved.
+    const review = await api.csrReview(ctx.clusterId, name);
     const ok = await ctx.confirm({
       title: `Approve certificate request ${name}?`,
-      body: <ApproveBody object={o} info={info} />,
+      body: <ApproveBody review={review} />,
       confirmLabel: "Approve",
-      danger: info.organizations.some((g) => g.startsWith("system:")),
+      danger: review.privileged.length > 0,
     });
     if (!ok) return;
-    await api.csrSetApproval(ctx.clusterId, name, "Approve");
+    await api.csrSetApproval(ctx.clusterId, name, review.uid, "Approve");
     toast.success(`Approved ${name}`);
   },
 };
@@ -44,7 +46,7 @@ export const denyCsrAction: KindAction = {
       danger: true,
     });
     if (!ok) return;
-    await api.csrSetApproval(ctx.clusterId, name, "Deny");
+    await api.csrSetApproval(ctx.clusterId, name, o.metadata.uid ?? "", "Deny");
     toast.success(`Denied ${name}`);
   },
 };

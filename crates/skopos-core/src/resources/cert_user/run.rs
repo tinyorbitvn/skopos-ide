@@ -236,10 +236,12 @@ fn signing_request(request: &CertUserRequest, pem: &str) -> CertificateSigningRe
 }
 
 /// Watches the one request until it has a certificate. Until an Approved condition is
-/// seen, the approval deadline holds; from then, `issue` from that moment.
+/// seen, the approval deadline holds; from then, `issue` from that moment. A request of that
+/// name with another uid is not this run's, as if the request were deleted.
 async fn wait_for_certificate(
     api: &Api<CertificateSigningRequest>,
     name: &str,
+    uid: &str,
     mut approved: bool,
     approval_deadline: Instant,
     issue: Duration,
@@ -289,6 +291,9 @@ async fn wait_for_certificate(
                 }
             }
         };
+        if csr.metadata.uid.as_deref() != Some(uid) {
+            return Err(deleted(name, approved));
+        }
         let status = csr.status.unwrap_or_default();
         let conditions = status.conditions.unwrap_or_default();
         if let Some(denied) = condition(&conditions, "Denied") {
@@ -412,6 +417,15 @@ async fn steps(
             ),
         )
     })?;
+    let csr_uid = created.metadata.uid.ok_or_else(|| {
+        (
+            CertUserStep::Submit,
+            IpcError::new(
+                ErrorCode::Internal,
+                "the API server gave the request no uid",
+            ),
+        )
+    })?;
     progress.csr = Some(csr_name.clone());
     tracing::info!(csr = %csr_name, "sent a client certificate request");
     send(
@@ -424,7 +438,7 @@ async fn steps(
     let approval_deadline = Instant::now() + input.limits.approval;
 
     started(tx, CertUserStep::Approve).await;
-    let approved = match set_approval(&api, &csr_name, CsrDecision::Approve).await {
+    let approved = match set_approval(&api, &csr_name, &csr_uid, CsrDecision::Approve).await {
         Ok(()) => true,
         Err(error) if error.code == ErrorCode::Forbidden => {
             tracing::info!(csr = %csr_name, "waiting for someone to approve the request");
@@ -450,6 +464,7 @@ async fn steps(
     let certificate = wait_for_certificate(
         &api,
         &csr_name,
+        &csr_uid,
         approved,
         approval_deadline,
         input.limits.issue,

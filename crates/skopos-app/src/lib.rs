@@ -164,6 +164,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::access::cert_user_create_start,
             commands::access::cert_user_create_cancel,
             commands::access::access_subject_remove,
+            commands::access::csr_review,
             commands::access::csr_set_approval,
             commands::access::certificate_request_describe,
             commands::actions::secret_reveal,
