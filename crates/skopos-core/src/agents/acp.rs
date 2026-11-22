@@ -321,7 +321,11 @@ impl Running {
             biased;
             result = reply => match result {
                 Ok(answer) => Ok(answer),
-                Err(error) if self.connection.is_incoming_closed() => {
+                Err(error)
+                if self.connection.is_incoming_closed()
+                    || agent_client_protocol::is_connection_terminated(&error)
+                    || agent_client_protocol::is_incoming_transport_closed(&error) =>
+            {
                     match tokio::time::timeout(EXIT_GRACE, exited(&mut exit)).await {
                         Ok(reason) => Err(Failure::Exited(reason)),
                         Err(_) => Err(Failure::Error(error)),
