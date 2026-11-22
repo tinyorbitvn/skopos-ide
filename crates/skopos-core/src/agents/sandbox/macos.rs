@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use super::paths::real_path;
+use super::paths::{links_on_the_way, real_path};
 use super::spec::{ChatPorts, SandboxSpec};
 use super::{configure, SandboxKind, SandboxStatus};
 use crate::process::{self, Output, ProcessOutput, ProcessSpec};
@@ -110,8 +110,10 @@ fn configured_folder(name: c_int) -> Option<PathBuf> {
 }
 
 /// The profile, one rule a line, in this order: the opening rules; no reading under the home
-/// folder or `temp_folders`, except the folders above an allowed path, which the agent may
-/// `stat` on its way down; reading again each `read_write` and `read_only` path; writing each
+/// folder or `temp_folders`, except the folders above an allowed path or a link the agent
+/// passes, which it may `stat` on its way down; reading again each `read_write` and
+/// `read_only` path, and each link in a covered folder on the way to a `linked` path, which a
+/// lookup through it reads; writing each
 /// `read_write` path, `/dev/null` and its controlling terminal; no reading or writing the
 /// hidden kubeconfig files and the person's other terminals, last among the file rules so that
 /// no allowed folder opens them again; connecting to `localhost:<proxy>` and `localhost:<mcp>`
@@ -123,12 +125,22 @@ fn profile_with(spec: &SandboxSpec, ports: ChatPorts, temp_folders: &[PathBuf]) 
     let allowed: Vec<&PathBuf> = read_write.iter().chain(&read_only).collect();
     let mut rules: Vec<String> = OPENING.iter().map(|rule| rule.to_string()).collect();
     let covered: Vec<&PathBuf> = std::iter::once(&home).chain(temp_folders).collect();
+    let mut links: Vec<PathBuf> = Vec::new();
+    for linked in &spec.linked {
+        for link in links_on_the_way(&linked.path) {
+            let hidden = covered.iter().any(|folder| link.starts_with(folder));
+            if hidden && !links.contains(&link) {
+                links.push(link);
+            }
+        }
+    }
     for folder in &covered {
         rules.push(format!("(deny file-read* (subpath {}))", quoted(folder)));
     }
+    let passed: Vec<&PathBuf> = allowed.iter().copied().chain(&links).collect();
     let mut above: Vec<PathBuf> = Vec::new();
     for folder in &covered {
-        for path in folders_above(folder, &allowed) {
+        for path in folders_above(folder, &passed) {
             if !above.contains(&path) {
                 above.push(path);
             }
@@ -142,6 +154,9 @@ fn profile_with(spec: &SandboxSpec, ports: ChatPorts, temp_folders: &[PathBuf]) 
     }
     for path in &allowed {
         rules.push(format!("(allow file-read* (subpath {}))", quoted(path)));
+    }
+    for link in &links {
+        rules.push(format!("(allow file-read* (literal {}))", quoted(link)));
     }
     for path in &read_write {
         rules.push(format!("(allow file-write* (subpath {}))", quoted(path)));
@@ -286,6 +301,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::agents::sandbox::spec::LinkedPath;
 
     const HOME: &str = "/Users/skopos-test";
     const DATA: &str = "/Users/skopos-test/Library/Application Support/dev.skopos.SkoposIDE/agents";
@@ -418,6 +434,64 @@ mod tests {
         assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{lines:?}");
         let hidden = r#"(deny file-read* file-write* (literal "/etc/skopos-test/config"))"#;
         assert_eq!(lines.iter().filter(|line| **line == hidden).count(), 1);
+    }
+
+    #[test]
+    fn a_link_in_the_home_folder_on_the_way_to_a_linked_folder_may_be_read_and_nothing_past_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = real_path(dir.path());
+        let home = root.join("home");
+        let kube = root.join("outside/kube");
+        std::fs::create_dir_all(home.join("dots")).unwrap();
+        std::fs::create_dir_all(&kube).unwrap();
+        // home/kube-link → dots/kube → outside/kube: both links sit in the hidden home.
+        std::os::unix::fs::symlink("dots/kube", home.join("kube-link")).unwrap();
+        std::os::unix::fs::symlink(&kube, home.join("dots/kube")).unwrap();
+        let mut spec = fixed_spec();
+        spec.home = home.clone();
+        spec.read_write = Vec::new();
+        spec.read_only = vec![kube.clone()];
+        spec.linked = vec![LinkedPath {
+            path: home.join("kube-link"),
+            target: kube.clone(),
+            writable: false,
+        }];
+        spec.hidden_files = vec![kube.join("config"), home.join("kube-link/config")];
+        let text = profile_with(&spec, PORTS, &[]);
+        let lines: Vec<&str> = text.lines().collect();
+        let wanted = [
+            format!("(deny file-read* (subpath {}))", quoted(&home)),
+            format!("(allow file-read-metadata (literal {}))", quoted(&home)),
+            format!(
+                "(allow file-read-metadata (literal {}))",
+                quoted(&home.join("dots"))
+            ),
+            format!("(allow file-read* (subpath {}))", quoted(&kube)),
+            format!(
+                "(allow file-read* (literal {}))",
+                quoted(&home.join("kube-link"))
+            ),
+            format!(
+                "(allow file-read* (literal {}))",
+                quoted(&home.join("dots/kube"))
+            ),
+            format!(
+                "(deny file-read* file-write* (literal {}))",
+                quoted(&kube.join("config"))
+            ),
+        ];
+        let at: Vec<usize> = wanted
+            .iter()
+            .map(|rule| lines.iter().position(|line| line == rule).expect(rule))
+            .collect();
+        assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{lines:?}");
+        let opened: Vec<&&str> = lines
+            .iter()
+            .filter(|line| {
+                line.starts_with("(allow file-read* ") && line.contains(&*home.to_string_lossy())
+            })
+            .collect();
+        assert_eq!(opened.len(), 2, "only the two links: {opened:?}");
     }
 
     #[test]
