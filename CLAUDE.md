@@ -1,9 +1,32 @@
 # SkoposIDE
 
-Source-available desktop Kubernetes IDE (PolyForm Shield 1.0.0, not open source). Tauri 2 +
-Rust core + React.
-Spec: `docs/superpowers/specs/2026-11-05-skopos-milestone-a-design.md` (kept locally, not in git).
-Later work: `docs/roadmap.md`.
+Source-available (PolyForm Shield 1.0.0, not open source) desktop Kubernetes IDE for Linux, macOS
+and Windows. Tauri 2 + Rust core + React.
+Spec: `docs/superpowers/specs/2026-11-05-skopos-milestone-a-design.md` (kept locally, not in git);
+each later feature has its own spec beside it. Later work: `docs/roadmap.md`. CI and releases:
+`docs/releasing.md`.
+
+## Product
+
+- **Catalog and clusters:** kubeconfig files are watched and synced into a catalog with folders
+  and a hotbar; several clusters connect at once, one failing never affects another.
+- **Shell:** sidebar, tabs across several windows (restored on restart), command palette, dock.
+- **Resources:** live tables per kind (columns, status badges, filter by any column), a detail
+  drawer with actions, a YAML editor to edit and create, cluster and section overviews, a
+  resource map and a node topology.
+- **Sessions:** logs, local terminals, pod and node shells in the dock.
+- **Port forwards:** saved definitions that never autostart, bound to `127.0.0.1` only.
+- **Helm and Argo CD:** repos, charts and releases through the `helm` CLI; Argo CD Applications
+  and their actions.
+- **Metrics:** Prometheus or metrics-server, detected per cluster, for charts, usage bars and
+  overview cards.
+- **Access control:** RBAC kinds, access checks of the verbs the account may use (kinds it may
+  not list are hidden), and ServiceAccount kubeconfigs.
+- **Tools and updates:** managed `helm` and `kubectl` downloads; signed in-app updates.
+- **AI agents:** chats with the agent CLIs the person installed (Claude Code, Codex, OpenCode,
+  Gemini CLI, custom) over ACP, in an OS sandbox, reaching clusters only through the app's tools.
+  Core, commands and sandbox are in; the panel is next
+  (`docs/superpowers/specs/2026-11-22-skopos-ai-agents-design.md`).
 
 ## Binding rules
 
@@ -25,16 +48,96 @@ Later work: `docs/roadmap.md`.
 - Tests touch only the `skopos-e2e` kind cluster, using `e2e/.tmp/kubeconfig`. Never use `~/.kube/config`.
 - Pin dependency versions from spec §4. Do not use Tauri 3 alpha.
 
+## Architecture
+
+- Rust owns all Kubernetes work; React only renders. Credentials never reach the webview, which
+  sees cluster IDs only.
+- `AppCore` (`app_core.rs`) is the one handle the app and the tests drive. Streams take an
+  `mpsc::Sender` that the app forwards to a Tauri `Channel`; `CoreEvent`s go out on a broadcast
+  that `skopos-app/src/events.rs` emits as `catalog://changed`-style events.
+- Commands: one file per domain in `skopos-app/src/commands/`, `snake_case` with a domain prefix
+  (`cluster_connect`), camelCase JS arguments, each returning `Result<T, IpcError>`.
+- IPC types derive `ts_rs::TS` with serde `camelCase`; `cargo test` writes them to
+  `ui/src/ipc/generated/` (`TS_RS_EXPORT_DIR` in `.cargo/config.toml`). The UI calls typed
+  wrappers in `ui/src/ipc/`.
+- One shared watcher per cluster and resource fans out to subscribers (`resources/hub.rs`); rows
+  travel as their JSON text, trimmed to what tables read (`resources/trim.rs`); the drawer fetches
+  the whole object.
+- Each cluster holds a cancellation token and its watches, streams, sessions and port forwards
+  hold child tokens. Subscriptions and sessions belong to a window and end when it reloads or
+  closes (`subscriptions.rs`).
+- Blocking work (files, big parses) runs off the Tokio workers (`blocking.rs`).
+- Platform services are core traits the app implements: `SecretStore` (OS keychain),
+  `UpdateSource` (Tauri updater plugin). Tests use fakes.
+- `JsonStore<T>` files are versioned and written atomically; a corrupt file is set aside and
+  defaults used, so a store never stops the app from starting. `SKOPOS_CONFIG_DIR` moves the root.
+- `helm` and `kubectl` run with an argument array, never a shell, with a timeout and a
+  per-context kubeconfig file. Managed downloads are pinned with checksums in `tools/pinned.rs`.
+- The login shell's environment is loaded at startup (`shell_env.rs`) so exec auth plugins work
+  from a GUI launch.
+- Argo CD actions write the Application through the Kubernetes API, not the Argo CD API server.
+- Security: CSP with no remote scripts, fonts and Monaco bundled; URLs leave the app only through
+  `external_url.rs`; a system dialog picks save paths, never the page; errors and logs never quote
+  kubeconfig, store or Secret values; destructive actions confirm and name the target.
+- Agents (`skopos-core/src/agents/`): an ACP client over the agent's stdio and a per-chat MCP
+  server (rmcp) with the cluster tools. The change gate (`Ask every time` by default,
+  `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call.
+- Agent sandbox: bubblewrap with seccomp on Linux, Seatbelt on macOS, none on Windows, so no
+  agents there. A per-chat proxy allows only `CONNECT` to port 443 of the agent's provider hosts
+  and the person's domains. The app binary's hidden `--agent-mcp` and `--agent-init` modes are
+  parsed in `main.rs` before Tauri starts.
+- Test doubles: `skopos-fakekube` is a fake API server for core tests and the smoke e2e;
+  `skopos-fakeagent` is a scripted ACP agent and `skopos-agent-host` stands in for the app
+  binary in sandbox tests. None ship.
+- E2E: WebdriverIO with `tauri-plugin-wdio-webdriver`, compiled only under the Cargo feature
+  `e2e`; `SKOPOS_E2E_SPEC_SET` picks `full`, `smoke` or `screens`.
+- UI: TinyOrbit tokens (`ui/src/design/tinyorbit.css`), semantic tokens only in product CSS, CSS
+  Modules plus Radix; `designRules.test.ts` enforces focus rings, token radii, shadows and motion,
+  and control heights. Stores are zustand in `ui/src/stores/`, per-kind logic in
+  `ui/src/kinds/`, icons from `@thesvg/ui-react`.
+- Releases: the tag builds signed updater files and `latest.json`; only the release build makes
+  them, so CI, e2e and local builds need no key.
+
+## Conventions
+
+- **Naming:** English identifiers. Rust `snake_case` and `PascalCase` types; TS `camelCase`,
+  components and their files `PascalCase` with a `.module.css` beside. File names in one folder
+  differ by more than case (macOS and Windows).
+- **UI copy:** English, sentence case, facts over adjectives, no exclamation marks, no emoji, no
+  "we"; no trailing period on labels; `…` on an item that opens a dialog (`Save…`). Every failed
+  action shows the API server's or tool's message. Every list has loading, empty and error states.
+  Interactive elements have an accessible name, and a `data-testid` where tests need one.
+- **Commits:** English, `type(scope): subject` (`feat`, `fix`, `perf`, `test`, `docs`, `chore`,
+  `ci`, `refactor`; scopes such as `ui`, `core`, `e2e`, `agents`, `changelog`, `site`), no
+  `Co-Authored-By` trailer. `main` is the only long-lived branch. Never commit
+  `docs/superpowers/` or `ui/tsconfig.tsbuildinfo`.
+- **Release notes:** Add release notes under `## [Unreleased]` in `CHANGELOG.md`: one bullet per
+  user-visible change, `**A short title:**` then what the person now sees. At release, remove
+  the `next-release` marks in `site/index.html` for what it ships.
+- **Tests:** Rust unit tests beside the code; core integration tests in
+  `crates/skopos-core/tests/`, where tests that need the kind cluster are `#[ignore]` and named
+  `kind_*`, `argocd_*` or `metrics_*` for their make target. Sandbox tests run with
+  `SKOPOS_SANDBOX_TEST=1`. UI tests sit beside the source as `*.test.ts(x)` (vitest); e2e specs
+  are `e2e/specs/*.e2e.ts`. Rust code does not `unwrap` or `panic` on input from files, the
+  network or the UI.
+- **Dependencies:** versions follow the spec's lines: shared crates in `[workspace.dependencies]`,
+  `~` in `package.json` for a major.minor line, `^` for a major-only one. pnpm only; the Tauri
+  CLI comes from the dev dependency. `pnpm-workspace.yaml` overrides lift packages with advisories.
+- **Generated TS types:** never edit `ui/src/ipc/generated/` by hand. Change the Rust type, run
+  `cargo test` and commit both; `make check` fails when they are stale or untracked.
+- **Scratch files:** scripts, logs, worktrees and downloads go in `tmp/` (git-ignored).
+
 ## Commands
 
 ```sh
-make check        # fmt, clippy, unit and fakekube tests, TS checks, provenance
+make check        # UI build, fmt, clippy, cargo tests, generated types, tsc, Biome, vitest, script tests, provenance
+make fmt          # cargo fmt and Biome fixes
 make test-kind    # core integration tests against the skopos-e2e kind cluster
 make test-argocd  # Argo CD actions against Argo CD Core on that cluster (network, minutes)
 make test-metrics # Prometheus and metrics-server on that cluster (network, minutes)
 make e2e          # full end-to-end suite on the running app (Linux)
+make e2e-smoke    # smoke end-to-end suite against skopos-fakekube, no Docker
 make dev          # run the app with hot reload
+make site         # build the project site into tmp/site/ from the latest release
 make release VERSION=x.y.z  # on main: bump, date CHANGELOG notes, commit, tag (see docs/releasing.md)
 ```
-
-`main` is the only long-lived branch. Add release notes under `## [Unreleased]` in `CHANGELOG.md`.
