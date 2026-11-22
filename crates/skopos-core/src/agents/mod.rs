@@ -1,0 +1,150 @@
+//! AI agents (agents spec 2026-11-22): the agent CLIs the person installed, run in a
+//! sandbox, reaching clusters only through SkoposIDE's tools. Agents run on Linux and macOS
+//! only: on Windows every agent call refuses with `Unsupported` and the readers give the
+//! defaults (spec §2, §11).
+
+pub mod settings;
+
+use crate::app_core::AppCore;
+use crate::error::{CoreResult, ErrorCode, IpcError};
+use crate::kubeconfig::ClusterId;
+use crate::prefs::{AgentChanges, AgentPrefs, ClusterAgentSettings};
+use settings::{expand_home, normalize_domain, normalize_folder};
+
+/// What every agent call answers on Windows.
+pub const UNSUPPORTED: &str = "Agents are not available on Windows.";
+const DOMAIN_TAKEN: &str = "That domain is already in the list";
+const FOLDER_TAKEN: &str = "That folder is already in the list";
+
+/// Agents never run outside a sandbox, and Windows has none yet (spec §2).
+#[cfg(windows)]
+pub(crate) fn supported() -> CoreResult<()> {
+    Err(IpcError::new(ErrorCode::Unsupported, UNSUPPORTED))
+}
+
+/// Linux runs agents in bubblewrap, macOS in Seatbelt.
+#[cfg(not(windows))]
+pub(crate) fn supported() -> CoreResult<()> {
+    Ok(())
+}
+
+impl AppCore {
+    /// The agent settings of Preferences.
+    pub fn agent_prefs(&self) -> AgentPrefs {
+        match supported() {
+            Ok(()) => self.prefs_get().agents,
+            Err(_) => AgentPrefs::default(),
+        }
+    }
+
+    /// Lets every agent reach `domain` and its subdomains (spec §3.5).
+    pub fn agent_domain_add(&self, domain: &str) -> CoreResult<AgentPrefs> {
+        supported()?;
+        let domain = normalize_domain(domain)?;
+        self.prefs_try_update(|prefs| {
+            let agents = &mut prefs.agents;
+            if agents.domains.contains(&domain) {
+                return Err(IpcError::new(ErrorCode::InvalidInput, DOMAIN_TAKEN));
+            }
+            agents.domains.push(domain);
+            Ok(agents.clone())
+        })
+    }
+
+    /// Removes `domain`; one that is not in the list changes nothing.
+    pub fn agent_domain_remove(&self, domain: &str) -> CoreResult<AgentPrefs> {
+        supported()?;
+        let domain = domain.trim().to_ascii_lowercase();
+        self.prefs_try_update(|prefs| {
+            prefs.agents.domains.retain(|kept| *kept != domain);
+            Ok(prefs.agents.clone())
+        })
+    }
+
+    /// Lets every agent read `folder` (spec §3.5), kept as typed. The same folder typed
+    /// another way (`~/x` and `/home/me/x`) is already in the list.
+    pub fn agent_folder_add(&self, folder: &str) -> CoreResult<AgentPrefs> {
+        supported()?;
+        let home = self.home_dir();
+        let folder = normalize_folder(folder, home)?;
+        let path = expand_home(&folder, home);
+        self.prefs_try_update(|prefs| {
+            let agents = &mut prefs.agents;
+            if agents
+                .folders
+                .iter()
+                .any(|kept| expand_home(kept, home) == path)
+            {
+                return Err(IpcError::new(ErrorCode::InvalidInput, FOLDER_TAKEN));
+            }
+            agents.folders.push(folder);
+            Ok(agents.clone())
+        })
+    }
+
+    /// Removes `folder` as the list holds it; one that is not there changes nothing.
+    pub fn agent_folder_remove(&self, folder: &str) -> CoreResult<AgentPrefs> {
+        supported()?;
+        let folder = folder.trim();
+        self.prefs_try_update(|prefs| {
+            prefs.agents.folders.retain(|kept| kept != folder);
+            Ok(prefs.agents.clone())
+        })
+    }
+
+    /// Sets only what agents may change in `id` (Preferences → Agent changes, spec §4.8):
+    /// no event, and the metrics caches and the keychain are left alone.
+    pub fn cluster_agent_changes_set(
+        &self,
+        id: &ClusterId,
+        changes: AgentChanges,
+    ) -> CoreResult<()> {
+        supported()?;
+        self.cluster_settings_update(id, |settings| settings.agent.changes = changes)
+    }
+
+    /// The agent settings of `id` as saved now, so a change applies to the next tool call
+    /// of a running chat (spec §4.5).
+    pub fn cluster_agent_settings(&self, id: &ClusterId) -> ClusterAgentSettings {
+        match supported() {
+            Ok(()) => self.cluster_settings_get(id).agent,
+            Err(_) => ClusterAgentSettings::default(),
+        }
+    }
+}
+
+/// Windows refuses every agent call and reads the defaults. Check it on Linux once by
+/// swapping the cfgs of the two `supported` and setting this module's to `test`.
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use crate::paths::AppPaths;
+
+    #[tokio::test]
+    async fn every_agent_call_is_unsupported_on_windows() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+        let core = AppCore::start_with_kubeconfig_env(paths, None)
+            .await
+            .unwrap();
+        let id = "c".repeat(32);
+        let calls = [
+            core.agent_domain_add("example.com").map(drop),
+            core.agent_domain_remove("example.com").map(drop),
+            core.agent_folder_add("/srv").map(drop),
+            core.agent_folder_remove("/srv").map(drop),
+            core.cluster_agent_changes_set(&id, AgentChanges::ReadOnly),
+        ];
+        for call in calls {
+            let error = call.unwrap_err();
+            assert_eq!(error.code, ErrorCode::Unsupported);
+            assert_eq!(error.message, UNSUPPORTED);
+        }
+        assert_eq!(core.agent_prefs(), AgentPrefs::default());
+        assert_eq!(
+            core.cluster_agent_settings(&id),
+            ClusterAgentSettings::default()
+        );
+        core.shutdown().await;
+    }
+}

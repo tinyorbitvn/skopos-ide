@@ -136,6 +136,14 @@ export function clusterSettings(
     proxyUrl: null,
     nodeShellImage: null,
     metricsProvider: { kind: "auto" },
+    agent: {
+      changes: "ask",
+      namespaces: null,
+      secretValues: false,
+      exec: false,
+      defaultAgent: null,
+      notes: "",
+    },
     ...over,
   };
 }
