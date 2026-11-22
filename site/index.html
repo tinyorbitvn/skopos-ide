@@ -32,6 +32,7 @@
       <a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a>
     </nav>
     <div class="nav__actions">
+      <a class="quiet nav__sponsor" href="https://github.com/sponsors/vanlongme"><svg class="icon" aria-hidden="true"><use href="#i-heart"/></svg>Sponsor</a>
       <a class="quiet nav__source" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Source</a>
       <a class="button button--primary button--sm" href="#download"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download<svg class="icon icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
     </div>
@@ -76,7 +77,7 @@
   <section class="wrap section" id="features" aria-labelledby="features-title">
     <p class="overline overline--accent">What works today</p>
     <h2 class="section__title" id="features-title"><span class="grad">One window</span> for the clusters you already run.</h2>
-    <p class="section__lead">Everything here is in release {{release.version}}. What is not built yet is on the roadmap, further down.</p>
+    <p class="section__lead">Everything here is in release {{release.version}}, except where marked Next release. What is not built yet is on the roadmap, further down.</p>
     <div class="bento">
       <article class="card card--half">
         <div class="card__text">
@@ -107,6 +108,38 @@
         </div>
         <figure class="card__media">
           <img {{image:canvas-yaml.png}} alt="The Deployments list above an edit tab in the dock: the YAML of Deployment payments-api and the API docs of its kind beside it" loading="lazy" decoding="async">
+        </figure>
+      </article>
+
+      <article class="card card--half">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-gauge"/></svg></span>
+          <h3 class="card__title">A cluster at a glance</h3>
+          <p>The Overview opens on what to look at first: how full the cluster is, what is failing and what uses the most.</p>
+          <ul class="ticks">
+            <li>CPU, memory and Pods against what the nodes can give</li>
+            <li>Health tiles that open the failing lists</li>
+            <li>The control plane's checks and the top consumers</li>
+          </ul>
+        </div>
+        <figure class="card__media">
+          <img {{image:canvas-overview.png}} alt="The Overview of prod-eu-west: CPU, memory and Pods donuts, health tiles for nodes, Pods, workloads and warnings, and the top consumers" loading="lazy" decoding="async">
+        </figure>
+      </article>
+
+      <article class="card card--half">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-layout-grid"/></svg></span>
+          <h3 class="card__title">Node topology</h3>
+          <p>The cluster drawn as an architecture diagram: regions and zones as boxes, a card for each node.</p>
+          <ul class="ticks">
+            <li>Health, roles, conditions and taints per node</li>
+            <li>CPU and memory against what the node can give</li>
+            <li>Its Pods as squares colored by status</li>
+          </ul>
+        </div>
+        <figure class="card__media">
+          <img {{image:canvas-topology.png}} alt="The Node topology of prod-eu-west: region eu-west-1 with three zones, each holding node cards with CPU and memory donuts and their Pods" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -189,12 +222,15 @@
 
       <article class="card card--third">
         <div class="card__text">
-          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-cpu"/></svg></span>
-          <h3 class="card__title">Tauri 2 and a Rust core</h3>
-          <p>A Rust core and a React UI in a native shell. The Windows installer is {{asset:x64-setup.exe:size}}.</p>
+          <div class="card__head">
+            <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-list-filter"/></svg></span>
+            <span class="badge next-release">Next release</span>
+          </div>
+          <h3 class="card__title">Filter by any column</h3>
+          <p>Type a value to search every column, the hidden ones too, or name a column, as in <code>status != Running</code> or <code>restarts &gt; 0</code>.</p>
         </div>
         <figure class="card__media">
-          <img {{image:canvas-about.png}} alt="The About dialog: version, build, the Tauri runtime and the open-source components with their licenses" loading="lazy" decoding="async">
+          <img {{image:canvas-filter.png}} alt="The Pods of prod-eu-west filtered by the status is not Running token: the Pending, failing and completed Pods" loading="lazy" decoding="async">
         </figure>
       </article>
 
@@ -206,6 +242,41 @@
         </div>
         <figure class="card__media">
           <img {{image:canvas-palette.png}} alt="The command palette: commands with their shortcuts, then the clusters with their state" loading="lazy" decoding="async">
+        </figure>
+      </article>
+
+      <article class="card card--half">
+        <div class="card__text">
+          <div class="card__head">
+            <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+            <span class="badge next-release">Next release</span>
+          </div>
+          <h3 class="card__title">AI agents that ask first</h3>
+          <p>Chat with the agent CLI you already use, such as Claude Code, Codex, OpenCode or Gemini CLI. It runs in an OS sandbox and reaches clusters only through SkoposIDE.</p>
+          <ul class="ticks">
+            <li>Each read shown as a tool card</li>
+            <li>Changes per cluster: Ask every time, Read only or Don't ask</li>
+            <li>On Linux and macOS</li>
+          </ul>
+        </div>
+        <figure class="card__media">
+          <img {{image:canvas-ai.png}} alt="The agent panel beside the Pods list: the agent's plan, three tool cards, its finding and a change to Deployment payments/api waiting for Approve" loading="lazy" decoding="async">
+        </figure>
+      </article>
+
+      <article class="card card--half">
+        <div class="card__text">
+          <span class="card__icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-cpu"/></svg></span>
+          <h3 class="card__title">Tauri 2 and a Rust core</h3>
+          <p>A Rust core and a React UI in a native shell. The Windows installer is {{asset:x64-setup.exe:size}}.</p>
+          <ul class="ticks">
+            <li>Installers for Linux, macOS and Windows</li>
+            <li>Signed updates from inside the app</li>
+            <li>Credentials stay in the core; the UI sees cluster IDs only</li>
+          </ul>
+        </div>
+        <figure class="card__media">
+          <img {{image:canvas-about.png}} alt="The About dialog: version, build, the Tauri runtime and the open-source components with their licenses" loading="lazy" decoding="async">
         </figure>
       </article>
     </div>
@@ -359,6 +430,7 @@
         <li><a href="https://github.com/vanlongme/skopos-ide/releases">Releases</a></li>
         <li><a href="https://github.com/vanlongme/skopos-ide/issues">Issues</a></li>
         <li><a href="https://github.com/vanlongme/skopos-ide#readme">README</a></li>
+        <li><a href="https://github.com/sponsors/vanlongme">Sponsor on GitHub</a></li>
       </ul>
     </nav>
     <nav aria-label="Legal">

@@ -20,6 +20,8 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_URL = "https://github.com/vanlongme/skopos-ide";
+// The pages link only to the repository and the maintainer's GitHub Sponsors page.
+const SITE_LINK = /^https:\/\/github\.com\/(vanlongme\/skopos-ide($|[/#])|sponsors\/vanlongme$)/;
 const SIZES = {
   "amd64.AppImage": 93891064,
   "amd64.deb": 16582772,
@@ -562,11 +564,13 @@ describe("page", () => {
     assert.ok(html.includes('<script src="ribbon.js" defer></script>'));
   });
 
-  test("lays the features out as nine cards, each with its canvas picture", () => {
+  test("lays the features out as thirteen cards, each with its canvas picture", () => {
     const cards = [...html.matchAll(/<article class="card ([^"]+)">([\s\S]*?)<\/article>/g)];
     assert.deepEqual(
       cards.map((m) => m[1]),
       [
+        "card--half",
+        "card--half",
         "card--half",
         "card--half",
         "card--third",
@@ -576,6 +580,8 @@ describe("page", () => {
         "card--third",
         "card--third",
         "card--third",
+        "card--half",
+        "card--half",
       ],
     );
     for (const [, cls, body] of cards) {
@@ -627,10 +633,10 @@ describe("page", () => {
     }
   });
 
-  test("links only to the repository, its files and its releases", () => {
+  test("links only to the repository, its files, its releases and the sponsor page", () => {
     const urls = [...html.matchAll(/(?:href|src)="([a-z]+:[^"]*)"/g)].map((m) => m[1]);
     assert.ok(urls.length > 0);
-    for (const url of urls) assert.match(url, /^https:\/\/github\.com\/vanlongme\/skopos-ide($|[/#])/);
+    for (const url of urls) assert.match(url, SITE_LINK, url);
     assert.doesNotMatch(css, /https?:|@import/);
   });
 
@@ -661,9 +667,10 @@ describe("page", () => {
     }
   });
 
-  test("follows the copy rules: no exclamation marks and no we", () => {
+  test("follows the copy rules outside code: no exclamation marks and no we", () => {
     const text = template
       .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<code>[\s\S]*?<\/code>/g, " ")
       .replace(/<!doctype html>/i, "")
       .replace(/<[^>]+>/g, " ");
     assert.doesNotMatch(text, /!/);
@@ -677,7 +684,7 @@ describe("page", () => {
 
   test("describes each canvas picture in its alt text", () => {
     const imgs = [...template.matchAll(/<img \{\{image:(canvas-[a-z-]+\.png)\}\} alt="([^"]*)"/g)];
-    assert.equal(imgs.length, 12);
+    assert.equal(imgs.length, 16);
     for (const [, name, alt] of imgs) assert.ok(alt.length >= 40, name);
   });
 
@@ -888,9 +895,9 @@ describe("docs pages", () => {
     assert.ok(html.includes('<a href="metrics.html" aria-current="page">Docs</a>'));
   });
 
-  test("links only to the repository, its files and its releases", () => {
+  test("links only to the repository, its files, its releases and the sponsor page", () => {
     const urls = [...html.matchAll(/(?:href|src)="([a-z]+:[^"]*)"/g)].map((m) => m[1]);
-    for (const url of urls) assert.match(url, /^https:\/\/github\.com\/vanlongme\/skopos-ide($|[/#])/);
+    for (const url of urls) assert.match(url, SITE_LINK, url);
   });
 
   test("follows the copy rules outside code: no exclamation marks and no we", () => {

@@ -75,6 +75,23 @@ export const SHOTS = [
     clip: `[$(".sh-work"), 0, $(".sh-work").offsetHeight - 626, $(".sh-work").offsetWidth, 626]`,
   },
   {
+    name: "canvas-overview",
+    steps: `
+      await openCluster();
+      await waitFor(() => has("Capacity") && has("Top consumers"));
+      await sleep(1200);`,
+    clip: `[$("section.sh-pane"), 12, 0, $("section.sh-pane").offsetWidth - 12, ($("section.sh-pane").offsetWidth - 12) * 600 / 980]`,
+  },
+  {
+    name: "canvas-topology",
+    steps: `
+      await openCluster();
+      await nav("Nodes", "Topology");
+      await waitFor(() => has("Node topology"));
+      await sleep(1200);`,
+    clip: `[$("section.sh-pane"), 12, 0, $("section.sh-pane").offsetWidth - 12, ($("section.sh-pane").offsetWidth - 12) * 600 / 980]`,
+  },
+  {
     name: "canvas-logs",
     steps: `
       await openPodDrawer();
@@ -129,6 +146,37 @@ export const SHOTS = [
     clip: `[$("section.sh-pane"), 12, 0, 640, 600]`,
   },
   {
+    name: "canvas-filter",
+    steps: `
+      await openPods();
+      const box = $(".sk-root input[aria-label^='Filter by any column']") || [...root().querySelectorAll("input")].find((i) => (i.placeholder || "").startsWith("Filter by any column"));
+      box.focus();
+      typeInto(box, "status != Running");
+      await sleep(400);
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await waitFor(() => !row("kafka-0"));
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      box.blur();
+      await sleep(800);`,
+    clip: `[$("section.sh-pane"), 12, 0, 640, 600]`,
+  },
+  {
+    name: "canvas-ai",
+    steps: `
+      await openPods();
+      click("Agent (Ctrl+J)");
+      await waitFor(() => $("aside.ai-panel .ai-sugg"));
+      $("aside.ai-panel .ai-sugg").click();
+      await waitFor(() => has("Approve for this chat"), 30000);
+      await sleep(800);`,
+    // From the work column's left edge to the panel's right edge, in the half cards' shape.
+    clip: `(() => {
+      const r = root().getBoundingClientRect(), w = $(".sh-work").getBoundingClientRect(), p = $("aside.ai-panel").getBoundingClientRect();
+      const width = p.right - w.left - 12;
+      return [root(), w.left - r.left + 12, p.top - r.top, width, width * 600 / 980];
+    })()`,
+  },
+  {
     name: "canvas-about",
     steps: `
       click("Search or run a command");
@@ -136,7 +184,7 @@ export const SHOTS = [
       clickHas("About SkoposIDE");
       await waitFor(() => $(".sk-root [role=dialog][aria-label='About SkoposIDE']"));
       await sleep(600);`,
-    clip: `[$(".sk-root [role=dialog]"), -40, 0, 640, 600]`,
+    clip: `[$(".sk-root [role=dialog]"), ($(".sk-root [role=dialog]").offsetWidth - 980) / 2, 0, 980, 600]`,
   },
   {
     name: "canvas-palette",
