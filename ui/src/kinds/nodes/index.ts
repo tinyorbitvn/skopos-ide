@@ -70,6 +70,10 @@ registerKind("", "nodes", {
         header: "Taints",
         width: 80,
         sortValue: (o) => nodeTaints(o).length,
+        filter: {
+          text: (o) => String(nodeTaints(o).length),
+          measure: { kind: "number", amount: (o) => nodeTaints(o).length },
+        },
         render: (o) => String(nodeTaints(o).length),
       },
     ),

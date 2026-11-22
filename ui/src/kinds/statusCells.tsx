@@ -160,6 +160,14 @@ export function workloadStatusColumn(
           : workloadStatus(own(o), o, pods, kindName).badge;
       return severitySortValue(badge.tone, badge.label);
     },
+    filter: {
+      text: (o) => {
+        const pods = owned?.podsOf(o);
+        return pods === undefined
+          ? own(o).label
+          : workloadStatus(own(o), o, pods, kindName).badge.label;
+      },
+    },
     render: (o) => {
       const status = own(o);
       const pods = owned?.podsOf(o);
@@ -279,6 +287,7 @@ export function nodeStatusColumn(): TableColumn<KubeObject> {
     header: "Status",
     width: 280,
     sortValue: (o) => nodeSortValue(nodeConditions(o)),
+    filter: { text: (o) => nodeSummary(nodeConditions(o)) },
     render: (o) => <NodeStatusCell node={o} />,
   };
 }

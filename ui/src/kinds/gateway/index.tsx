@@ -26,6 +26,7 @@ function conditionColumn(
     header,
     width: 120,
     sortValue: (o) => conditionStatus(o, type)?.label ?? "",
+    filter: { text: (o) => conditionStatus(o, type)?.label ?? null },
     render: (o) => {
       const status = conditionStatus(o, type);
       return status ? <Badge tone={status.tone}>{status.label}</Badge> : NONE;
@@ -44,6 +45,12 @@ function listColumn(
     header,
     width: "minmax(120px, 1fr)",
     sortValue: get,
+    filter: {
+      text: (o) => {
+        const text = get(o);
+        return text === NONE || text === "" ? null : text;
+      },
+    },
     render: (o) => <span title={get(o)}>{get(o)}</span>,
   };
 }
