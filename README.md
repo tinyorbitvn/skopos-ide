@@ -1,8 +1,9 @@
 # SkoposIDE
 
-SkoposIDE is a source-available desktop Kubernetes IDE built with Tauri 2, a Rust
-core and a React UI. It reads your kubeconfig files, connects to several
-clusters at once and lets you switch between them from a hotbar.
+SkoposIDE is a source-available desktop Kubernetes IDE built with Tauri 2, a
+Rust core and a React UI, free to use for people and companies alike. It reads
+your kubeconfig files, connects to several clusters at once and lets you switch
+between them from a hotbar.
 
 Project site, with downloads for Linux, macOS and Windows:
 https://vanlongme.github.io/skopos-ide/
@@ -78,5 +79,10 @@ checks its signature, installs it and restarts SkoposIDE with its windows and ta
 
 ## License
 
-PolyForm Shield 1.0.0, source-available, not open source. Copyright Nguyen Van Long. See [LICENSE](LICENSE). Third-party credits are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+SkoposIDE is source-available under the [PolyForm Shield License 1.0.0](LICENSE), not open
+source. Copyright Nguyen Van Long. Anyone, people and companies alike, may use it free of
+charge, change it and share it, but not to provide a product that competes with SkoposIDE or
+with a product its licensor provides using it. [LICENSE](LICENSE) has the exact terms.
+
+Third-party code, icons and packages keep their own licenses; their credits and license texts
+are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
