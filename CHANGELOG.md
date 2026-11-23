@@ -6,6 +6,9 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **More actions on a pinned cluster:** right-clicking a cluster on the hotbar now offers Settings, which opens the cluster's settings in the focused tab, and Disconnect while the cluster is connected or connecting, or Connect while it is not, beside Unpin.
+- **Less memory when opening many pods:** the window keeps the metrics charts of the 16 most recently closed pods, nodes and other objects so they still draw at once, and lets go of older ones, instead of keeping every chart it has shown until the window closes.
+
 ## [0.12.0] - 2026-11-23
 
 - **Signed and notarized on macOS:** the macOS app and disk image are signed with a Developer ID certificate and notarized by Apple, so they open without Open Anyway or `xattr`. After this update macOS may ask once more for the passwords SkoposIDE keeps in the Keychain; choose Always Allow. Later updates keep access.
