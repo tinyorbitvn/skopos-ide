@@ -215,6 +215,10 @@ runs on a schedule.
   the Security tab with the reason that fits (Tolerable risk, Not used, Inaccurate) and a comment
   that says why. The glib alert is one: glib 0.18 comes through Tauri's GTK 3 stack on Linux, and
   the fix is in 0.20. Nothing is recorded in the repository.
+  An advisory that a change brings in has no alert until the change is on `main`.
+  `dependency-review` is not a required check, so once a maintainer has decided to accept the
+  advisory, merge the change over the failed check. The run on that push to `main` fails once;
+  dismiss the alert Dependabot then raises, as above, and later changes pass.
 - **Each change:** the `dependency-review` workflow asks GitHub's dependency graph what a pull
   request or a push to `main` changes (`dependency-graph/compare`) and runs
   `scripts/advisories.mjs review`. It fails when the change brings in an advisory the policy does
