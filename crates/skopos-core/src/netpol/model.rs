@@ -4,7 +4,6 @@
 
 use super::selector::LabelSelector;
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum PolicySource {
     Kubernetes,

@@ -10,13 +10,26 @@ use crate::resources::{WatchEvent, WatchStatus};
 
 const LOAD_BALANCER: &str = "LoadBalancer";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Phase {
     /// Its first list has not finished.
     Waiting,
     Listed,
-    /// Forbidden, or no longer served.
-    Missing,
+    /// Forbidden, or no longer served, with why (network policies spec §3.2).
+    Missing(String),
+}
+
+/// Why a kind cannot be listed: the watch hub's message, else what its status says.
+fn missing_reason(status: WatchStatus, message: Option<String>) -> String {
+    message
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| {
+            if status == WatchStatus::Forbidden {
+                "listing is forbidden".to_owned()
+            } else {
+                "the cluster no longer serves it".to_owned()
+            }
+        })
 }
 
 struct KindState {
@@ -89,17 +102,17 @@ impl Store {
             }
             // Both are final: the hub sends nothing more for this kind.
             WatchEvent::Status {
-                status: WatchStatus::Forbidden | WatchStatus::NotServed,
-                ..
+                status: status @ (WatchStatus::Forbidden | WatchStatus::NotServed),
+                message,
             } => {
                 state.objects.clear();
-                state.phase = Phase::Missing;
+                state.phase = Phase::Missing(missing_reason(status, message));
             }
             WatchEvent::Status { .. } => {}
         }
     }
 
-    fn items(&self, kind: Kind) -> impl Iterator<Item = &Item> {
+    pub(crate) fn items(&self, kind: Kind) -> impl Iterator<Item = &Item> {
         self.kinds
             .get(&kind)
             .into_iter()
@@ -114,21 +127,39 @@ impl Store {
     }
 
     /// Listed. A kind that is forbidden, gone or not served is not.
-    fn listable(&self, kind: Kind) -> bool {
+    pub(crate) fn listable(&self, kind: Kind) -> bool {
         self.kinds
             .get(&kind)
             .is_some_and(|state| state.phase == Phase::Listed)
     }
 
+    /// Whether the store was made with `kind`: the cluster serves it, though it may be
+    /// forbidden.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn serves(&self, kind: Kind) -> bool {
+        self.kinds.contains_key(&kind)
+    }
+
     /// The plurals of the kinds that could not be listed, by name.
-    fn missing(&self) -> Vec<String> {
-        let mut missing: Vec<String> = self
+    pub(crate) fn missing(&self) -> Vec<String> {
+        self.missing_reasons()
+            .into_iter()
+            .map(|(kind, _)| kind.plural().to_owned())
+            .collect()
+    }
+
+    /// The kinds that could not be listed, by plural, each with why (network policies spec
+    /// §3.2).
+    pub(crate) fn missing_reasons(&self) -> Vec<(Kind, String)> {
+        let mut missing: Vec<(Kind, String)> = self
             .kinds
             .iter()
-            .filter(|(_, state)| state.phase == Phase::Missing)
-            .map(|(kind, _)| kind.plural().to_owned())
+            .filter_map(|(kind, state)| match &state.phase {
+                Phase::Missing(reason) => Some((*kind, reason.clone())),
+                _ => None,
+            })
             .collect();
-        missing.sort();
+        missing.sort_by_key(|(kind, _)| kind.plural());
         missing
     }
 
@@ -263,10 +294,11 @@ pub(crate) fn build(store: &Store) -> Built {
 
     // Every object of a kind that is always shown, but a ReplicaSet scaled to zero that owns no
     // Pod, so a Deployment's old revisions do not crowd the map. Bindings and roles are shown
-    // only on a ServiceAccount's access chain (spec O §4.3).
+    // only on a ServiceAccount's access chain (spec O §4.3). Namespaces are read for their
+    // labels and are never nodes.
     let mut nodes: BTreeMap<String, GraphNode> = BTreeMap::new();
     let mut members: Vec<&Item> = Vec::new();
-    let shown = |kind: &Kind| !kind.is_leaf() && !kind.is_access();
+    let shown = |kind: &Kind| !kind.is_leaf() && !kind.is_access() && *kind != Kind::Namespace;
     for kind in Kind::ALL.into_iter().filter(shown) {
         for item in store.items(kind) {
             let id = item.id();
@@ -1612,5 +1644,93 @@ mod tests {
             2_000
         );
         assert!(took.as_millis() < 2_000, "{took:?}");
+    }
+
+    #[test]
+    fn the_store_keeps_why_a_kind_cannot_be_listed() {
+        let mut store = Store::new(&[
+            Kind::Pod,
+            Kind::Secret,
+            Kind::NetworkPolicy,
+            Kind::CiliumNetworkPolicy,
+            Kind::Application,
+        ]);
+        let fail = |status, message: Option<&str>| WatchEvent::Status {
+            status,
+            message: message.map(str::to_owned),
+        };
+        let denied = "secrets is forbidden: User \"dev\" cannot list resource \"secrets\"";
+        store.apply(Kind::Pod, WatchEvent::Snapshot { items: Vec::new() });
+        store.apply(Kind::Secret, fail(WatchStatus::Forbidden, Some(denied)));
+        store.apply(
+            Kind::CiliumNetworkPolicy,
+            fail(WatchStatus::Forbidden, None),
+        );
+        store.apply(Kind::NetworkPolicy, fail(WatchStatus::NotServed, Some("")));
+        store.apply(
+            Kind::Application,
+            fail(
+                WatchStatus::NotServed,
+                Some("the cluster no longer serves applications"),
+            ),
+        );
+
+        assert!(store.ready());
+        assert_eq!(
+            store.missing_reasons(),
+            [
+                (
+                    Kind::Application,
+                    "the cluster no longer serves applications".to_owned()
+                ),
+                (Kind::CiliumNetworkPolicy, "listing is forbidden".to_owned()),
+                (
+                    Kind::NetworkPolicy,
+                    "the cluster no longer serves it".to_owned()
+                ),
+                (Kind::Secret, denied.to_owned()),
+            ]
+        );
+        assert_eq!(
+            store.missing(),
+            [
+                "applications",
+                "ciliumnetworkpolicies",
+                "networkpolicies",
+                "secrets"
+            ]
+        );
+        assert!(store.listable(Kind::Pod));
+        assert!(!store.listable(Kind::Secret));
+        assert!(
+            store.serves(Kind::Secret),
+            "a forbidden kind is still served"
+        );
+        assert!(
+            !store.serves(Kind::CiliumClusterwideNetworkPolicy),
+            "the store was not made with it"
+        );
+    }
+
+    #[test]
+    fn a_namespace_is_read_but_never_a_node() {
+        let built = built(&[
+            (
+                Kind::Namespace,
+                json!({ "metadata": { "name": "a", "labels": { "team": "x" } } }),
+            ),
+            (
+                Kind::Pod,
+                pod(meta("a", "web"), json!({ "app": "web" }), true),
+            ),
+        ]);
+        assert_eq!(ids(&built), ["Pod/a/web", "ServiceAccount/a/web"]);
+        assert_eq!(
+            built.counts,
+            [GraphNamespaceCount {
+                namespace: "a".into(),
+                nodes: 2
+            }]
+        );
     }
 }

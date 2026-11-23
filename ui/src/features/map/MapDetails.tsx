@@ -35,6 +35,8 @@ export const REL_OUT: Readonly<Record<GraphRel, string>> = {
   class: "Uses class",
   binds: "Binds",
   grants: "Grants",
+  manages: "Manages",
+  project: "Project",
 };
 
 export const REL_IN: Readonly<Record<GraphRel, string>> = {
@@ -48,6 +50,8 @@ export const REL_IN: Readonly<Record<GraphRel, string>> = {
   class: "Class of",
   binds: "Bound by",
   grants: "Granted by",
+  manages: "Managed by",
+  project: "Applications",
 };
 
 /** The status dot's tone of a node's status. */

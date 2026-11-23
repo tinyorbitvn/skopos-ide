@@ -51,7 +51,6 @@ const TO: PeerFields = PeerFields {
 /// A NetworkPolicy (`Kubernetes`), CiliumNetworkPolicy (`Cilium`) or
 /// CiliumClusterwideNetworkPolicy (`CiliumClusterwide`) object. `None` only when it has no
 /// `metadata.name`. Never panics.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn parse_policy(source: PolicySource, object: &Value) -> Option<Policy> {
     let metadata = &object["metadata"];
     let name = text(metadata, "name")?;

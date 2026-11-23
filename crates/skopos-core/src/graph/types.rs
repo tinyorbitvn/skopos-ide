@@ -29,6 +29,8 @@ pub enum GraphRel {
     Class,
     Binds,
     Grants,
+    Manages,
+    Project,
 }
 
 /// An object, a referenced object that does not exist, or a load balancer address. `id` is
@@ -149,6 +151,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value([GraphRel::Binds, GraphRel::Grants]).unwrap(),
             json!(["binds", "grants"])
+        );
+    }
+
+    #[test]
+    fn argo_cd_relations_serialize_as_the_interface_reads_them() {
+        assert_eq!(
+            serde_json::to_value([GraphRel::Manages, GraphRel::Project]).unwrap(),
+            json!(["manages", "project"])
         );
     }
 }
