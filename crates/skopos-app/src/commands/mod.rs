@@ -13,6 +13,7 @@ pub mod helm;
 pub mod logs;
 pub mod map;
 pub mod metrics;
+pub mod network;
 pub mod portforward;
 pub mod resources;
 pub(crate) mod save;
