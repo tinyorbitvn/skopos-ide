@@ -13,6 +13,7 @@ import type { MetricsTarget } from "./generated/MetricsTarget";
 import type { MoveOutcome } from "./generated/MoveOutcome";
 import type { ObjectRef } from "./generated/ObjectRef";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
+import type { ReachEvent } from "./generated/ReachEvent";
 import type { ResourceRef } from "./generated/ResourceRef";
 import type { SessionEvent } from "./generated/SessionEvent";
 import type { TopologyEvent } from "./generated/TopologyEvent";
@@ -426,6 +427,35 @@ test("node_topology_unsubscribe names the subscription", async () => {
   await api.nodeTopologyUnsubscribe("t1");
   expect(backend.calls).toEqual([
     { cmd: "node_topology_unsubscribe", args: { subscriptionId: "t1" } },
+  ]);
+});
+
+test("network_reachability_subscribe gets the cluster, the namespace and a channel, and gives the id", async () => {
+  const events: ReachEvent[] = [];
+  const backend = mockBackend({ network_reachability_subscribe: () => "r1" });
+  await expect(
+    api.networkReachabilitySubscribe("c1", "payments", (event) =>
+      events.push(event),
+    ),
+  ).resolves.toBe("r1");
+  const sent = backend.callsTo("network_reachability_subscribe")[0];
+  expect(Object.keys(sent ?? {}).sort()).toEqual([
+    "clusterId",
+    "namespace",
+    "onEvent",
+  ]);
+  expect([sent?.clusterId, sent?.namespace]).toEqual(["c1", "payments"]);
+  const channel = sent?.onEvent as Channel<ReachEvent>;
+  expect(channel).toBeInstanceOf(Channel);
+  channel.onmessage({ type: "failure", message: "boom" });
+  expect(events).toEqual([{ type: "failure", message: "boom" }]);
+});
+
+test("network_reachability_unsubscribe names the subscription", async () => {
+  const backend = mockBackend({ network_reachability_unsubscribe: () => null });
+  await api.networkReachabilityUnsubscribe("r1");
+  expect(backend.calls).toEqual([
+    { cmd: "network_reachability_unsubscribe", args: { subscriptionId: "r1" } },
   ]);
 });
 

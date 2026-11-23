@@ -66,6 +66,7 @@ import type { PortForward } from "./generated/PortForward";
 import type { PortForwardSpec } from "./generated/PortForwardSpec";
 import type { Prefs } from "./generated/Prefs";
 import type { Propagation } from "./generated/Propagation";
+import type { ReachEvent } from "./generated/ReachEvent";
 import type { ResourceRef } from "./generated/ResourceRef";
 import type { SandboxStatus } from "./generated/SandboxStatus";
 import type { SavedKubeconfig } from "./generated/SavedKubeconfig";
@@ -227,6 +228,22 @@ export const api = {
     }),
   nodeTopologyUnsubscribe: (subscriptionId: string) =>
     call<void>("node_topology_unsubscribe", { subscriptionId }),
+  /**
+   * Returns the subscription id. Snapshots of `namespace`'s reachability go to `onEvent`
+   * until unsubscribed or until a `failure` ends it (network policies spec §7.3).
+   */
+  networkReachabilitySubscribe: (
+    clusterId: string,
+    namespace: string,
+    onEvent: (event: ReachEvent) => void,
+  ) =>
+    call<string>("network_reachability_subscribe", {
+      clusterId,
+      namespace,
+      onEvent: new Channel<ReachEvent>(onEvent),
+    }),
+  networkReachabilityUnsubscribe: (subscriptionId: string) =>
+    call<void>("network_reachability_unsubscribe", { subscriptionId }),
   /**
    * Saves the map as drawn: the backend opens the save dialog with the suggested
    * name and returns the path written, or null when the user cancels (spec O §6.4).
