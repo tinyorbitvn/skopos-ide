@@ -229,7 +229,7 @@ describe("agents", () => {
     expect(await mode()).toBe("slow");
   });
 
-  it("gives the agent no change tools under Read only", async () => {
+  it("refuses the agent's change under Read only", async () => {
     await runCommand("preferences");
     const option = await $(
       '[data-testid^="pref-changes-"][data-testid$="-mode-readOnly"]',
@@ -245,9 +245,9 @@ describe("agents", () => {
     await until(
       async () =>
         (await text("agent-stream")).includes(
-          "tool:patch_object:Unknown tool patch_object.",
+          `tool:patch_object:error: Changes to ${KIND} are read only for agents.`,
         ),
-      "the agent was not told the tool is unknown",
+      "the agent was not told the cluster is read only",
     );
     expect(await lastCard()).toBeNull();
     expect(await mode()).toBe("slow");
