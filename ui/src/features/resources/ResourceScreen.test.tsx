@@ -1251,8 +1251,8 @@ test("the drawer header opens Edit YAML, and its Delete button asks to delete", 
   });
   resetDockForTest();
 
-  // Edit YAML and Delete are both buttons, so there is nothing left for More actions.
-  expect(screen.queryByTestId("detail-more-actions")).toBeNull();
+  // Edit YAML and Delete are both buttons; More actions holds only Ask the agent.
+  expect(screen.getByTestId("detail-more-actions")).toBeTruthy();
   fireEvent.click(screen.getByTestId("detail-action-delete"));
   const dialog = await screen.findByRole("dialog");
   expect(

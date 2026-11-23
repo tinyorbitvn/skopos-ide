@@ -487,6 +487,12 @@ export function ResourceScreen(props: {
               context,
               onDelete: (o) => setDeleting([o]),
             })}
+            ask={{
+              cluster: clusterId,
+              kind: resource.kind,
+              namespace: object.metadata.namespace ?? null,
+              name: object.metadata.name,
+            }}
           />
         )}
       />

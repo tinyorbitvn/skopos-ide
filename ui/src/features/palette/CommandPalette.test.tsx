@@ -212,8 +212,8 @@ test("without a query: Commands and Clusters at their caps", async () => {
     "palette-command-preferences",
     "palette-command-add-cluster",
     "palette-command-shortcuts",
-    "palette-command-about",
-    "palette-command-check-updates",
+    "palette-command-agent-open",
+    "palette-command-agent-new-chat",
   ]);
   expect(rowIds("clusters")).toHaveLength(8);
   expect(screen.getByTestId("palette-count").textContent).toBe("14 results");
@@ -285,8 +285,8 @@ test("Up and Down wrap, and hovering a row selects it", async () => {
   expect(selectedId()).toBe("palette-command-catalog");
   press("ArrowDown");
   expect(selectedId()).toBe("palette-command-preferences");
-  fireEvent.mouseMove(screen.getByTestId("palette-command-about"));
-  expect(selectedId()).toBe("palette-command-about");
+  fireEvent.mouseMove(screen.getByTestId("palette-command-agent-open"));
+  expect(selectedId()).toBe("palette-command-agent-open");
 });
 
 test("the first row is selected whenever the query changes", async () => {

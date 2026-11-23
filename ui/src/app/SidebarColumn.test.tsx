@@ -264,6 +264,7 @@ test("Ctrl+B and the palette command toggle the mounted sidebar", async () => {
       shortcuts: () => {},
       preferences: () => {},
       sidebar: toggleSidebar,
+      agent: () => {},
     },
     false,
   );

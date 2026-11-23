@@ -8,6 +8,7 @@ import {
   Search,
   Settings,
 } from "../design/icons";
+import { AgentButton } from "../features/agents/AgentButton";
 import { useCatalog } from "../stores/catalog";
 import { useConnect } from "../stores/clusters";
 import { useShell } from "../stores/shell";
@@ -110,6 +111,7 @@ export function AppHeader() {
         <span className={styles.paletteText}>Search or run a command</span>
         <kbd className={styles.chip}>{paletteKeys}</kbd>
       </button>
+      <AgentButton />
       {pathname === "/catalog" ? (
         <Button
           variant="primary"

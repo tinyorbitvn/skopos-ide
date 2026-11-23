@@ -1,0 +1,15 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.dot {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-warning);
+  pointer-events: none;
+}

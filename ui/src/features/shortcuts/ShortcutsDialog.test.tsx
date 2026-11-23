@@ -272,3 +272,13 @@ test("the dialog opens with the focus in the filter, and Close gives it back", a
     expect(document.activeElement).toBe(screen.getByTestId("opener")),
   );
 });
+
+test("Agent is listed with Mod+J, except on Windows", () => {
+  const { unmount } = render(
+    <ShortcutsBody platform="linux" onClose={() => {}} />,
+  );
+  expect(screen.getByText("Agent")).toBeTruthy();
+  unmount();
+  render(<ShortcutsBody platform="windows" onClose={() => {}} />);
+  expect(screen.queryByText("Agent")).toBeNull();
+});
