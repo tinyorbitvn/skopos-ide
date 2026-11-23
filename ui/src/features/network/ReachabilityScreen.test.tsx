@@ -285,6 +285,10 @@ test.each(STARTS)(
 test("picking another namespace shows only its snapshot", async () => {
   await showPayments();
   expect(rowIds()).toContain(`reach-row-${IDS.api}`);
+  // A filter typed here does not follow to the next namespace.
+  fireEvent.change(screen.getByTestId("reach-filter"), {
+    target: { value: "api" },
+  });
   r.hold();
   fireEvent.keyDown(screen.getByTestId("reach-namespace"), { key: "Enter" });
   expect(
@@ -313,6 +317,9 @@ test("picking another namespace shows only its snapshot", async () => {
     "reach-row-otherPods",
     "reach-row-world",
   ]);
+  expect((screen.getByTestId("reach-filter") as HTMLInputElement).value).toBe(
+    "",
+  );
   expect(text("reach-count-kubernetes")).toBe("K8s 0 policies");
   await r.send(PAYMENTS, "r1");
   expect(rowIds()).not.toContain(`reach-row-${IDS.api}`);
@@ -399,6 +406,19 @@ test("the filter keeps workloads and peers by name or label, case-insensitive", 
   fireEvent.change(filter, { target: { value: "tier=frontend" } });
   expect(rowIds()).toEqual([`reach-row-${IDS.web}`]);
   fireEvent.change(filter, { target: { value: "" } });
+  expect(rowIds()).toHaveLength(8);
+});
+
+test("a filter that matches nothing says so instead of an empty matrix", async () => {
+  await showPayments();
+  fireEvent.change(screen.getByTestId("reach-filter"), {
+    target: { value: "zzz" },
+  });
+  expect(screen.queryByTestId("reach-matrix")).toBeNull();
+  expect(text("reach-no-match")).toBe('No workloads match "zzz"');
+  fireEvent.change(screen.getByTestId("reach-filter"), {
+    target: { value: "" },
+  });
   expect(rowIds()).toHaveLength(8);
 });
 

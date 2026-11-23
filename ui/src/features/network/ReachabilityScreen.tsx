@@ -86,7 +86,9 @@ function ReachView(props: {
 }) {
   const { clusterId, namespace } = props;
   const { snapshot, error, loading } = useReachability(clusterId, namespace);
-  const [query, setQuery] = useState("");
+  // The filter typed in a namespace; another namespace starts unfiltered.
+  const [filter, setFilter] = useState({ namespace, text: "" });
+  const query = filter.namespace === namespace ? filter.text : "";
   // The workload picked in a namespace; another namespace starts with none.
   const [picked, setPicked] = useState<{
     namespace: string;
@@ -130,6 +132,12 @@ function ReachView(props: {
     body = (
       <div className={styles.state} data-testid="reach-empty">
         <EmptyState title={`No Pods in ${namespace}`} />
+      </div>
+    );
+  } else if (rows.length === 0) {
+    body = (
+      <div className={styles.state} data-testid="reach-no-match">
+        <EmptyState title={`No workloads match "${query}"`} />
       </div>
     );
   } else {
@@ -216,7 +224,7 @@ function ReachView(props: {
             aria-label="Filter workloads"
             data-testid="reach-filter"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setFilter({ namespace, text: e.target.value })}
           />
         </div>
       </div>

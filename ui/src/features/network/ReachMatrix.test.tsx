@@ -99,6 +99,21 @@ test("the sample namespace's matrix reads as the board (contract C13)", () => {
   ).toEqual(["allowed", "open", "denied", "blocked", "none"]);
 });
 
+test("each cell names its verdict in words for screen readers", () => {
+  show();
+  const said = (from: string, to: string) =>
+    within(screen.getByTestId(`reach-cell-${from}--${to}`))
+      .queryByRole("img")
+      ?.getAttribute("aria-label") ?? null;
+  expect([
+    said(IDS.web, IDS.api),
+    said(IDS.worker, IDS.world),
+    said(IDS.db, IDS.world),
+    said(IDS.worker, IDS.web),
+    said(IDS.world, IDS.stripe),
+  ]).toEqual(["Allowed, 8080 GET /api/.*", "Open", "Denied", "Blocked", null]);
+});
+
 test("workload rows are buttons; outside rows are not selectable", () => {
   const { onSelect } = show();
   const api = screen.getByTestId(`reach-row-${IDS.api}`);

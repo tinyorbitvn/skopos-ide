@@ -32,12 +32,32 @@ function Cell(props: {
     styles[cell.verdict ?? "none"],
     props.dim ? styles.dim : "",
   ].join(" ");
-  const box = (
-    <span className={className}>
+  // Screen readers get the verdict in words: "—" alone says nothing, and the color is
+  // not read out.
+  const said =
+    cell.verdict === null
+      ? undefined
+      : [
+          cell.tip[0],
+          cell.verdict === "allowed" ? cell.text : null,
+          cell.somePods ? "Some Pods" : null,
+        ]
+          .filter((part) => part !== null)
+          .join(", ");
+  const content = (
+    <>
       <span className={styles.cellText}>{cell.text}</span>
       {cell.somePods ? <span className={styles.some}>Some Pods</span> : null}
-    </span>
+    </>
   );
+  const box =
+    said === undefined ? (
+      <span className={className}>{content}</span>
+    ) : (
+      <span className={className} role="img" aria-label={said}>
+        {content}
+      </span>
+    );
   return (
     <td
       className={props.edge ? styles.edge : undefined}
