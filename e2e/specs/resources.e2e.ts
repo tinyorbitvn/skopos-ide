@@ -640,7 +640,7 @@ spec:
     await gone("detail-drawer");
   });
 
-  it("resizes a column by dragging its edge, keeps its width per kind, and resets it", async () => {
+  it("resizes a column by dragging its edge, keeps its width per kind, and fits it to its content", async () => {
     /** The header cell's width on screen and the width its handle reports. */
     const namespace = () =>
       browser.execute(() => {
@@ -694,10 +694,22 @@ spec:
         .querySelector('[data-testid="column-resize-namespace"]')
         ?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 }));
     });
-    await browser.waitUntil(async () => (await namespace()).given === null, {
-      timeoutMsg: "a double-click never reset the Namespace column",
+    await browser.waitUntil(async () => (await namespace()).given !== before.cell + 60, {
+      timeoutMsg: "a double-click never fitted the Namespace column",
     });
-    expect((await namespace()).cell).toBe(before.cell);
+    const fitted = await namespace();
+    expect(fitted.cell).toBe(fitted.given);
+    // Fitted, the header and every namespace on screen show in full.
+    const clipped = await browser.execute(() => {
+      const th = document.querySelector('[data-testid="column-resize-namespace"]')?.parentElement;
+      const index = th?.parentElement ? [...th.parentElement.children].indexOf(th) : -1;
+      const rows = [...document.querySelectorAll('[data-testid^="resource-row-"]')];
+      const cells = [th, ...rows.map((r) => r.children[index])].filter((c): c is Element => !!c);
+      return cells
+        .filter((c) => [c, ...c.children].some((el) => el.scrollWidth > el.clientWidth + 1))
+        .map((c) => c.textContent);
+    });
+    expect(clipped).toEqual([]);
   });
 
   it("back and forward navigate between resource views", async () => {

@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { flush, mockBackend } from "../test/ipc";
-import { flushUiStateWrites, useUiState } from "./uiState";
+import { flushUiStateWrites, useColumnWidths, useUiState } from "./uiState";
 
 test("loads the saved value and saves changes after a pause", async () => {
   const backend = mockBackend({
@@ -169,4 +169,24 @@ test("a value this window is still saving under another key is not taken", async
     finish();
     await flush();
   });
+});
+
+test("a table's column widths are kept under its name, ready for the table's props", async () => {
+  const backend = mockBackend({
+    ui_state_get: (a: { key: string }) =>
+      a.key === "column-widths:#helm-releases" ? { name: 200 } : null,
+    ui_state_set: () => null,
+  });
+  const { result, unmount } = renderHook(() =>
+    useColumnWidths("#helm-releases"),
+  );
+  expect(result.current.columnWidths).toEqual({});
+  await act(flush);
+  expect(result.current.columnWidths).toEqual({ name: 200 });
+  act(() => result.current.onColumnWidthsChange({ name: 240 }));
+  expect(result.current.columnWidths).toEqual({ name: 240 });
+  unmount();
+  expect(backend.callsTo("ui_state_set")).toEqual([
+    { key: "column-widths:#helm-releases", value: { name: 240 } },
+  ]);
 });

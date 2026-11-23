@@ -4,7 +4,6 @@ import {
   Badge,
   Button,
   CheckMenu,
-  type ColumnWidths,
   EmptyState,
   ErrorNotice,
   Spinner,
@@ -20,7 +19,7 @@ import { type KubeObject, objectKey } from "../../kinds/objects";
 import { kindSpec } from "../../kinds/registry";
 import { useClusterNamespaces } from "../../stores/clusters";
 import { findResource } from "../../stores/resources";
-import { useUiState } from "../../stores/uiState";
+import { useColumnWidths, useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import { DetailDrawer, isDrawerEscape } from "../details/DetailDrawer";
 import { drawerTabOf } from "../details/drawerHistory";
@@ -160,10 +159,7 @@ export function ResourceScreen(props: {
     {},
   );
   // Kept per kind, as the column choices are, so each list keeps the widths it was given.
-  const [columnWidths, setColumnWidths] = useUiState<ColumnWidths>(
-    `column-widths:${resource.group}/${resource.plural}`,
-    {},
-  );
+  const widths = useColumnWidths(`${resource.group}/${resource.plural}`);
   // The list holds only the chosen namespaces, so the choices are the cluster's own,
   // and those of the rows for a cluster whose namespaces could not be listed.
   const clusterNamespaces = useClusterNamespaces(clusterId);
@@ -451,8 +447,7 @@ export function ResourceScreen(props: {
                   : o.metadata.name
               }
               hiddenColumns={hiddenColumns}
-              columnWidths={columnWidths}
-              onColumnWidthsChange={setColumnWidths}
+              {...widths}
               sort={sort}
               onSortChange={setSort}
               selected={selected}

@@ -5,7 +5,6 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   memo,
-  type PointerEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -15,8 +14,16 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import {
+  ColumnResizer,
+  type ColumnWidths,
+  fitWidth,
+  MIN_COLUMN_PX,
+} from "./ColumnResizer";
 import { compare } from "./DataTable";
 import styles from "./VirtualTable.module.css";
+
+export type { ColumnWidths } from "./ColumnResizer";
 
 /** What a filter reads from a column (column filter spec §4.1). */
 export interface ColumnFilter<T> {
@@ -58,14 +65,6 @@ const CLOCK_TICK_MS = 30_000;
 /** A row younger than this has its age count every second. */
 const FRESH_MS = 60_000;
 const FRESH_TICK_MS = 1000;
-/** The narrowest and widest a column can be dragged to. */
-const MIN_COLUMN_PX = 48;
-const MAX_COLUMN_PX = 2000;
-/** One arrow press on a column's handle moves its edge this far; with Shift, four times. */
-const COLUMN_KEY_STEP = 16;
-
-/** Widths given to columns by their handles, in pixels, by column id. */
-export type ColumnWidths = Readonly<Record<string, number>>;
 
 let clockNow = Date.now();
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -146,94 +145,6 @@ function trackMinimum(width: number | string): number {
   if (typeof width === "number") return width;
   const px = /^(?:minmax\()?(\d+)px/.exec(width);
   return px ? Number(px[1]) : 0;
-}
-
-/**
- * The handle on a header cell's right edge: drag it, or use Left and Right (Shift for
- * bigger steps). A double-click gives the column back its own width. A drag or key press
- * starts from the width given by a handle, else the column's own width in pixels, else,
- * for a column that shares the spare room, the width its cell has on screen.
- */
-function ColumnResizer(props: {
-  header: string;
-  width: number | undefined;
-  /** The column's own width, when it is in pixels. */
-  base: number | undefined;
-  onResize(width: number | null): void;
-  testId: string;
-}) {
-  const { width, base, onResize } = props;
-  const [active, setActive] = useState(false);
-  // The drag's listeners outlive the render that started it, so they read the latest.
-  const resizeRef = useRef(onResize);
-  resizeRef.current = onResize;
-  const set = (next: number) =>
-    resizeRef.current(
-      Math.round(Math.min(MAX_COLUMN_PX, Math.max(MIN_COLUMN_PX, next))),
-    );
-  const current = (handle: HTMLElement) =>
-    width ??
-    base ??
-    handle.parentElement?.getBoundingClientRect().width ??
-    MIN_COLUMN_PX;
-
-  /** Ends a drag in progress; also run if the table goes away during one. */
-  const endDrag = useRef<(() => void) | null>(null);
-  useEffect(() => () => endDrag.current?.(), []);
-
-  // The window follows the pointer, not the 9px handle, which the pointer leaves at
-  // once: pointer capture is not there for every kind of input.
-  function start(event: PointerEvent<HTMLDivElement>): void {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    endDrag.current?.();
-    const fromX = event.clientX;
-    const from = current(event.currentTarget);
-    const move = (e: globalThis.PointerEvent) => set(from + e.clientX - fromX);
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      endDrag.current = null;
-      setActive(false);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    endDrag.current = stop;
-    setActive(true);
-  }
-
-  function key(event: KeyboardEvent<HTMLDivElement>): void {
-    const step = event.shiftKey ? COLUMN_KEY_STEP * 4 : COLUMN_KEY_STEP;
-    if (event.key === "ArrowLeft") set(current(event.currentTarget) - step);
-    else if (event.key === "ArrowRight")
-      set(current(event.currentTarget) + step);
-    else return;
-    event.preventDefault();
-  }
-
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: an hr cannot be dragged or focused.
-    <div
-      className={styles.resize}
-      role="separator"
-      aria-label={`Resize ${props.header}`}
-      aria-orientation="vertical"
-      aria-valuenow={width}
-      aria-valuemin={MIN_COLUMN_PX}
-      aria-valuemax={MAX_COLUMN_PX}
-      data-active={active}
-      title="Drag to resize, double-click to reset"
-      tabIndex={0}
-      onPointerDown={start}
-      onDoubleClick={() => onResize(null)}
-      onKeyDown={key}
-      data-testid={props.testId}
-    >
-      <span className={styles.resizeLine} />
-    </div>
-  );
 }
 
 /** True for a click or key press meant for a control inside the row, or a portal. */
@@ -386,12 +297,8 @@ export function VirtualTable<T>(props: {
 
   const [ownWidths, setOwnWidths] = useState<ColumnWidths>({});
   const widths = props.columnWidths ?? ownWidths;
-  /** Null gives the column back the width its definition asks for. */
-  function resize(id: string, width: number | null): void {
-    const next = Object.fromEntries(
-      Object.entries(widths).filter(([column]) => column !== id),
-    );
-    if (width !== null) next[id] = width;
+  function resize(id: string, width: number): void {
+    const next = { ...widths, [id]: width };
     setOwnWidths(next);
     props.onColumnWidthsChange?.(next);
   }
@@ -508,13 +415,34 @@ export function VirtualTable<T>(props: {
     (sum, c) => sum + trackMinimum(widthOf(c)),
     selectable ? SELECT_TRACK_PX : 0,
   );
+  const allTracks = [
+    ...(selectable ? [`${SELECT_TRACK_PX}px`] : []),
+    ...tracks,
+  ];
   const layout = {
-    "--vt-columns": [
-      ...(selectable ? [`${SELECT_TRACK_PX}px`] : []),
-      ...tracks,
-    ].join(" "),
+    "--vt-columns": allTracks.join(" "),
     "--vt-min-width": `${minWidth}px`,
   } as CSSProperties;
+
+  /**
+   * The width that fits a column's header and the rows on screen. Its track is laid out at
+   * max-content for one measure and given back before anything paints; each row is a grid
+   * of its own, so each cell then takes the width its content asks for.
+   */
+  function fitColumn(index: number): number {
+    const el = scroller.current;
+    if (!el) return MIN_COLUMN_PX;
+    const place = index + (selectable ? 1 : 0);
+    const laidOut = el.style.getPropertyValue("--vt-columns");
+    const measuring = [...allTracks];
+    measuring[place] = "max-content";
+    el.style.setProperty("--vt-columns", measuring.join(" "));
+    const natural = [...el.querySelectorAll("tr")].map(
+      (tr) => tr.children[place]?.getBoundingClientRect().width ?? 0,
+    );
+    el.style.setProperty("--vt-columns", laidOut);
+    return fitWidth(natural);
+  }
 
   return (
     <div ref={scroller} className={styles.scroller} style={layout}>
@@ -543,7 +471,7 @@ export function VirtualTable<T>(props: {
                 />
               </th>
             ) : null}
-            {columns.map((c) => {
+            {columns.map((c, index) => {
               const active = sort?.id === c.id ? sort : null;
               return (
                 <th
@@ -581,8 +509,16 @@ export function VirtualTable<T>(props: {
                     <ColumnResizer
                       header={c.header}
                       width={widths[c.id]}
-                      base={typeof c.width === "number" ? c.width : undefined}
+                      // The width given by a handle, else the column's own in pixels, else,
+                      // for a column that shares the spare room, its cell's on screen.
+                      current={(handle) =>
+                        widths[c.id] ??
+                        (typeof c.width === "number" ? c.width : undefined) ??
+                        handle.parentElement?.getBoundingClientRect().width ??
+                        MIN_COLUMN_PX
+                      }
                       onResize={(width) => resize(c.id, width)}
+                      onFit={() => resize(c.id, fitColumn(index))}
                       testId={`column-resize-${c.id}`}
                     />
                   )}

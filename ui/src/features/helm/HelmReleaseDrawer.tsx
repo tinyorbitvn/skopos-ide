@@ -17,6 +17,7 @@ import type { HelmReleaseDetail } from "../../ipc/generated/HelmReleaseDetail";
 import type { HelmRevision } from "../../ipc/generated/HelmRevision";
 import type { ManifestResource } from "../../ipc/generated/ManifestResource";
 import { releaseIsBusy, runKey, useHelm } from "../../stores/helm";
+import { useColumnWidths } from "../../stores/uiState";
 import { CopyRow } from "../details/CopyRow";
 import drawer from "../details/DetailDrawer.module.css";
 import { CodeBlock } from "./CodeBlock";
@@ -101,6 +102,8 @@ export function HelmReleaseDrawer(props: {
   listLoaded: boolean;
   onClose(): void;
 }) {
+  const historyWidths = useColumnWidths("#helm-release-history");
+  const resourceWidths = useColumnWidths("#helm-release-resources");
   const { clusterId, namespace, name, listed, onClose } = props;
   const navigate = useNavigate();
   const now = useNow();
@@ -263,6 +266,7 @@ export function HelmReleaseDrawer(props: {
         <section className={drawer.section}>
           <h4 className={drawer.heading}>Resources</h4>
           <DataTable
+            {...resourceWidths}
             rows={shown.resources}
             columns={resourceColumns}
             rowKey={(r) => `${r.apiVersion}/${r.kind}/${r.namespace}/${r.name}`}
@@ -317,6 +321,7 @@ export function HelmReleaseDrawer(props: {
           <section className={drawer.section}>
             <h4 className={drawer.heading}>History</h4>
             <DataTable
+              {...historyWidths}
               rows={history.value}
               columns={historyColumns}
               rowKey={(r) => String(r.revision)}

@@ -13,6 +13,10 @@
   color: var(--text-secondary);
   font: var(--type-caption);
   text-align: left;
+  /* A header narrowed by its handle ends in an ellipsis, as its cells do. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table td {

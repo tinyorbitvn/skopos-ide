@@ -27,6 +27,7 @@ import {
   runKey,
   useHelm,
 } from "../../stores/helm";
+import { useColumnWidths } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import { NamespaceFilter } from "../resources/NamespaceFilter";
 import styles from "../resources/ResourceScreen.module.css";
@@ -52,6 +53,7 @@ const releaseKey = (r: { namespace: string; name: string }) =>
 
 /** The releases of the selected namespaces (spec §8). */
 export function HelmReleasesScreen({ clusterId }: { clusterId: string }) {
+  const releaseWidths = useColumnWidths("#helm-releases");
   const navigate = useNavigate();
   const now = useNow();
   const [params, setParams] = useSearchParams();
@@ -259,6 +261,7 @@ export function HelmReleasesScreen({ clusterId }: { clusterId: string }) {
   } else {
     body = (
       <VirtualTable
+        {...releaseWidths}
         rows={rows}
         columns={columns}
         rowKey={releaseKey}

@@ -3,14 +3,16 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import { resetResourcesForTest } from "../../stores/resources";
+import { expectKeptWidth, savedWidth } from "../../test/columnWidths";
 import { flush, mockBackend } from "../../test/ipc";
 import { DrawerLinkContext } from "../detail/links";
 import type { KubeObject } from "../objects";
 import { PodList } from "./PodList";
 
-function live() {
+function live(handlers: Parameters<typeof mockBackend>[0] = {}) {
   let send: (e: WatchEvent) => void = () => {};
   mockBackend({
+    ...handlers,
     resources_subscribe: (a: {
       onEvent: { onmessage: (e: WatchEvent) => void };
     }) => {
@@ -172,4 +174,13 @@ test("the Pods of a node are asked for by the node, and not as every Pod", async
     { clusterId: "c", node: "worker-1" },
   ]);
   expect(backend.callsTo("resources_subscribe")).toHaveLength(0);
+});
+
+test("keeps the widths its columns are given, between runs", async () => {
+  const state = savedWidth("#detail-pods", "name");
+  const snapshot = live(state.handlers);
+  show(() => true, "n");
+  await act(flush);
+  await snapshot([{ metadata: { name: "a", namespace: "n" } }]);
+  await expectKeptWidth(state, "#detail-pods", "name");
 });

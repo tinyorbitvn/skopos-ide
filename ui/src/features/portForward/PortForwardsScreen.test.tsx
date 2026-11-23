@@ -7,6 +7,7 @@ import {
   resetPortForwardsForTest,
   usePortForwards,
 } from "../../stores/portForwards";
+import { expectKeptWidth, savedWidth } from "../../test/columnWidths";
 import { emitEvent, flush, mockBackend } from "../../test/ipc";
 import { forward } from "../../test/portForwards";
 import { mockElementSize } from "../../test/size";
@@ -397,4 +398,11 @@ test("an item of the row menu does not open the drawer", async () => {
   openMenu("a");
   await pick("pf-stop-a");
   expect(screen.queryByTestId("pf-drawer")).toBeNull();
+});
+
+test("keeps the widths its columns are given, between runs", async () => {
+  const state = savedWidth("#port-forwards", "name");
+  await loadWith([RUNNING_A], state.handlers);
+  show();
+  await expectKeptWidth(state, "#port-forwards", "name");
 });

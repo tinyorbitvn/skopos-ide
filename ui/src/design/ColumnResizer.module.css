@@ -1,0 +1,32 @@
+/* A 9px hit area on a header cell's right edge, with a 2px line that shows on hover. The
+   cell is positioned, so the handle spans its height. */
+.resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.line {
+  flex: 0 0 2px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.resize:hover .line {
+  background: var(--border-strong-color);
+}
+
+.resize[data-active="true"] .line {
+  background: var(--border-accent);
+}
+
+.resize:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus-ring-color);
+}

@@ -19,7 +19,7 @@ import {
   type ResourceListState,
   useResourceList,
 } from "../../stores/resources";
-import { useUiState } from "../../stores/uiState";
+import { useColumnWidths, useUiState } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import styles from "../resources/ResourceScreen.module.css";
@@ -108,6 +108,7 @@ export function UsersGroupsScreen({
   clusterId: string;
   resources: ApiResourceInfo[];
 }) {
+  const subjectWidths = useColumnWidths("#access-subjects");
   const [namespaces] = useUiState<string[]>(namespaceFilterKey(clusterId), []);
   const clusterBindings = useResourceList(clusterId, CLUSTER_ROLE_BINDINGS);
   const roleBindings = useResourceList(clusterId, ROLE_BINDINGS, namespaces);
@@ -187,6 +188,7 @@ export function UsersGroupsScreen({
   } else {
     body = (
       <VirtualTable
+        {...subjectWidths}
         rows={rows}
         columns={COLUMNS}
         rowKey={(s) => s.key}

@@ -13,6 +13,7 @@ import { PackagePlus } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { ChartVersion } from "../../ipc/generated/ChartVersion";
 import { useHelm } from "../../stores/helm";
+import { useColumnWidths } from "../../stores/uiState";
 import { CopyRow } from "../details/CopyRow";
 import drawer from "../details/DetailDrawer.module.css";
 import { CodeBlock } from "./CodeBlock";
@@ -59,6 +60,7 @@ export function HelmChartDrawer(props: {
   name: string;
   onClose(): void;
 }) {
+  const versionWidths = useColumnWidths("#helm-chart-versions");
   const { clusterId, repo, name, onClose } = props;
   const navigate = useNavigate();
   const now = useNow();
@@ -164,6 +166,7 @@ export function HelmChartDrawer(props: {
           <section className={drawer.section}>
             <h4 className={drawer.heading}>Versions</h4>
             <DataTable
+              {...versionWidths}
               rows={versions.value}
               columns={columns}
               rowKey={(v) => v.version}

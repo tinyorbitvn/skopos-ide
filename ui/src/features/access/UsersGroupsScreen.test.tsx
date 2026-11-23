@@ -8,6 +8,11 @@ import type { SubjectRemoval } from "../../ipc/generated/SubjectRemoval";
 import type { WatchEvent } from "../../ipc/generated/WatchEvent";
 import type { KubeObject } from "../../kinds/objects";
 import { resetResourcesForTest } from "../../stores/resources";
+import {
+  expectKeptWidth,
+  keptUiState,
+  savedWidth,
+} from "../../test/columnWidths";
 import { flush, mockBackend } from "../../test/ipc";
 import { mockElementSize } from "../../test/size";
 import { UsersGroupsScreen } from "./UsersGroupsScreen";
@@ -80,6 +85,7 @@ async function show(
     denied?: string[];
     at?: string;
     remove?: (args: RemoveArgs) => SubjectRemoval[];
+    uiState?: ReturnType<typeof keptUiState>;
   } = {},
 ) {
   const subs = new Map<string, (event: WatchEvent) => void>();
@@ -101,6 +107,7 @@ async function show(
     },
     resources_unsubscribe: () => null,
     access_subject_remove: (a: RemoveArgs) => options.remove?.(a) ?? [],
+    ...options.uiState?.handlers,
   });
   render(
     <MemoryRouter initialEntries={[options.at ?? "/cluster/c1/users-groups"]}>
@@ -390,4 +397,10 @@ test("Create user… opens the dialog, from the toolbar and from the empty state
   expect(screen.queryByTestId("cu-dialog")).toBeNull();
   fireEvent.click(screen.getByTestId("ug-create"));
   expect(screen.getByTestId("cu-dialog")).toBeTruthy();
+});
+
+test("keeps the widths its columns are given, between runs", async () => {
+  const uiState = savedWidth("#access-subjects", "name");
+  await show({ uiState });
+  await expectKeptWidth(uiState, "#access-subjects", "name");
 });

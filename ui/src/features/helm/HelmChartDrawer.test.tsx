@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { resetHelmForTest, useHelm } from "../../stores/helm";
+import { expectKeptWidth, savedWidth } from "../../test/columnWidths";
 import { chart, chartVersion } from "../../test/helm";
 import { flush, mockBackend } from "../../test/ipc";
 import { HelmChartDrawer } from "./HelmChartDrawer";
@@ -159,4 +160,15 @@ test("a chart that left the list says so, with no tabs and no Install", async ()
   );
   expect(screen.queryByTestId("helm-chart-install")).toBeNull();
   expect(screen.queryByTestId("helm-chart-tab-readme")).toBeNull();
+});
+
+test("the versions keep the widths their columns are given", async () => {
+  const state = savedWidth("#helm-chart-versions", "version");
+  await show({
+    helm_chart_readme: () => "",
+    helm_chart_versions: () => [chartVersion({ version: "1.2.3" })],
+    ...state.handlers,
+  });
+  await openTab("helm-chart-tab-versions");
+  await expectKeptWidth(state, "#helm-chart-versions", "version");
 });

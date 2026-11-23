@@ -3,6 +3,7 @@ import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, expect, test } from "vitest";
 import type { ChartSearch } from "../../ipc/generated/ChartSearch";
 import { resetHelmForTest } from "../../stores/helm";
+import { expectKeptWidth, savedWidth } from "../../test/columnWidths";
 import { chart, chartVersion, HELM_MISSING, toolStatus } from "../../test/helm";
 import { flush, mockBackend } from "../../test/ipc";
 import { mockElementSize } from "../../test/size";
@@ -199,4 +200,10 @@ test("charts still show when the repository list cannot be read", async () => {
     },
   });
   expect(rowIds()).toHaveLength(3);
+});
+
+test("keeps the widths its columns are given, between runs", async () => {
+  const state = savedWidth("#helm-charts", "name");
+  await show({ helm_chart_search: () => SEARCH, ...state.handlers });
+  await expectKeptWidth(state, "#helm-charts", "name");
 });

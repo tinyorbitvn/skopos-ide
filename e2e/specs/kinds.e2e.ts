@@ -53,6 +53,22 @@ describe("kinds on a real cluster", () => {
     await searchResources("steady");
     await byTestId(rowId(NS, "steady")).click();
     await until(async () => (await (await shown("detail-pods")).getText()).includes("steady-"), "no pod listed");
+
+    // Its columns resize from the keyboard, and the list keeps their widths.
+    const handle = '[data-testid="detail-pods"] [data-testid="column-resize-name"]';
+    const nameWidth = () =>
+      browser.execute(
+        (selector) => Math.round(document.querySelector(selector)?.parentElement?.getBoundingClientRect().width ?? 0),
+        handle,
+      );
+    const before = await nameWidth();
+    await browser.execute((selector) => (document.querySelector(selector) as HTMLElement | null)?.focus(), handle);
+    await browser.keys(["ArrowRight"]);
+    await until(async () => (await nameWidth()) === before + 16, "the pod list's Name column never grew");
+    await clickWhenShown("detail-close");
+    await byTestId(rowId(NS, "steady")).click();
+    await until(async () => (await (await shown("detail-pods")).getText()).includes("steady-"), "no pod listed again");
+    await until(async () => (await nameWidth()) === before + 16, "the pod list lost its Name column's width");
     await clickWhenShown("detail-close");
   });
 

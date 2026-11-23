@@ -3,6 +3,7 @@ import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, expect, test } from "vitest";
 import type { HelmReleaseList } from "../../ipc/generated/HelmReleaseList";
 import { resetHelmForTest } from "../../stores/helm";
+import { expectKeptWidth, savedWidth } from "../../test/columnWidths";
 import {
   detail,
   HELM_MISSING,
@@ -122,11 +123,18 @@ test.each([
 });
 
 test("the namespace selection of the resource lists is the one asked for", async () => {
-  const backend = await show(LIST, { ui_state_get: () => ["shop"] });
+  const backend = await show(LIST, {
+    ui_state_get: (a: { key: string }) =>
+      a.key === "namespaces:c1" ? ["shop"] : null,
+  });
   expect(backend.callsTo("helm_release_list")).toEqual([
     { clusterId: "c1", namespaces: ["shop"] },
   ]);
-  expect(backend.callsTo("ui_state_get")).toEqual([{ key: "namespaces:c1" }]);
+  // The table also reads its column widths.
+  const reads = backend.callsTo("ui_state_get").map((a) => String(a.key));
+  expect(reads.filter((key) => key.startsWith("namespaces:"))).toEqual([
+    "namespaces:c1",
+  ]);
 });
 
 test("search filters on the name, the namespace and the chart", async () => {
@@ -262,4 +270,10 @@ test("missing helm shows the missing block", async () => {
   });
   expect(screen.getByTestId("helm-missing")).toBeTruthy();
   expect(screen.queryByTestId("helm-releases-error")).toBeNull();
+});
+
+test("keeps the widths its columns are given, between runs", async () => {
+  const state = savedWidth("#helm-releases", "name");
+  await show(LIST, state.handlers);
+  await expectKeptWidth(state, "#helm-releases", "name");
 });

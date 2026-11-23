@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ColumnWidths } from "../design/ColumnResizer";
 import { api } from "../ipc/api";
 import type { JsonValue } from "../ipc/generated/serde_json/JsonValue";
 
@@ -100,4 +101,22 @@ export function useUiState<T>(
   );
 
   return [value, set, readKey === key];
+}
+
+const NO_WIDTHS: ColumnWidths = {};
+
+/**
+ * The widths a table's columns were given by their handles, kept between runs: a kind's
+ * list under `<group>/<resource>`, any other table under its own `#name`. Spread the result
+ * into the table's props.
+ */
+export function useColumnWidths(name: string): {
+  columnWidths: ColumnWidths;
+  onColumnWidthsChange(widths: ColumnWidths): void;
+} {
+  const [columnWidths, onColumnWidthsChange] = useUiState<ColumnWidths>(
+    `column-widths:${name}`,
+    NO_WIDTHS,
+  );
+  return { columnWidths, onColumnWidthsChange };
 }

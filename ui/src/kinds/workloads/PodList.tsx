@@ -8,6 +8,7 @@ import {
   Spinner,
 } from "../../design";
 import { useNodePods, useResourceList } from "../../stores/resources";
+import { useColumnWidths } from "../../stores/uiState";
 import { DrawerLinkContext } from "../detail/links";
 import type { KubeObject } from "../objects";
 import { PODS } from "../refs";
@@ -29,6 +30,7 @@ export function PodList(props: {
   namespace?: string;
   node?: string;
 }) {
+  const podWidths = useColumnWidths("#detail-pods");
   const { clusterId, match, namespace, node } = props;
   const listed = useResourceList(
     clusterId,
@@ -116,6 +118,7 @@ export function PodList(props: {
   ];
   return (
     <DataTable
+      {...podWidths}
       testId="detail-pods"
       rows={rows}
       columns={columns}

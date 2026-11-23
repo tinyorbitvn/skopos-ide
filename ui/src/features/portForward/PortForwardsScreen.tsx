@@ -14,6 +14,7 @@ import { Ellipsis } from "../../design/icons";
 import type { PortForward } from "../../ipc/generated/PortForward";
 import { resourcePath } from "../../kinds/nav";
 import { forwardsOf, usePortForwards } from "../../stores/portForwards";
+import { useColumnWidths } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import styles from "../resources/ResourceScreen.module.css";
 import { ForwardStatus } from "./ForwardStatus";
@@ -114,6 +115,7 @@ const COLUMNS: TableColumn<PortForward>[] = [
 
 /** The cluster's port forward definitions (spec §6). */
 export function PortForwardsScreen({ clusterId }: { clusterId: string }) {
+  const forwardWidths = useColumnWidths("#port-forwards");
   const navigate = useNavigate();
   const all = usePortForwards((s) => s.forwards);
   const loaded = usePortForwards((s) => s.loaded);
@@ -175,6 +177,7 @@ export function PortForwardsScreen({ clusterId }: { clusterId: string }) {
   } else {
     body = (
       <VirtualTable
+        {...forwardWidths}
         rows={rows}
         columns={COLUMNS}
         rowKey={(f) => f.id}

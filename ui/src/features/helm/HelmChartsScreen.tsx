@@ -13,6 +13,7 @@ import {
 import { Library } from "../../design/icons";
 import type { ChartSummary } from "../../ipc/generated/ChartSummary";
 import { isToolMissing, useHelm } from "../../stores/helm";
+import { useColumnWidths } from "../../stores/uiState";
 import { useClusterContext } from "../cluster/ClusterLayout";
 import styles from "../resources/ResourceScreen.module.css";
 import own from "./Helm.module.css";
@@ -74,6 +75,7 @@ export const chartKey = (c: { repo: string; name: string }) =>
 
 /** The charts of helm's repositories (spec §6). */
 export function HelmChartsScreen({ clusterId }: { clusterId: string }) {
+  const chartWidths = useColumnWidths("#helm-charts");
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const search = useHelm((s) => s.charts.search);
@@ -176,6 +178,7 @@ export function HelmChartsScreen({ clusterId }: { clusterId: string }) {
   } else {
     body = (
       <VirtualTable
+        {...chartWidths}
         rows={rows}
         columns={COLUMNS}
         rowKey={chartKey}

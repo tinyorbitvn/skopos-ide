@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { HelmRelease } from "../../ipc/generated/HelmRelease";
 import type { HelmReleaseDetail } from "../../ipc/generated/HelmReleaseDetail";
 import { resetHelmForTest, runKey, useHelm } from "../../stores/helm";
+import { expectKeptWidth, savedWidth } from "../../test/columnWidths";
 import { detail, release, releaseList, revision } from "../../test/helm";
 import { flush, mockBackend } from "../../test/ipc";
 import { HelmReleaseDrawer } from "./HelmReleaseDrawer";
@@ -323,4 +324,27 @@ test("it reads again when the list shows a new revision or status, not on the li
   rerender(view(release({ name: "web", revision: 3, status: "uninstalled" })));
   await act(flush);
   expect(backend.callsTo("helm_release_get")).toHaveLength(3);
+});
+
+test("the resources and the history keep the widths their columns are given", async () => {
+  const resources = savedWidth("#helm-release-resources", "kind");
+  const history = savedWidth("#helm-release-history", "revision");
+  Object.assign(resources.saved, history.saved);
+  await show({
+    ...handlers({
+      resources: [
+        {
+          apiVersion: "v1",
+          kind: "ConfigMap",
+          namespace: "shop",
+          name: "web-config",
+          ref: CONFIG_MAPS,
+        },
+      ],
+    }),
+    ...resources.handlers,
+  });
+  await expectKeptWidth(resources, "#helm-release-resources", "kind");
+  await openTab("helm-release-tab-history");
+  await expectKeptWidth(resources, "#helm-release-history", "revision");
 });

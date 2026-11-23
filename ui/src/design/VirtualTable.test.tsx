@@ -545,7 +545,24 @@ function tracks(): string {
 
 const resizer = (id: string) => screen.getByTestId(`column-resize-${id}`);
 
-test("a column's handle resizes it from the keyboard; a double-click resets it", () => {
+/**
+ * Lays each cell out at the width its text asks for while the table measures a column at
+ * max-content, as a browser would; jsdom has no layout. Cells not named are 0 px wide.
+ */
+function naturalWidths(widths: Record<string, number>): void {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: Element) {
+      const scroller = this.closest("table")?.parentElement;
+      const measuring = scroller?.style
+        .getPropertyValue("--vt-columns")
+        .includes("max-content");
+      const width = measuring ? (widths[this.textContent ?? ""] ?? 0) : 0;
+      return { width } as DOMRect;
+    },
+  );
+}
+
+test("a column's handle resizes it from the keyboard; a double-click fits it to its content", () => {
   const withActions: TableColumn<Row>[] = [
     ...columns,
     {
@@ -580,9 +597,43 @@ test("a column's handle resizes it from the keyboard; a double-click resets it",
   const scroller = screen.getByTestId("table").parentElement as HTMLElement;
   expect(scroller.style.getPropertyValue("--vt-min-width")).toBe("168px");
 
+  expect(size.getAttribute("title")).toBe(
+    "Drag to resize, double-click to fit",
+  );
+
+  // The widest of the header and the rows on screen, rounded up; the other columns keep
+  // their tracks while it measures.
+  naturalWidths({ Size: 41.2, "0": 61.4, a: 500, "a note": 300 });
   fireEvent.doubleClick(resizer("size"));
-  expect(tracks()).toBe("1fr 80px 80px 40px");
-  expect(resizer("size").getAttribute("aria-valuenow")).toBeNull();
+  expect(tracks()).toBe("1fr 62px 80px 40px");
+  expect(resizer("size").getAttribute("aria-valuenow")).toBe("62");
+});
+
+test("Enter on a column's handle fits it too, within 48 and 2000 px", () => {
+  // A track may hold spaces of its own.
+  const shared = [
+    { ...columns[0], width: "minmax(120px, 1fr)" },
+    ...columns.slice(1),
+  ];
+  render(
+    <VirtualTable
+      rows={[row("a", "a long name"), row("b", "b")]}
+      columns={shared}
+      rowKey={rowKey}
+      testId="table"
+    />,
+  );
+  naturalWidths({
+    Name: 30,
+    "a long name": 2400,
+    b: 10,
+    Note: 20,
+    "a note": 30,
+  });
+  fireEvent.keyDown(resizer("name"), { key: "Enter" });
+  expect(tracks()).toBe("2000px 80px 80px");
+  fireEvent.keyDown(resizer("note"), { key: "Enter" });
+  expect(tracks()).toBe("2000px 80px 48px");
 });
 
 test("dragging a column that shares the spare room starts from its width on screen", () => {
@@ -628,10 +679,11 @@ test("a table given its widths shows them and reports each change", () => {
   // A width kept for a column the table no longer has changes nothing.
   expect(tracks()).toBe("1fr 120px 80px");
   fireEvent.keyDown(resizer("size"), { key: "ArrowLeft" });
+  naturalWidths({ Note: 40, "a note": 90 });
   fireEvent.doubleClick(resizer("note"));
   expect(changes).toEqual([
     { size: 104, gone: 300 },
-    { size: 120, gone: 300 },
+    { size: 120, gone: 300, note: 90 },
   ]);
   // What it shows is what it is given.
   expect(tracks()).toBe("1fr 120px 80px");
