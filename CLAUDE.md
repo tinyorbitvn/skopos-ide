@@ -137,5 +137,6 @@ make e2e          # full end-to-end suite on the running app (Linux)
 make e2e-smoke    # smoke end-to-end suite against skopos-fakekube, no Docker
 make dev          # run the app with hot reload
 make site         # build the project site into tmp/site/ from the latest release
+make audit        # open Dependabot alerts against the advisory policy (needs gh auth)
 make release VERSION=x.y.z  # on main: bump, date CHANGELOG notes, commit, tag (see docs/releasing.md)
 ```
