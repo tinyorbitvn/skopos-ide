@@ -218,9 +218,11 @@ async fn the_hub_keeps_a_watched_object_in_about_the_size_of_its_json() {
     let json_per_object = text / PODS;
     // A Pod row is trimmed to about 1 KB, and the group keeps the graph's and the topology's
     // rows beside it, so the rows, the key, the map entry and the watch's own share weigh
-    // about twice the text. A parsed tree would cost about ten times the text.
+    // about twice the text. A parsed tree would cost about ten times the text. The Pod's graph
+    // row also keeps its containers' ports (about 100 bytes each), which the network policy
+    // module resolves named ports against.
     assert!(
-        per_object < json_per_object * 3 / 2 + 2048,
+        per_object < json_per_object * 3 / 2 + 2560,
         "the hub keeps {per_object} bytes for each object of {json_per_object} bytes of JSON"
     );
     drop(rx);

@@ -26,7 +26,7 @@ use super::discovery::state_name;
 use super::ops::{invalid, is_path_segment, selector_value};
 use super::sanitize::strip_for_list;
 use super::trim::{
-    has_topology_row, is_core_pods, trim_for_graph, trim_for_topology, trim_for_watch,
+    has_graph_row, has_topology_row, trim_for_graph, trim_for_topology, trim_for_watch,
 };
 use super::types::{ObjectKey, ResourceRef, Row, WatchEvent, WatchStatus};
 use crate::app_core::AppCore;
@@ -64,9 +64,9 @@ fn in_partition(key: &ObjectKey, partition: &Partition) -> bool {
 }
 
 /// What a subscriber's rows keep: what the tables read, what the relationship graph reads, or
-/// what the node topology reads. The graph shape differs only for core Pods and the topology
-/// shape only for core Pods and Nodes, so a group stores those rows beside the table row, and
-/// every other resource has one row for every shape.
+/// what the node topology reads. The graph shape differs only for core Pods and Argo CD
+/// Applications, and the topology shape only for core Pods and Nodes, so a group stores those
+/// rows beside the table row, and every other resource has one row for every shape.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) enum RowShape {
     #[default]
@@ -128,7 +128,7 @@ struct Wanted {
 #[derive(Clone)]
 struct StoredRow {
     table: Row,
-    /// Only core Pods have a graph row of their own.
+    /// Only core Pods and Argo CD Applications have a graph row of their own.
     graph: Option<Row>,
     /// Only core Pods and Nodes have a topology row of their own.
     topology: Option<Row>,
@@ -886,11 +886,12 @@ pub(super) fn stripped_object(
     Some((key, value))
 }
 
-/// The rows for the subscribers. A core Pod gets its graph row too, cut from a copy of the
-/// same parsed value, so the object is parsed once however many shapes read it.
+/// The rows for the subscribers. A core Pod or an Argo CD Application gets its graph row too,
+/// cut from a copy of the same parsed value, so the object is parsed once however many shapes
+/// read it.
 fn to_row(object: &DynamicObject, resource: &ResourceRef) -> Option<(ObjectKey, StoredRow)> {
     let (key, mut value) = stripped_object(object, resource)?;
-    let graph = if is_core_pods(resource) {
+    let graph = if has_graph_row(resource) {
         let mut graph = value.clone();
         trim_for_graph(resource, &mut graph);
         Some(Row::new(&graph).ok()?)
@@ -1330,7 +1331,7 @@ mod tests {
     }
 
     #[test]
-    fn only_core_pods_store_a_graph_row_of_their_own() {
+    fn only_core_pods_and_applications_store_a_graph_row_of_their_own() {
         let object: DynamicObject = serde_json::from_value(serde_json::json!({
             "apiVersion": "v1",
             "kind": "Pod",
@@ -1340,9 +1341,11 @@ mod tests {
         .unwrap();
         for (group, plural, own_graph_row) in [
             ("", "pods", true),
+            ("argoproj.io", "applications", true),
             ("", "secrets", false),
             ("", "configmaps", false),
             ("example.com", "pods", false),
+            ("argoproj.io", "applicationsets", false),
         ] {
             let (_, stored) = to_row(&object, &resource(group, plural)).unwrap();
             assert_eq!(stored.graph.is_some(), own_graph_row, "{group}/{plural}");
@@ -1354,6 +1357,44 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn an_application_graph_row_keeps_its_managed_objects_and_its_table_row_does_not() {
+        let object: DynamicObject = serde_json::from_value(serde_json::json!({
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Application",
+            "metadata": { "name": "shop", "namespace": "argocd" },
+            "spec": { "project": "default", "destination": { "namespace": "shop" } },
+            "status": {
+                "resources": [{ "kind": "Service", "namespace": "shop", "name": "web", "status": "Synced" }],
+            },
+        }))
+        .unwrap();
+        let applications = ResourceRef {
+            group: "argoproj.io".into(),
+            version: "v1alpha1".into(),
+            plural: "applications".into(),
+            kind: "Application".into(),
+            namespaced: true,
+        };
+
+        let (_, stored) = to_row(&object, &applications).unwrap();
+        let table = stored.pick(RowShape::Table).to_value();
+        let graph = stored.pick(RowShape::Graph).to_value();
+
+        assert!(table["status"].get("resources").is_none());
+        assert!(table["spec"].get("destination").is_none());
+        assert_eq!(table["spec"]["project"], "default");
+        assert_eq!(
+            graph["status"]["resources"],
+            serde_json::json!([{ "kind": "Service", "namespace": "shop", "name": "web" }])
+        );
+        assert_eq!(
+            graph["spec"]["destination"],
+            serde_json::json!({ "namespace": "shop" })
+        );
+        assert_eq!(graph["spec"]["project"], "default");
     }
 
     #[test]

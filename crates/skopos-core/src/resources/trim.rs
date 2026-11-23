@@ -5,8 +5,8 @@
 //! whole object with `resource_get`.
 //! Annotations stay for the list's filter, each value cut short (spec M24), and so does a
 //! Pod's status message for the workload Status card, cut the same way (spec N20). The
-//! resource graph reads these same rows for every kind but Pods, so each rule keeps what the
-//! graph's extractors read too.
+//! resource graph reads these same rows for every kind but Pods and Argo CD Applications,
+//! which have graph rows of their own, so each rule keeps what the graph's extractors read too.
 
 use serde_json::Value;
 
@@ -118,8 +118,17 @@ const ENV_FROM_REFS: Keep = Each(&Fields(&[
     ("secretRef", NAME_ONLY),
 ]));
 
+/// A container's ports, which a policy's named ports resolve against (network policies spec
+/// §4.2).
+const CONTAINER_PORTS: Keep = Each(&Fields(&[
+    ("name", All),
+    ("containerPort", All),
+    ("protocol", All),
+]));
+
 /// What the relationship graph (spec E §4) reads of a Pod: its owner and labels, the objects
-/// it mounts, reads and runs as, and what its status and facts need.
+/// it mounts, reads and runs as, what its status and facts need, and the container ports the
+/// policy module reads (network policies spec §7.2).
 const POD_GRAPH: Keep = Fields(&[
     ("apiVersion", All),
     ("kind", All),
@@ -160,6 +169,7 @@ const POD_GRAPH: Keep = Fields(&[
                     ("name", All),
                     ("env", ENV_REFS),
                     ("envFrom", ENV_FROM_REFS),
+                    ("ports", CONTAINER_PORTS),
                 ])),
             ),
             (
@@ -169,6 +179,7 @@ const POD_GRAPH: Keep = Fields(&[
                     ("restartPolicy", All),
                     ("env", ENV_REFS),
                     ("envFrom", ENV_FROM_REFS),
+                    ("ports", CONTAINER_PORTS),
                 ])),
             ),
         ]),
@@ -511,9 +522,19 @@ fn cut_chars(text: &mut String, max: usize) {
     }
 }
 
-/// Core `v1` Pods are the only rows with a graph shape of their own.
+/// Core `v1` Pods.
 pub(super) fn is_core_pods(resource: &ResourceRef) -> bool {
     resource.group.is_empty() && resource.plural == "pods"
+}
+
+/// Argo CD Applications, at any version.
+fn is_argo_applications(resource: &ResourceRef) -> bool {
+    resource.group == "argoproj.io" && resource.plural == "applications"
+}
+
+/// Core Pods and Argo CD Applications are the only rows with a graph shape of their own.
+pub(super) fn has_graph_row(resource: &ResourceRef) -> bool {
+    is_core_pods(resource) || is_argo_applications(resource)
 }
 
 /// Core `v1` Nodes.
@@ -572,6 +593,50 @@ const APPLICATION_ROW: Keep = Fields(&[
     ),
 ]);
 
+/// Where an Application deploys: its cluster, by URL or by name, and its namespace.
+const APPLICATION_DESTINATION: Keep = Fields(&[("server", All), ("name", All), ("namespace", All)]);
+
+/// An object an Application manages, as `status.resources` names it. Its sync and health
+/// state, wave and flags stay out.
+const MANAGED_RESOURCE: Keep = Fields(&[
+    ("group", All),
+    ("kind", All),
+    ("namespace", All),
+    ("name", All),
+]);
+
+/// What the resource map reads of an Application (network policies spec §3.3, §6.1): the
+/// table row's fields, where it deploys and the objects it manages.
+const APPLICATION_GRAPH: Keep = Fields(&[
+    ("apiVersion", All),
+    ("kind", All),
+    ("metadata", ROW_METADATA),
+    ("operation", PRESENT),
+    (
+        "spec",
+        Fields(&[
+            ("project", All),
+            ("sources", Each(&PRESENT)),
+            ("syncPolicy", Fields(&[("automated", All)])),
+            ("destination", APPLICATION_DESTINATION),
+        ]),
+    ),
+    (
+        "status",
+        Fields(&[
+            ("controllerNamespace", All),
+            (
+                "sync",
+                Fields(&[("status", All), ("revision", All), ("revisions", All)]),
+            ),
+            ("health", Fields(&[("status", All)])),
+            ("history", Each(&APPLICATION_HISTORY)),
+            ("operationState", Fields(&[("phase", All)])),
+            ("resources", Each(&MANAGED_RESOURCE)),
+        ]),
+    ),
+]);
+
 /// The object an Event is about: the kind and name the Events tables show, and the
 /// apiVersion and namespace that resolve it, so a recent event opens its object.
 const EVENT_OBJECT: Keep = Fields(&[
@@ -625,10 +690,13 @@ pub(super) fn trim_for_watch(resource: &ResourceRef, row: &mut Value) {
 }
 
 /// Trims a graph row after `strip_for_list`. A core Pod keeps what the relationship graph
-/// reads, and never an environment variable's value.
+/// reads, and never an environment variable's value; an Argo CD Application keeps its table
+/// row's fields with its destination and managed objects.
 pub(super) fn trim_for_graph(resource: &ResourceRef, row: &mut Value) {
     if is_core_pods(resource) {
         keep(row, &POD_GRAPH);
+    } else if is_argo_applications(resource) {
+        keep(row, &APPLICATION_GRAPH);
     }
 }
 
@@ -1023,6 +1091,7 @@ mod tests {
                     { "valueFrom": { "secretKeyRef": { "name": "s" } } },
                 ],
                 "envFrom": [{ "secretRef": { "name": "all" } }],
+                "ports": [{ "name": "http", "containerPort": 8080, "protocol": "TCP" }],
             })
         );
         assert_eq!(
@@ -1048,6 +1117,60 @@ mod tests {
         let before = row.clone();
         trim_for_graph(&resource("apps", "deployments", "Deployment"), &mut row);
         assert_eq!(row, before);
+    }
+
+    #[test]
+    fn a_graph_pod_row_keeps_container_ports_and_no_env_values() {
+        let mut row = full_pod();
+        row["spec"]["initContainers"][0]["ports"] =
+            json!([{ "containerPort": 9000, "hostIP": "0.0.0.0" }]);
+        row["spec"]["containers"][0]["ports"] = json!([
+            { "name": "http", "containerPort": 8080, "protocol": "TCP", "hostPort": 18080 },
+            { "name": "dns", "containerPort": 53, "protocol": "UDP" },
+        ]);
+
+        trim_for_graph(&resource("", "pods", "Pod"), &mut row);
+
+        assert_eq!(
+            row["spec"]["containers"][0]["ports"],
+            json!([
+                { "name": "http", "containerPort": 8080, "protocol": "TCP" },
+                { "name": "dns", "containerPort": 53, "protocol": "UDP" },
+            ])
+        );
+        assert_eq!(
+            row["spec"]["initContainers"][0]["ports"],
+            json!([{ "containerPort": 9000 }])
+        );
+        assert_eq!(row["spec"]["containers"][0]["env"], json!([{}]));
+        assert_eq!(row["spec"]["initContainers"][0]["env"], json!([{}]));
+        assert_eq!(row["spec"]["serviceAccountName"], "web");
+        assert_eq!(row["metadata"]["ownerReferences"][0]["kind"], "ReplicaSet");
+        assert_eq!(row["status"]["phase"], "Running");
+        let text = row.to_string();
+        for gone in ["18080", "0.0.0.0", "registry.example.com"] {
+            assert!(!text.contains(gone), "{gone} in {text}");
+        }
+    }
+
+    #[test]
+    fn only_core_pods_and_argo_cd_applications_have_a_graph_row() {
+        for (group, plural, own) in [
+            ("", "pods", true),
+            ("argoproj.io", "applications", true),
+            ("", "secrets", false),
+            ("", "applications", false),
+            ("example.com", "pods", false),
+            ("example.com", "applications", false),
+            ("argoproj.io", "applicationsets", false),
+            ("argoproj.io", "appprojects", false),
+        ] {
+            assert_eq!(
+                has_graph_row(&resource(group, plural, "X")),
+                own,
+                "{group}/{plural}"
+            );
+        }
     }
 
     fn long_annotations() -> Value {
@@ -1524,6 +1647,93 @@ mod tests {
         );
         assert!(row.get("operation").is_none());
         assert!(row["status"].get("operationState").is_none());
+    }
+
+    /// An Application whose destination names its cluster and whose managed resources carry
+    /// everything Argo CD writes on them.
+    fn full_managed_application() -> Value {
+        let mut whole = full_application();
+        whole["spec"]["destination"]["name"] = json!("in-cluster");
+        whole["status"]["resources"] = json!([
+            {
+                "group": "apps",
+                "version": "v1",
+                "kind": "Deployment",
+                "namespace": "shop",
+                "name": "managed-web",
+                "status": "Synced",
+                "health": { "status": "Healthy", "message": "rollout fine" },
+                "syncWave": 2,
+                "hook": false,
+                "requiresPruning": true,
+            },
+            { "version": "v1", "kind": "Namespace", "name": "shop", "status": "Synced" },
+        ]);
+        whole
+    }
+
+    #[test]
+    fn an_application_graph_row_keeps_its_destination_and_managed_objects() {
+        let applications = resource("argoproj.io", "applications", "Application");
+        let mut row = full_managed_application();
+
+        trim_for_graph(&applications, &mut row);
+
+        let mut expected = trimmed_application();
+        expected["spec"]["destination"] = json!({
+            "server": "https://kubernetes.default.svc",
+            "name": "in-cluster",
+            "namespace": "shop",
+        });
+        expected["status"]["resources"] = json!([
+            { "group": "apps", "kind": "Deployment", "namespace": "shop", "name": "managed-web" },
+            { "kind": "Namespace", "name": "shop" },
+        ]);
+        assert_eq!(row, expected);
+        let text = row.to_string();
+        for gone in [
+            "synced-web",
+            "successfully synced",
+            "a condition",
+            "-values",
+            "rollout fine",
+            "syncWave",
+            "requiresPruning",
+        ] {
+            assert!(!text.contains(gone), "{gone} is still in the graph row");
+        }
+    }
+
+    #[test]
+    fn the_table_row_of_an_application_stays_as_it_was() {
+        let mut row = full_managed_application();
+        trim_for_watch(
+            &resource("argoproj.io", "applications", "Application"),
+            &mut row,
+        );
+        assert_eq!(row, trimmed_application());
+    }
+
+    #[test]
+    fn an_application_graph_row_shaped_oddly_is_kept_as_far_as_it_goes() {
+        let applications = resource("argoproj.io", "applications", "Application");
+        for odd in [
+            json!({}),
+            json!({ "spec": { "destination": "in-cluster" }, "status": { "resources": "all" } }),
+            json!({ "status": { "resources": [1, "web", { "kind": "Service", "health": "Healthy" }] } }),
+        ] {
+            let mut row = odd.clone();
+            trim_for_graph(&applications, &mut row);
+            assert!(row.is_object(), "{odd}");
+        }
+        let mut row = json!({
+            "status": { "resources": [1, "web", { "kind": "Service", "health": "Healthy" }] },
+        });
+        trim_for_graph(&applications, &mut row);
+        assert_eq!(
+            row["status"]["resources"],
+            json!([1, "web", { "kind": "Service" }])
+        );
     }
 
     #[test]
