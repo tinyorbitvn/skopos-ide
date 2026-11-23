@@ -3,9 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use super::extract::{extract, node_id, Item, Target};
+use super::extract::{extract, node_id, Item, Netpol, Target};
 use super::kinds::Kind;
 use super::types::{GraphEdge, GraphEvent, GraphNamespaceCount, GraphNode, GraphRel, GraphStatus};
+use crate::netpol::{Index, PolicySource};
 use crate::resources::{WatchEvent, WatchStatus};
 
 const LOAD_BALANCER: &str = "LoadBalancer";
@@ -135,7 +136,6 @@ impl Store {
 
     /// Whether the store was made with `kind`: the cluster serves it, though it may be
     /// forbidden.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn serves(&self, kind: Kind) -> bool {
         self.kinds.contains_key(&kind)
     }
@@ -278,7 +278,76 @@ fn reach<'a>(
     id
 }
 
-/// The whole graph (spec E §4.4 to §4.6, O §4.3).
+/// The graph kind of a parsed policy.
+fn policy_kind(source: PolicySource) -> Kind {
+    match source {
+        PolicySource::Kubernetes => Kind::NetworkPolicy,
+        PolicySource::Cilium => Kind::CiliumNetworkPolicy,
+        PolicySource::CiliumClusterwide => Kind::CiliumClusterwideNetworkPolicy,
+    }
+}
+
+/// Network policies spec §3.3: a `selects` edge from each policy to each Pod a rule of it
+/// selects, through one `netpol::Index` built from the store's Pods, Namespaces and policies.
+/// A policy that selects no Pod is flagged while Pods are listed, but never a host policy,
+/// which selects none by design.
+fn policy_edges(
+    store: &Store,
+    nodes: &mut BTreeMap<String, GraphNode>,
+    edges: &mut BTreeSet<GraphEdge>,
+    pods_listable: bool,
+) {
+    let policies: Vec<_> = Kind::ALL
+        .into_iter()
+        .filter(|kind| kind.is_policy())
+        .flat_map(|kind| store.items(kind))
+        .filter_map(|item| match &item.netpol {
+            Netpol::Policy(policy) => Some(policy.clone()),
+            _ => None,
+        })
+        .collect();
+    if policies.is_empty() {
+        return;
+    }
+    let pods = store
+        .items(Kind::Pod)
+        .filter_map(|item| match &item.netpol {
+            Netpol::Pod(pod) => Some(pod.clone()),
+            _ => None,
+        })
+        .collect();
+    let namespaces = store
+        .items(Kind::Namespace)
+        .filter_map(|item| match &item.netpol {
+            Netpol::Namespace(namespace) => Some(namespace.clone()),
+            _ => None,
+        })
+        .collect();
+    let index = Index::new(policies, pods, namespaces);
+    for (at, policy) in index.policies().iter().enumerate() {
+        let id = node_id(
+            policy_kind(policy.id.source).name(),
+            &policy.id.namespace,
+            &policy.id.name,
+        );
+        let selected = index.selected_pods(at);
+        for pod in selected.iter().filter_map(|pod| index.pods().get(*pod)) {
+            let pod = node_id(Kind::Pod.name(), &pod.namespace, &pod.name);
+            if nodes.contains_key(&pod) {
+                edges.insert(edge(&id, &pod, GraphRel::Selects));
+            }
+        }
+        if selected.is_empty() && pods_listable && !policy.is_host() {
+            if let Some(node) = nodes.get_mut(&id) {
+                node.status = GraphStatus::Warning;
+                node.status_text = Some("Selects no Pods".to_owned());
+            }
+        }
+    }
+}
+
+/// The whole graph (spec E §4.4 to §4.6, O §4.3), with the policies' `selects` edges and an
+/// Application's `manages` and `project` edges (network policies spec §3.3).
 pub(crate) fn build(store: &Store) -> Built {
     let mut pods_by_namespace: HashMap<&str, Vec<&Item>> = HashMap::new();
     let mut pod_owners = HashSet::new();
@@ -340,6 +409,12 @@ pub(crate) fn build(store: &Store) -> Built {
             }
         }
         for reference in &item.refs {
+            // An Application's object or project of a kind the cluster does not serve is not
+            // drawn: nothing says it exists (network policies spec §3.3).
+            let argo_cd = matches!(reference.rel, GraphRel::Manages | GraphRel::Project);
+            if argo_cd && !store.serves(reference.target.kind) {
+                continue;
+            }
             let target = reach(store, &reference.target, &mut nodes, &mut reached);
             let (from, to) = if reference.inbound {
                 (&target, &id)
@@ -356,6 +431,7 @@ pub(crate) fn build(store: &Store) -> Built {
             edges.insert(edge(&balancer, &id, GraphRel::Routes));
         }
     }
+    policy_edges(store, &mut nodes, &mut edges, pods_listable);
 
     // Spec O §4.3: after every other kind, so the ServiceAccount nodes are settled whatever
     // order objects arrive in. A binding of a ServiceAccount node is a node, with `binds` edges
@@ -415,11 +491,24 @@ pub(crate) fn build(store: &Store) -> Built {
     }
 }
 
+/// The ids of the nodes of `kind`.
+fn ids_of(built: &Built, kind: Kind) -> HashSet<&str> {
+    built
+        .nodes
+        .iter()
+        .filter(|node| node.kind == kind.name())
+        .map(|node| node.id.as_str())
+        .collect()
+}
+
 /// What one subscription sees (spec E §4.7, O §4.5). `None` is the whole graph. Otherwise: the
 /// nodes in those namespaces, then, until nothing is added, every node joined to the view by a
 /// `routes` or `class` edge, every binding of a ServiceAccount in the view and every role of a
 /// binding in the view, and the edges between them. A GatewayClass or LoadBalancer is brought
 /// in but not expanded from, so a shared class or address does not pull in the whole cluster.
+/// Then, once (network policies spec §3.3, C14), a CiliumClusterwideNetworkPolicy that selects
+/// a node in the view, an Application that manages one, and that Application's AppProject and
+/// ApplicationSet join. None of them is expanded from.
 /// Counts, missing kinds and the Gateway API flag always describe the whole graph.
 /// With no namespaces it clones the whole graph; the hub calls it once per generation and shares the result.
 pub(crate) fn view(built: &Built, namespaces: Option<&[String]>) -> GraphEvent {
@@ -477,6 +566,41 @@ pub(crate) fn view(built: &Built, namespaces: Option<&[String]>) -> GraphEvent {
                     break;
                 }
             }
+            // Network policies spec §3.3: one pass, whose additions are never expanded from.
+            let cluster_policies = ids_of(built, Kind::CiliumClusterwideNetworkPolicy);
+            let applications = ids_of(built, Kind::Application);
+            let sets = ids_of(built, Kind::ApplicationSet);
+            let mut joined: HashSet<&str> = HashSet::new();
+            let mut managing: HashSet<&str> = HashSet::new();
+            for edge in &built.edges {
+                let (from, to) = (edge.from.as_str(), edge.to.as_str());
+                if !members.contains(to) {
+                    continue;
+                }
+                match edge.rel {
+                    GraphRel::Selects if cluster_policies.contains(from) => {
+                        joined.insert(from);
+                    }
+                    GraphRel::Manages if applications.contains(from) => {
+                        joined.insert(from);
+                        managing.insert(from);
+                    }
+                    _ => {}
+                }
+            }
+            for edge in &built.edges {
+                let (from, to) = (edge.from.as_str(), edge.to.as_str());
+                match edge.rel {
+                    GraphRel::Project if managing.contains(from) => {
+                        joined.insert(to);
+                    }
+                    GraphRel::Owns if managing.contains(to) && sets.contains(from) => {
+                        joined.insert(from);
+                    }
+                    _ => {}
+                }
+            }
+            members.extend(joined);
             let nodes = built
                 .nodes
                 .iter()
@@ -1731,6 +1855,490 @@ mod tests {
                 namespace: "a".into(),
                 nodes: 2
             }]
+        );
+    }
+
+    /// A policy object of `kind`; `namespace` is "" for a cluster-wide one.
+    fn policy(kind: Kind, namespace: &str, name: &str, spec: Value) -> (Kind, Value) {
+        (
+            kind,
+            json!({ "metadata": meta(namespace, name), "spec": spec }),
+        )
+    }
+
+    /// Every edge as `(from, to, rel)`, in order.
+    fn all_edges(built: &Built) -> Vec<(&str, &str, GraphRel)> {
+        built
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.rel))
+            .collect()
+    }
+
+    fn status_of<'a>(built: &'a Built, id: &str) -> (GraphStatus, Option<&'a str>) {
+        let node = node(built, id);
+        (node.status, node.status_text.as_deref())
+    }
+
+    #[test]
+    fn policies_select_their_pods_across_namespaces() {
+        let built = built(&[
+            (
+                Kind::Pod,
+                pod(meta("a", "web"), json!({ "app": "web" }), true),
+            ),
+            (
+                Kind::Pod,
+                pod(meta("a", "api"), json!({ "app": "api" }), true),
+            ),
+            (
+                Kind::Pod,
+                pod(meta("b", "web"), json!({ "app": "web" }), true),
+            ),
+            policy(
+                Kind::NetworkPolicy,
+                "a",
+                "web-only",
+                json!({ "podSelector": { "matchLabels": { "app": "web" } }, "policyTypes": ["Ingress"] }),
+            ),
+            policy(
+                Kind::CiliumNetworkPolicy,
+                "b",
+                "all",
+                json!({ "endpointSelector": {}, "ingress": [{ "fromEntities": ["cluster"] }] }),
+            ),
+            policy(
+                Kind::CiliumClusterwideNetworkPolicy,
+                "",
+                "every-web",
+                json!({
+                    "endpointSelector": { "matchLabels": { "app": "web" } },
+                    "ingress": [{ "fromEntities": ["cluster"] }],
+                }),
+            ),
+        ]);
+        let selects: Vec<_> = all_edges(&built)
+            .into_iter()
+            .filter(|(_, _, rel)| *rel == GraphRel::Selects)
+            .collect();
+        assert_eq!(
+            selects,
+            [
+                (
+                    "CiliumClusterwideNetworkPolicy//every-web",
+                    "Pod/a/web",
+                    GraphRel::Selects
+                ),
+                (
+                    "CiliumClusterwideNetworkPolicy//every-web",
+                    "Pod/b/web",
+                    GraphRel::Selects
+                ),
+                ("CiliumNetworkPolicy/b/all", "Pod/b/web", GraphRel::Selects),
+                ("NetworkPolicy/a/web-only", "Pod/a/web", GraphRel::Selects),
+            ]
+        );
+        for id in [
+            "CiliumClusterwideNetworkPolicy//every-web",
+            "CiliumNetworkPolicy/b/all",
+            "NetworkPolicy/a/web-only",
+        ] {
+            assert_eq!(status_of(&built, id), (GraphStatus::Neutral, None), "{id}");
+        }
+    }
+
+    #[test]
+    fn a_policy_that_selects_no_pod_is_flagged_while_pods_can_be_listed() {
+        let objects = [
+            (
+                Kind::Pod,
+                pod(meta("a", "web"), json!({ "app": "web" }), true),
+            ),
+            policy(
+                Kind::NetworkPolicy,
+                "a",
+                "nothing",
+                json!({ "podSelector": { "matchLabels": { "app": "none" } } }),
+            ),
+            policy(
+                Kind::NetworkPolicy,
+                "b",
+                "empty-namespace",
+                json!({ "podSelector": {} }),
+            ),
+        ];
+        let listed = built(&objects);
+        for id in ["NetworkPolicy/a/nothing", "NetworkPolicy/b/empty-namespace"] {
+            assert_eq!(
+                status_of(&listed, id),
+                (GraphStatus::Warning, Some("Selects no Pods")),
+                "{id}"
+            );
+        }
+
+        let unknown = build(&store_of(&Kind::ALL, &[Kind::Pod], &objects));
+        for id in ["NetworkPolicy/a/nothing", "NetworkPolicy/b/empty-namespace"] {
+            assert_eq!(
+                status_of(&unknown, id),
+                (GraphStatus::Neutral, None),
+                "{id}: the graph cannot tell without Pods"
+            );
+        }
+    }
+
+    #[test]
+    fn a_host_policy_selects_nothing_and_is_not_flagged() {
+        let built = built(&[
+            (
+                Kind::Pod,
+                pod(meta("a", "web"), json!({ "app": "web" }), true),
+            ),
+            policy(
+                Kind::CiliumClusterwideNetworkPolicy,
+                "",
+                "nodes",
+                json!({
+                    "nodeSelector": { "matchLabels": { "role": "worker" } },
+                    "ingress": [{ "fromEntities": ["cluster"] }],
+                }),
+            ),
+        ]);
+        assert_eq!(
+            status_of(&built, "CiliumClusterwideNetworkPolicy//nodes"),
+            (GraphStatus::Neutral, Some("Host policy"))
+        );
+        assert!(
+            !built
+                .edges
+                .iter()
+                .any(|e| e.from == "CiliumClusterwideNetworkPolicy//nodes"),
+            "{:?}",
+            built.edges
+        );
+    }
+
+    #[test]
+    fn namespaces_are_never_nodes_but_lend_their_labels_to_policies() {
+        let built = built(&[
+            (
+                Kind::Namespace,
+                json!({ "metadata": { "name": "a", "labels": { "team": "x" } } }),
+            ),
+            (
+                Kind::Namespace,
+                json!({ "metadata": { "name": "b", "labels": { "team": "y" } } }),
+            ),
+            (
+                Kind::Pod,
+                pod(meta("a", "web"), json!({ "app": "web" }), true),
+            ),
+            (
+                Kind::Pod,
+                pod(meta("b", "web"), json!({ "app": "web" }), true),
+            ),
+            policy(
+                Kind::CiliumClusterwideNetworkPolicy,
+                "",
+                "team-x",
+                json!({
+                    "endpointSelector": { "matchLabels": {
+                        "k8s:io.cilium.k8s.namespace.labels.team": "x",
+                    } },
+                    "ingress": [{ "fromEntities": ["cluster"] }],
+                }),
+            ),
+        ]);
+        assert!(
+            !ids(&built).iter().any(|id| id.starts_with("Namespace/")),
+            "{:?}",
+            ids(&built)
+        );
+        let from_policy: Vec<_> = all_edges(&built)
+            .into_iter()
+            .filter(|(from, _, _)| *from == "CiliumClusterwideNetworkPolicy//team-x")
+            .collect();
+        assert_eq!(
+            from_policy,
+            [(
+                "CiliumClusterwideNetworkPolicy//team-x",
+                "Pod/a/web",
+                GraphRel::Selects
+            )]
+        );
+        let counts: Vec<_> = built
+            .counts
+            .iter()
+            .map(|c| (c.namespace.as_str(), c.nodes))
+            .collect();
+        assert_eq!(
+            counts,
+            [("a", 2), ("b", 2)],
+            "a Pod and its ServiceAccount each"
+        );
+    }
+
+    /// An Application in `argocd` of the ApplicationSet `apps`, managing `resources`, each
+    /// `(group, kind, namespace, name)`.
+    fn application(
+        name: &str,
+        project: &str,
+        resources: &[(&str, &str, &str, &str)],
+    ) -> (Kind, Value) {
+        let resources: Vec<Value> = resources
+            .iter()
+            .map(|(group, kind, namespace, name)| {
+                json!({ "group": group, "kind": kind, "namespace": namespace, "name": name })
+            })
+            .collect();
+        (
+            Kind::Application,
+            json!({
+                "metadata": owned("argocd", name, "ApplicationSet", "apps"),
+                "spec": {
+                    "project": project,
+                    "destination": { "server": "https://kubernetes.default.svc", "namespace": "a" },
+                },
+                "status": {
+                    "health": { "status": "Healthy" },
+                    "sync": { "status": "Synced" },
+                    "resources": resources,
+                },
+            }),
+        )
+    }
+
+    /// The AppProject `team` and the ApplicationSet `apps`, both in `argocd`.
+    fn argo_cd_parents() -> [(Kind, Value); 2] {
+        [
+            (
+                Kind::AppProject,
+                json!({
+                    "metadata": meta("argocd", "team"),
+                    "spec": { "destinations": [], "sourceRepos": [] },
+                }),
+            ),
+            (
+                Kind::ApplicationSet,
+                json!({ "metadata": meta("argocd", "apps"), "status": { "conditions": [] } }),
+            ),
+        ]
+    }
+
+    #[test]
+    fn applications_manage_their_objects_with_their_project_and_set() {
+        let mut objects = vec![
+            (
+                Kind::Deployment,
+                json!({ "metadata": meta("a", "web"), "spec": { "replicas": 1 } }),
+            ),
+            (
+                Kind::ConfigMap,
+                json!({ "metadata": meta("a", "settings") }),
+            ),
+            application(
+                "shop",
+                "team",
+                &[
+                    ("apps", "Deployment", "a", "web"),
+                    ("", "ConfigMap", "a", "settings"),
+                    ("", "Service", "a", "gone"),
+                    ("gateway.networking.k8s.io", "Gateway", "a", "edge"),
+                    ("argoproj.io", "Application", "argocd", "child"),
+                    ("", "Namespace", "", "a"),
+                ],
+            ),
+            application("child", "team", &[]),
+        ];
+        objects.extend(argo_cd_parents());
+        // The cluster serves no Gateway API kind.
+        let kinds: Vec<Kind> = Kind::ALL
+            .into_iter()
+            .filter(|kind| !kind.is_gateway_api())
+            .collect();
+        let built = build(&store_of(&kinds, &[], &objects));
+
+        assert_eq!(
+            ids(&built),
+            [
+                "AppProject/argocd/team",
+                "Application/argocd/child",
+                "Application/argocd/shop",
+                "ApplicationSet/argocd/apps",
+                "ConfigMap/a/settings",
+                "Deployment/a/web",
+                "Service/a/gone",
+            ],
+            "a Gateway is not invented and a Namespace is not drawn"
+        );
+        assert_eq!(
+            all_edges(&built),
+            [
+                (
+                    "Application/argocd/child",
+                    "AppProject/argocd/team",
+                    GraphRel::Project
+                ),
+                (
+                    "Application/argocd/shop",
+                    "AppProject/argocd/team",
+                    GraphRel::Project
+                ),
+                (
+                    "Application/argocd/shop",
+                    "Application/argocd/child",
+                    GraphRel::Manages
+                ),
+                (
+                    "Application/argocd/shop",
+                    "ConfigMap/a/settings",
+                    GraphRel::Manages
+                ),
+                (
+                    "Application/argocd/shop",
+                    "Deployment/a/web",
+                    GraphRel::Manages
+                ),
+                (
+                    "Application/argocd/shop",
+                    "Service/a/gone",
+                    GraphRel::Manages
+                ),
+                (
+                    "ApplicationSet/argocd/apps",
+                    "Application/argocd/child",
+                    GraphRel::Owns
+                ),
+                (
+                    "ApplicationSet/argocd/apps",
+                    "Application/argocd/shop",
+                    GraphRel::Owns
+                ),
+            ]
+        );
+        assert_eq!(
+            status_of(&built, "Service/a/gone"),
+            (GraphStatus::Critical, Some("Not found"))
+        );
+        assert_eq!(
+            status_of(&built, "Application/argocd/shop"),
+            (GraphStatus::Nominal, Some("Healthy · Synced"))
+        );
+        assert!(node(&built, "Application/argocd/shop")
+            .facts
+            .contains(&("Other resources".to_owned(), "1 (Namespace)".to_owned())));
+        assert_eq!(
+            status_of(&built, "ApplicationSet/argocd/apps"),
+            (GraphStatus::Nominal, None)
+        );
+    }
+
+    /// C14: a namespace with a Pod, a cluster-wide policy selecting it, and an Application in
+    /// `argocd` managing its Deployment, with its project and ApplicationSet. A second
+    /// Application that manages nothing in view stays out.
+    #[test]
+    fn a_namespace_view_brings_in_a_cluster_policy_and_the_applications_that_manage_it() {
+        let mut objects = vec![
+            (
+                Kind::Deployment,
+                json!({ "metadata": meta("shop", "web"), "spec": { "replicas": 1 } }),
+            ),
+            (
+                Kind::ReplicaSet,
+                json!({
+                    "metadata": owned("shop", "web-1", "Deployment", "web"),
+                    "spec": { "replicas": 1 },
+                    "status": { "replicas": 1, "readyReplicas": 1, "availableReplicas": 1 },
+                }),
+            ),
+            (
+                Kind::Pod,
+                pod(
+                    owned("shop", "web-1-a", "ReplicaSet", "web-1"),
+                    json!({ "app": "web" }),
+                    true,
+                ),
+            ),
+            policy(
+                Kind::CiliumClusterwideNetworkPolicy,
+                "",
+                "scrape",
+                json!({
+                    "endpointSelector": { "matchLabels": { "app": "web" } },
+                    "ingress": [{ "fromEntities": ["cluster"] }],
+                }),
+            ),
+            application("shop", "team", &[("apps", "Deployment", "shop", "web")]),
+            application(
+                "other",
+                "team",
+                &[("apps", "Deployment", "elsewhere", "api")],
+            ),
+        ];
+        objects.extend(argo_cd_parents());
+        let built = built(&objects);
+
+        let GraphEvent::Snapshot { nodes, edges, .. } =
+            view(&built, Some(&["shop".to_owned()][..]))
+        else {
+            panic!("a view is a snapshot");
+        };
+        let nodes: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(
+            nodes,
+            [
+                "AppProject/argocd/team",
+                "Application/argocd/shop",
+                "ApplicationSet/argocd/apps",
+                "CiliumClusterwideNetworkPolicy//scrape",
+                "Deployment/shop/web",
+                "Pod/shop/web-1-a",
+                "ReplicaSet/shop/web-1",
+                "ServiceAccount/shop/web",
+            ]
+        );
+        let edges: Vec<_> = edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.rel))
+            .collect();
+        assert_eq!(
+            edges,
+            [
+                (
+                    "Application/argocd/shop",
+                    "AppProject/argocd/team",
+                    GraphRel::Project
+                ),
+                (
+                    "Application/argocd/shop",
+                    "Deployment/shop/web",
+                    GraphRel::Manages
+                ),
+                (
+                    "ApplicationSet/argocd/apps",
+                    "Application/argocd/shop",
+                    GraphRel::Owns
+                ),
+                (
+                    "CiliumClusterwideNetworkPolicy//scrape",
+                    "Pod/shop/web-1-a",
+                    GraphRel::Selects
+                ),
+                (
+                    "Deployment/shop/web",
+                    "ReplicaSet/shop/web-1",
+                    GraphRel::Owns
+                ),
+                (
+                    "Pod/shop/web-1-a",
+                    "ServiceAccount/shop/web",
+                    GraphRel::RunsAs
+                ),
+                ("ReplicaSet/shop/web-1", "Pod/shop/web-1-a", GraphRel::Owns),
+            ]
+        );
+        assert!(
+            ids(&built).contains(&"Application/argocd/other"),
+            "the whole graph still has it"
         );
     }
 }

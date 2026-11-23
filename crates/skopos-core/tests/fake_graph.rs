@@ -19,6 +19,10 @@ use tokio::sync::mpsc;
 
 const CONTEXT: &str = "fake";
 const GATEWAY: &str = "gateway.networking.k8s.io";
+const CILIUM: &str = "cilium.io";
+const ARGO: &str = "argoproj.io";
+/// A git SHA, which an Application's "Revision" cuts to its first 7 characters.
+const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 const WAIT: Duration = Duration::from_secs(10);
 const INTERVAL: Duration = Duration::from_millis(500);
 /// How much sooner than the interval a later snapshot may come: the first one's delivery.
@@ -57,13 +61,86 @@ fn graph_resources(gateway_api: bool) -> Vec<FakeResource> {
     resources
 }
 
+/// NetworkPolicies, and Cilium's two policy kinds when `cilium`.
+fn policy_resources(cilium: bool) -> Vec<FakeResource> {
+    let mut resources = vec![FakeResource::new(
+        "networking.k8s.io",
+        "v1",
+        "NetworkPolicy",
+        "networkpolicies",
+        true,
+    )];
+    if cilium {
+        resources.extend([
+            FakeResource::new(
+                CILIUM,
+                "v2",
+                "CiliumNetworkPolicy",
+                "ciliumnetworkpolicies",
+                true,
+            ),
+            FakeResource::new(
+                CILIUM,
+                "v2",
+                "CiliumClusterwideNetworkPolicy",
+                "ciliumclusterwidenetworkpolicies",
+                false,
+            ),
+        ]);
+    }
+    resources
+}
+
+/// Argo CD's three kinds.
+fn argo_resources() -> Vec<FakeResource> {
+    vec![
+        FakeResource::new(ARGO, "v1alpha1", "Application", "applications", true),
+        FakeResource::new(ARGO, "v1alpha1", "ApplicationSet", "applicationsets", true),
+        FakeResource::new(ARGO, "v1alpha1", "AppProject", "appprojects", true),
+    ]
+}
+
+fn facts_of(node: &GraphNode) -> Vec<(&str, &str)> {
+    node.facts
+        .iter()
+        .map(|(label, value)| (label.as_str(), value.as_str()))
+        .collect()
+}
+
+/// A CiliumClusterwideNetworkPolicy that selects every `app=web` Pod.
+fn every_web() -> Value {
+    json!({
+        "metadata": { "name": "every-web" },
+        "spec": {
+            "endpointSelector": { "matchLabels": { "app": "web" } },
+            "ingress": [{ "fromEntities": ["cluster"] }],
+        },
+    })
+}
+
+/// The web objects' ids plus `more`, in order.
+fn web_ids_and(more: &[&'static str]) -> Vec<&'static str> {
+    let mut ids: Vec<&str> = WEB_IDS.iter().chain(more).copied().collect();
+    ids.sort_unstable();
+    ids
+}
+
 /// Discovery is read when the cluster connects, so the kinds are served before that.
 async fn connected(
     cfg: FakeKubeConfig,
     gateway_api: bool,
 ) -> (AppCore, FakeKube, ClusterId, TempDir) {
+    connected_serving(cfg, gateway_api, Vec::new()).await
+}
+
+/// As `connected`, with `extra` served too.
+async fn connected_serving(
+    cfg: FakeKubeConfig,
+    gateway_api: bool,
+    extra: Vec<FakeResource>,
+) -> (AppCore, FakeKube, ClusterId, TempDir) {
     let fake = FakeKube::start(cfg).await.unwrap();
-    for resource in graph_resources(gateway_api) {
+    for resource in graph_resources(gateway_api).into_iter().chain(extra) {
         fake.serve_resource(resource);
     }
     let root = tempfile::tempdir().unwrap();
@@ -760,4 +837,326 @@ async fn trimmed_replica_set_and_config_map_rows_give_the_graph_the_same_facts()
         !first.json.contains(PLAIN_VALUE),
         "no ConfigMap value leaves the core"
     );
+}
+
+/// Review Focus 2.
+#[tokio::test]
+async fn without_cilium_and_argo_cd_nothing_is_missing() {
+    let (core, fake, id, _root) =
+        connected_serving(FakeKubeConfig::default(), false, policy_resources(false)).await;
+    seed_web(&fake, "default");
+    fake.upsert(
+        "networkpolicies",
+        json!({
+            "metadata": { "name": "web", "namespace": "default" },
+            "spec": { "podSelector": { "matchLabels": { "app": "web" } }, "policyTypes": ["Ingress"] },
+        }),
+    );
+    let mut map = Subscription::start(&core, &id, None);
+
+    let snapshot = map.snapshot().await;
+    assert!(
+        snapshot.missing.is_empty(),
+        "kinds that are not served are not missing: {:?}",
+        snapshot.missing
+    );
+    assert_eq!(snapshot.ids(), web_ids_and(&["NetworkPolicy/default/web"]));
+    assert!(snapshot.edges().contains(&(
+        "NetworkPolicy/default/web",
+        "Pod/default/web-1-a",
+        GraphRel::Selects
+    )));
+    let policy = snapshot.node("NetworkPolicy/default/web");
+    assert_eq!(
+        (policy.status, policy.status_text.as_deref()),
+        (GraphStatus::Neutral, None)
+    );
+    assert_eq!(
+        facts_of(policy),
+        [
+            ("Source", "Kubernetes"),
+            ("Selector", "app=web"),
+            ("Types", "Ingress"),
+            ("Ingress rules", "0"),
+            ("Egress rules", "0"),
+        ]
+    );
+}
+
+/// Review Focus 2.
+#[tokio::test]
+async fn a_forbidden_cilium_network_policy_list_is_missing() {
+    let cfg = FakeKubeConfig {
+        deny: vec![DenyRule {
+            verb: "list".into(),
+            plural: "ciliumnetworkpolicies".into(),
+            namespace: None,
+        }],
+        ..Default::default()
+    };
+    let (core, fake, id, _root) = connected_serving(cfg, false, policy_resources(true)).await;
+    seed_web(&fake, "default");
+    fake.upsert(
+        "ciliumnetworkpolicies",
+        json!({
+            "metadata": { "name": "web-egress", "namespace": "default" },
+            "spec": {
+                "endpointSelector": { "matchLabels": { "app": "web" } },
+                "egress": [{ "toEntities": ["world"] }],
+            },
+        }),
+    );
+    fake.upsert("ciliumclusterwidenetworkpolicies", every_web());
+    let mut map = Subscription::start(&core, &id, None);
+
+    let snapshot = map.snapshot().await;
+    assert_eq!(snapshot.missing, ["ciliumnetworkpolicies"]);
+    assert_eq!(
+        snapshot.ids(),
+        web_ids_and(&["CiliumClusterwideNetworkPolicy//every-web"]),
+        "the graph still works"
+    );
+    assert!(snapshot.edges().contains(&(
+        "CiliumClusterwideNetworkPolicy//every-web",
+        "Pod/default/web-1-a",
+        GraphRel::Selects
+    )));
+}
+
+#[tokio::test]
+async fn cilium_and_argo_cd_kinds_become_nodes_with_their_edges() {
+    let cfg = FakeKubeConfig {
+        namespaces: vec!["default".into(), "kube-system".into(), "argocd".into()],
+        ..Default::default()
+    };
+    let mut extra = policy_resources(true);
+    extra.extend(argo_resources());
+    let (core, fake, id, _root) = connected_serving(cfg, false, extra).await;
+    seed_web(&fake, "default");
+    fake.upsert(
+        "networkpolicies",
+        json!({
+            "metadata": { "name": "web-ingress", "namespace": "default" },
+            "spec": {
+                "podSelector": { "matchLabels": { "app": "web" } },
+                "ingress": [{ "from": [{ "podSelector": {} }], "ports": [{ "port": 8080 }] }],
+            },
+        }),
+    );
+    fake.upsert(
+        "networkpolicies",
+        json!({
+            "metadata": { "name": "nothing", "namespace": "default" },
+            "spec": { "podSelector": { "matchLabels": { "app": "none" } } },
+        }),
+    );
+    fake.upsert(
+        "ciliumnetworkpolicies",
+        json!({
+            "metadata": { "name": "web-egress", "namespace": "default" },
+            "spec": {
+                "endpointSelector": { "matchLabels": { "app": "web" } },
+                "egress": [{
+                    "toFQDNs": [{ "matchName": "api.example.com" }],
+                    "toPorts": [{ "ports": [{ "port": "443", "protocol": "TCP" }] }],
+                }],
+            },
+        }),
+    );
+    fake.upsert("ciliumclusterwidenetworkpolicies", every_web());
+    fake.upsert(
+        "appprojects",
+        json!({
+            "metadata": { "name": "team", "namespace": "argocd" },
+            "spec": {
+                "destinations": [{ "server": "*", "namespace": "default" }],
+                "sourceRepos": ["https://example.com/web.git"],
+            },
+        }),
+    );
+    fake.upsert(
+        "applicationsets",
+        json!({
+            "metadata": { "name": "apps", "namespace": "argocd" },
+            "status": { "conditions": [{ "type": "ErrorOccurred", "status": "False" }] },
+        }),
+    );
+    let application = |name: &str, resources: Value| {
+        json!({
+            "metadata": {
+                "name": name,
+                "namespace": "argocd",
+                "ownerReferences": controller("ApplicationSet", "apps"),
+            },
+            "spec": {
+                "project": "team",
+                "destination": { "server": "https://kubernetes.default.svc", "namespace": "default" },
+            },
+            "status": {
+                "health": { "status": "Healthy" },
+                "sync": { "status": "Synced", "revision": REVISION },
+                "resources": resources,
+            },
+        })
+    };
+    fake.upsert(
+        "applications",
+        application(
+            "web",
+            json!([
+                { "group": "apps", "kind": "Deployment", "namespace": "default", "name": "web" },
+                { "kind": "Service", "namespace": "default", "name": "web" },
+                { "kind": "ConfigMap", "namespace": "default", "name": "gone" },
+                { "kind": "Namespace", "name": "default" },
+            ]),
+        ),
+    );
+    fake.upsert(
+        "applications",
+        application(
+            "other",
+            json!([{ "group": "apps", "kind": "Deployment", "namespace": "elsewhere", "name": "api" }]),
+        ),
+    );
+    let mut map = Subscription::start(&core, &id, None);
+
+    let snapshot = map.snapshot().await;
+    assert!(snapshot.missing.is_empty(), "{:?}", snapshot.missing);
+    assert!(
+        !snapshot.ids().iter().any(|id| id.starts_with("Namespace/")),
+        "{:?}",
+        snapshot.ids()
+    );
+    let edges: Vec<_> = snapshot
+        .edges()
+        .into_iter()
+        .filter(|(from, _, _)| !WEB_IDS.contains(from))
+        .collect();
+    assert_eq!(
+        edges,
+        [
+            (
+                "Application/argocd/other",
+                "AppProject/argocd/team",
+                GraphRel::Project
+            ),
+            (
+                "Application/argocd/other",
+                "Deployment/elsewhere/api",
+                GraphRel::Manages
+            ),
+            (
+                "Application/argocd/web",
+                "AppProject/argocd/team",
+                GraphRel::Project
+            ),
+            (
+                "Application/argocd/web",
+                "ConfigMap/default/gone",
+                GraphRel::Manages
+            ),
+            (
+                "Application/argocd/web",
+                "Deployment/default/web",
+                GraphRel::Manages
+            ),
+            (
+                "Application/argocd/web",
+                "Service/default/web",
+                GraphRel::Manages
+            ),
+            (
+                "ApplicationSet/argocd/apps",
+                "Application/argocd/other",
+                GraphRel::Owns
+            ),
+            (
+                "ApplicationSet/argocd/apps",
+                "Application/argocd/web",
+                GraphRel::Owns
+            ),
+            (
+                "CiliumClusterwideNetworkPolicy//every-web",
+                "Pod/default/web-1-a",
+                GraphRel::Selects
+            ),
+            (
+                "CiliumNetworkPolicy/default/web-egress",
+                "Pod/default/web-1-a",
+                GraphRel::Selects
+            ),
+            (
+                "NetworkPolicy/default/web-ingress",
+                "Pod/default/web-1-a",
+                GraphRel::Selects
+            ),
+        ]
+    );
+    let nothing = snapshot.node("NetworkPolicy/default/nothing");
+    assert_eq!(
+        (nothing.status, nothing.status_text.as_deref()),
+        (GraphStatus::Warning, Some("Selects no Pods"))
+    );
+    let app = snapshot.node("Application/argocd/web");
+    assert_eq!(
+        (app.group.as_str(), app.plural.as_str()),
+        (ARGO, "applications")
+    );
+    assert_eq!(
+        (app.status, app.status_text.as_deref()),
+        (GraphStatus::Nominal, Some("Healthy · Synced"))
+    );
+    assert_eq!(
+        facts_of(app),
+        [
+            ("Project", "team"),
+            ("Health", "Healthy"),
+            ("Sync", "Synced"),
+            ("Revision", "0123456"),
+            ("Destination", "default"),
+            ("Other resources", "1 (Namespace)"),
+        ]
+    );
+    let gone = snapshot.node("ConfigMap/default/gone");
+    assert_eq!(
+        (gone.status, gone.status_text.as_deref()),
+        (GraphStatus::Critical, Some("Not found"))
+    );
+    assert_eq!(
+        facts_of(snapshot.node("AppProject/argocd/team")),
+        [("Destinations", "1"), ("Source repos", "1")]
+    );
+    let set = snapshot.node("ApplicationSet/argocd/apps");
+    assert_eq!(
+        (set.status, set.status_text.as_deref()),
+        (GraphStatus::Nominal, None)
+    );
+    assert_eq!(
+        snapshot.counts(),
+        [("argocd", 4), ("default", 11), ("elsewhere", 1)],
+        "a cluster-wide policy is not counted"
+    );
+
+    // C14: the cluster-wide policy, the Application that manages `default`'s objects, its
+    // project and its set join the view; the other Application does not.
+    let mut in_default = Subscription::start(&core, &id, Some(&["default"]));
+    let view = in_default.snapshot().await;
+    assert_eq!(
+        view.ids(),
+        web_ids_and(&[
+            "AppProject/argocd/team",
+            "Application/argocd/web",
+            "ApplicationSet/argocd/apps",
+            "CiliumClusterwideNetworkPolicy//every-web",
+            "CiliumNetworkPolicy/default/web-egress",
+            "ConfigMap/default/gone",
+            "NetworkPolicy/default/nothing",
+            "NetworkPolicy/default/web-ingress",
+        ])
+    );
+    assert!(!view
+        .edges()
+        .iter()
+        .any(|(from, to, _)| *from == "Application/argocd/other"
+            || *to == "Application/argocd/other"));
 }

@@ -194,7 +194,6 @@ impl Kind {
 
     /// A NetworkPolicy or a Cilium policy: a node with `selects` edges to the Pods its rules
     /// select (network policies spec §3.3).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_policy(self) -> bool {
         matches!(
             self,

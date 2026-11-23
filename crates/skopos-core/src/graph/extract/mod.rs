@@ -48,7 +48,6 @@ pub(crate) struct Ref {
 /// so a build evaluates the policies without parsing anything again: a Pod's labels and
 /// ports, a Namespace's labels, or a parsed policy.
 #[derive(Debug, Clone, PartialEq, Default)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum Netpol {
     #[default]
     None,
@@ -80,7 +79,6 @@ pub(crate) struct Item {
     pub addresses: Vec<String>,
     pub refs: Vec<Ref>,
     /// What the policy module reads of a Pod, a Namespace or a policy.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub netpol: Netpol,
 }
 
