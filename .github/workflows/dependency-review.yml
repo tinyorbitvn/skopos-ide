@@ -11,8 +11,10 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request replaces its run. Each push to main runs on its own: the run
+# checks only the commits that push added, so a replaced run would leave them unreviewed.
 concurrency:
-  group: dependency-review-${{ github.event_name }}-${{ github.ref }}
+  group: dependency-review-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

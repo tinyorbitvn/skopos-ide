@@ -22,6 +22,16 @@ test("dependency review only reads the repository", () => {
   assert.doesNotMatch(workflow, /: write\b/);
 });
 
+test("a newer push to a pull request replaces its run, but every push to main is reviewed", () => {
+  // Each push run checks only the commits that push added, so a replaced run is a range
+  // nobody reviews.
+  assert.match(
+    workflow,
+    /^ {2}group: dependency-review-\$\{\{ github\.event_name == 'pull_request' && github\.ref \|\| github\.sha \}\}$/m,
+  );
+  assert.match(workflow, /^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
+});
+
 test("every action is pinned to a commit", () => {
   const uses = [...workflow.matchAll(/uses: (\S+)/g)].map((m) => m[1]);
   assert.ok(uses.length >= 2);
