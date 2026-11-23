@@ -13,6 +13,7 @@ cancels the older run.
 | `check` | Linux, macOS 15, Windows 2022 | `make check` |
 | `linux-integration` | Linux | `make test-kind`, then `make e2e` on a kind cluster |
 | `smoke` | macOS 15, Windows 2022 | `make e2e-smoke` against the fake cluster |
+| `sbom` | Linux | `make sbom`; the SBOM is kept as the run's `sbom` artifact |
 
 Hosted macOS runners cannot run the kind cluster, so the kind and full end-to-end suites run on
 Linux only. The jobs share their toolchain and cache setup through `.github/actions/setup`.
@@ -51,10 +52,13 @@ the dependency advisories each change adds; see
       `.sig`, and each macOS build adds `SkoposIDE_aarch64.app.tar.gz` or
       `SkoposIDE_x64.app.tar.gz` and its `.sig`. A build stops at once when the updater key's
       secret, or on macOS an Apple secret, is not set.
-   5. **publish:** once all four builds pass, `scripts/updater-manifest.mjs` builds
+   5. **sbom:** once the draft exists, `make sbom` builds the SBOM and uploads it to the draft as
+      `SkoposIDE_<version>.cdx.json` (see [SBOM](#sbom)).
+   6. **publish:** once all four builds and the SBOM pass, `scripts/updater-manifest.mjs` builds
       `latest.json` from the draft's updater files and signatures and uploads it to the draft.
       The draft must then hold the five installers (AppImage, deb, arm64 and x64 dmg, Windows
-      setup exe), the updater files and `latest.json`; then it is published and marked Latest.
+      setup exe), the updater files, `latest.json` and the SBOM; then it is published and marked
+      Latest.
       A tag with a pre-release suffix, such as `v0.7.0-rc.1`, is published as a pre-release,
       which installed copies are not offered. For a stable release, the job then checks that
       `releases/latest/download/latest.json` offers the new version and that each of its
@@ -162,6 +166,35 @@ release workflow changes.
    Keychain; later updates must not ask.
 5. On the deb, check that cancelling the password prompt shows "The package was not installed.
    If you cancelled the password prompt, try again." and that Try Again works.
+
+## SBOM
+
+Each release carries `SkoposIDE_<version>.cdx.json`, a CycloneDX 1.6 software bill of materials
+of what the installers ship:
+
+- The crates compiled into `skopos-app` for the four release targets, from `cargo cyclonedx`, one
+  run per target. Each crate has a `skopos:target` property for every target that compiles it.
+  Build dependencies are listed with `scope: "excluded"`, since they do not ship.
+  `cargo cyclonedx` reads `cargo metadata`, which turns features on across the whole workspace
+  and for build scripts too, so the list also holds a few crates the app does not link (15 at
+  0.12.1, such as `httpdate` and `swift-rs`). No crate the app links is missing.
+- The npm packages in the UI's `dependencies`, from `pnpm list --prod`, with their license, the
+  lock file's SHA-512 and the registry tarball.
+
+Dev dependencies, the `e2e` package, `skopos-fakekube` and the GitHub Actions are left out.
+`scripts/sbom.mjs` joins the parts and refuses a BOM whose dependencies name a missing component.
+
+To build it locally, install the pinned cargo-cyclonedx (`CARGO_CYCLONEDX_VERSION` in the
+`Makefile`) and run `make sbom`:
+
+```sh
+cargo install --locked cargo-cyclonedx@0.5.10
+make sbom   # writes tmp/sbom/SkoposIDE.cdx.json
+```
+
+CI's `sbom` job builds it on every push and pull request, so a broken generator stops a release
+before the draft. To move to another cargo-cyclonedx, change the `Makefile` and both workflows
+together; `scripts/sbom-workflow.test.mjs` checks that they match.
 
 ## Dependencies and advisories
 

@@ -1,9 +1,12 @@
-.PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens audit
+.PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens audit sbom
 ifeq ($(shell uname -s),Linux)
 XVFB := xvfb-run -a --server-args="-screen 0 1600x1000x24"
 else
 XVFB :=
 endif
+# The release SBOM (docs/releasing.md, "SBOM"). Both workflows install this version too.
+CARGO_CYCLONEDX_VERSION := 0.5.10
+SBOM_TARGETS := x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc
 ui-build:
 	pnpm install --frozen-lockfile
 	pnpm -C ui build
@@ -65,3 +68,20 @@ audit:
 	  "repos/$$(gh repo view --json nameWithOwner --jq .nameWithOwner)/dependabot/alerts?state=open&per_page=100" \
 	  > tmp/advisories/alerts.ndjson
 	node scripts/advisories.mjs alerts --file tmp/advisories/alerts.ndjson
+
+# cargo cyclonedx writes <name>.json beside every workspace member's Cargo.toml; only
+# skopos-app's is kept.
+sbom:
+	@cargo cyclonedx --version 2>/dev/null | grep -qE ' $(subst .,\.,$(CARGO_CYCLONEDX_VERSION))$$' || \
+	  { echo "make sbom needs cargo-cyclonedx $(CARGO_CYCLONEDX_VERSION): cargo install --locked cargo-cyclonedx@$(CARGO_CYCLONEDX_VERSION)" >&2; exit 1; }
+	pnpm install --frozen-lockfile
+	rm -rf tmp/sbom && mkdir -p tmp/sbom
+	for target in $(SBOM_TARGETS); do \
+	  cargo cyclonedx --manifest-path crates/skopos-app/Cargo.toml --format json --spec-version 1.6 \
+	    --target $$target --override-filename sbom-$$target && \
+	  mv crates/skopos-app/sbom-$$target.json tmp/sbom/ && \
+	  rm -f crates/*/sbom-$$target.json || exit 1; \
+	done
+	pnpm --filter ./ui list --prod --depth Infinity --json > tmp/sbom/ui.json
+	node scripts/sbom.mjs merge $(foreach t,$(SBOM_TARGETS),--rust $(t)=tmp/sbom/sbom-$(t).json) \
+	  --ui tmp/sbom/ui.json --lock pnpm-lock.yaml --out tmp/sbom/SkoposIDE.cdx.json

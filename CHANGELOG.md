@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Software bill of materials:** each release lists the Rust crates and npm packages it ships in `SkoposIDE_<version>.cdx.json` (CycloneDX), next to the installers.
+
 ## [0.12.1] - 2026-11-23
 
 - **More actions on a pinned cluster:** right-clicking a cluster on the hotbar now offers Settings, which opens the cluster's settings in the focused tab, and Disconnect while the cluster is connected or connecting, or Connect while it is not, beside Unpin.

@@ -103,3 +103,27 @@ jobs:
           path: e2e/.tmp/app-logs/
           include-hidden-files: true
           if-no-files-found: ignore
+
+  # The release attaches this SBOM (docs/releasing.md); building it here catches a broken
+  # generator before a tag.
+  sbom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/setup
+      # Checks the download's SHA-256; the version matches CARGO_CYCLONEDX_VERSION in the Makefile.
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-cyclonedx@0.5.10
+          fallback: none
+      - name: Build the SBOM
+        run: make sbom
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
+          path: tmp/sbom/SkoposIDE.cdx.json
+          if-no-files-found: error
