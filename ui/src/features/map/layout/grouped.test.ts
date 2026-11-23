@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARGO,
   DEMO,
   demoGraph,
   drawnHiding,
   gedge,
   gnode,
   ownsCycle,
+  POLICY,
+  policyArgoGraph,
   RBAC,
   rbacGraph,
 } from "../../../test/graph";
@@ -345,5 +348,44 @@ describe("bridged edges", () => {
       (e) => e.rel === "mounts" && e.to === DEMO.configMap,
     );
     expect(mounts?.via).toBeUndefined();
+  });
+});
+
+describe("policies and Argo CD", () => {
+  function policyArgoModel() {
+    const { nodes, edges } = policyArgoGraph();
+    return buildModel(nodes, edges);
+  }
+
+  it("holds Applications in their ApplicationSet's box, policies with the Services and AppProjects with config", () => {
+    const model = policyArgoModel();
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[ARGO.app]).toBe(ARGO.appSet);
+    expect(tree.parentOf[ARGO.nightly]).toBe(ARGO.appSet);
+    expect(tree.parentOf[ARGO.appSet]).toBe("ns:argocd");
+    expect(tree.parentOf[ARGO.project]).toBe("ns:argocd");
+    expect(tree.parentOf[POLICY.netpol]).toBe("ns:shop");
+    expect(tree.parentOf[POLICY.scrape]).toBe(ROOT);
+    const pos = layoutGrouped(model, ids, "h");
+    expect(pos[POLICY.netpol].x).toBeCloseTo(pos[DEMO.service].x);
+    expect(pos[POLICY.cilium].x).toBeCloseTo(pos[DEMO.service].x);
+    expect(pos[ARGO.project].x).toBeGreaterThan(pos[ARGO.app].x);
+    checkLayout(model, ids, pos);
+    checkLayout(model, ids, layoutGrouped(model, ids, "v"));
+  });
+
+  it("draws a policy's selects as traffic, manages like ownership and project as a use", () => {
+    const model = policyArgoModel();
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    const edges = groupedEdges(model, tree, layoutGrouped(model, ids), "h", "");
+    const brief = edges.map((e) => `${e.cls} ${e.from} ${e.rel} ${e.to}`);
+    expect(brief).toContain(`net ${POLICY.netpol} selects ${DEMO.replicaSet}`);
+    expect(brief).toContain(`own ${ARGO.app} manages ${DEMO.deployment}`);
+    expect(brief).toContain(`own ${ARGO.app} manages ${DEMO.service}`);
+    expect(brief).toContain(`own ${ARGO.nightly} manages ${DEMO.cronJob}`);
+    expect(brief).toContain(`use ${ARGO.app} project ${ARGO.project}`);
+    expect(brief).toContain(`use ${ARGO.nightly} project ${ARGO.project}`);
   });
 });

@@ -166,6 +166,8 @@ async function startHelmFixture() {
 }
 
 const MAP_NAMESPACE = "skopos-e2e-map";
+// The map's Argo CD objects, in a namespace of their own as Argo CD's are.
+const MAP_ARGO_NAMESPACE = "skopos-e2e-map-argocd";
 // Cluster-scoped, so deleting the namespace leaves it: it is deleted on its own.
 const MAP_CLUSTER_ROLE_BINDING = "skopos-e2e-map-web-view";
 const MAP_OBJECTS = path.resolve(__dirname, "..", "fixtures", "map.yaml");
@@ -173,11 +175,12 @@ const GATEWAY_API_CRDS =
   "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml";
 
 /**
- * The kind cluster with the resource map's objects (spec E §18.3). The graph reads
- * discovery once, when it starts, so the Gateway API CRDs and the objects are in
- * place before the app connects. The CRDs stay installed, as the backend's kind
- * test leaves them; the namespace and the ClusterRoleBinding are deleted when the run
- * ends.
+ * The kind cluster with the resource map's objects (spec E §18.3), with its network
+ * policies and Argo CD objects (spec §3.3). The graph reads discovery once, when it
+ * starts, so the CRDs (Gateway API here; Cilium and Argo CD from scripts/kind-up.sh) and
+ * the objects are in place before the app connects. The CRDs stay installed, as the
+ * backend's kind test leaves them; the namespaces and the ClusterRoleBinding are deleted
+ * when the run ends.
  */
 async function startMapFixture() {
   await kubectl([
@@ -202,14 +205,25 @@ async function startMapFixture() {
     "crd/udproutes.gateway.networking.k8s.io",
     "crd/backendtlspolicies.gateway.networking.k8s.io",
   ]);
+  // Installed by scripts/kind-up.sh; the map draws these kinds (spec §3.3).
   await kubectl([
-    "delete",
-    "namespace",
-    MAP_NAMESPACE,
-    "--ignore-not-found",
-    "--wait=true",
-    "--timeout=120s",
+    "wait",
+    "--for=condition=Established",
+    "--timeout=60s",
+    "crd/ciliumnetworkpolicies.cilium.io",
+    "crd/appprojects.argoproj.io",
+    "crd/applications.argoproj.io",
   ]);
+  for (const namespace of [MAP_NAMESPACE, MAP_ARGO_NAMESPACE]) {
+    await kubectl([
+      "delete",
+      "namespace",
+      namespace,
+      "--ignore-not-found",
+      "--wait=true",
+      "--timeout=120s",
+    ]);
+  }
   await kubectl([
     "delete",
     "clusterrolebinding",
@@ -228,13 +242,15 @@ async function startMapFixture() {
   return {
     kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
     async stop() {
-      await kubectl([
-        "delete",
-        "namespace",
-        MAP_NAMESPACE,
-        "--ignore-not-found",
-        "--wait=false",
-      ]);
+      for (const namespace of [MAP_NAMESPACE, MAP_ARGO_NAMESPACE]) {
+        await kubectl([
+          "delete",
+          "namespace",
+          namespace,
+          "--ignore-not-found",
+          "--wait=false",
+        ]);
+      }
       await kubectl([
         "delete",
         "clusterrolebinding",

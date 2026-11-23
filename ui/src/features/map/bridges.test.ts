@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { GraphEdge } from "../../ipc/generated/GraphEdge";
 import type { GraphNode } from "../../ipc/generated/GraphNode";
 import {
+  ARGO,
   DEMO,
   demoGraph,
   gedge,
   gnode,
   ownsCycle,
+  POLICY,
+  policyArgoGraph,
   rbacGraph,
 } from "../../test/graph";
 import { bridgeEdges } from "./bridges";
@@ -212,6 +215,41 @@ describe("bridgeEdges", () => {
         to: "Deployment/n/top",
         rel: "selects",
         via: ["ReplicaSet"],
+      },
+    ]);
+  });
+});
+
+describe("bridges of policies and Argo CD", () => {
+  it("carries a policy's selects to the owner of hidden Pods", () => {
+    const { nodes, edges } = policyArgoGraph();
+    const bridges = bridgesHiding(["Pod", "ReplicaSet"], nodes, edges);
+    expect(bridges.filter((b) => b.from === POLICY.netpol)).toEqual([
+      {
+        from: POLICY.netpol,
+        to: DEMO.deployment,
+        rel: "selects",
+        via: ["Pod", "ReplicaSet"],
+      },
+    ]);
+  });
+
+  it("never carries manages through hidden kinds", () => {
+    const { nodes, edges } = policyArgoGraph();
+    const bridges = bridgesHiding(["Deployment", "Service"], nodes, edges);
+    expect(
+      bridges.filter((b) => b.from === ARGO.app || b.to === ARGO.app),
+    ).toEqual([]);
+  });
+
+  it("passes a hidden Application's project to its ApplicationSet", () => {
+    const { nodes, edges } = policyArgoGraph();
+    expect(bridgesHiding(["Application"], nodes, edges)).toEqual([
+      {
+        from: ARGO.appSet,
+        to: ARGO.project,
+        rel: "project",
+        via: ["Application"],
       },
     ]);
   });

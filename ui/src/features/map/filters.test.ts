@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEMO, demoGraph, gedge, gnode } from "../../test/graph";
+import {
+  DEMO,
+  demoGraph,
+  gedge,
+  gnode,
+  policyArgoGraph,
+} from "../../test/graph";
 import {
   filtersActive,
   graphTotal,
@@ -234,5 +240,41 @@ describe("trigger texts and tools", () => {
     expect(filtersActive(["a"], new Set(), groups, new Set(["Pod"]))).toBe(
       true,
     );
+  });
+});
+
+describe("kindGroups of policies and Argo CD", () => {
+  it("puts the policy kinds under Network and the Argo CD kinds under Argo", () => {
+    const { nodes, edges } = policyArgoGraph();
+    const model = buildModel(nodes, edges);
+    const groups = kindGroups(model, namespaceView(model, new Set()));
+    expect(groups.map((g) => g.id)).toEqual([
+      "argo",
+      "workloads",
+      "config",
+      "network",
+      "storage",
+      "access",
+      "outside",
+    ]);
+    const kinds = (id: string) =>
+      groups
+        .find((g) => g.id === id)
+        ?.kinds.map((k) => [k.kind, k.label, k.nodes]);
+    expect(kinds("argo")).toEqual([
+      ["Application", "Applications", 2],
+      ["ApplicationSet", "ApplicationSets", 1],
+      ["AppProject", "AppProjects", 1],
+    ]);
+    expect(kinds("network")).toEqual([
+      ["Service", "Services", 1],
+      ["Ingress", "Ingresses", 1],
+      ["NetworkPolicy", "NetworkPolicies", 1],
+      ["CiliumNetworkPolicy", "CiliumNetworkPolicies", 1],
+      ["CiliumClusterwideNetworkPolicy", "CiliumClusterwideNetworkPolicies", 2],
+      ["GatewayClass", "GatewayClasses", 1],
+      ["Gateway", "Gateways", 1],
+      ["HTTPRoute", "HTTPRoutes", 1],
+    ]);
   });
 });

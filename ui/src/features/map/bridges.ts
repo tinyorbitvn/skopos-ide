@@ -17,6 +17,7 @@ const USES: ReadonlySet<GraphRel> = new Set([
   "runsAs",
   "claims",
   "class",
+  "project",
 ]);
 
 interface Lifted {
@@ -34,7 +35,10 @@ const unique = (list: readonly string[]) => [...new Set(list)];
 
 /**
  * The bridges of the view: ownership lifted to the nearest shown owner, traffic carried
- * through hidden nodes, and use edges of hidden nodes passed to their shown owner. Nodes
+ * through hidden nodes, and use edges of hidden nodes passed to their shown owner. A
+ * policy's `selects` is traffic, as a Service's is, and an Application's `project` a use
+ * edge, which a hidden Application passes to its ApplicationSet. A `manages` edge is never
+ * carried: an Application manages only the objects its status names (spec §3.3). Nodes
  * outside `viewIds` take no part. Every walk is iterative and stops at a node it has
  * already met, so owner cycles and long chains end.
  */

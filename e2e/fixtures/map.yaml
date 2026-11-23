@@ -1,5 +1,6 @@
-# The resource map's objects (spec E §18.3). e2e/helpers/fixtures.ts applies this
-# before the app starts, after the Gateway API CRDs.
+# The resource map's objects (spec E §18.3), with network policies and Argo CD objects
+# (spec §3.3). e2e/helpers/fixtures.ts applies this before the app starts, after the
+# Gateway API CRDs, once the Cilium and Argo CD CRDs of scripts/kind-up.sh are established.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -184,3 +185,104 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: web-leader
+---
+# The NetworkPolicy and the CiliumNetworkPolicy select the web Pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-ingress
+  namespace: skopos-e2e-map
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 80
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: web-l7
+  namespace: skopos-e2e-map
+spec:
+  endpointSelector:
+    matchLabels:
+      app: web
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: web
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+          rules:
+            http:
+              - method: GET
+                path: "/.*"
+---
+# No Argo CD controller runs, so the Application carries the status the controller would
+# write; the Application CRD has no status subresource, so apply writes it. Its status names
+# the Deployment and the Service, which the map joins to it, and the Namespace, which the map
+# counts in "Other resources".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skopos-e2e-map-argocd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: skopos-e2e-map
+  namespace: skopos-e2e-map-argocd
+spec:
+  sourceRepos: ["https://git.example.test/map.git"]
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: skopos-e2e-map
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web
+  namespace: skopos-e2e-map-argocd
+spec:
+  project: skopos-e2e-map
+  source:
+    repoURL: https://git.example.test/map.git
+    path: web
+    targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: skopos-e2e-map
+status:
+  sync:
+    status: Synced
+    revision: 4f2c9a1d0b6e8f7a3c5d9e1b2a4c6e8f0a1b3c5d
+  health:
+    status: Healthy
+  resources:
+    - group: apps
+      version: v1
+      kind: Deployment
+      namespace: skopos-e2e-map
+      name: web
+      status: Synced
+      health:
+        status: Healthy
+    - version: v1
+      kind: Service
+      namespace: skopos-e2e-map
+      name: web
+      status: Synced
+      health:
+        status: Healthy
+    - version: v1
+      kind: Namespace
+      name: skopos-e2e-map
+      status: Synced

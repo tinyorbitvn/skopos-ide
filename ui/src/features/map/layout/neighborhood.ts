@@ -9,8 +9,8 @@ export type Depth = 1 | 2 | "all";
  *
  * - The owner chain above the focus, and everything it owns below.
  * - Links within `depth` hops, counted from the focus and everything it owns, where
- *   ConfigMap, Secret, ServiceAccount, PersistentVolumeClaim, GatewayClass, Role and
- *   ClusterRole end a path.
+ *   ConfigMap, Secret, ServiceAccount, PersistentVolumeClaim, GatewayClass, Role,
+ *   ClusterRole, AppProject and the policy kinds end a path (`LEAVES`).
  * - Inbound traffic climbed over `routes` edges up to the load balancer, from each Service,
  *   route, Ingress or Gateway reached in fewer than `depth` hops. A Gateway brings its
  *   GatewayClass.

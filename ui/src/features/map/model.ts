@@ -103,7 +103,8 @@ const joins = (link: Link) =>
  * own rule (spec E §4.7, O §4.5), which also brings in the cluster-scoped and load
  * balancer nodes connected to what is shown, the bindings of its ServiceAccounts and the
  * roles of its bindings. A GatewayClass or LoadBalancer is brought in but never walked on
- * from, because many objects share one.
+ * from, because many objects share one. Then `viewAdditions` brings the cluster-wide
+ * policies and the Argo CD objects of spec §3.3, which are never walked on from either.
  */
 export function namespaceView(
   model: MapModel,
@@ -124,7 +125,46 @@ export function namespaceView(
         queue.push(link.other);
     }
   }
+  for (const id of viewAdditions(model, shown)) shown.add(id);
   return model.nodes.filter((n) => shown.has(n.id)).map((n) => n.id);
+}
+
+/**
+ * What joins a namespace view once `joins` has added all it adds (spec §3.3): a
+ * CiliumClusterwideNetworkPolicy that selects a member, an Application that manages a
+ * member, and that Application's AppProject and ApplicationSet. The core's view follows
+ * the same rule. NetworkPolicies and CiliumNetworkPolicies are in their Pods' namespace.
+ */
+function viewAdditions(
+  model: MapModel,
+  members: ReadonlySet<string>,
+): Set<string> {
+  const added = new Set<string>();
+  const apps = new Set<string>();
+  for (const id of members) {
+    for (const link of linksOf(model, id)) {
+      if (link.out || members.has(link.other)) continue;
+      const kind = nodeOf(model, link.other).kind;
+      if (link.rel === "selects" && kind === "CiliumClusterwideNetworkPolicy") {
+        added.add(link.other);
+      } else if (link.rel === "manages" && kind === "Application") {
+        apps.add(link.other);
+      }
+    }
+  }
+  for (const app of apps) {
+    added.add(app);
+    for (const link of linksOf(model, app)) {
+      const kind = nodeOf(model, link.other).kind;
+      if (
+        (link.out && link.rel === "project" && kind === "AppProject") ||
+        (!link.out && link.rel === "owns" && kind === "ApplicationSet")
+      ) {
+        added.add(link.other);
+      }
+    }
+  }
+  return added;
 }
 
 /** Ids sorted by level, then by name: the order of "the first node". */

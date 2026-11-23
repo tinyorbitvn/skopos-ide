@@ -2,10 +2,13 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import {
+  ARGO,
   DEMO,
   demoGraph,
   drawnHiding,
   gnode,
+  POLICY,
+  policyArgoGraph,
   RBAC,
   rbacGraph,
   servedResource,
@@ -249,5 +252,72 @@ describe("MapDetails", () => {
     const group = screen.getByTestId("map-connection-group");
     expect(group.textContent).toBe("Selects 2 Pods of web-7d9, via Service");
     expect(group.getAttribute("data-via")).toBe("Service");
+  });
+});
+
+function policyArgoModel() {
+  const { nodes, edges } = policyArgoGraph();
+  return buildModel(nodes, edges);
+}
+
+describe("MapDetails of policies and Argo CD", () => {
+  it("labels an Application's links Manages and Project", () => {
+    show(ARGO.app, { model: policyArgoModel() });
+    expect(connections()).toEqual([
+      `out manages ${DEMO.deployment}: Manages Deploymentweb`,
+      `out manages ${DEMO.service}: Manages Serviceweb`,
+      `out project ${ARGO.project}: Project AppProjectdefault`,
+      `in owns ${ARGO.appSet}: Owned by ApplicationSetshops`,
+    ]);
+  });
+
+  it("labels the links into an AppProject Applications", () => {
+    show(ARGO.project, { model: policyArgoModel() });
+    expect(connections()).toEqual([
+      `in project ${ARGO.app}: Applications Applicationshop`,
+      `in project ${ARGO.nightly}: Applications Applicationnightly`,
+    ]);
+  });
+
+  it("labels the link into a managed object Managed by", () => {
+    show(DEMO.deployment, { model: policyArgoModel() });
+    expect(connections()).toContain(
+      `in manages ${ARGO.app}: Managed by Applicationshop`,
+    );
+  });
+
+  it.each([POLICY.netpol, POLICY.cilium])(
+    "opens Reachability on the namespace of %s",
+    (id) => {
+      show(id, { model: policyArgoModel() });
+      const open = screen.getByTestId("map-open-reachability");
+      expect(open.textContent).toBe("Open in Reachability");
+      fireEvent.click(open);
+      expect(screen.getByTestId("where").textContent).toBe(
+        "/cluster/c1/network/reachability?ns=shop",
+      );
+    },
+  );
+
+  it("opens Reachability for a cluster-wide policy on the namespace of its first Pod by id", () => {
+    show(POLICY.scrape, { model: policyArgoModel() });
+    fireEvent.click(screen.getByTestId("map-open-reachability"));
+    // It selects Pod/shop/db-0 first, but Pod/jobs/nightly-1-x comes first by id.
+    expect(screen.getByTestId("where").textContent).toBe(
+      "/cluster/c1/network/reachability?ns=jobs",
+    );
+  });
+
+  it.each([
+    { what: "a host policy", id: POLICY.host, model: () => policyArgoModel() },
+    {
+      what: "a cluster-wide policy whose Pods are hidden",
+      id: POLICY.scrape,
+      model: () => drawnHiding(["Pod"], policyArgoGraph()),
+    },
+    { what: "a Service", id: DEMO.service, model: () => policyArgoModel() },
+  ])("offers no Reachability for $what", ({ id, model }) => {
+    show(id, { model: model() });
+    expect(screen.queryByTestId("map-open-reachability")).toBeNull();
   });
 });

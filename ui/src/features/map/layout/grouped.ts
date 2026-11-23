@@ -253,16 +253,22 @@ const mean = (vals: (number | null)[]): number | null => {
   return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
 };
 
-/** Columns inside a namespace box: routes, Services, workloads, config, bindings, roles. */
+/**
+ * Columns inside a namespace box: routes, Services and the policies that select Pods,
+ * workloads and Applications, config and AppProjects, bindings, roles (spec §3.3).
+ */
 const ROLE: Readonly<Record<string, number>> = {
   Gateway: 0,
   Ingress: 0,
   HTTPRoute: 0,
   Service: 1,
+  NetworkPolicy: 1,
+  CiliumNetworkPolicy: 1,
   ConfigMap: 3,
   Secret: 3,
   ServiceAccount: 3,
   PersistentVolumeClaim: 3,
+  AppProject: 3,
   RoleBinding: 4,
   ClusterRoleBinding: 4,
   Role: 5,
@@ -741,8 +747,10 @@ export function poly(pts: [number, number][]): {
 /**
  * The Grouped edges between the drawn nodes (spec E §8.1, H64): a real `owns` is the box
  * nesting and is not drawn, a bridged one is a branch in its owner's box; a link to every
- * Pod of a box becomes one arrow to the box. Each other edge runs orthogonally between the
- * edges of its ends, and between two namespace boxes through the gap between them.
+ * Pod of a box becomes one arrow to the box. An Application's `manages` is drawn like
+ * ownership and may end at an owner box (spec §3.3). Each other edge runs orthogonally
+ * between the edges of its ends, and between two namespace boxes through the gap between
+ * them.
  */
 export function groupedEdges(
   model: MapModel,
@@ -810,6 +818,18 @@ export function groupedEdges(
   fan(
     "net",
     all.filter((e) => e.rel === "selects"),
+    (e) => e.from,
+    (e) => e.to,
+    true,
+  );
+  // An Application manages Deployments and other owners, which are boxes, so these links
+  // may end at a box.
+  const inTree = new Set(Object.keys(tree.parentOf));
+  fan(
+    "own",
+    model.edges.filter(
+      (e) => e.rel === "manages" && inTree.has(e.from) && inTree.has(e.to),
+    ),
     (e) => e.from,
     (e) => e.to,
     true,

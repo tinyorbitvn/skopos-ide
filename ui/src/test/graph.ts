@@ -38,6 +38,15 @@ const LISTS: Record<string, [string, string]> = {
   RoleBinding: ["rbac.authorization.k8s.io", "rolebindings"],
   ClusterRole: ["rbac.authorization.k8s.io", "clusterroles"],
   ClusterRoleBinding: ["rbac.authorization.k8s.io", "clusterrolebindings"],
+  NetworkPolicy: ["networking.k8s.io", "networkpolicies"],
+  CiliumNetworkPolicy: ["cilium.io", "ciliumnetworkpolicies"],
+  CiliumClusterwideNetworkPolicy: [
+    "cilium.io",
+    "ciliumclusterwidenetworkpolicies",
+  ],
+  Application: ["argoproj.io", "applications"],
+  ApplicationSet: ["argoproj.io", "applicationsets"],
+  AppProject: ["argoproj.io", "appprojects"],
 };
 
 /** A node from its id, `‹Kind›/‹namespace›/‹name›`, healthy and without facts. */
@@ -459,4 +468,101 @@ export function drawnHiding(
     shownIds,
     bridgeEdges(model, view, new Set(shownIds)),
   );
+}
+
+/** Ids of the policies `policyArgoGraph` adds to the demo graph. */
+export const POLICY = {
+  netpol: "NetworkPolicy/shop/web-ingress",
+  cilium: "CiliumNetworkPolicy/shop/web-l7",
+  scrape: "CiliumClusterwideNetworkPolicy//allow-scrape",
+  host: "CiliumClusterwideNetworkPolicy//host-firewall",
+} as const;
+
+/** Ids of the Argo CD objects `policyArgoGraph` adds to the demo graph. */
+export const ARGO = {
+  appSet: "ApplicationSet/argocd/shops",
+  app: "Application/argocd/shop",
+  nightly: "Application/argocd/nightly",
+  project: "AppProject/argocd/default",
+} as const;
+
+/**
+ * The demo graph with network policies and Argo CD (spec §3.3). A NetworkPolicy and a
+ * CiliumNetworkPolicy select the web Pods; a cluster-wide policy selects the db Pod, then
+ * the nightly Job's Pod; a host policy selects nothing. In `argocd`, ApplicationSet `shops`
+ * owns Application `shop`, which manages the web Deployment and Service, and Application
+ * `nightly`, which manages the CronJob; both belong to AppProject `default`.
+ */
+export function policyArgoGraph(): {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+} {
+  const { nodes, edges } = demoGraph();
+  const d = DEMO;
+  const p = POLICY;
+  const a = ARGO;
+  const rules = (source: string, selector: string): [string, string][] => [
+    ["Source", source],
+    ["Selector", selector],
+    ["Types", "Ingress"],
+  ];
+  return {
+    nodes: [
+      ...nodes,
+      gnode(p.netpol, {
+        status: "neutral",
+        facts: rules("Kubernetes", "app=web"),
+      }),
+      gnode(p.cilium, {
+        status: "neutral",
+        facts: rules("Cilium", "app=web, io.kubernetes.pod.namespace=shop"),
+      }),
+      gnode(p.scrape, {
+        status: "neutral",
+        facts: rules("Cilium cluster-wide", "app in (db, nightly)"),
+      }),
+      gnode(p.host, {
+        status: "neutral",
+        statusText: "Host policy",
+        facts: [
+          ["Source", "Cilium cluster-wide"],
+          ["Not evaluated", "nodeSelector"],
+        ],
+      }),
+      gnode(a.appSet),
+      gnode(a.app, {
+        statusText: "Healthy · Synced",
+        facts: [
+          ["Project", "default"],
+          ["Health", "Healthy"],
+          ["Sync", "Synced"],
+        ],
+      }),
+      gnode(a.nightly, { statusText: "Healthy · Synced" }),
+      gnode(a.project, {
+        status: "neutral",
+        facts: [
+          ["Destinations", "1"],
+          ["Source repos", "1"],
+        ],
+      }),
+    ],
+    edges: [
+      ...edges,
+      gedge(p.netpol, "selects", d.podA),
+      gedge(p.netpol, "selects", d.podB),
+      gedge(p.cilium, "selects", d.podA),
+      gedge(p.cilium, "selects", d.podB),
+      // The db Pod comes first here; "Open in Reachability" still picks the first by id.
+      gedge(p.scrape, "selects", d.dbPod),
+      gedge(p.scrape, "selects", d.jobPod),
+      gedge(a.appSet, "owns", a.app),
+      gedge(a.appSet, "owns", a.nightly),
+      gedge(a.app, "manages", d.deployment),
+      gedge(a.app, "manages", d.service),
+      gedge(a.app, "project", a.project),
+      gedge(a.nightly, "manages", d.cronJob),
+      gedge(a.nightly, "project", a.project),
+    ],
+  };
 }
