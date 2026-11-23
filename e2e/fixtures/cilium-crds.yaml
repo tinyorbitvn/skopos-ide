@@ -1,0 +1,67 @@
+# Minimal CRDs of the two Cilium policy kinds, so that the kind tests and the e2e specs can write
+# CiliumNetworkPolicies and CiliumClusterwideNetworkPolicies on a cluster without Cilium. These
+# are our own, not Cilium's: the schema keeps every field as written and checks none. No Cilium
+# agent runs, so nothing enforces these policies. scripts/kind-up.sh applies this file.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ciliumnetworkpolicies.cilium.io
+spec:
+  group: cilium.io
+  scope: Namespaced
+  names:
+    kind: CiliumNetworkPolicy
+    listKind: CiliumNetworkPolicyList
+    plural: ciliumnetworkpolicies
+    singular: ciliumnetworkpolicy
+    shortNames:
+      - cnp
+  versions:
+    - name: v2
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            specs:
+              type: array
+              items:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ciliumclusterwidenetworkpolicies.cilium.io
+spec:
+  group: cilium.io
+  scope: Cluster
+  names:
+    kind: CiliumClusterwideNetworkPolicy
+    listKind: CiliumClusterwideNetworkPolicyList
+    plural: ciliumclusterwidenetworkpolicies
+    singular: ciliumclusterwidenetworkpolicy
+    shortNames:
+      - ccnp
+  versions:
+    - name: v2
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            specs:
+              type: array
+              items:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true

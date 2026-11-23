@@ -41,12 +41,20 @@ kubectl --kubeconfig "$config" --request-timeout=30s uncordon skopos-e2e-worker 
 crds=https://raw.githubusercontent.com/argoproj/argo-cd/94037c4d4e1af4bd0651d37a179fbd9e347e668c/manifests/crds
 kubectl --kubeconfig "$config" --request-timeout=60s apply --server-side --force-conflicts \
   --field-manager=skopos-e2e -f "$crds/application-crd.yaml" -f "$crds/applicationset-crd.yaml" -f "$crds/appproject-crd.yaml" >/dev/null
+# Our own minimal CRDs of the two Cilium policy kinds, for the tests that write policies. No
+# Cilium agent runs.
+kubectl --kubeconfig "$config" --request-timeout=60s apply --server-side --force-conflicts \
+  --field-manager=skopos-e2e -f e2e/fixtures/cilium-crds.yaml >/dev/null
+established=(
+  crd/applications.argoproj.io crd/applicationsets.argoproj.io crd/appprojects.argoproj.io
+  crd/ciliumnetworkpolicies.cilium.io crd/ciliumclusterwidenetworkpolicies.cilium.io
+)
 # A CRD just created has no status.conditions yet, and kubectl wait then fails at once instead
 # of waiting (seen on CI), so try again before the last, loud attempt.
 for _ in $(seq 1 30); do
   kubectl --kubeconfig "$config" wait --for=condition=Established --timeout=60s \
-    crd/applications.argoproj.io crd/applicationsets.argoproj.io crd/appprojects.argoproj.io >/dev/null 2>&1 && break
+    "${established[@]}" >/dev/null 2>&1 && break
   sleep 2
 done
 kubectl --kubeconfig "$config" wait --for=condition=Established --timeout=60s \
-  crd/applications.argoproj.io crd/applicationsets.argoproj.io crd/appprojects.argoproj.io >/dev/null
+  "${established[@]}" >/dev/null

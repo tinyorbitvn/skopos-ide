@@ -1,6 +1,8 @@
 //! The resource graph against the real `skopos-e2e` kind cluster (spec E §4.8, O §4.6).
 //! Needs `make test-kind`. Only `e2e/.tmp/kubeconfig` is read, never a default one.
 
+mod support;
+
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -21,13 +23,19 @@ use skopos_core::graph::{
 };
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
+use support::{connected_kind, in_namespace};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
 const CONTEXT: &str = "kind-skopos-e2e";
-/// The namespace, and the GatewayClass's name.
+/// The namespace, and the names of the GatewayClass and the CiliumClusterwideNetworkPolicy.
 const NAMESPACE: &str = "skopos-test-graph";
 const GATEWAY: &str = "gateway.networking.k8s.io";
+const CILIUM: &str = "cilium.io";
+const ARGO: &str = "argoproj.io";
+/// A git SHA, as Argo CD writes `status.sync.revision`.
+const REVISION: &str = "4f2a9c1e0b7d3a5f6c8e9d0a1b2c3d4e5f6a7b8c";
+const REPO: &str = "https://git.example.com/policies.git";
 const RBAC: &str = "rbac.authorization.k8s.io";
 /// The ClusterRoleBinding of ServiceAccount `web` to the built-in ClusterRole `view`.
 const VIEW_BINDING: &str = "skopos-test-graph-web-view";
@@ -130,14 +138,25 @@ fn api(
     plural: &str,
     namespaced: bool,
 ) -> Api<DynamicObject> {
+    versioned_api(client, group, "v1", kind, plural, namespaced)
+}
+
+fn versioned_api(
+    client: &Client,
+    group: &str,
+    version: &str,
+    kind: &str,
+    plural: &str,
+    namespaced: bool,
+) -> Api<DynamicObject> {
     let api_version = if group.is_empty() {
-        "v1".to_owned()
+        version.to_owned()
     } else {
-        format!("{group}/v1")
+        format!("{group}/{version}")
     };
     let resource = ApiResource {
         group: group.into(),
-        version: "v1".into(),
+        version: version.into(),
         api_version,
         kind: kind.into(),
         plural: plural.into(),
@@ -147,6 +166,170 @@ fn api(
     } else {
         Api::all_with(client.clone(), &resource)
     }
+}
+
+fn cluster_policies(client: &Client) -> Api<DynamicObject> {
+    versioned_api(
+        client,
+        CILIUM,
+        "v2",
+        "CiliumClusterwideNetworkPolicy",
+        "ciliumclusterwidenetworkpolicies",
+        false,
+    )
+}
+
+/// Two Pods, a policy of each source selecting them, and an Application that manages the two
+/// namespaced policies and the namespace, with its AppProject and the ApplicationSet that owns
+/// it. No Argo CD controller watches this namespace, so the Application's status stays as
+/// written here, as the controller would write it.
+async fn create_policies_and_argo_cd(client: &Client) {
+    let meta = |name: &str| json!({ "name": name, "namespace": NAMESPACE });
+    for app in ["web", "api"] {
+        apply(
+            &api(client, "", "Pod", "pods", true),
+            json!({
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": { "name": app, "namespace": NAMESPACE, "labels": { "app": app } },
+                "spec": {
+                    "terminationGracePeriodSeconds": 0,
+                    "containers": [{ "name": "app", "image": "registry.k8s.io/pause:3.10" }],
+                },
+            }),
+        )
+        .await;
+    }
+    apply(
+        &api(
+            client,
+            "networking.k8s.io",
+            "NetworkPolicy",
+            "networkpolicies",
+            true,
+        ),
+        json!({
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": meta("web"),
+            "spec": {
+                "podSelector": { "matchLabels": { "app": "web" } },
+                "ingress": [{ "from": [{ "podSelector": { "matchLabels": { "app": "api" } } }] }],
+            },
+        }),
+    )
+    .await;
+    apply(
+        &versioned_api(
+            client,
+            CILIUM,
+            "v2",
+            "CiliumNetworkPolicy",
+            "ciliumnetworkpolicies",
+            true,
+        ),
+        json!({
+            "apiVersion": format!("{CILIUM}/v2"),
+            "kind": "CiliumNetworkPolicy",
+            "metadata": meta("api"),
+            "spec": {
+                "endpointSelector": { "matchLabels": { "app": "api" } },
+                "ingress": [{ "fromEndpoints": [{ "matchLabels": { "app": "web" } }] }],
+            },
+        }),
+    )
+    .await;
+    apply(
+        &cluster_policies(client),
+        json!({
+            "apiVersion": format!("{CILIUM}/v2"),
+            "kind": "CiliumClusterwideNetworkPolicy",
+            "metadata": { "name": NAMESPACE },
+            "spec": {
+                "endpointSelector": { "matchLabels": { "io.kubernetes.pod.namespace": NAMESPACE } },
+                "egress": [{ "toEntities": ["cluster"] }],
+            },
+        }),
+    )
+    .await;
+
+    let argo =
+        |kind: &str, plural: &str| versioned_api(client, ARGO, "v1alpha1", kind, plural, true);
+    let destination = json!({ "server": "https://kubernetes.default.svc", "namespace": NAMESPACE });
+    let source = json!({ "repoURL": REPO, "path": "policies", "targetRevision": "HEAD" });
+    apply(
+        &argo("AppProject", "appprojects"),
+        json!({
+            "apiVersion": format!("{ARGO}/v1alpha1"),
+            "kind": "AppProject",
+            "metadata": meta("policies"),
+            "spec": { "sourceRepos": ["*"], "destinations": [destination] },
+        }),
+    )
+    .await;
+    let application_sets = argo("ApplicationSet", "applicationsets");
+    apply(
+        &application_sets,
+        json!({
+            "apiVersion": format!("{ARGO}/v1alpha1"),
+            "kind": "ApplicationSet",
+            "metadata": meta("policies"),
+            "spec": {
+                "generators": [{ "list": { "elements": [] } }],
+                "template": {
+                    "metadata": { "name": "policies" },
+                    "spec": { "project": "policies", "source": source, "destination": destination },
+                },
+            },
+        }),
+    )
+    .await;
+    let owner = application_sets.get("policies").await.unwrap();
+    let uid = owner.metadata.uid.expect("the API server sets a uid");
+    // The Application CRD has no status subresource, so the status goes in with the object.
+    apply(
+        &argo("Application", "applications"),
+        json!({
+            "apiVersion": format!("{ARGO}/v1alpha1"),
+            "kind": "Application",
+            "metadata": {
+                "name": "policies",
+                "namespace": NAMESPACE,
+                "ownerReferences": [{
+                    "apiVersion": format!("{ARGO}/v1alpha1"),
+                    "kind": "ApplicationSet",
+                    "name": "policies",
+                    "uid": uid,
+                    "controller": true,
+                }],
+            },
+            "spec": { "project": "policies", "source": source, "destination": destination },
+            "status": {
+                "health": { "status": "Healthy" },
+                "sync": { "status": "Synced", "revision": REVISION },
+                "resources": [
+                    {
+                        "group": "networking.k8s.io",
+                        "version": "v1",
+                        "kind": "NetworkPolicy",
+                        "namespace": NAMESPACE,
+                        "name": "web",
+                        "status": "Synced",
+                    },
+                    {
+                        "group": CILIUM,
+                        "version": "v2",
+                        "kind": "CiliumNetworkPolicy",
+                        "namespace": NAMESPACE,
+                        "name": "api",
+                        "status": "Synced",
+                    },
+                    { "version": "v1", "kind": "Namespace", "name": NAMESPACE, "status": "Synced" },
+                ],
+            },
+        }),
+    )
+    .await;
 }
 
 fn gateway_classes(client: &Client) -> Api<DynamicObject> {
@@ -494,6 +677,16 @@ fn status_of<'a>(snapshot: &'a Snapshot, id: &str) -> (GraphStatus, Option<&'a s
     (node.status, node.status_text.as_deref())
 }
 
+/// The value of the node's fact `label`.
+fn fact<'a>(snapshot: &'a Snapshot, id: &str, label: &str) -> Option<&'a str> {
+    snapshot
+        .node(id)
+        .facts
+        .iter()
+        .find(|(name, _)| name == label)
+        .map(|(_, value)| value.as_str())
+}
+
 #[tokio::test]
 #[ignore = "needs the skopos-e2e kind cluster"]
 async fn the_graph_of_the_e2e_fixture() {
@@ -672,4 +865,95 @@ async fn the_access_chain_of_a_service_account() {
         core.resource_graph_unsubscribe(&map.id);
     })
     .await;
+}
+
+/// Spec §3.3 and §6.1: the policy and Argo CD nodes with their edges, and the cluster-wide
+/// policy joining the namespace view through the Pods it selects (contract C14).
+#[tokio::test]
+#[ignore = "needs the skopos-e2e kind cluster"]
+async fn the_policies_and_argo_cd_objects_of_a_namespace() {
+    let (core, cluster, _root) = connected_kind().await;
+    let client = core.cluster_client(&cluster).unwrap();
+    let cluster_policy_api = cluster_policies(&client);
+    // A leftover of an earlier failed run.
+    let _ = cluster_policy_api
+        .delete(NAMESPACE, &DeleteParams::default())
+        .await;
+    let outcome = AssertUnwindSafe(in_namespace(&client, NAMESPACE, async {
+        create_policies_and_argo_cd(&client).await;
+        let mut map = Map::start(&core, &cluster);
+        let web = id("Pod", "web");
+        let api_pod = id("Pod", "api");
+        let network_policy = id("NetworkPolicy", "web");
+        let cilium_policy = id("CiliumNetworkPolicy", "api");
+        let cluster_policy = format!("CiliumClusterwideNetworkPolicy//{NAMESPACE}");
+        let application = id("Application", "policies");
+        let project = id("AppProject", "policies");
+        let application_set = id("ApplicationSet", "policies");
+        let expected = [
+            (network_policy.clone(), web.clone(), GraphRel::Selects),
+            (cilium_policy.clone(), api_pod.clone(), GraphRel::Selects),
+            (cluster_policy.clone(), web.clone(), GraphRel::Selects),
+            (cluster_policy.clone(), api_pod.clone(), GraphRel::Selects),
+            (
+                application.clone(),
+                network_policy.clone(),
+                GraphRel::Manages,
+            ),
+            (
+                application.clone(),
+                cilium_policy.clone(),
+                GraphRel::Manages,
+            ),
+            (application.clone(), project.clone(), GraphRel::Project),
+            (application_set.clone(), application.clone(), GraphRel::Owns),
+        ];
+        let ready = map
+            .until("the policy and Argo CD edges", |s| {
+                expected
+                    .iter()
+                    .all(|(from, to, rel)| s.has_edge(from, to, *rel))
+            })
+            .await;
+
+        assert!(
+            ready.find(&format!("Namespace//{NAMESPACE}")).is_none(),
+            "a Namespace in status.resources is counted, not drawn"
+        );
+        assert!(ready.missing.is_empty(), "{:?}", ready.missing);
+        assert_eq!(ready.node(&cluster_policy).namespace, "");
+        for (policy, source) in [
+            (&network_policy, "Kubernetes"),
+            (&cilium_policy, "Cilium"),
+            (&cluster_policy, "Cilium cluster-wide"),
+        ] {
+            assert_eq!(fact(&ready, policy, "Source"), Some(source), "{policy}");
+            assert_eq!(
+                status_of(&ready, policy).0,
+                GraphStatus::Neutral,
+                "{policy}"
+            );
+        }
+        assert_eq!(
+            status_of(&ready, &application),
+            (GraphStatus::Nominal, Some("Healthy · Synced"))
+        );
+        assert_eq!(fact(&ready, &application, "Project"), Some("policies"));
+        assert_eq!(fact(&ready, &application, "Health"), Some("Healthy"));
+        assert_eq!(fact(&ready, &application, "Sync"), Some("Synced"));
+        assert_eq!(fact(&ready, &application, "Revision"), Some(&REVISION[..7]));
+        assert_eq!(status_of(&ready, &application_set).0, GraphStatus::Nominal);
+        assert_eq!(status_of(&ready, &project).0, GraphStatus::Neutral);
+        assert_eq!(fact(&ready, &project, "Destinations"), Some("1"));
+        assert_eq!(fact(&ready, &project, "Source repos"), Some("1"));
+        core.resource_graph_unsubscribe(&map.id);
+    }))
+    .catch_unwind()
+    .await;
+    let _ = cluster_policy_api
+        .delete(NAMESPACE, &DeleteParams::default())
+        .await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
 }
