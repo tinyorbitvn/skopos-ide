@@ -1,10 +1,19 @@
 import styles from "./Spinner.module.css";
 
-export function Spinner({ label }: { label?: string }) {
+/** A spinner. `hideLabel` keeps `label` for screen readers only, for a mark inside a row. */
+export function Spinner({
+  label,
+  hideLabel,
+}: {
+  label?: string;
+  hideLabel?: boolean;
+}) {
   return (
     <span className={styles.wrap} role="status" aria-label={label ?? "Loading"}>
       <span className={styles.spinner} aria-hidden="true" />
-      {label ? <span className={styles.label}>{label}</span> : null}
+      {label && !hideLabel ? (
+        <span className={styles.label}>{label}</span>
+      ) : null}
     </span>
   );
 }

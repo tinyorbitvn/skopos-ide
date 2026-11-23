@@ -9,6 +9,7 @@ export { EmptyState } from "./EmptyState";
 export { ErrorNotice } from "./ErrorNotice";
 export { IconButton } from "./IconButton";
 export { Input } from "./Input";
+export { Markdown } from "./Markdown";
 export { CheckMenu, Menu, type MenuItem } from "./Menu";
 export { PaneHandle } from "./PaneHandle";
 export { ProgressBar } from "./ProgressBar";

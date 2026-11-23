@@ -1,6 +1,40 @@
-import { createElement, type ReactNode, useMemo } from "react";
+import {
+  createContext,
+  createElement,
+  type ReactNode,
+  useContext,
+  useMemo,
+} from "react";
 import styles from "./Markdown.module.css";
 import { type Block, type Inline, parseMarkdown } from "./parseMarkdown";
+
+/** What opens a link; null renders links as text, as chart READMEs and release notes want. */
+const LinkOpener = createContext<((url: string) => void) | null>(null);
+
+const WEB_LINK = /^https?:\/\//i;
+
+/** A link: a button that opens a web address when the page passed `onLink`, else text. */
+function LinkText(props: { url: string; children?: ReactNode }) {
+  const open = useContext(LinkOpener);
+  if (open === null || !WEB_LINK.test(props.url)) {
+    return createElement(
+      "span",
+      null,
+      props.children,
+      createElement("span", { className: styles.url }, ` (${props.url})`),
+    );
+  }
+  return createElement(
+    "button",
+    {
+      type: "button",
+      className: styles.link,
+      title: props.url,
+      onClick: () => open(props.url),
+    },
+    props.children,
+  );
+}
 
 // Children are spread into `createElement`, so the lists of a tree need no keys.
 
@@ -15,12 +49,10 @@ function inlineNode(node: Inline): ReactNode {
     case "em":
       return createElement("em", null, ...inline(node.children));
     case "link":
-      // Not an anchor: the text, then where it points, which nothing opens.
       return createElement(
-        "span",
-        null,
+        LinkText,
+        { url: node.url },
         ...inline(node.children),
-        createElement("span", { className: styles.url }, ` (${node.url})`),
       );
     case "break":
       return createElement("br");
@@ -107,14 +139,22 @@ function block(node: Block): ReactNode {
 }
 
 /**
- * A chart README as React elements (spec D1 §13). Raw HTML and entities show as the
- * text they are; links and images load and open nothing.
+ * Markdown as React elements (spec D1 §13). Raw HTML and entities show as the text they
+ * are; images load nothing. Links open only through `onLink`, and only http and https ones.
  */
-export function Markdown(props: { text: string; testId?: string }) {
+export function Markdown(props: {
+  text: string;
+  testId?: string;
+  onLink?: (url: string) => void;
+}) {
   const blocks = useMemo(() => parseMarkdown(props.text), [props.text]);
   return createElement(
-    "div",
-    { className: styles.markdown, "data-testid": props.testId },
-    ...blocks.map(block),
+    LinkOpener.Provider,
+    { value: props.onLink ?? null },
+    createElement(
+      "div",
+      { className: styles.markdown, "data-testid": props.testId },
+      ...blocks.map(block),
+    ),
   );
 }

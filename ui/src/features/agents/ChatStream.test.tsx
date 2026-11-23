@@ -1,0 +1,175 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { expect, test, vi } from "vitest";
+import type { ChatItem } from "../../ipc/generated/ChatItem";
+import { mockBackend } from "../../test/ipc";
+import { ChatStream, type ChatStreamProps } from "./ChatStream";
+
+function show(items: ChatItem[], more: Partial<ChatStreamProps> = {}) {
+  const props: ChatStreamProps = {
+    items,
+    busy: false,
+    agentName: "Claude",
+    live: true,
+    past: [],
+    undone: [],
+    onAnswer: vi.fn(async () => {}),
+    onUndo: vi.fn(),
+    onNewChat: vi.fn(),
+    ...more,
+  };
+  render(
+    <MemoryRouter>
+      <ChatStream {...props} />
+    </MemoryRouter>,
+  );
+  return props;
+}
+
+test("a message shows its object, and the agent's Markdown opens only web links", () => {
+  const ipc = mockBackend({ open_external: () => null });
+  show([
+    {
+      id: "u",
+      body: {
+        type: "user",
+        text: "Why is it restarting?",
+        object: {
+          cluster: "a",
+          kind: "Pod",
+          namespace: "payments",
+          name: "api-1",
+        },
+      },
+    },
+    {
+      id: "a",
+      body: {
+        type: "agent",
+        text: "See [runbook](https://example.com/r) or [x](javascript:alert(1)) <b>bold</b>",
+      },
+    },
+  ]);
+  expect(screen.getByText("Pod payments/api-1")).toBeTruthy();
+  expect(screen.getByText("Why is it restarting?")).toBeTruthy();
+  expect(screen.getByText(/<b>bold<\/b>/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "x" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "runbook" }));
+  expect(ipc.callsTo("open_external")).toEqual([
+    { url: "https://example.com/r" },
+  ]);
+});
+
+test("the working line names the agent", () => {
+  show([], { busy: true });
+  expect(
+    within(screen.getByTestId("agent-working")).getByText("Claude is working…"),
+  ).toBeTruthy();
+});
+
+test("plan steps are done, running or waiting, and a stopped turn shows no running step", () => {
+  const plan: ChatItem = {
+    id: "p",
+    body: {
+      type: "plan",
+      entries: [
+        { content: "List Pods", status: "completed" },
+        { content: "Read logs", status: "inProgress" },
+        { content: "Explain", status: "pending" },
+      ],
+    },
+  };
+  show([plan], { busy: true });
+  const box = screen.getByRole("region", { name: "Plan" });
+  expect(within(box).getByRole("img", { name: "Done" })).toBeTruthy();
+  expect(within(box).getByRole("status", { name: "Running" })).toBeTruthy();
+  expect(within(box).getAllByRole("img", { name: "Waiting" })).toHaveLength(1);
+});
+
+test("a stopped turn shows its running step as waiting", () => {
+  show(
+    [
+      {
+        id: "p",
+        body: {
+          type: "plan",
+          entries: [{ content: "Read logs", status: "inProgress" }],
+        },
+      },
+    ],
+    { busy: false },
+  );
+  expect(screen.getByRole("img", { name: "Waiting" })).toBeTruthy();
+});
+
+test("a tool card shows its result and opens its table", () => {
+  show([
+    {
+      id: "t",
+      body: {
+        type: "tool",
+        card: {
+          id: "t",
+          cluster: "prod",
+          title: "Listed Pods in payments",
+          result: "3 Pods, 1 not ready",
+          tone: "normal",
+          details: {
+            type: "table",
+            head: ["Name", "Status"],
+            rows: [["api-1", "Running"]],
+          },
+          running: false,
+        },
+      },
+    },
+  ]);
+  const card = screen.getByTestId("agent-tool-card");
+  expect(within(card).getByText("3 Pods, 1 not ready")).toBeTruthy();
+  expect(within(card).getByText("prod")).toBeTruthy();
+  const head = within(card).getByRole("button", { expanded: false });
+  fireEvent.click(head);
+  expect(within(card).getByRole("cell", { name: "api-1" })).toBeTruthy();
+});
+
+test("the agent's own tool shows its status and content", () => {
+  show([
+    {
+      id: "o",
+      body: {
+        type: "agentTool",
+        title: "Edit notes.md",
+        status: "failed",
+        details: "denied",
+      },
+    },
+  ]);
+  expect(screen.getByText("Failed")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Edit notes.md/ }));
+  expect(screen.getByText("denied")).toBeTruthy();
+});
+
+test("notices offer the sandbox section and a new chat", () => {
+  const props = show([
+    {
+      id: "n1",
+      body: {
+        type: "notice",
+        notice: { kind: "blockedHost", host: "x.io" },
+        text: "The sandbox blocked x.io.",
+      },
+    },
+    {
+      id: "n2",
+      body: {
+        type: "notice",
+        notice: { kind: "exited", agent: "Claude", reason: "exit 1" },
+        text: "Claude stopped unexpectedly: exit 1.",
+      },
+    },
+  ]);
+  expect(screen.getByText("The sandbox blocked x.io.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Agent sandbox" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  expect(props.onNewChat).toHaveBeenCalled();
+});
