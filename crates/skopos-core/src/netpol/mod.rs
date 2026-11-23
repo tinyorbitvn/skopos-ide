@@ -2,13 +2,10 @@
 //! CiliumNetworkPolicies and CiliumClusterwideNetworkPolicies, read from their JSON objects and
 //! evaluated for the map and the Reachability page. Pure: no I/O, no kube client, no tokio.
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod eval;
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod group;
-mod model;
+pub(crate) mod model;
 mod parse;
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod pods;
 mod selector;
 

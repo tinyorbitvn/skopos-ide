@@ -19,6 +19,7 @@ pub mod portforward;
 pub mod prefs;
 pub mod process;
 pub mod quit;
+pub mod reachability;
 pub mod resources;
 pub mod save_file;
 pub mod secrets;
