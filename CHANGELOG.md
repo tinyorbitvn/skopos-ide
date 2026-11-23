@@ -6,6 +6,10 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **AI agents:** the header's sparkles button or Ctrl+J (⌘J on macOS) opens an agent panel beside the page. Chat with the agent CLI you installed (Claude Code, Codex, OpenCode, Gemini CLI or your own ACP command) about one cluster or several. The agent runs in an OS sandbox on Linux and macOS and reaches your clusters only through SkoposIDE's tools; each read shows as a card, and each change shows its diff and waits for Approve, Approve for this chat or Deny, then follows the rollout. Not available on Windows.
+- **Ask the agent about an object:** a drawer's More actions and the command palette offer Ask the agent about this Pod (or any kind), which opens a new chat with the object attached.
+- **Agent settings:** Preferences lists the agents found on this computer with their state, lets you add your own and pick the default, shows the sandbox's status and the domains and folders agents may use, and sets per cluster whether changes ask every time, are read only or run without asking. A cluster's Settings page has an Agent card for that setting, the namespaces the agent can see, Secret values, commands in containers, the default agent and notes sent with every chat; the hotbar's right-click menu opens it with Agent settings.
+
 ## [0.12.1] - 2026-11-23
 
 - **More actions on a pinned cluster:** right-clicking a cluster on the hotbar now offers Settings, which opens the cluster's settings in the focused tab, and Disconnect while the cluster is connected or connecting, or Connect while it is not, beside Unpin.

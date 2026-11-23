@@ -24,7 +24,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 - **Tools and updates:** managed `helm` and `kubectl` downloads; signed in-app updates.
 - **AI agents:** chats with the agent CLIs the person installed (Claude Code, Codex, OpenCode,
   Gemini CLI, custom) over ACP, in an OS sandbox, reaching clusters only through the app's tools.
-  Core, commands and sandbox are in; the panel is next.
+  The panel beside the page, Preferences and each cluster's Agent card drive it.
 
 ## Binding rules
 
