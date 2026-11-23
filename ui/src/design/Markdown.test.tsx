@@ -292,6 +292,35 @@ test("with onLink only web links become buttons that call it", () => {
   expect(
     screen.getByText("(javascript:alert(1))", { exact: false }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "ok" }));
+  fireEvent.click(screen.getByRole("button", { name: "ok (example.com)" }));
   expect(onLink).toHaveBeenCalledWith("https://example.com/a");
+});
+
+test("with onLink a web link names its host, so its text cannot hide where it goes", () => {
+  const onLink = vi.fn();
+  render(
+    <Markdown
+      text="[Kubernetes docs](https://evil.example:8443/x?d=secret) [local](http://localhost:8080/)"
+      onLink={onLink}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Kubernetes docs (evil.example:8443)" }),
+  );
+  expect(onLink).toHaveBeenCalledWith("https://evil.example:8443/x?d=secret");
+  expect(
+    screen.getByRole("button", { name: "local (localhost:8080)" }),
+  ).toBeTruthy();
+});
+
+test("with onLink a web link that does not parse is text", () => {
+  const onLink = vi.fn();
+  render(
+    <Markdown
+      text="[bad](https://) [ok](https://example.com)"
+      onLink={onLink}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /bad/ })).toBeNull();
+  expect(screen.getByText("(https://)", { exact: false })).toBeTruthy();
 });

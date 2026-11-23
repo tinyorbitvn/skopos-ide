@@ -13,10 +13,25 @@ const LinkOpener = createContext<((url: string) => void) | null>(null);
 
 const WEB_LINK = /^https?:\/\//i;
 
-/** A link: a button that opens a web address when the page passed `onLink`, else text. */
+/** The host of a web address, or null when it does not parse to one. */
+function webHost(url: string): string | null {
+  if (!WEB_LINK.test(url)) return null;
+  try {
+    const host = new URL(url).host;
+    return host === "" ? null : host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A link: a button that opens a web address when the page passed `onLink`, else text. The
+ * button names the address's host after its text, so the text cannot hide where it goes.
+ */
 function LinkText(props: { url: string; children?: ReactNode }) {
   const open = useContext(LinkOpener);
-  if (open === null || !WEB_LINK.test(props.url)) {
+  const host = open === null ? null : webHost(props.url);
+  if (open === null || host === null) {
     return createElement(
       "span",
       null,
@@ -33,6 +48,9 @@ function LinkText(props: { url: string; children?: ReactNode }) {
       onClick: () => open(props.url),
     },
     props.children,
+    // The space stays outside the span, or the accessible name runs the two together.
+    " ",
+    createElement("span", { className: styles.url }, `(${host})`),
   );
 }
 

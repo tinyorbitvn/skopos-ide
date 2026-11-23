@@ -54,7 +54,9 @@ test("a message shows its object, and the agent's Markdown opens only web links"
   expect(screen.getByText("Why is it restarting?")).toBeTruthy();
   expect(screen.getByText(/<b>bold<\/b>/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "x" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "runbook" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "runbook (example.com)" }),
+  );
   expect(ipc.callsTo("open_external")).toEqual([
     { url: "https://example.com/r" },
   ]);
