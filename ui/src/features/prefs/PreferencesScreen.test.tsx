@@ -43,6 +43,14 @@ function show(
       { name: "bitnami", url: "https://charts.example/bitnami" },
     ],
     helm_chart_search: () => ({ charts: [], repoProblems: [] }),
+    agents_status: () => [],
+    agent_sandbox_status: () => ({ status: "unsupported" }),
+    agent_prefs: () => ({
+      defaultAgent: null,
+      custom: [],
+      domains: [],
+      folders: [],
+    }),
     ...over,
   });
   render(
@@ -273,7 +281,7 @@ test("the theme is a Segmented control, and Dark applies and saves the theme", a
   expect(usePrefs.getState().prefs?.theme).toBe("dark");
 });
 
-test("Tools and Helm repositories sit between Kubeconfig sources and Appearance", async () => {
+test("Tools, Agents and Helm repositories sit between Kubeconfig sources and Appearance", async () => {
   show();
   await screen.findByTestId("pref-tool-helm");
   expect(
@@ -281,6 +289,7 @@ test("Tools and Helm repositories sit between Kubeconfig sources and Appearance"
   ).toEqual([
     "Kubeconfig sources",
     "Tools",
+    "Agents",
     "Helm repositories",
     "Appearance",
     "Updates",
