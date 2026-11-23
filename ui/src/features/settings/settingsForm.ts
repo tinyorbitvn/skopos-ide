@@ -1,5 +1,5 @@
 import { IpcFailure } from "../../ipc/client";
-import type { ClusterAgentSettings } from "../../ipc/generated/ClusterAgentSettings";
+import type { AgentChanges } from "../../ipc/generated/AgentChanges";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { LabelMatcher } from "../../ipc/generated/LabelMatcher";
 import type { MetricsProvider } from "../../ipc/generated/MetricsProvider";
@@ -48,6 +48,20 @@ export interface SettingsDraft {
   remoteCert: string;
   remoteKey: string;
   remoteCa: string;
+  /** The Agent card: what an agent may change on this cluster. */
+  agentChanges: AgentChanges;
+  /** "Only these namespaces" is chosen. */
+  agentNamespacesOnly: boolean;
+  /** The picked namespaces joined with `,`, so drafts compare by value. */
+  agentNamespaces: string;
+  /** The agent may read Secret values. */
+  agentSecretValues: boolean;
+  /** The agent may run commands in containers. */
+  agentExec: boolean;
+  /** The agent new chats start with, or null for the app default. */
+  agentDefault: string | null;
+  /** Notes sent to the agent at the start of every chat. */
+  agentNotes: string;
 }
 
 /** The password or token field (spec I57, I58), kept apart from the draft. */
@@ -77,9 +91,12 @@ export type DraftField =
   | "remoteLabelName"
   | "remoteLabelValue"
   | "remoteUsername"
-  | "remoteSecret";
+  | "remoteSecret"
+  | "agentNamespaces";
 
 export type DraftErrors = Partial<Record<DraftField, string>>;
+
+export const AGENT_NAMESPACES_ERROR = "Pick at least one namespace.";
 
 export const ICON_MAX_BYTES = 262_144;
 export const ICON_ERROR = "Pick a PNG or SVG image up to 256 KB";
@@ -166,6 +183,13 @@ export function draftFrom(settings: ClusterSettings): SettingsDraft {
     remoteCert: auth?.kind === "mtls" ? auth.certPath : "",
     remoteKey: auth?.kind === "mtls" ? auth.keyPath : "",
     remoteCa: remote?.caPath ?? "",
+    agentChanges: settings.agent.changes,
+    agentNamespacesOnly: settings.agent.namespaces !== null,
+    agentNamespaces: (settings.agent.namespaces ?? []).join(","),
+    agentSecretValues: settings.agent.secretValues,
+    agentExec: settings.agent.exec,
+    agentDefault: settings.agent.defaultAgent,
+    agentNotes: settings.agent.notes,
   };
 }
 
@@ -197,7 +221,19 @@ export function emptyDraft(): SettingsDraft {
     remoteCert: "",
     remoteKey: "",
     remoteCa: "",
+    agentChanges: "ask",
+    agentNamespacesOnly: false,
+    agentNamespaces: "",
+    agentSecretValues: false,
+    agentExec: false,
+    agentDefault: null,
+    agentNotes: "",
   };
+}
+
+/** The picked namespaces, in order. */
+export function agentNamespaceList(draft: SettingsDraft): string[] {
+  return draft.agentNamespaces === "" ? [] : draft.agentNamespaces.split(",");
 }
 
 /** Names split on commas and whitespace, without empty ones or repeats, in order. */
@@ -433,6 +469,9 @@ export function validate(
   if (draft.provider === "remote") {
     Object.assign(errors, remoteErrors(draft, secret));
   }
+  if (draft.agentNamespacesOnly && agentNamespaceList(draft).length === 0) {
+    errors.agentNamespaces = AGENT_NAMESPACES_ERROR;
+  }
   return errors;
 }
 
@@ -495,24 +534,11 @@ function providerSetting(draft: SettingsDraft): MetricsProviderSetting {
   }
 }
 
-/** What the core saves for a cluster whose agent settings were never changed. */
-const AGENT_DEFAULTS: ClusterAgentSettings = {
-  changes: "ask",
-  namespaces: null,
-  secretValues: false,
-  exec: false,
-  defaultAgent: null,
-  notes: "",
-};
-
 /**
  * The settings to save, normalised as the core saves them: trimmed, empty text as null.
- * The page shows no agent settings, so `agent` goes back as it was saved.
+ * The Agent card's fields become the cluster's `agent` settings.
  */
-export function settingsFrom(
-  draft: SettingsDraft,
-  agent: ClusterAgentSettings = AGENT_DEFAULTS,
-): ClusterSettings {
+export function settingsFrom(draft: SettingsDraft): ClusterSettings {
   return {
     displayName: textOrNull(draft.displayName),
     icon: draft.icon,
@@ -522,7 +548,14 @@ export function settingsFrom(
     proxyUrl: textOrNull(draft.proxyUrl),
     nodeShellImage: textOrNull(draft.nodeShellImage),
     metricsProvider: providerSetting(draft),
-    agent,
+    agent: {
+      changes: draft.agentChanges,
+      namespaces: draft.agentNamespacesOnly ? agentNamespaceList(draft) : null,
+      secretValues: draft.agentSecretValues,
+      exec: draft.agentExec,
+      defaultAgent: draft.agentDefault,
+      notes: draft.agentNotes,
+    },
   };
 }
 

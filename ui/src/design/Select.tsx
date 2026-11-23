@@ -14,6 +14,8 @@ export function Select<T extends string>(props: {
   width?: number;
   /** Set on the trigger, the part a pointer clicks. */
   testId?: string;
+  /** The trigger does not open. */
+  disabled?: boolean;
 }) {
   const labelId = useId();
   return (
@@ -26,6 +28,7 @@ export function Select<T extends string>(props: {
       </span>
       <RS.Root
         value={props.value}
+        disabled={props.disabled}
         onValueChange={(v) => props.onChange(v as T)}
       >
         <RS.Trigger

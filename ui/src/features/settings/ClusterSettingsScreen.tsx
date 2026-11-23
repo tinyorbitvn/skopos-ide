@@ -6,7 +6,8 @@ import {
   useId,
   useState,
 } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useAnchorFocus } from "../../app/anchorFocus";
 import { connectionNotes } from "../../app/connectionNotes";
 import {
   Badge,
@@ -32,11 +33,13 @@ import {
   forgetQueries,
   useMetrics,
 } from "../../stores/metrics";
+import { agentsSupported } from "../agents/supported";
 import { useFetch } from "../helm/useFetch";
+import { AgentCard } from "./AgentCard";
 import styles from "./ClusterSettingsScreen.module.css";
 import { dropDraft, keepDraft, keptDraft } from "./drafts";
 import { IconField } from "./IconField";
-import { overviewPath } from "./paths";
+import { AGENT_CARD_ID, overviewPath } from "./paths";
 import {
   type AuthKind,
   draftFrom,
@@ -201,6 +204,8 @@ function SettingsForm(props: {
   initial: ClusterSettings;
 }) {
   const { clusterId } = props;
+  const [params] = useSearchParams();
+  useAnchorFocus(params.get("card") === "agent" ? AGENT_CARD_ID : null, true);
   // Only the cached provider: this page never asks for it.
   const detected = useMetrics((s) => s.providers[clusterId]?.value);
   const [saved, setSaved] = useState(props.initial);
@@ -281,7 +286,7 @@ function SettingsForm(props: {
   async function save(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (!canSave) return;
-    const next = settingsFrom(draft, saved.agent);
+    const next = settingsFrom(draft);
     setSaving(true);
     try {
       // The secret first: a keychain that refuses it leaves the settings unsaved (I59).
@@ -616,6 +621,20 @@ function SettingsForm(props: {
           </div>
         ) : null}
       </section>
+
+      {agentsSupported() ? (
+        <AgentCard
+          clusterName={props.name}
+          draft={draft}
+          errors={errors}
+          update={update}
+          namespaces={
+            props.namespaces.length > 0
+              ? props.namespaces
+              : saved.accessibleNamespaces
+          }
+        />
+      ) : null}
 
       <footer className={styles.footer}>
         <p

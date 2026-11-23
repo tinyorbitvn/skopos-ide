@@ -9,10 +9,12 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import type { AgentStatus } from "../../ipc/generated/AgentStatus";
 import type { ClusterAgentSettings } from "../../ipc/generated/ClusterAgentSettings";
 import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import type { ClusterSettings } from "../../ipc/generated/ClusterSettings";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
+import { resetAgentsForTest } from "../../stores/agents";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import {
   queryKey,
@@ -23,6 +25,7 @@ import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { clusterSettings, metricsResult, prometheus } from "../../test/metrics";
 import { CONNECTED } from "../../test/terminal";
+import { setAgentsSupportedForTest } from "../agents/supported";
 import { ClusterSettingsRoute } from "./ClusterSettingsScreen";
 import { keptDraft, resetDraftsForTest } from "./drafts";
 
@@ -30,8 +33,27 @@ beforeEach(() => {
   resetCatalogForTest();
   resetMetricsForTest();
   resetDraftsForTest();
+  resetAgentsForTest();
+  setAgentsSupportedForTest(true);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  setAgentsSupportedForTest(true);
+});
+
+function agentRow(partial: Partial<AgentStatus>): AgentStatus {
+  return {
+    id: "claude",
+    name: "Claude",
+    state: { state: "ready" },
+    detail: "/usr/bin/claude",
+    hint: null,
+    isDefault: false,
+    custom: false,
+    hosts: [],
+    ...partial,
+  };
+}
 
 const ICON = "data:image/png;base64,AAAA";
 
@@ -83,6 +105,10 @@ async function show(
   const backend = mockBackend({
     cluster_settings_get: () => options.saved ?? clusterSettings(),
     cluster_settings_set: () => null,
+    agents_status: () => [
+      agentRow({ isDefault: true }),
+      agentRow({ id: "codex", name: "Codex" }),
+    ],
     ...options.handlers,
   });
   render(
@@ -218,6 +244,7 @@ test("the head names the cluster and its kubeconfig, and the fields show the sav
     "Terminal and node shell",
     "Network",
     "Metrics",
+    "Agent",
   ]);
   expect(input("settings-display-name").value).toBe("Prod");
   expect(input("settings-display-name").placeholder).toBe("kind-x");
@@ -1227,4 +1254,48 @@ test("the head offers nothing to stop for an exec command that is not allowed", 
 
   expect(screen.getByTestId("settings-note-exec")).toBeTruthy();
   expect(screen.queryByTestId("settings-exec-allowed")).toBeNull();
+});
+
+test("the Agent card saves with the page's draft", async () => {
+  const backend = await show({
+    state: CONNECTED,
+    saved: FULL,
+  });
+  const card = await screen.findByTestId("settings-agent-card");
+  fireEvent.click(within(card).getByRole("radio", { name: /Don't ask/ }));
+  expect(
+    within(card).getByText(
+      "Changes run without asking. Use this only for a cluster you can rebuild.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(card).getByText(/Under Don't ask, an agent that changes workloads/),
+  ).toBeTruthy();
+  fireEvent.click(
+    within(card).getByLabelText("Let the agent run commands in containers"),
+  );
+  fireEvent.change(within(card).getByLabelText("Notes for the agent"), {
+    target: { value: "Use Argo CD." },
+  });
+  await save();
+  expect(savedPayload(backend)).toMatchObject({
+    agent: { changes: "dontAsk", exec: true, notes: "Use Argo CD." },
+  });
+});
+
+test("Only these namespaces needs a namespace before Save", async () => {
+  await show({ saved: FULL });
+  const card = await screen.findByTestId("settings-agent-card");
+  fireEvent.click(
+    within(card).getByRole("radio", { name: /Only these namespaces/ }),
+  );
+  expect(within(card).getByText("Pick at least one namespace.")).toBeTruthy();
+  expect(button("settings-save").hasAttribute("disabled")).toBe(true);
+});
+
+test("on Windows the page has no Agent card", async () => {
+  setAgentsSupportedForTest(false);
+  await show();
+  await screen.findByTestId("settings-save");
+  expect(screen.queryByTestId("settings-agent-card")).toBeNull();
 });
