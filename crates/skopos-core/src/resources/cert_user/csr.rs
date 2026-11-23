@@ -217,6 +217,10 @@ mod tests {
     #[test]
     fn the_key_is_pkcs8_pem() {
         let (key, _) = generate("carol", &[]).unwrap();
-        assert!(key.pem().starts_with("-----BEGIN PRIVATE KEY-----\n"));
+        // rcgen ends PEM lines with CRLF on Windows; PEM readers take either.
+        assert_eq!(
+            key.pem().lines().next(),
+            Some("-----BEGIN PRIVATE KEY-----")
+        );
     }
 }

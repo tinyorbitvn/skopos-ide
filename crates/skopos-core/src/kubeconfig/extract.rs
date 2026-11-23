@@ -341,9 +341,10 @@ contexts:
     #[test]
     fn extract_leaves_a_bare_or_absolute_gcp_command_alone() {
         let dir = tempfile::tempdir().unwrap();
-        for command in ["gcloud", "/usr/bin/gcloud"] {
-            assert_eq!(extracted_cmd_path(dir.path(), command), command);
-        }
+        assert_eq!(extracted_cmd_path(dir.path(), "gcloud"), "gcloud");
+        // Absolute on this platform: `/usr/bin/gcloud` has no drive on Windows.
+        let abs = dir.path().join("gcloud").display().to_string();
+        assert_eq!(extracted_cmd_path(dir.path(), &abs), abs);
     }
 
     #[test]
