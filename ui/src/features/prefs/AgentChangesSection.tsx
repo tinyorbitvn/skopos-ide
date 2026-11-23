@@ -17,6 +17,7 @@ function ChangesRow({ cluster }: { cluster: ClusterEntry }) {
   const [attempt, setAttempt] = useState(0);
   const status = clusterStatus(cluster.state);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` reads again on Try again.
   useEffect(() => {
     let live = true;
     setLoadError(null);

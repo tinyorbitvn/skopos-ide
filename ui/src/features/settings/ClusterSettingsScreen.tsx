@@ -211,7 +211,8 @@ function SettingsForm(props: {
   const [saved, setSaved] = useState(props.initial);
   // A draft kept from before a remount wins over the settings just read.
   const [draft, setDraft] = useState(
-    () => restoredDraft(clusterId, draftFrom(props.initial)) ??
+    () =>
+      restoredDraft(clusterId, draftFrom(props.initial)) ??
       draftFrom(props.initial),
   );
   const [justSaved, setJustSaved] = useState(false);
