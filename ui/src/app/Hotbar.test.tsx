@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { toast } from "../design";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
@@ -32,13 +33,18 @@ const beta = clusterEntry({
   state: { status: "connecting" },
 });
 
-async function show(clusters: ClusterEntry[], hotbar: string[]) {
+async function show(
+  clusters: ClusterEntry[],
+  hotbar: string[],
+  more: Parameters<typeof mockBackend>[0] = {},
+) {
   const ipc = mockBackend({
     catalog_list: () => clusters,
     catalog_warnings: () => [],
     hotbar_get: () => hotbar,
     hotbar_set: () => null,
     update_check: () => updateState({ phase: { type: "upToDate" } }),
+    ...more,
   });
   await useCatalog.getState().init();
   render(
@@ -209,6 +215,85 @@ test("unpin from the context menu", async () => {
   );
   await waitFor(() => expect(shownOrder()).toEqual(["hotbar-item-b"]));
   expect(screen.getByTestId("where").textContent).toBe("/catalog");
+});
+
+test("the context menu opens the cluster's settings in the focused tab", async () => {
+  await show([alpha, beta], ["a", "b"]);
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-a"));
+  fireEvent.click(await screen.findByTestId("menu-item-settings"));
+
+  expect(screen.getByTestId("where").textContent).toBe("/cluster/a/settings");
+  expect(shownPaths()).toEqual(["/cluster/a/settings"]);
+});
+
+test("the context menu disconnects a connected or connecting cluster", async () => {
+  const ipc = await show([alpha, beta], ["a", "b"], {
+    cluster_disconnect: () => null,
+  });
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-b"));
+  expect(screen.queryByTestId("menu-item-connect")).toBeNull();
+  fireEvent.click(await screen.findByTestId("menu-item-disconnect"));
+
+  await waitFor(() =>
+    expect(ipc.callsTo("cluster_disconnect")).toEqual([{ id: "b" }]),
+  );
+  expect(screen.getByTestId("where").textContent).toBe("/catalog");
+});
+
+test("the context menu connects a disconnected cluster", async () => {
+  const ipc = await show([alpha, beta], ["a", "b"], {
+    cluster_connect: () => ({ status: "connecting" }),
+  });
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-a"));
+  expect(screen.queryByTestId("menu-item-disconnect")).toBeNull();
+  fireEvent.click(await screen.findByTestId("menu-item-connect"));
+
+  await waitFor(() =>
+    expect(ipc.callsTo("cluster_connect")).toEqual([{ id: "a" }]),
+  );
+});
+
+test("Connect is disabled, with the reason, for a kubeconfig with a problem", async () => {
+  const broken = clusterEntry({
+    id: "x",
+    contextName: "broken",
+    problem: "The kubeconfig names no server for this context",
+  });
+  const ipc = await show([broken], ["x"], {
+    cluster_connect: () => ({ status: "connecting" }),
+  });
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-x"));
+  const connect = await screen.findByTestId("menu-item-connect");
+  expect(connect.getAttribute("data-disabled")).not.toBeNull();
+  expect(connect.getAttribute("title")).toBe(
+    "The kubeconfig names no server for this context",
+  );
+  fireEvent.click(connect);
+  await act(flush);
+  expect(ipc.callsTo("cluster_connect")).toEqual([]);
+});
+
+test("a failed disconnect shows the backend's message", async () => {
+  const error = vi.spyOn(toast, "error");
+  await show([alpha, beta], ["a", "b"], {
+    cluster_disconnect: () => {
+      throw new Error("the cluster is busy");
+    },
+  });
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-b"));
+  fireEvent.click(await screen.findByTestId("menu-item-disconnect"));
+
+  await waitFor(() =>
+    expect(error).toHaveBeenCalledWith(
+      "Could not disconnect",
+      expect.stringContaining("the cluster is busy"),
+    ),
+  );
 });
 
 test("a long non-ASCII name stays on one line in the tooltip, in full", async () => {

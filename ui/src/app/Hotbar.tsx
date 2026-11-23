@@ -35,14 +35,16 @@ import {
   Settings,
   TriangleAlert,
 } from "../design/icons";
+import { settingsPath } from "../features/settings/paths";
 import { checkForUpdates } from "../features/updates/updateStore";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { useCatalog } from "../stores/catalog";
+import { connectCluster, disconnectCluster } from "../stores/clusters";
 import { useShell } from "../stores/shell";
 import { clusterStatus } from "./clusterStatus";
 import { clusterColor, clusterInitials } from "./clusterVisual";
 import styles from "./Hotbar.module.css";
-import { useNavItem } from "./tabs/navigation";
+import { openPath, useNavItem } from "./tabs/navigation";
 
 function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
   const unpin = useCatalog((s) => s.unpin);
@@ -54,6 +56,9 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: cluster.id });
   const status = clusterStatus(cluster.state);
+  const live =
+    cluster.state.status === "connected" ||
+    cluster.state.status === "connecting";
 
   return (
     <li
@@ -67,8 +72,28 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
       <ContextMenu
         items={[
           {
+            id: "settings",
+            label: "Settings",
+            onSelect: () => void openPath(settingsPath(cluster.id), "current"),
+          },
+          live
+            ? {
+                id: "disconnect",
+                label: "Disconnect",
+                onSelect: () => void disconnectCluster(cluster.id),
+              }
+            : {
+                id: "connect",
+                label: "Connect",
+                // As in the catalog: a kubeconfig with a problem cannot connect.
+                disabled: cluster.problem !== null,
+                tooltip: cluster.problem ?? undefined,
+                onSelect: () => void connectCluster(cluster.id),
+              },
+          {
             id: "unpin",
             label: "Unpin",
+            separated: true,
             onSelect: () => void unpin(cluster.id),
           },
         ]}

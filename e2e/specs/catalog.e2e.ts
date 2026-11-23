@@ -148,9 +148,10 @@ describe("catalog", () => {
     await shown("catalog-row-alpha");
   });
 
-  it("unpins from the hotbar context menu", async () => {
+  /** Opens a hotbar item's context menu. */
+  async function openHotbarMenu(name: string): Promise<void> {
     // The driver's right button sends no contextmenu event, so send that part.
-    const item = await hotbarItem("alpha");
+    const item = await hotbarItem(name);
     await browser.execute((el) => {
       const target = el as unknown as HTMLElement;
       const { x, y } = target.getBoundingClientRect();
@@ -162,6 +163,19 @@ describe("catalog", () => {
         }),
       );
     }, item);
+  }
+
+  it("opens a cluster's settings from the hotbar context menu", async () => {
+    await openHotbarMenu("alpha");
+    await clickWhenShown("menu-item-settings");
+    await shown("cluster-settings", 30_000);
+
+    await clickWhenShown("nav-catalog");
+    await shown("catalog-row-alpha");
+  });
+
+  it("unpins from the hotbar context menu", async () => {
+    await openHotbarMenu("alpha");
     await clickWhenShown("menu-item-unpin");
 
     await expectHotbar(["beta"]);
