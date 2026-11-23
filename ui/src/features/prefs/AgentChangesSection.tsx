@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { clusterStatus } from "../../app/clusterStatus";
-import { EmptyState, Segmented, StatusDot, toast } from "../../design";
+import { Button, EmptyState, Segmented, StatusDot, toast } from "../../design";
 import { TriangleAlert } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
@@ -13,22 +13,26 @@ import { prefsSectionId } from "./paths";
 
 function ChangesRow({ cluster }: { cluster: ClusterEntry }) {
   const [value, setValue] = useState<AgentChanges | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const status = clusterStatus(cluster.state);
 
   useEffect(() => {
     let live = true;
+    setLoadError(null);
     api.clusterAgentSettings(cluster.id).then(
       (settings) => {
         if (live) setValue(settings.changes);
       },
-      () => {
-        if (live) setValue("ask");
+      (error) => {
+        // Never show a default as if it were the saved value.
+        if (live) setLoadError(failureMessage(error));
       },
     );
     return () => {
       live = false;
     };
-  }, [cluster.id]);
+  }, [cluster.id, attempt]);
 
   async function pick(changes: AgentChanges): Promise<void> {
     const before = value;
@@ -63,6 +67,19 @@ function ChangesRow({ cluster }: { cluster: ClusterEntry }) {
           />
         ) : null}
       </div>
+      {loadError !== null ? (
+        <p className={styles.warning} role="alert">
+          <TriangleAlert size={14} aria-hidden="true" />
+          {`Could not read the setting for ${cluster.name}: ${loadError}`}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setAttempt((n) => n + 1)}
+          >
+            Try again
+          </Button>
+        </p>
+      ) : null}
       {value === "dontAsk" && cluster.name.startsWith("prod") ? (
         <p className={styles.warning}>
           <TriangleAlert size={14} aria-hidden="true" />

@@ -180,7 +180,12 @@ export function rolloutProgress(
     (current ?? 0) === desired &&
     ready === desired &&
     available === desired &&
-    (updated === undefined || updated === desired) &&
+    // omitempty: a zero count is left out of status. Once the controller has written
+    // the status (observedGeneration is there), a missing count reads as 0, as in
+    // kubectl rollout status. A trimmed row without it keeps only the counts.
+    (updated === undefined
+      ? observed === undefined || desired === 0
+      : updated === desired) &&
     (generation === undefined ||
       observed === undefined ||
       observed >= generation);

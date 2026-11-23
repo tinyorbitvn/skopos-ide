@@ -76,3 +76,28 @@ test("no clusters reads No clusters yet", async () => {
   render(<AgentChangesSection />);
   expect(await screen.findByText("No clusters yet")).toBeTruthy();
 });
+
+test("a failed read shows the message and Try again, not a default", async () => {
+  let fail = true;
+  await show({
+    cluster_agent_settings: () => {
+      if (fail) throw new Error("kubeconfig is gone");
+      return { ...SETTINGS, changes: "dontAsk" };
+    },
+  });
+  const a = await screen.findByTestId("pref-changes-a");
+  await waitFor(() =>
+    expect(within(a).getByRole("alert").textContent).toContain(
+      "kubeconfig is gone",
+    ),
+  );
+  expect(within(a).queryByRole("radio")).toBeNull();
+  fail = false;
+  fireEvent.click(within(a).getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(
+      (within(a).getByRole("radio", { name: "Don't ask" }) as HTMLInputElement)
+        .checked,
+    ).toBe(true),
+  );
+});

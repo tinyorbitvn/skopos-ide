@@ -219,6 +219,18 @@ test("a rollout settles when every Pod is ready on the new generation", () => {
       }),
     ),
   ).toEqual({ desired: 3, ready: 3, settled: false });
+  // updatedReplicas is omitted while it is 0: the first sync of a rolling update.
+  expect(
+    rolloutProgress(
+      "Deployment",
+      deployment({
+        observedGeneration: 2,
+        replicas: 3,
+        readyReplicas: 3,
+        availableReplicas: 3,
+      }),
+    ).settled,
+  ).toBe(false);
   expect(
     rolloutProgress(
       "Deployment",

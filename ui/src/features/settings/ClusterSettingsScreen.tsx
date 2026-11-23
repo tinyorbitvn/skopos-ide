@@ -37,7 +37,7 @@ import { agentsSupported } from "../agents/supported";
 import { useFetch } from "../helm/useFetch";
 import { AgentCard } from "./AgentCard";
 import styles from "./ClusterSettingsScreen.module.css";
-import { dropDraft, keepDraft, keptDraft } from "./drafts";
+import { dropDraft, keepDraft, restoredDraft } from "./drafts";
 import { IconField } from "./IconField";
 import { AGENT_CARD_ID, overviewPath } from "./paths";
 import {
@@ -211,7 +211,8 @@ function SettingsForm(props: {
   const [saved, setSaved] = useState(props.initial);
   // A draft kept from before a remount wins over the settings just read.
   const [draft, setDraft] = useState(
-    () => keptDraft(clusterId) ?? draftFrom(props.initial),
+    () => restoredDraft(clusterId, draftFrom(props.initial)) ??
+      draftFrom(props.initial),
   );
   const [justSaved, setJustSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -246,9 +247,9 @@ function SettingsForm(props: {
     !secretSaved.loading;
 
   useEffect(() => {
-    if (changed) keepDraft(clusterId, draft);
+    if (changed) keepDraft(clusterId, draft, draftFrom(saved));
     else dropDraft(clusterId);
-  }, [clusterId, draft, changed]);
+  }, [clusterId, draft, changed, saved]);
 
   function update(fields: Partial<SettingsDraft>): void {
     setDraft((d) => ({ ...d, ...fields }));
