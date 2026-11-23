@@ -10,6 +10,7 @@ release notes (see `docs/releasing.md`).
 - **Resize the columns of every table:** the tables of Helm releases, Helm charts, port forwards and Users & Groups keep the column widths you give them after a restart too, as a kind's list does. The tables in drawers, such as a workload's pods, a Helm release's resources and history and a chart's versions, now resize the same way: drag the right edge of a column's header, or focus it and use Left and Right; the last column takes the rest of the width
 - **Fit a column to its content:** a double-click on a column's edge, or Enter on its focused edge, makes the column as wide as its header and the rows on screen need, where it gave the column back its own width before
 - **Software bill of materials:** each release lists the Rust crates and npm packages it ships in `SkoposIDE_<version>.cdx.json` (CycloneDX), next to the installers.
+- **Reachability:** Network › Reachability shows which workloads of a namespace may talk to which, by port and HTTP rule, from Kubernetes and Cilium policies.
 
 ## [0.12.1] - 2026-11-23
 

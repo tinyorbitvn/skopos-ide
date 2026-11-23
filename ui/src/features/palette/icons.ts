@@ -28,6 +28,7 @@ import {
   Replica,
   Secret,
   Server,
+  ShieldCheck,
   Users,
 } from "../../design/icons";
 
@@ -71,6 +72,7 @@ export const ROUTE_ICONS: Partial<Record<string, IconComponent>> = {
   "helm/releases": PackageCheck,
   "node-topology": LayoutGrid,
   "users-groups": Users,
+  "network/reachability": ShieldCheck,
 };
 
 export const OVERVIEW_ICON: IconComponent = LayoutDashboard;

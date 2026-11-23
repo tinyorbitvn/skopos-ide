@@ -86,11 +86,14 @@ const EXPECTED: [string, string[]][] = [
   [
     "network",
     [
+      "route:network/reachability",
       "/services",
       "discovery.k8s.io/endpointslices",
       "networking.k8s.io/ingresses",
       "networking.k8s.io/ingressclasses",
       "networking.k8s.io/networkpolicies",
+      "cilium.io/ciliumnetworkpolicies",
+      "cilium.io/ciliumclusterwidenetworkpolicies",
       "gateway.networking.k8s.io/gatewayclasses",
       "gateway.networking.k8s.io/gateways",
       "gateway.networking.k8s.io/listenersets",
@@ -184,14 +187,14 @@ test("sections with no visible items disappear; routes need no listable resource
     "helm",
     ["route:helm/charts", "route:helm/releases"],
   ];
+  const network: [string, string[]] = [
+    "network",
+    ["route:network/reachability", "route:port-forwards"],
+  ];
   expect(
     shape([info("", "pods"), info("", "nodes", { canList: false })]),
-  ).toEqual([
-    helm,
-    ["workloads", ["/pods"]],
-    ["network", ["route:port-forwards"]],
-  ]);
-  expect(shape([])).toEqual([helm, ["network", ["route:port-forwards"]]]);
+  ).toEqual([helm, ["workloads", ["/pods"]], network]);
+  expect(shape([])).toEqual([helm, network]);
 });
 
 test("Helm is an Apps section of two routes, with its logo", () => {
@@ -421,10 +424,10 @@ test("each Argo CD page shows only when its kind is served", () => {
   ).toEqual(["argoproj.io/applications", "argoproj.io/appprojects"]);
 });
 
-test("the Gateway API kinds sit in Network between NetworkPolicies and Port Forwarding", () => {
+test("the Gateway API kinds sit in Network between the Cilium policies and Port Forwarding", () => {
   const network = NAV_SECTIONS.find((s) => s.id === "network");
   const keys = network?.items.map(navItemKey) ?? [];
-  const at = keys.indexOf("networking.k8s.io/networkpolicies");
+  const at = keys.indexOf("cilium.io/ciliumclusterwidenetworkpolicies");
   expect(keys.slice(at + 1)).toEqual([
     "gateway.networking.k8s.io/gatewayclasses",
     "gateway.networking.k8s.io/gateways",
@@ -438,7 +441,7 @@ test("the Gateway API kinds sit in Network between NetworkPolicies and Port Forw
     "gateway.networking.k8s.io/referencegrants",
     "route:port-forwards",
   ]);
-  expect(network?.items.slice(5, 15).map((i) => i.label)).toEqual([
+  expect(network?.items.slice(8, 18).map((i) => i.label)).toEqual([
     "GatewayClasses",
     "Gateways",
     "ListenerSets",
@@ -449,6 +452,76 @@ test("the Gateway API kinds sit in Network between NetworkPolicies and Port Forw
     "UDPRoutes",
     "BackendTLSPolicies",
     "ReferenceGrants",
+  ]);
+});
+
+test("Network starts with Reachability, which shows whenever Network does", () => {
+  const network = NAV_SECTIONS.find((s) => s.id === "network");
+  expect(network?.items[0]).toEqual({
+    type: "route",
+    label: "Reachability",
+    path: "network/reachability",
+  });
+  const shown = (resources: ApiResourceInfo[]) =>
+    visibleSections(resources)
+      .find((s) => s.id === "network")
+      ?.items.map(navItemKey);
+  expect(shown([])?.[0]).toBe("route:network/reachability");
+  expect(shown([info("", "services")])?.slice(0, 2)).toEqual([
+    "route:network/reachability",
+    "/services",
+  ]);
+});
+
+test("the two Cilium policy kinds follow NetworkPolicies, show where served, and leave Custom Resources", () => {
+  const network = NAV_SECTIONS.find((s) => s.id === "network");
+  const labels = network?.items.map(navLabel) ?? [];
+  const at = labels.indexOf("NetworkPolicies");
+  expect(labels.slice(at, at + 3)).toEqual([
+    "NetworkPolicies",
+    "CiliumNetworkPolicies",
+    "CiliumClusterwideNetworkPolicies",
+  ]);
+  const served = [
+    info("networking.k8s.io", "networkpolicies", {}, "NetworkPolicy"),
+    info("cilium.io", "ciliumnetworkpolicies", {}, "CiliumNetworkPolicy"),
+    info(
+      "cilium.io",
+      "ciliumclusterwidenetworkpolicies",
+      {},
+      "CiliumClusterwideNetworkPolicy",
+    ),
+    info("cilium.io", "ciliumendpoints", {}, "CiliumEndpoint"),
+    info("cilium.io", "ciliumidentities", {}, "CiliumIdentity"),
+  ];
+  expect(
+    visibleSections(served)
+      .find((s) => s.id === "network")
+      ?.items.map(navItemKey),
+  ).toEqual([
+    "route:network/reachability",
+    "networking.k8s.io/networkpolicies",
+    "cilium.io/ciliumnetworkpolicies",
+    "cilium.io/ciliumclusterwidenetworkpolicies",
+    "route:port-forwards",
+  ]);
+  expect(
+    visibleSections(served.slice(0, 1))
+      .find((s) => s.id === "network")
+      ?.items.map(navItemKey),
+  ).toEqual([
+    "route:network/reachability",
+    "networking.k8s.io/networkpolicies",
+    "route:port-forwards",
+  ]);
+  expect(customResourceGroups(served)).toEqual([
+    {
+      group: "cilium.io",
+      items: [
+        { label: "CiliumEndpoint", plural: "ciliumendpoints" },
+        { label: "CiliumIdentity", plural: "ciliumidentities" },
+      ],
+    },
   ]);
 });
 
@@ -489,6 +562,7 @@ test("Network adds the other listable kinds of both Gateway API groups, sorted, 
     info("example.com", "widgets", {}, "Widget"),
   ]);
   expect(items.map((i) => [navItemKey(i), i.label])).toEqual([
+    ["route:network/reachability", "Reachability"],
     ["gateway.networking.k8s.io/gateways", "Gateways"],
     ["gateway.networking.k8s.io/referencegrants", "ReferenceGrants"],
     ["gateway.networking.k8s.io/futureroutes", "FutureRoutes"],
@@ -501,7 +575,7 @@ test("Network adds the other listable kinds of both Gateway API groups, sorted, 
     ["gateway.networking.x-k8s.io/xtelemetrypolicies", "XTelemetryPolicies"],
     ["route:port-forwards", "Port Forwarding"],
   ]);
-  expect(items[2]).toEqual({
+  expect(items[3]).toEqual({
     type: "resource",
     label: "FutureRoutes",
     group: "gateway.networking.k8s.io",

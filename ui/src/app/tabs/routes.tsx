@@ -18,6 +18,7 @@ import {
   PackagePlus,
   PackageSearch,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   SquareDashed,
   Users,
@@ -33,6 +34,7 @@ import {
 } from "../../features/helm/HelmFormScreen";
 import { HelmReleasesRoute } from "../../features/helm/HelmReleasesScreen";
 import { MapRoute } from "../../features/map/MapRoute";
+import { ReachabilityScreen } from "../../features/network/ReachabilityScreen";
 import { OVERVIEW_ICONS } from "../../features/palette/icons";
 import { PortForwardsRoute } from "../../features/portForward/PortForwardsScreen";
 import { PreferencesScreen } from "../../features/prefs/PreferencesScreen";
@@ -64,6 +66,7 @@ export function tabRoutes(): RouteObject[] {
         { path: "nodes", element: <NodesOverview /> },
         { path: "namespaces", element: <NamespacesOverview /> },
         { path: "network", element: <NetworkOverview /> },
+        { path: "network/reachability", element: <ReachabilityScreen /> },
         { path: "storage", element: <StorageOverview /> },
         { path: "r/:group/:plural", element: <ResourceRoute /> },
         { path: "port-forwards", element: <PortForwardsRoute /> },
@@ -155,6 +158,11 @@ const SCREENS: readonly Screen[] = [
     pattern: "/cluster/:id/network",
     name: named("Network overview"),
     icon: OVERVIEW_ICONS.network,
+  },
+  {
+    pattern: "/cluster/:id/network/reachability",
+    name: named("Reachability"),
+    icon: ShieldCheck,
   },
   {
     pattern: "/cluster/:id/storage",

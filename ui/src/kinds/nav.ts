@@ -110,6 +110,7 @@ function r(label: string, group: string, plural: string): NavResource {
 const GATEWAY = "gateway.networking.k8s.io";
 const GATEWAY_EXPERIMENTAL = "gateway.networking.x-k8s.io";
 const ARGO = "argoproj.io";
+const CILIUM = "cilium.io";
 /** Dynamic Resource Allocation: Device Resources lists its kinds. */
 const RESOURCE = "resource.k8s.io";
 
@@ -136,10 +137,11 @@ const ARGO_CD: NavResource[] = [
  * (F17, section overviews spec §3.7), which shows while the section does. Port
  * Forwarding and Helm's Charts and Releases are routes of the cluster screen, not
  * resource kinds. Custom Resources starts with Definitions; the entries for each CRD are
- * added by `customResourceGroups`. The Gateway API kinds are under Network, where
- * `visibleSections` adds the other served kinds of `GATEWAY_GROUPS` (spec M2, M3), and
- * the Dynamic Resource Allocation kinds have their own section (Device Resources); items
- * hide where the cluster does not serve them.
+ * added by `customResourceGroups`. Network starts with the Reachability page and lists the
+ * two Cilium policy kinds after NetworkPolicies (network policies spec §3.1). The Gateway
+ * API kinds are under Network, where `visibleSections` adds the other served kinds of
+ * `GATEWAY_GROUPS` (spec M2, M3), and the Dynamic Resource Allocation kinds have their own
+ * section (Device Resources); items hide where the cluster does not serve them.
  */
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -242,11 +244,18 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: glyph("network"),
     overview: "network",
     items: [
+      { type: "route", label: "Reachability", path: "network/reachability" },
       r("Services", "", "services"),
       r("EndpointSlices", "discovery.k8s.io", "endpointslices"),
       r("Ingresses", "networking.k8s.io", "ingresses"),
       r("IngressClasses", "networking.k8s.io", "ingressclasses"),
       r("NetworkPolicies", "networking.k8s.io", "networkpolicies"),
+      r("CiliumNetworkPolicies", CILIUM, "ciliumnetworkpolicies"),
+      r(
+        "CiliumClusterwideNetworkPolicies",
+        CILIUM,
+        "ciliumclusterwidenetworkpolicies",
+      ),
       r("GatewayClasses", GATEWAY, "gatewayclasses"),
       r("Gateways", GATEWAY, "gateways"),
       r("ListenerSets", GATEWAY, "listenersets"),
@@ -410,7 +419,7 @@ function otherGatewayItems(resources: ApiResourceInfo[]): NavResource[] {
 /**
  * Removes the items that are not served or not listable, then empty sections and empty
  * branches. Network also gets the other served Gateway API kinds, just before Port
- * Forwarding.
+ * Forwarding, found by its path: Reachability is a route too (network policies R9).
  */
 export function visibleSections(resources: ApiResourceInfo[]): NavSection[] {
   const ok = listable(resources);
@@ -425,7 +434,9 @@ export function visibleSections(resources: ApiResourceInfo[]): NavSection[] {
   return NAV_SECTIONS.map((section) => {
     let items = section.items.filter(shows);
     if (section.id === "network" && gateway.length > 0) {
-      const route = items.findIndex((i) => i.type === "route");
+      const route = items.findIndex(
+        (i) => i.type === "route" && i.path === "port-forwards",
+      );
       const at = route === -1 ? items.length : route;
       items = [...items.slice(0, at), ...gateway, ...items.slice(at)];
     }

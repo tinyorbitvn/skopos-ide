@@ -1,7 +1,12 @@
 import { expect, test, vi } from "vitest";
 import type { CommandContext } from "../../app/commands";
 import { toast } from "../../design";
-import { ChevronRight, LayoutGrid, Server } from "../../design/icons";
+import {
+  ChevronRight,
+  LayoutGrid,
+  Server,
+  ShieldCheck,
+} from "../../design/icons";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import {
@@ -296,6 +301,7 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
     ["palette-page-helm/releases", "Releases", "Page"],
     ["palette-page-r/core/pods", "Pods", "Page"],
     ["palette-page-r/core/configmaps", "ConfigMaps", "Page"],
+    ["palette-page-network/reachability", "Reachability", "Page"],
     ["palette-page-port-forwards", "Port Forwarding", "Page"],
     ["palette-page-r/example.com/widgets", "Widget", "Page"],
   ]);
@@ -309,6 +315,7 @@ test("pages follow the sidebar: the overviews, its items, then custom resources"
     ["/cluster/c1/helm/releases"],
     ["/cluster/c1/r/core/pods"],
     ["/cluster/c1/r/core/configmaps"],
+    ["/cluster/c1/network/reachability"],
     ["/cluster/c1/port-forwards"],
     ["/cluster/c1/r/example.com/widgets"],
   ]);
@@ -376,6 +383,17 @@ test("Nodes gives three pages: its overview, its list and Topology", () => {
   ]);
 });
 
+test("Reachability is a page of Network with its shield icon", () => {
+  const page = pageEntries("c1", []).find(
+    (p) => p.testId === "palette-page-network/reachability",
+  );
+  expect([page?.label, page?.icon, page?.path]).toEqual([
+    "Reachability",
+    ShieldCheck,
+    "/cluster/c1/network/reachability",
+  ]);
+});
+
 test("the other Gateway API kinds are pages of Network once, never custom resources", () => {
   const pages = pageEntries("c1", [
     info("gateway.networking.k8s.io", "gateways", "Gateway"),
@@ -386,6 +404,7 @@ test("the other Gateway API kinds are pages of Network once, never custom resour
     ["palette-page-network", "Network overview"],
     ["palette-page-helm/charts", "Charts"],
     ["palette-page-helm/releases", "Releases"],
+    ["palette-page-network/reachability", "Reachability"],
     ["palette-page-r/gateway.networking.k8s.io/gateways", "Gateways"],
     ["palette-page-r/gateway.networking.x-k8s.io/xmeshes", "XMeshes"],
     ["palette-page-port-forwards", "Port Forwarding"],
@@ -398,6 +417,7 @@ test("without discovery, Pages hold Overview, the Network overview and the route
     "palette-page-network",
     "palette-page-helm/charts",
     "palette-page-helm/releases",
+    "palette-page-network/reachability",
     "palette-page-port-forwards",
   ]);
 });

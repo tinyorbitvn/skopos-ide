@@ -1,0 +1,178 @@
+/* The reachability matrix (network policies spec §3.2, the canvas board's option A). */
+.matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  font: var(--type-caption);
+  color: var(--text-primary);
+}
+
+.matrix th,
+.matrix td {
+  padding: var(--space-2);
+  vertical-align: middle;
+}
+
+/* The header row and the first column stay put while the matrix scrolls in its box. */
+.corner,
+.colHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-card);
+}
+
+.corner {
+  left: 0;
+  z-index: 2;
+}
+
+.colHead {
+  min-width: 88px;
+  max-width: 140px;
+  text-align: left;
+  vertical-align: bottom;
+  font-weight: var(--weight-medium);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.rowHead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  text-align: left;
+  font-weight: var(--weight-medium);
+  background: var(--surface-card);
+}
+
+/* The outside columns start after a gap with a rule. */
+.edge {
+  border-left: 1px solid var(--border-subtle);
+  padding-left: var(--space-5);
+}
+
+.headName,
+.headSub {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headSub {
+  font-weight: var(--weight-regular);
+  color: var(--text-tertiary);
+}
+
+.colHead[data-selected] .headName {
+  color: var(--text-accent);
+}
+
+.headButton,
+.headLabel {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xs);
+  text-align: left;
+}
+
+.headButton {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+.headButton:hover {
+  background: var(--surface-hover);
+}
+
+.headButton:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.headButton[aria-pressed="true"] {
+  background: var(--surface-selected);
+}
+
+.headButton[aria-pressed="true"] .headName {
+  color: var(--text-accent);
+}
+
+.separator {
+  padding-top: var(--space-7);
+  text-align: left;
+  font: var(--type-overline);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.separatorText {
+  position: sticky;
+  left: var(--space-3);
+}
+
+/* One verdict: Allowed green, Open amber, Denied red, Blocked grey (spec §3.2). */
+.cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 80px;
+  min-height: 40px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  transition: var(--transition-control);
+}
+
+.cellText {
+  overflow-wrap: anywhere;
+}
+
+.some {
+  font-family: var(--font-sans);
+  color: inherit;
+}
+
+.allowed {
+  background: var(--status-nominal-soft);
+  color: var(--status-nominal-text);
+}
+
+.open {
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+}
+
+.denied {
+  background: var(--status-critical-soft);
+  color: var(--status-critical-text);
+}
+
+.blocked {
+  background: var(--surface-inset);
+  color: var(--text-tertiary);
+}
+
+.none {
+  align-items: center;
+  background: transparent;
+  color: var(--text-disabled);
+}
+
+/* Cells of neither the selected row nor its column. */
+.dim {
+  opacity: 0.38;
+}
+
+.tipLine {
+  display: block;
+}
