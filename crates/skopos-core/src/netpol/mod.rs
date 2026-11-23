@@ -4,6 +4,8 @@
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod eval;
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod group;
 mod model;
 mod parse;
 #[cfg_attr(not(test), allow(dead_code))]
