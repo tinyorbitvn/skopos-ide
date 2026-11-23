@@ -52,12 +52,10 @@ make e2e-smoke  # smoke end-to-end tests, no Docker
 - `site/` the project site, deployed to GitHub Pages (see `docs/releasing.md`).
 - `docs/` roadmap, specs and plans.
 
-## Unsigned builds
+## First run
 
-Release builds are unsigned for now.
-
-- **macOS**: builds carry an ad-hoc signature, not one from Apple. Drag the app to Applications and open it. When macOS blocks it, go to System Settings > Privacy & Security and choose Open Anyway, or run `xattr -cr /Applications/SkoposIDE.app`.
-- **Windows**: in SmartScreen choose "More info", then "Run anyway".
+- **macOS**: builds are signed with a Developer ID certificate and notarized by Apple. Drag the app to Applications and open it.
+- **Windows**: builds are unsigned for now. In SmartScreen choose "More info", then "Run anyway".
 - **Linux**: mark the AppImage executable with `chmod +x` and run it.
 
 ## Updates
