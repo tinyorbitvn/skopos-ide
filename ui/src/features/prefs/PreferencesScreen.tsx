@@ -23,6 +23,8 @@ import { classifySourcePath, usePrefs } from "../../stores/prefs";
 import { agentsSupported } from "../agents/supported";
 import { checkForUpdates, useUpdates } from "../updates/updateStore";
 import { lastCheckedText } from "../updates/updateText";
+import { AgentChangesSection } from "./AgentChangesSection";
+import { AgentSandboxSection } from "./AgentSandboxSection";
 import { AgentsSection } from "./AgentsSection";
 import { HelmReposSection } from "./HelmReposSection";
 import styles from "./PreferencesScreen.module.css";
@@ -197,7 +199,13 @@ export function PreferencesScreen() {
     <div className={styles.screen}>
       <Sources sources={prefs.syncSources} />
       <ToolsSection />
-      {agentsSupported() ? <AgentsSection /> : null}
+      {agentsSupported() ? (
+        <>
+          <AgentsSection />
+          <AgentSandboxSection />
+          <AgentChangesSection />
+        </>
+      ) : null}
       <HelmReposSection />
       <section className={styles.section}>
         <h3 className={styles.heading}>Appearance</h3>
