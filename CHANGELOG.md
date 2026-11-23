@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-23
+
 - **More actions on a pinned cluster:** right-clicking a cluster on the hotbar now offers Settings, which opens the cluster's settings in the focused tab, and Disconnect while the cluster is connected or connecting, or Connect while it is not, beside Unpin.
 - **Less memory when opening many pods:** the window keeps the metrics charts of the 16 most recently closed pods, nodes and other objects so they still draw at once, and lets go of older ones, instead of keeping every chart it has shown until the window closes.
 
