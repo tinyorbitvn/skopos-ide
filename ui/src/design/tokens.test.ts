@@ -62,32 +62,46 @@ test.each(Object.entries(CSS_FILES))(
   },
 );
 
+// The window's wallpaper behind the left column (spec Q §1) is the one gradient: tinyorbit.css
+// declares it once, as --glass-wall, and no other stylesheet draws one.
+const WALL_DECL = /--glass-wall\s*:[^;]*;/g;
+
 test.each(Object.entries(CSS_FILES))(
   "%s loads nothing from a network and draws no gradient but a flat tint",
-  (_, css) => {
+  (file, css) => {
     expect(css).not.toMatch(/@import\s+url\(\s*["']?https?:/);
     expect(css).not.toMatch(/fonts\.googleapis|fonts\.gstatic/);
     // `linear-gradient(var(--x), var(--x))` is one flat colour over a base (spec H68).
-    const flat = css.replace(
-      /linear-gradient\(\s*(var\(--[a-z-]+\)),\s*\1\s*\)/g,
-      "",
-    );
+    const flat = (
+      file === "/src/design/tinyorbit.css" ? css.replace(WALL_DECL, "") : css
+    ).replace(/linear-gradient\(\s*(var\(--[a-z-]+\)),\s*\1\s*\)/g, "");
     expect(flat).not.toMatch(/gradient\(/);
   },
 );
 
-// The board frosts its wallpaper under the column; the app has none, so --glass-backdrop is that
-// frosted wallpaper averaged over the column, and the tint is the board's own 84% of sunken over it.
-test("the glass tokens hold the design's values in both themes (spec Q §1)", () => {
+// The board's glass, value for value: the left column is 84% of sunken over the desktop
+// wallpaper, saturated 1.6 times. The board also blurs it 30 px, which its soft shapes do not
+// show (at most 3 of 255 per channel apart), so the app leaves the blur out.
+test("the glass tokens hold the board's values in both themes (spec Q §1)", () => {
   const expected = {
     light: {
-      "--glass-backdrop": "#b2ceff",
+      "--glass-saturate": "1.6",
+      "--wall-base": "#e3eaf7",
+      "--wall-1": "rgba(138, 170, 255, 0.85)",
+      "--wall-2": "rgba(255, 193, 120, 0.8)",
+      "--wall-3": "rgba(5, 42, 112, 0.2)",
+      "--wall-4": "rgba(79, 128, 251, 0.42)",
       "--side-selected": "rgba(11, 14, 18, 0.08)",
       "--glass-field": "rgba(255, 255, 255, 0.55)",
       "--tree-line": "#b4bdc8",
     },
     dark: {
-      "--glass-backdrop": "#011b59",
+      "--glass-saturate": "1.6",
+      "--wall-base": "#060a14",
+      "--wall-1": "rgba(5, 42, 112, 0.95)",
+      "--wall-2": "rgba(245, 130, 11, 0.4)",
+      "--wall-3": "rgba(11, 87, 227, 0.5)",
+      "--wall-4": "rgba(8, 70, 188, 0.5)",
       "--side-selected": "rgba(255, 255, 255, 0.13)",
       "--glass-field": "rgba(255, 255, 255, 0.06)",
       "--tree-line": "rgba(255, 255, 255, 0.22)",
@@ -95,11 +109,22 @@ test("the glass tokens hold the design's values in both themes (spec Q §1)", ()
   } as const;
   for (const theme of ["light", "dark"] as const) {
     const tokens = themeTokens(theme);
+    const w = expected[theme];
     expect([theme, tokens.get("--glass-tint")]).toEqual([
       theme,
-      `color-mix(in srgb, ${tokens.get("--surface-sunken")} 84%, ${tokens.get("--glass-backdrop")})`,
+      `color-mix(in srgb, ${tokens.get("--surface-sunken")} 84%, transparent)`,
     ]);
-    for (const [name, value] of Object.entries(expected[theme])) {
+    expect([theme, tokens.get("--glass-wall")?.replace(/\s+/g, " ")]).toEqual([
+      theme,
+      [
+        `radial-gradient(ellipse 44% 58% at 12% 20%, ${w["--wall-1"]} 0%, ${w["--wall-1"]} 38%, transparent 72%)`,
+        `radial-gradient(ellipse 38% 50% at 88% 80%, ${w["--wall-2"]} 0%, ${w["--wall-2"]} 34%, transparent 70%)`,
+        `radial-gradient(ellipse 58% 42% at 74% 6%, ${w["--wall-3"]} 0%, ${w["--wall-3"]} 36%, transparent 74%)`,
+        `radial-gradient(ellipse 36% 40% at 38% 98%, ${w["--wall-4"]} 0%, ${w["--wall-4"]} 32%, transparent 70%)`,
+      ].join(", "),
+    ]);
+    expect([theme, tokens.has("--glass-backdrop")]).toEqual([theme, false]);
+    for (const [name, value] of Object.entries(w)) {
       expect([theme, name, tokens.get(name)]).toEqual([theme, name, value]);
     }
   }

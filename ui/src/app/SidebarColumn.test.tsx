@@ -146,6 +146,33 @@ test("the column draws one glass layer and the only border; the switcher and the
   expect(decl(hotbar, ".status", "background")).toBe("var(--surface-card)");
 });
 
+test("the window paints the board's wallpaper, which only the left column's glass lets through (spec Q §1)", () => {
+  const shell = cssRules(CSS_FILES["/src/app/Shell.module.css"]);
+  expect(decl(shell, ".shell", "position")).toBe("relative");
+  expect(decl(shell, ".shell", "isolation")).toBe("isolate");
+  expect([
+    decl(shell, ".shell::before", "position"),
+    decl(shell, ".shell::before", "inset"),
+    decl(shell, ".shell::before", "z-index"),
+    decl(shell, ".shell::before", "background-color"),
+    decl(shell, ".shell::before", "background-image"),
+    decl(shell, ".shell::before", "filter"),
+    decl(shell, ".shell::before", "pointer-events"),
+  ]).toEqual([
+    "absolute",
+    "0",
+    "-1",
+    "var(--wall-base)",
+    "var(--glass-wall)",
+    "saturate(var(--glass-saturate))",
+    "none",
+  ]);
+  // Everything else in the window stays solid, as on the board.
+  expect(decl(shell, ".work", "background")).toBe("var(--surface-page)");
+  const header = cssRules(CSS_FILES["/src/app/AppHeader.module.css"]);
+  expect(decl(header, ".header", "background")).toBe("var(--surface-page)");
+});
+
 test("the navigation starts at 248 px, steps by 16 and resets to 248 on a double-click", async () => {
   await show("/cluster/c1/r/core/pods");
   const handle = screen.getByTestId("nav-resize");

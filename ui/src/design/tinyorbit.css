@@ -456,23 +456,33 @@
 }
 
 /* SkoposIDE additions (spec Q §1), not from the design system: keep this block when
-   the file is rebuilt. The left column's glass, as one solid colour: the board lays 84% of
-   sunken over its frosted wallpaper, and --glass-backdrop is that wallpaper averaged over
-   the column, so the tint keeps the board's hue without a wallpaper behind the window. */
+   the file is rebuilt. The board's glass on the left column: the window paints the board's
+   desktop wallpaper (--glass-wall, saturated by --glass-saturate) under everything, the rest
+   of the window stays solid, and the hotbar and the sidebar lay 84% of sunken over it. The
+   board also blurs the wallpaper 30 px; its shapes are too soft for that to show. */
 :root,
 [data-theme="light"] {
   /* biome-ignore format: the token test compares the value on one line */
-  --glass-tint: color-mix(in srgb, var(--surface-sunken) 84%, var(--glass-backdrop));
-  --glass-backdrop: #b2ceff;
+  --glass-tint: color-mix(in srgb, var(--surface-sunken) 84%, transparent);
+  --glass-saturate: 1.6;
+  /* biome-ignore format: the token test compares the value on one line */
+  --glass-wall: radial-gradient(ellipse 44% 58% at 12% 20%, var(--wall-1) 0%, var(--wall-1) 38%, transparent 72%), radial-gradient(ellipse 38% 50% at 88% 80%, var(--wall-2) 0%, var(--wall-2) 34%, transparent 70%), radial-gradient(ellipse 58% 42% at 74% 6%, var(--wall-3) 0%, var(--wall-3) 36%, transparent 74%), radial-gradient(ellipse 36% 40% at 38% 98%, var(--wall-4) 0%, var(--wall-4) 32%, transparent 70%);
+  --wall-base: #e3eaf7;
+  --wall-1: rgba(138, 170, 255, 0.85);
+  --wall-2: rgba(255, 193, 120, 0.8);
+  --wall-3: rgba(5, 42, 112, 0.2);
+  --wall-4: rgba(79, 128, 251, 0.42);
   --side-selected: rgba(11, 14, 18, 0.08);
   --glass-field: rgba(255, 255, 255, 0.55);
   --tree-line: #b4bdc8;
 }
 
 [data-theme="dark"] {
-  /* biome-ignore format: the token test compares the value on one line */
-  --glass-tint: color-mix(in srgb, var(--surface-sunken) 84%, var(--glass-backdrop));
-  --glass-backdrop: #011b59;
+  --wall-base: #060a14;
+  --wall-1: rgba(5, 42, 112, 0.95);
+  --wall-2: rgba(245, 130, 11, 0.4);
+  --wall-3: rgba(11, 87, 227, 0.5);
+  --wall-4: rgba(8, 70, 188, 0.5);
   --side-selected: rgba(255, 255, 255, 0.13);
   --glass-field: rgba(255, 255, 255, 0.06);
   --tree-line: rgba(255, 255, 255, 0.22);
