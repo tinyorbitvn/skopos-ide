@@ -1,0 +1,55 @@
+name: dependency-review
+
+# Stops a change that adds a dependency advisory the policy does not allow: any Rust
+# advisory, or another at high or critical. Advisories already on main are Dependabot
+# alerts. See docs/releasing.md, "Dependencies and advisories".
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-review-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - id: compare
+        name: Ask the dependency graph what the change adds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # A push that creates the branch has no before commit.
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "::notice::no base commit to compare with; nothing to review"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The endpoint sometimes answers 502; gh prints its message.
+          for attempt in 1 2 3; do
+            if gh api "repos/$GITHUB_REPOSITORY/dependency-graph/compare/$BASE_SHA...$HEAD_SHA" \
+              > "$RUNNER_TEMP/changes.json"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 20; fi
+          done
+          echo "::error::the dependency graph comparison failed three times; re-run the job"
+          exit 1
+      - name: Check the added advisories against the policy
+        if: steps.compare.outputs.skip != 'true'
+        run: node scripts/advisories.mjs review --changes "$RUNNER_TEMP/changes.json"

@@ -17,6 +17,10 @@ cancels the older run.
 Hosted macOS runners cannot run the kind cluster, so the kind and full end-to-end suites run on
 Linux only. The jobs share their toolchain and cache setup through `.github/actions/setup`.
 
+`.github/workflows/dependency-review.yml` runs on the same pushes and pull requests and checks
+the dependency advisories each change adds; see
+[Dependencies and advisories](#dependencies-and-advisories).
+
 ## Cutting a release
 
 1. Add notes under `## [Unreleased]` in `CHANGELOG.md` as changes land. The release refuses
@@ -158,6 +162,38 @@ release workflow changes.
    Keychain; later updates must not ask.
 5. On the deb, check that cancelling the password prompt shows "The package was not installed.
    If you cancelled the password prompt, try again." and that Try Again works.
+
+## Dependencies and advisories
+
+Dependabot watches `Cargo.lock` and `pnpm-lock.yaml` against GitHub's advisory database. The
+repository's security settings have Dependabot alerts and Dependabot security updates turned on.
+It raises an alert when an advisory is published for a version the lock files hold, so no scan
+runs on a schedule.
+
+- **The policy:** a Rust advisory of any severity is fixed or accepted, and so is any other at
+  high or critical. Low and moderate advisories in npm packages are warnings. An advisory with
+  no severity counts as critical.
+- **Fixing:** merge the security update pull request Dependabot opens. When it cannot lift an npm
+  package that another package pins, add an override to `pnpm-workspace.yaml` with a comment that
+  names the advisory, as for dompurify, glob and minimatch. For a crate, run
+  `cargo update -p <crate> --precise <fixed version>`, which also lifts what the fixed version
+  needs, or lift the dependency that holds it back.
+- **Accepting:** when an advisory does not affect SkoposIDE or has no fix yet, dismiss the alert on
+  the Security tab with the reason that fits (Tolerable risk, Not used, Inaccurate) and a comment
+  that says why. The glib alert is one: glib 0.18 comes through Tauri's GTK 3 stack on Linux, and
+  the fix is in 0.20. Nothing is recorded in the repository.
+- **Each change:** the `dependency-review` workflow asks GitHub's dependency graph what a pull
+  request or a push to `main` changes (`dependency-graph/compare`) and runs
+  `scripts/advisories.mjs review`. It fails when the change brings in an advisory the policy does
+  not allow and warns about the others, in the log and the job summary. An advisory the base
+  already has does not count, so lifting a package with an accepted advisory passes. When the
+  comparison fails three times, the job fails; re-run it.
+- **Locally:** `make audit` lists the open Dependabot alerts with `gh` and fails when one breaks
+  the policy. It needs `gh auth login`.
+- **What Dependabot misses:** it reads only GitHub's advisory database, which gets RustSec
+  advisories late or not at all, and has no notices for unmaintained crates. In November 2026
+  neither RUSTSEC-2026-0592 (`url`) nor RUSTSEC-2026-0594 (`cookie`) was there. When lifting
+  crates, also check https://rustsec.org/advisories/.
 
 ## Project site
 
