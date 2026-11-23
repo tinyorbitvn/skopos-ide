@@ -305,6 +305,85 @@ async function startTopologyFixture() {
   };
 }
 
+const REACH_NAMESPACES = [
+  "skopos-e2e-reach",
+  "skopos-e2e-reach-ingress",
+  "skopos-e2e-reach-monitoring",
+];
+// Cluster-scoped, so deleting the namespaces leaves it: it is deleted on its own.
+const REACH_CLUSTERWIDE_POLICY = "skopos-e2e-reach-allow-prometheus-scrape";
+const REACH_OBJECTS = path.resolve(
+  __dirname,
+  "..",
+  "fixtures",
+  "reachability.yaml",
+);
+
+/**
+ * The kind cluster with the Reachability page's sample namespace (network policies
+ * contract C13). scripts/kind-up.sh installs the Cilium CRDs; the policies need them
+ * established. The namespaces and the cluster-wide policy go when the run ends.
+ */
+async function startReachabilityFixture() {
+  await kubectl([
+    "wait",
+    "--for=condition=Established",
+    "--timeout=60s",
+    "crd/ciliumnetworkpolicies.cilium.io",
+    "crd/ciliumclusterwidenetworkpolicies.cilium.io",
+  ]);
+  await kubectl([
+    "delete",
+    "namespace",
+    ...REACH_NAMESPACES,
+    "--ignore-not-found",
+    "--wait=true",
+    "--timeout=120s",
+  ]);
+  await kubectl([
+    "delete",
+    "ciliumclusterwidenetworkpolicies.cilium.io",
+    REACH_CLUSTERWIDE_POLICY,
+    "--ignore-not-found",
+  ]);
+  await kubectl(["apply", "-f", REACH_OBJECTS]);
+  for (const [namespace, workload] of [
+    ["skopos-e2e-reach", "deployment/web"],
+    ["skopos-e2e-reach", "deployment/api"],
+    ["skopos-e2e-reach", "deployment/worker"],
+    ["skopos-e2e-reach", "statefulset/db"],
+    ["skopos-e2e-reach-ingress", "deployment/ingress-nginx-controller"],
+    ["skopos-e2e-reach-monitoring", "deployment/prometheus"],
+  ]) {
+    await kubectl([
+      "-n",
+      namespace,
+      "rollout",
+      "status",
+      workload,
+      "--timeout=120s",
+    ]);
+  }
+  return {
+    kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
+    async stop() {
+      await kubectl([
+        "delete",
+        "namespace",
+        ...REACH_NAMESPACES,
+        "--ignore-not-found",
+        "--wait=false",
+      ]);
+      await kubectl([
+        "delete",
+        "ciliumclusterwidenetworkpolicies.cilium.io",
+        REACH_CLUSTERWIDE_POLICY,
+        "--ignore-not-found",
+      ]);
+    },
+  };
+}
+
 /**
  * A local update server that offers 99.0.0, which the e2e build asks instead of GitHub
  * (in-app update spec §8). Nothing is downloaded, so the addresses and signatures are
@@ -399,6 +478,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
   topology: { kubeconfigs: {}, start: startTopologyFixture },
+  reachability: { kubeconfigs: {}, start: startReachabilityFixture },
   tabs: { kubeconfigs: {}, start: startKindFixture },
   "sidebar-rail": { kubeconfigs: {}, start: startKindFixture },
   "tabs-restart-1-save": {
