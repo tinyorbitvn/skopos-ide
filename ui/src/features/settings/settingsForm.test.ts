@@ -126,6 +126,13 @@ test("a draft shows the saved settings as text, and saving it gives them back", 
     remoteCert: "",
     remoteKey: "",
     remoteCa: "",
+    agentChanges: "ask",
+    agentNamespacesOnly: false,
+    agentNamespaces: "",
+    agentSecretValues: false,
+    agentExec: false,
+    agentDefault: null,
+    agentNotes: "",
   });
   expect(settingsFrom(d)).toEqual(SAVED);
 });
@@ -195,6 +202,13 @@ test("Restore defaults is an empty draft with no icon, no namespaces and Detect"
     remoteCert: "",
     remoteKey: "",
     remoteCa: "",
+    agentChanges: "ask",
+    agentNamespacesOnly: false,
+    agentNamespaces: "",
+    agentSecretValues: false,
+    agentExec: false,
+    agentDefault: null,
+    agentNotes: "",
   });
   expect(settingsFrom(emptyDraft())).toEqual(clusterSettings());
 });
@@ -211,8 +225,56 @@ test("saving gives the cluster's agent settings back as they were", () => {
       notes: "Deploys go through Argo CD.",
     },
   });
-  expect(settingsFrom(draftFrom(saved), saved.agent)).toEqual(saved);
-  expect(settingsFrom(draftFrom(saved)).agent).toEqual(clusterSettings().agent);
+  expect(settingsFrom(draftFrom(saved))).toEqual(saved);
+});
+
+test("the agent fields round-trip through the draft", () => {
+  const saved = clusterSettings({
+    agent: {
+      changes: "dontAsk",
+      namespaces: ["payments", "ingest"],
+      secretValues: true,
+      exec: true,
+      defaultAgent: "codex",
+      notes: "Deploys go through Argo CD.",
+    },
+  });
+  const draft = draftFrom(saved);
+  expect(draft).toMatchObject({
+    agentChanges: "dontAsk",
+    agentNamespacesOnly: true,
+    agentNamespaces: "payments,ingest",
+    agentSecretValues: true,
+    agentExec: true,
+    agentDefault: "codex",
+    agentNotes: "Deploys go through Argo CD.",
+  });
+  expect(settingsFrom(draft).agent).toEqual(saved.agent);
+});
+
+test("all namespaces saves null, and the defaults restore Ask every time", () => {
+  const draft = { ...emptyDraft(), agentNamespaces: "payments" };
+  expect(settingsFrom(draft).agent.namespaces).toBeNull();
+  expect(settingsFrom(emptyDraft()).agent).toEqual({
+    changes: "ask",
+    namespaces: null,
+    secretValues: false,
+    exec: false,
+    defaultAgent: null,
+    notes: "",
+  });
+});
+
+test("Only these namespaces with none picked blocks Save", () => {
+  const draft = {
+    ...emptyDraft(),
+    agentNamespacesOnly: true,
+    agentNamespaces: "",
+  };
+  expect(validate(draft).agentNamespaces).toBe("Pick at least one namespace.");
+  expect(
+    validate({ ...draft, agentNamespaces: "payments" }).agentNamespaces,
+  ).toBeUndefined();
 });
 
 test("accessible namespaces split on commas and spaces, de-duplicate, and name every bad entry", () => {
@@ -535,6 +597,13 @@ test("drafts are the same only when every field is", () => {
     { remoteCert: "x" },
     { remoteKey: "x" },
     { remoteCa: "x" },
+    { agentChanges: "readOnly" },
+    { agentNamespacesOnly: true },
+    { agentNamespaces: "x" },
+    { agentSecretValues: true },
+    { agentExec: true },
+    { agentDefault: "codex" },
+    { agentNotes: "x" },
   ];
   // One change per field.
   expect(changes).toHaveLength(Object.keys(emptyDraft()).length);

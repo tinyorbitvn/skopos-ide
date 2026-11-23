@@ -10,6 +10,7 @@ import {
   Network,
   Server,
 } from "../design/icons";
+import { setAgentsSupportedForTest } from "../features/agents/supported";
 import { openTerminal } from "../features/dock/openTerminal";
 import {
   resetUpdatesForTest,
@@ -18,6 +19,7 @@ import {
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
+import { resetAgentChatForTest, useAgentChat } from "../stores/agentChat";
 import { resetPrefsForTest } from "../stores/prefs";
 import { resetShellForTest, useShell } from "../stores/shell";
 import {
@@ -104,6 +106,7 @@ beforeEach(() => {
   resetPrefsForTest();
   resetWindowLayoutForTest();
   resetSidebarToggleForTest();
+  resetAgentChatForTest();
 });
 
 test("the registry lists the spec's commands in order", () => {
@@ -125,6 +128,9 @@ test("the registry lists the spec's commands in order", () => {
       ["network-overview", "Network overview of prod", null],
       ["storage-overview", "Storage overview of prod", null],
       ["shortcuts", "Show keyboard shortcuts", "shortcuts"],
+      ["agent-open", "Open the agent", "agent"],
+      ["agent-new-chat", "New agent chat", null],
+      ["agent-ask", "Ask the agent about this object", null],
       ["about", "About SkoposIDE", null],
       ["check-updates", "Check for Updates", null],
       ["theme-dark", "Theme: Dark", null],
@@ -145,9 +151,10 @@ test("terminal, disconnect, install-chart, resource-map and node-topology need t
   const available = (ctx: CommandContext) =>
     COMMANDS.filter((c) => c.available(ctx)).map((c) => c.id);
   // toggle-sidebar needs a mounted sidebar, not a cluster, and the overview commands the
-  // cluster's resources too; their own tests cover them.
+  // cluster's resources too; their own tests cover them. agent-ask needs the drawer.
   const all = COMMANDS.map((c) => c.id).filter(
-    (id) => id !== "toggle-sidebar" && !OVERVIEWS.includes(id),
+    (id) =>
+      id !== "toggle-sidebar" && id !== "agent-ask" && !OVERVIEWS.includes(id),
   );
   const onCluster = all.filter(
     (id) =>
@@ -522,4 +529,30 @@ test("the macOS menu's check_updates runs the same command", async () => {
   runMenuCommand("check_updates", context());
   expect(useShell.getState().dialog).toBe("updates");
   await waitFor(() => expect(ipc.callsTo("update_check")).toHaveLength(1));
+});
+
+test("Ask the agent is offered only while the drawer shows an object", () => {
+  const ask = commandById("agent-ask");
+  const ctx = {
+    navigate: () => {},
+    pathname: "/cluster/a/pods",
+    cluster: null,
+  };
+  expect(ask.available(ctx)).toBe(false);
+  useAgentChat.getState().setDrawerObject({
+    cluster: "a",
+    kind: "Pod",
+    namespace: "ns",
+    name: "p",
+  });
+  expect(ask.available(ctx)).toBe(true);
+  expect(ask.label(ctx)).toBe("Ask the agent about this Pod");
+});
+
+test("the agent commands are absent on Windows", () => {
+  setAgentsSupportedForTest(false);
+  const ctx = { navigate: () => {}, pathname: "/catalog", cluster: null };
+  expect(commandById("agent-open").available(ctx)).toBe(false);
+  expect(commandById("agent-new-chat").available(ctx)).toBe(false);
+  setAgentsSupportedForTest(true);
 });

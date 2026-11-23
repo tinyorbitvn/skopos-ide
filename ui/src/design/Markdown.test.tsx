@@ -1,5 +1,5 @@
-import { render } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
 import { Markdown } from "./Markdown";
 import { type Block, type Inline, parseMarkdown } from "./parseMarkdown";
 
@@ -263,4 +263,64 @@ test.each([
   const started = performance.now();
   parseMarkdown(text);
   expect(performance.now() - started).toBeLessThan(1000);
+});
+
+test("without onLink a link is its text and where it points", () => {
+  render(<Markdown text="See [docs](https://example.com)." />);
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(
+    screen.getByText("(https://example.com)", { exact: false }),
+  ).toBeTruthy();
+});
+
+test("with onLink only web links become buttons that call it", () => {
+  const onLink = vi.fn();
+  render(
+    <Markdown
+      text={
+        '<button onclick="x()">hi</button> <img src=x> [bad](javascript:alert(1)) [ok](https://example.com/a)'
+      }
+      onLink={onLink}
+    />,
+  );
+  // Raw HTML stays text.
+  expect(screen.queryByRole("button", { name: "hi" })).toBeNull();
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.getByText(/<button onclick/)).toBeTruthy();
+  // A javascript: link is text.
+  expect(screen.queryByRole("button", { name: "bad" })).toBeNull();
+  expect(
+    screen.getByText("(javascript:alert(1))", { exact: false }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "ok (example.com)" }));
+  expect(onLink).toHaveBeenCalledWith("https://example.com/a");
+});
+
+test("with onLink a web link names its host, so its text cannot hide where it goes", () => {
+  const onLink = vi.fn();
+  render(
+    <Markdown
+      text="[Kubernetes docs](https://evil.example:8443/x?d=secret) [local](http://localhost:8080/)"
+      onLink={onLink}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Kubernetes docs (evil.example:8443)" }),
+  );
+  expect(onLink).toHaveBeenCalledWith("https://evil.example:8443/x?d=secret");
+  expect(
+    screen.getByRole("button", { name: "local (localhost:8080)" }),
+  ).toBeTruthy();
+});
+
+test("with onLink a web link that does not parse is text", () => {
+  const onLink = vi.fn();
+  render(
+    <Markdown
+      text="[bad](https://) [ok](https://example.com)"
+      onLink={onLink}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /bad/ })).toBeNull();
+  expect(screen.getByText("(https://)", { exact: false })).toBeTruthy();
 });

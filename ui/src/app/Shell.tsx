@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, EmptyState, Spinner } from "../design";
 import { AboutDialog } from "../features/about/AboutDialog";
+import { AgentPanel } from "../features/agents/AgentPanel";
+import { agentsSupported } from "../features/agents/supported";
 import { ExecConsentDialog } from "../features/cluster/ExecConsentDialog";
 import { Dock } from "../features/dock/Dock";
 import { CommandPalette } from "../features/palette/CommandPalette";
@@ -8,6 +10,7 @@ import { ShortcutsDialog } from "../features/shortcuts/ShortcutsDialog";
 import { UpdateDialog } from "../features/updates/UpdateDialog";
 import { initUpdates } from "../features/updates/updateStore";
 import { events } from "../ipc/events";
+import { useAgentChat } from "../stores/agentChat";
 import { useCatalog } from "../stores/catalog";
 import { useClusterState } from "../stores/clusters";
 import { useDiscovery } from "../stores/discovery";
@@ -103,6 +106,13 @@ function ShellEffects() {
           shortcuts: () => useShell.getState().open("shortcuts"),
           preferences: () => runCommand("preferences", contextRef.current),
           sidebar: toggleSidebar,
+          agent: () => {
+            if (agentsSupported()) {
+              useAgentChat
+                .getState()
+                .toggle(contextRef.current.cluster?.id ?? null);
+            }
+          },
         },
         IS_MAC,
       ),
@@ -193,6 +203,9 @@ export function Shell() {
               <ShellDock />
             </ShellRouter>
           </div>
+          <ShellRouter>
+            <AgentPanel />
+          </ShellRouter>
         </div>
       </div>
       <StatusBar />

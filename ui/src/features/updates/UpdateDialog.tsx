@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import { ShellDialog } from "../../app/ShellDialog";
-import { Button, IconButton, ProgressBar, Spinner } from "../../design";
+import {
+  Button,
+  IconButton,
+  Markdown,
+  ProgressBar,
+  Spinner,
+} from "../../design";
 import { X } from "../../design/icons";
 import { api } from "../../ipc/api";
 import type { Release } from "../../ipc/generated/Release";
@@ -8,7 +14,6 @@ import type { UpdateState } from "../../ipc/generated/UpdateState";
 import { useDock } from "../../stores/dock";
 import { runningCount, usePortForwards } from "../../stores/portForwards";
 import { useShell } from "../../stores/shell";
-import { Markdown } from "../helm/Markdown";
 import { useSessions } from "../terminal/sessions";
 import styles from "./UpdateDialog.module.css";
 import {

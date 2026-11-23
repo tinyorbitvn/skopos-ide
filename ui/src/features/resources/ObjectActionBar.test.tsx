@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { Box, Pen, Trash2, Zap } from "../../design/icons";
+import { resetAgentChatForTest, useAgentChat } from "../../stores/agentChat";
 import { ObjectActionBar } from "./ObjectActionBar";
 import type { ObjectActionItem } from "./objectActions";
 
@@ -112,4 +113,35 @@ test("a disabled top item cannot be pressed", () => {
   expect(button.disabled).toBe(true);
   fireEvent.click(button);
   expect(run).not.toHaveBeenCalled();
+});
+
+test("More actions ends with Ask the agent, which opens the panel on the object", () => {
+  const object = {
+    cluster: "a",
+    kind: "Deployment",
+    namespace: "ns",
+    name: "web",
+  };
+  resetAgentChatForTest();
+  const askAbout = vi.fn().mockResolvedValue(undefined);
+  useAgentChat.setState({ askAbout });
+  const { unmount } = render(
+    <ObjectActionBar items={[item("scale")]} ask={object} />,
+  );
+  expect(useAgentChat.getState().drawerObject).toEqual(object);
+  fireEvent.keyDown(screen.getByTestId("detail-more-actions"), {
+    key: "Enter",
+  });
+  const entries = screen.getAllByRole("menuitem");
+  expect(entries.at(-1)?.getAttribute("data-testid")).toBe(
+    "menu-item-agent-ask",
+  );
+  expect(entries.at(-1)?.textContent).toContain(
+    "Ask the agent about this Deployment",
+  );
+  fireEvent.click(entries.at(-1) as HTMLElement);
+  expect(askAbout).toHaveBeenCalledWith(object);
+  unmount();
+  expect(useAgentChat.getState().drawerObject).toBeNull();
+  resetAgentChatForTest();
 });

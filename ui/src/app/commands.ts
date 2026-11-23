@@ -11,6 +11,7 @@ import {
   Info,
   Keyboard,
   LayoutGrid,
+  MessageSquarePlus,
   Monitor,
   Moon,
   Network,
@@ -21,10 +22,12 @@ import {
   RefreshCw,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   SquareTerminal,
   Sun,
   X,
 } from "../design/icons";
+import { agentsSupported } from "../features/agents/supported";
 import { openTerminal } from "../features/dock/openTerminal";
 import { chartsPath } from "../features/helm/helmText";
 import { mapPath } from "../features/map/paths";
@@ -35,6 +38,7 @@ import { checkForUpdates } from "../features/updates/updateStore";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { Theme } from "../ipc/generated/Theme";
 import { visibleSections } from "../kinds/nav";
+import { useAgentChat } from "../stores/agentChat";
 import { disconnectCluster } from "../stores/clusters";
 import { usePrefs } from "../stores/prefs";
 import { useShell } from "../stores/shell";
@@ -75,6 +79,9 @@ export type CommandId =
   | "network-overview"
   | "storage-overview"
   | "shortcuts"
+  | "agent-open"
+  | "agent-new-chat"
+  | "agent-ask"
   | "about"
   | "check-updates"
   | "theme-dark"
@@ -315,6 +322,40 @@ export const COMMANDS: readonly AppCommand[] = [
     shortcut: "shortcuts",
     available: always,
     run: () => useShell.getState().open("shortcuts"),
+  },
+  {
+    id: "agent-open",
+    label: () => "Open the agent",
+    icon: Sparkles,
+    shortcut: "agent",
+    available: () => agentsSupported(),
+    run: (ctx) => useAgentChat.getState().openPanel(ctx.cluster?.id ?? null),
+  },
+  {
+    id: "agent-new-chat",
+    label: () => "New agent chat",
+    icon: MessageSquarePlus,
+    available: () => agentsSupported(),
+    run: (ctx) => {
+      const page = ctx.cluster?.id ?? null;
+      const chat = useAgentChat.getState();
+      // Opening an unused panel already starts a new chat.
+      const fresh = chat.start.phase === "idle";
+      chat.openPanel(page);
+      if (!fresh) void chat.newChat(page);
+    },
+  },
+  {
+    id: "agent-ask",
+    label: () =>
+      `Ask the agent about this ${useAgentChat.getState().drawerObject?.kind ?? "object"}`,
+    icon: Sparkles,
+    available: () =>
+      agentsSupported() && useAgentChat.getState().drawerObject !== null,
+    run: () => {
+      const object = useAgentChat.getState().drawerObject;
+      if (object) void useAgentChat.getState().askAbout(object);
+    },
   },
   {
     id: "about",

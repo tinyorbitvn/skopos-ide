@@ -8,6 +8,12 @@ test("the Overview and Settings paths encode the cluster id", () => {
   expect(settingsPath("team a/prod")).toBe("/cluster/team%20a%2Fprod/settings");
 });
 
+test("the Settings path can name the Agent card", () => {
+  expect(settingsPath("a b", "agent")).toBe(
+    "/cluster/a%20b/settings?card=agent",
+  );
+});
+
 test("they share their base with the Helm paths", () => {
   expect(
     chartsPath("team a/prod").startsWith(overviewPath("team a/prod")),

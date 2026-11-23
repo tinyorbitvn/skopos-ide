@@ -256,3 +256,15 @@ test("unsaved edits in the drawer keep it open until they are saved or dropped",
   click(dimmed());
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+test("a press in the agent panel leaves the drawer open", () => {
+  const { onClose } = show();
+  const panel = document.createElement("aside");
+  panel.setAttribute("data-agent-panel", "");
+  const button = document.createElement("button");
+  panel.append(button);
+  // Inside the app root, as the shell renders it: beside the drawer's own screen.
+  screen.getByTestId("dock").parentElement?.append(panel);
+  click(button);
+  expect(onClose).not.toHaveBeenCalled();
+});

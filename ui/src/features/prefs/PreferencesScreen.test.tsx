@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "../../design";
 import type { Prefs } from "../../ipc/generated/Prefs";
 import { resetHelmForTest } from "../../stores/helm";
@@ -15,6 +15,7 @@ import { resetPrefsForTest, usePrefs } from "../../stores/prefs";
 import { toolStatus } from "../../test/helm";
 import { mockBackend } from "../../test/ipc";
 import { updateState } from "../../test/updates";
+import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetUpdatesForTest, useUpdates } from "../updates/updateStore";
 import { PreferencesScreen } from "./PreferencesScreen";
 
@@ -43,6 +44,14 @@ function show(
       { name: "bitnami", url: "https://charts.example/bitnami" },
     ],
     helm_chart_search: () => ({ charts: [], repoProblems: [] }),
+    agents_status: () => [],
+    agent_sandbox_status: () => ({ status: "unsupported" }),
+    agent_prefs: () => ({
+      defaultAgent: null,
+      custom: [],
+      domains: [],
+      folders: [],
+    }),
     ...over,
   });
   render(
@@ -53,6 +62,10 @@ function show(
   );
   return ipc;
 }
+
+afterEach(() => {
+  setAgentsSupportedForTest(true);
+});
 
 beforeEach(() => {
   resetPrefsForTest();
@@ -273,7 +286,7 @@ test("the theme is a Segmented control, and Dark applies and saves the theme", a
   expect(usePrefs.getState().prefs?.theme).toBe("dark");
 });
 
-test("Tools and Helm repositories sit between Kubeconfig sources and Appearance", async () => {
+test("Tools, Agents and Helm repositories sit between Kubeconfig sources and Appearance", async () => {
   show();
   await screen.findByTestId("pref-tool-helm");
   expect(
@@ -281,6 +294,10 @@ test("Tools and Helm repositories sit between Kubeconfig sources and Appearance"
   ).toEqual([
     "Kubeconfig sources",
     "Tools",
+    "Agents",
+    "Agent sandbox",
+    "Agent changes",
+    "No clusters yet",
     "Helm repositories",
     "Appearance",
     "Updates",
@@ -354,4 +371,21 @@ test("a saved updateCheck of false shows the switch off", async () => {
     name: "Check for updates automatically",
   });
   expect((toggle as HTMLInputElement).checked).toBe(false);
+});
+
+test("the agent sections show when agents are supported", async () => {
+  setAgentsSupportedForTest(true);
+  show();
+  expect(await screen.findByTestId("pref-agents")).toBeTruthy();
+  expect(await screen.findByTestId("pref-agent-sandbox")).toBeTruthy();
+  expect(await screen.findByTestId("pref-agent-changes")).toBeTruthy();
+});
+
+test("the agent sections are hidden when agents are not supported", async () => {
+  setAgentsSupportedForTest(false);
+  show();
+  await screen.findByText("Appearance");
+  expect(screen.queryByTestId("pref-agents")).toBeNull();
+  expect(screen.queryByTestId("pref-agent-sandbox")).toBeNull();
+  expect(screen.queryByTestId("pref-agent-changes")).toBeNull();
 });

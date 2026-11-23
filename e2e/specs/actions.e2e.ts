@@ -188,8 +188,12 @@ describe("object actions on the kind cluster", () => {
   it("deletes a ConfigMap with the Delete button of its drawer's toolbar", async () => {
     await kubectl(["-n", NS, "create", "configmap", "binned"]);
     await openDrawer("nav-item-core-configmaps", "ConfigMap", "binned");
-    // Delete left More actions, which a ConfigMap then has no use for.
-    expect(await byTestId("detail-more-actions").isExisting()).toBe(false);
+    // Delete left More actions; a ConfigMap's More menu holds only the agent item (spec §3.1).
+    await pointerClick(await shown("detail-more-actions"));
+    await shown("menu-item-agent-ask");
+    expect(await byTestId("menu-item-delete").isExisting()).toBe(false);
+    await browser.keys("Escape");
+    await gone("menu-item-agent-ask");
     await clickWhenShown("detail-action-delete");
     await clickWhenShown("delete-confirm");
     await gone(rowId(NS, "binned"), 30000);

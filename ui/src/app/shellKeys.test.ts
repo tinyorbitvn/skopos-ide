@@ -4,6 +4,7 @@ import { installShellKeys } from "./shellKeys";
 const CTRL_SHIFT_P = { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true };
 const CTRL_SLASH = { key: "/", code: "Slash", ctrlKey: true };
 const CTRL_COMMA = { key: ",", code: "Comma", ctrlKey: true };
+const CTRL_J = { key: "j", code: "KeyJ", ctrlKey: true };
 const CMD_SLASH = { key: "/", code: "Slash", metaKey: true };
 
 let remove: () => void = () => {};
@@ -19,6 +20,7 @@ function actions() {
     shortcuts: vi.fn(),
     preferences: vi.fn(),
     sidebar: vi.fn(),
+    agent: vi.fn(),
   };
 }
 
@@ -159,4 +161,32 @@ test("Mod+B toggles the sidebar, but not from a field", () => {
   expect(mac.sidebar).not.toHaveBeenCalled();
   press({ key: "b", code: "KeyB", metaKey: true });
   expect(mac.sidebar).toHaveBeenCalledTimes(1);
+});
+
+test("Mod+J toggles the panel but not inside a terminal on Linux", () => {
+  const a = actions();
+  remove = installShellKeys(a, false);
+  press(CTRL_J);
+  expect(a.agent).toHaveBeenCalledTimes(1);
+  // Ctrl+Shift+J is not the shortcut.
+  press({ ...CTRL_J, shiftKey: true });
+  expect(a.agent).toHaveBeenCalledTimes(1);
+  const term = document.createElement("div");
+  term.className = "xterm";
+  const input = document.createElement("textarea");
+  term.append(input);
+  document.body.append(term);
+  const inShell = press(CTRL_J, input);
+  expect(a.agent).toHaveBeenCalledTimes(1);
+  expect(inShell.defaultPrevented).toBe(false);
+});
+
+test("Cmd+J toggles the panel from a terminal on macOS", () => {
+  const a = actions();
+  remove = installShellKeys(a, true);
+  const term = document.createElement("div");
+  term.className = "xterm";
+  document.body.append(term);
+  press({ key: "j", code: "KeyJ", metaKey: true }, term);
+  expect(a.agent).toHaveBeenCalledTimes(1);
 });

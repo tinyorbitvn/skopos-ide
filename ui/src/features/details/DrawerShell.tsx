@@ -73,7 +73,7 @@ function appRoot(el: HTMLElement): Element | null {
 /**
  * Closes the drawer on a click of the primary button anywhere outside it, as Close does:
  * on the dimmed screen around it, the list's toolbar and column headers, the sidebar, the
- * tab strip, the header, the dock or another pane. The dim lets clicks through, so a row of
+ * tab strip, the header, the dock or another pane (but not the agent panel). The dim lets clicks through, so a row of
  * the list behind still shows in the drawer (`ROWS`). The press and the release
  * must both land outside, so a resize drag or a text selection that ends there does not
  * count. A portal (a menu, a dialog, a select, a tooltip) lies outside the app's root, as
@@ -96,6 +96,8 @@ function useCloseOnClickOutside(
         return false;
       if (drawer.contains(target) || !appRoot(drawer)?.contains(target))
         return false;
+      // The agent panel sits beside the drawer; using it keeps the drawer open.
+      if (target.closest("[data-agent-panel]")) return false;
       const row = target.closest(ROWS);
       const screen = dim.current ? dimmedScreen(dim.current) : null;
       return !(row && screen?.contains(row));

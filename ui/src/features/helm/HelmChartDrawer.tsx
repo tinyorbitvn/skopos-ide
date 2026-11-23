@@ -5,6 +5,7 @@ import {
   DataTable,
   ErrorNotice,
   IconButton,
+  Markdown,
   Spinner,
   Tabs,
   useNow,
@@ -20,7 +21,6 @@ import { CodeBlock } from "./CodeBlock";
 import { DrawerFrame } from "./DrawerFrame";
 import own from "./Helm.module.css";
 import { ago, installPath, versionText } from "./helmText";
-import { Markdown } from "./Markdown";
 import { type Fetched, useFetch } from "./useFetch";
 import { useSeenTab } from "./useSeenTab";
 

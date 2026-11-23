@@ -3,6 +3,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fakeAgentPrefs } from "./fakeagent";
 import { startFakeKube } from "./fakekube";
 import { findHelm } from "./helmCharts";
 import { kubectl } from "./kube";
@@ -162,6 +163,21 @@ async function startHelmFixture() {
     kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
     prefs: helm.onPath ? undefined : { helmPath: helm.path },
     async stop() {},
+  };
+}
+
+/**
+ * The kind cluster and the scripted agent as the default agent, run without the sandbox:
+ * the app inherits the switch from the launcher's environment.
+ */
+async function startAgentsFixture() {
+  process.env.SKOPOS_E2E_AGENT_SANDBOX_OFF = "1";
+  return {
+    kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
+    prefs: fakeAgentPrefs(),
+    async stop() {
+      delete process.env.SKOPOS_E2E_AGENT_SANDBOX_OFF;
+    },
   };
 }
 
@@ -380,7 +396,10 @@ const FIXTURES: Record<string, SpecFixture> = {
     envGroup: "terminal-restart",
     start: startKindFixture,
   },
-  "terminal-restart-2-verify": { kubeconfigs: {}, envGroup: "terminal-restart" },
+  "terminal-restart-2-verify": {
+    kubeconfigs: {},
+    envGroup: "terminal-restart",
+  },
   "port-forward": { kubeconfigs: {}, start: startKindFixture },
   "cert-users": { kubeconfigs: {}, start: startKindFixture },
   "app-shell": { kubeconfigs: {}, start: startKindFixture },
@@ -395,6 +414,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   },
   screens: { kubeconfigs: {}, start: startKindFixture },
   helm: { kubeconfigs: {}, start: startHelmFixture },
+  agents: { kubeconfigs: {}, start: startAgentsFixture },
   // e2e/helpers/metrics.ts installs the providers in the spec, which needs a longer timeout.
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },

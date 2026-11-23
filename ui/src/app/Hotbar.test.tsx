@@ -9,6 +9,7 @@ import {
 import { useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
+import { setAgentsSupportedForTest } from "../features/agents/supported";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
@@ -73,7 +74,10 @@ beforeEach(() => {
 function shownPaths(): string[] {
   return useWindowLayout.getState().layout.panes[0].tabs.map(tabPath);
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  setAgentsSupportedForTest(true);
+});
 
 test("renders pinned clusters with initials and status dot", async () => {
   await show([alpha, beta], ["b", "a"]);
@@ -225,6 +229,25 @@ test("the context menu opens the cluster's settings in the focused tab", async (
 
   expect(screen.getByTestId("where").textContent).toBe("/cluster/a/settings");
   expect(shownPaths()).toEqual(["/cluster/a/settings"]);
+});
+
+test("Agent settings opens the cluster's Settings at the Agent card", async () => {
+  await show([alpha], ["a"]);
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-a"));
+  fireEvent.click(await screen.findByTestId("menu-item-agent-settings"));
+
+  expect(screen.getByTestId("where").textContent).toBe("/cluster/a/settings");
+  expect(shownPaths()).toEqual(["/cluster/a/settings?card=agent"]);
+});
+
+test("on Windows the menu has no Agent settings", async () => {
+  setAgentsSupportedForTest(false);
+  await show([alpha], ["a"]);
+
+  fireEvent.contextMenu(screen.getByTestId("hotbar-item-a"));
+  await screen.findByTestId("menu-item-settings");
+  expect(screen.queryByTestId("menu-item-agent-settings")).toBeNull();
 });
 
 test("the context menu disconnects a connected or connecting cluster", async () => {

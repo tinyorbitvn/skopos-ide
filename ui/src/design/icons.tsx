@@ -80,6 +80,7 @@ import { LoadBalancerFillIcon } from "@thesvg/ui-react/load-balancer";
 import { LogOutFillIcon } from "@thesvg/ui-react/log-out";
 import { MapFillIcon } from "@thesvg/ui-react/map";
 import { Maximize2FillIcon } from "@thesvg/ui-react/maximize-2";
+import { MessageSquarePlusFillIcon } from "@thesvg/ui-react/message-square-plus";
 import { Minimize2FillIcon } from "@thesvg/ui-react/minimize-2";
 import { MinusFillIcon } from "@thesvg/ui-react/minus";
 import { MonitorFillIcon } from "@thesvg/ui-react/monitor";
@@ -106,11 +107,14 @@ import { ScanFillIcon } from "@thesvg/ui-react/scan";
 import { ScrollTextFillIcon } from "@thesvg/ui-react/scroll-text";
 import { SearchFillIcon } from "@thesvg/ui-react/search";
 import { SecretFillIcon } from "@thesvg/ui-react/secret";
+import { SendFillIcon } from "@thesvg/ui-react/send";
 import { ServerFillIcon } from "@thesvg/ui-react/server";
 import { SettingsFillIcon } from "@thesvg/ui-react/settings";
+import { ShieldFillIcon } from "@thesvg/ui-react/shield";
 import { ShieldCheckFillIcon } from "@thesvg/ui-react/shield-check";
 import { ShieldOffFillIcon } from "@thesvg/ui-react/shield-off";
 import { SlidersHorizontalFillIcon } from "@thesvg/ui-react/sliders-horizontal";
+import { SparklesFillIcon } from "@thesvg/ui-react/sparkles";
 import { SplitFillIcon } from "@thesvg/ui-react/split";
 import { SquareFillIcon } from "@thesvg/ui-react/square";
 import { StarFillIcon } from "@thesvg/ui-react/star";
@@ -203,6 +207,11 @@ function icon(name: string, drawing: string, Drawing: Drawing): IconComponent {
  * Lucide's drawings for use inside another SVG, such as a kind's frame on the resource map,
  * where the box an icon of this module brings cannot go.
  */
+export const MessageSquarePlus = /* @__PURE__ */ icon(
+  "message-square-plus",
+  "message-square-plus",
+  MessageSquarePlusFillIcon,
+);
 export const SVG_ART = {
   DoorOpen: LucideDoorOpen,
   Layers: LucideLayers,
@@ -306,6 +315,11 @@ export const CircleArrowUp = /* @__PURE__ */ icon(
   "circle-arrow-up",
   "arrow-up",
   ArrowUpFillIcon,
+);
+export const CircleDashed = /* @__PURE__ */ icon(
+  "circle-dashed",
+  "circle-dashed",
+  CircleDashedFillIcon,
 );
 export const CircleHelp = /* @__PURE__ */ icon(
   "circle-question-mark",
@@ -610,12 +624,14 @@ export const ScrollText = /* @__PURE__ */ icon(
 );
 export const Search = /* @__PURE__ */ icon("search", "search", SearchFillIcon);
 export const Secret = /* @__PURE__ */ icon("secret", "secret", SecretFillIcon);
+export const Send = /* @__PURE__ */ icon("send", "send", SendFillIcon);
 export const Server = /* @__PURE__ */ icon("server", "server", ServerFillIcon);
 export const Settings = /* @__PURE__ */ icon(
   "settings",
   "settings",
   SettingsFillIcon,
 );
+export const Shield = /* @__PURE__ */ icon("shield", "shield", ShieldFillIcon);
 export const ShieldCheck = /* @__PURE__ */ icon(
   "shield-check",
   "shield-check",
@@ -630,6 +646,11 @@ export const SlidersHorizontal = /* @__PURE__ */ icon(
   "sliders-horizontal",
   "sliders-horizontal",
   SlidersHorizontalFillIcon,
+);
+export const Sparkles = /* @__PURE__ */ icon(
+  "sparkles",
+  "sparkles",
+  SparklesFillIcon,
 );
 export const Split = /* @__PURE__ */ icon("split", "split", SplitFillIcon);
 export const Square = /* @__PURE__ */ icon("square", "square", SquareFillIcon);

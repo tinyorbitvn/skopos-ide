@@ -46,3 +46,18 @@ test("choosing an option reports its value", async () => {
   fireEvent.click(await screen.findByRole("option", { name: "All lines" }));
   expect(onChange).toHaveBeenCalledWith("all");
 });
+
+test("a disabled select's trigger is disabled", () => {
+  render(
+    <Select
+      label="Lines"
+      value="100"
+      options={OPTIONS}
+      onChange={() => {}}
+      disabled
+    />,
+  );
+  expect(
+    screen.getByRole("combobox", { name: "Lines" }).hasAttribute("disabled"),
+  ).toBe(true);
+});

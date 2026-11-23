@@ -116,7 +116,22 @@ fn navigation_guard() -> TauriPlugin<Wry> {
         .build()
 }
 
+/// Set to `1` by the end-to-end tests: agents then run without the sandbox, which the test
+/// machine's AppArmor keeps bubblewrap from starting (agents panel plan P15). Only a build
+/// with the `e2e` feature reads it, so a shipped app always sandboxes agents.
+#[cfg(feature = "e2e")]
+const E2E_AGENT_SANDBOX_OFF: &str = "SKOPOS_E2E_AGENT_SANDBOX_OFF";
+
+#[cfg(feature = "e2e")]
+fn sandbox_off_requested(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| value == "1")
+}
+
 fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<Wry>) {
+    #[cfg(feature = "e2e")]
+    if sandbox_off_requested(std::env::var_os(E2E_AGENT_SANDBOX_OFF).as_deref()) {
+        core.agent_sandbox_off_for_test();
+    }
     let builder = tauri::Builder::default();
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
@@ -569,5 +584,19 @@ mod command_tests {
             missing.is_empty(),
             "api.ts calls unregistered commands: {missing:?}"
         );
+    }
+}
+
+#[cfg(all(test, feature = "e2e"))]
+mod e2e_switch_tests {
+    use super::sandbox_off_requested;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn sandbox_off_needs_the_value_one() {
+        assert!(sandbox_off_requested(Some(OsStr::new("1"))));
+        assert!(!sandbox_off_requested(Some(OsStr::new("0"))));
+        assert!(!sandbox_off_requested(Some(OsStr::new(""))));
+        assert!(!sandbox_off_requested(None));
     }
 }

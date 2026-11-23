@@ -1,5 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { type FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
+import { useAnchorFocus } from "../../app/anchorFocus";
 import {
   Badge,
   Button,
@@ -18,11 +20,22 @@ import { failureMessage } from "../../ipc/client";
 import type { SyncSource } from "../../ipc/generated/SyncSource";
 import type { Theme } from "../../ipc/generated/Theme";
 import { classifySourcePath, usePrefs } from "../../stores/prefs";
+import { agentsSupported } from "../agents/supported";
 import { checkForUpdates, useUpdates } from "../updates/updateStore";
 import { lastCheckedText } from "../updates/updateText";
+import { AgentChangesSection } from "./AgentChangesSection";
+import { AgentSandboxSection } from "./AgentSandboxSection";
+import { AgentsSection } from "./AgentsSection";
 import { HelmReposSection } from "./HelmReposSection";
 import styles from "./PreferencesScreen.module.css";
+import { type PrefsSection, prefsSectionId } from "./paths";
 import { ToolsSection } from "./ToolsSection";
+
+const SECTIONS: PrefsSection[] = ["agents", "agent-sandbox", "agent-changes"];
+
+function sectionOf(value: string | null): PrefsSection | null {
+  return SECTIONS.find((s) => s === value) ?? null;
+}
 
 const THEMES: { value: Theme; label: string }[] = [
   { value: "system", label: "System" },
@@ -159,6 +172,9 @@ export function PreferencesScreen() {
   const error = usePrefs((s) => s.error);
   const load = usePrefs((s) => s.load);
   const setTheme = usePrefs((s) => s.setTheme);
+  const [params] = useSearchParams();
+  const section = sectionOf(params.get("section"));
+  useAnchorFocus(section ? prefsSectionId(section) : null, prefs !== null);
 
   useEffect(() => {
     void load();
@@ -183,6 +199,13 @@ export function PreferencesScreen() {
     <div className={styles.screen}>
       <Sources sources={prefs.syncSources} />
       <ToolsSection />
+      {agentsSupported() ? (
+        <>
+          <AgentsSection />
+          <AgentSandboxSection />
+          <AgentChangesSection />
+        </>
+      ) : null}
       <HelmReposSection />
       <section className={styles.section}>
         <h3 className={styles.heading}>Appearance</h3>
