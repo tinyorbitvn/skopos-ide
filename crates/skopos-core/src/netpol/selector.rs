@@ -8,7 +8,6 @@ use serde_json::Value;
 
 use super::model::{push_unique, Entity};
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Operator {
     In(Vec<String>),
@@ -17,7 +16,6 @@ pub(crate) enum Operator {
     DoesNotExist,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Requirement {
     pub key: String,
@@ -26,7 +24,6 @@ pub(crate) struct Requirement {
 
 /// All requirements must hold. `matches_nothing` is set by an unknown operator, an `In` or
 /// `NotIn` without values, or an unknown Cilium label source.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct LabelSelector {
     pub requirements: Vec<Requirement>,
@@ -34,7 +31,6 @@ pub(crate) struct LabelSelector {
 }
 
 /// What a Cilium label key names once its source is read (spec §4.1).
-#[cfg_attr(not(test), allow(dead_code))]
 enum CiliumKey {
     /// A label of the Pod or one of its virtual labels: `k8s:`, `any:` or no source.
     Label(String),
@@ -44,7 +40,6 @@ enum CiliumKey {
     Unknown(String),
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl CiliumKey {
     fn read(key: &str) -> CiliumKey {
         match key.split_once(':') {
@@ -62,7 +57,6 @@ impl CiliumKey {
 /// The operator of one `matchExpressions` entry, or `None` after adding its note when the
 /// operator is unknown or an `In`/`NotIn` lists no value (spec §4.1). An operator that is
 /// not a string is named by its JSON text (`operator null` when it is missing).
-#[cfg_attr(not(test), allow(dead_code))]
 fn operator(expression: &Value, notes: &mut Vec<String>) -> Option<Operator> {
     let values: Vec<String> = expression["values"]
         .as_array()
@@ -94,7 +88,6 @@ impl LabelSelector {
     /// A field of another type than expected counts as absent: a `matchLabels` value that is
     /// not a string, an expression that is not an object or has no string `key`, and values
     /// that are not strings are left out.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn parse(value: &Value, notes: &mut Vec<String>) -> LabelSelector {
         Self::read(value, notes, false).0
     }
@@ -106,7 +99,6 @@ impl LabelSelector {
     /// A Pod never carries a reserved label, so `NotIn` and `DoesNotExist` on one hold for
     /// every Pod and are dropped without an entity. A reserved name that is not an entity
     /// (`reserved:world-ipv4`) sets `matches_nothing` and pushes "entity <name>".
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn parse_cilium(
         value: &Value,
         notes: &mut Vec<String>,
@@ -114,7 +106,6 @@ impl LabelSelector {
         Self::read(value, notes, true)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     fn read(value: &Value, notes: &mut Vec<String>, cilium: bool) -> (LabelSelector, Vec<Entity>) {
         let mut selector = LabelSelector::default();
         let mut entities = Vec::new();
@@ -172,7 +163,6 @@ impl LabelSelector {
         (selector, entities)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn matches(&self, labels: &BTreeMap<String, String>) -> bool {
         !self.matches_nothing
             && self.requirements.iter().all(|requirement| {
@@ -187,13 +177,11 @@ impl LabelSelector {
     }
 
     /// No requirement and not `matches_nothing`.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_everything(&self) -> bool {
         self.requirements.is_empty() && !self.matches_nothing
     }
 
     /// Whether a requirement names `key`.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn constrains(&self, key: &str) -> bool {
         self.requirements
             .iter()
@@ -201,7 +189,6 @@ impl LabelSelector {
     }
 
     /// Adds `key In [value]`.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_label(mut self, key: &str, value: &str) -> LabelSelector {
         self.requirements.push(Requirement {
             key: key.to_owned(),
@@ -213,7 +200,6 @@ impl LabelSelector {
     /// "All Pods" when everything; "No Pods" when `matches_nothing`; else the requirements,
     /// sorted by key, joined with ", ": `app=web`, `tier in (a, b)`, `env notin (x)`, `team`
     /// (Exists), `!team` (DoesNotExist). Values keep their written order.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn text(&self) -> String {
         if self.matches_nothing {
             return "No Pods".to_owned();

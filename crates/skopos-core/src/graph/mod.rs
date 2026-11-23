@@ -14,9 +14,6 @@ pub use types::{GraphEdge, GraphEvent, GraphNamespaceCount, GraphNode, GraphRel,
 
 // The reachability hub reads the cluster through the graph's store (network policies spec
 // §7.3).
-#[allow(unused_imports)]
 pub(crate) use build::Store;
-#[allow(unused_imports)]
-pub(crate) use extract::{Item, Netpol};
-#[allow(unused_imports)]
+pub(crate) use extract::Netpol;
 pub(crate) use kinds::{served_kinds, Kind};

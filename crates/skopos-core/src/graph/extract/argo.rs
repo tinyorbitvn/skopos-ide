@@ -55,13 +55,21 @@ fn destination(object: &Value) -> Option<String> {
     let namespace = text(object, "/spec/destination/namespace");
     let name = text(object, "/spec/destination/name");
     let server = text(object, "/spec/destination/server");
-    let in_cluster = name.as_deref().is_none_or(|name| name == IN_CLUSTER_NAME)
-        && server
-            .as_deref()
-            .is_none_or(|server| server == IN_CLUSTER_SERVER);
+    let in_cluster = targets_this_cluster(object);
     let cluster = name.or(server).filter(|_| !in_cluster);
     let parts: Vec<String> = namespace.into_iter().chain(cluster).collect();
     (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// Whether the Application deploys to the cluster Argo CD runs in. The objects of a remote
+/// cluster are not in this cluster's map, so they are only counted.
+fn targets_this_cluster(object: &Value) -> bool {
+    text(object, "/spec/destination/name")
+        .as_deref()
+        .is_none_or(|name| name == IN_CLUSTER_NAME)
+        && text(object, "/spec/destination/server")
+            .as_deref()
+            .is_none_or(|server| server == IN_CLUSTER_SERVER)
 }
 
 /// A kind the map draws an Application's object of. Namespaces are never nodes, and roles and
@@ -90,13 +98,15 @@ pub(super) fn application(item: &mut Item, object: &Value) {
 
     // An entry without a kind or a name names nothing. A namespaced object Argo CD wrote no
     // namespace for is in the destination's namespace.
+    let local = targets_this_cluster(object);
     let mut others: Vec<String> = Vec::new();
     for entry in items(object, "/status/resources") {
         let (Some(kind), Some(name)) = (text(entry, "/kind"), text(entry, "/name")) else {
             continue;
         };
         let group = text(entry, "/group").unwrap_or_default();
-        let Some(drawn_kind) = Kind::from_group_kind(&group, &kind).filter(|k| drawn(*k)) else {
+        let Some(drawn_kind) = Kind::from_group_kind(&group, &kind).filter(|k| local && drawn(*k))
+        else {
             others.push(kind);
             continue;
         };
@@ -311,6 +321,36 @@ mod tests {
                 (app.status, app.status_text.as_deref()),
                 (status, text),
                 "{health:?} {sync:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_application_of_a_remote_cluster_manages_nothing_here() {
+        for destination in [
+            json!({ "server": "https://prod.example.com", "namespace": "shop" }),
+            json!({ "name": "prod", "namespace": "shop" }),
+        ] {
+            let app = application(
+                json!({ "destination": destination }),
+                json!({ "resources": [
+                    { "group": "apps", "kind": "Deployment", "namespace": "shop", "name": "web" },
+                    { "kind": "Service", "namespace": "shop", "name": "web" },
+                ] }),
+            );
+            assert_eq!(
+                refs(&app),
+                [(
+                    GraphRel::Project,
+                    "AppProject/argocd/default".to_owned(),
+                    false
+                )],
+                "{destination}"
+            );
+            assert_eq!(
+                fact(&facts(&app), "Other resources"),
+                Some("2 (Deployment, Service)"),
+                "{destination}"
             );
         }
     }

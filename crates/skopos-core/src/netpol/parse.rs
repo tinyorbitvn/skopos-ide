@@ -13,11 +13,9 @@ use super::{
 };
 
 /// The virtual label that carries a Pod's namespace in Cilium selectors (spec §4.1).
-#[cfg_attr(not(test), allow(dead_code))]
 const NAMESPACE_LABEL: &str = "io.kubernetes.pod.namespace";
 
 /// The peer fields of a Cilium entry in one direction (spec §4.3).
-#[cfg_attr(not(test), allow(dead_code))]
 struct PeerFields {
     endpoints: &'static str,
     cidr: &'static str,
@@ -28,7 +26,6 @@ struct PeerFields {
     unevaluated: &'static [&'static str],
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 const FROM: PeerFields = PeerFields {
     endpoints: "fromEndpoints",
     cidr: "fromCIDR",
@@ -38,7 +35,6 @@ const FROM: PeerFields = PeerFields {
     unevaluated: &["fromRequires", "fromGroups", "fromNodes"],
 };
 
-#[cfg_attr(not(test), allow(dead_code))]
 const TO: PeerFields = PeerFields {
     endpoints: "toEndpoints",
     cidr: "toCIDR",
@@ -86,7 +82,6 @@ pub(crate) fn parse_policy(source: PolicySource, object: &Value) -> Option<Polic
 }
 
 /// Reads the rules of one policy object and collects its notes.
-#[cfg_attr(not(test), allow(dead_code))]
 struct Reader<'a> {
     /// The policy's namespace; "" for a cluster-wide policy.
     namespace: &'a str,
@@ -94,7 +89,6 @@ struct Reader<'a> {
     notes: Vec<String>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Reader<'_> {
     fn note(&mut self, note: impl Into<String>) {
         push_unique(&mut self.notes, note.into());
@@ -471,7 +465,6 @@ impl Reader<'_> {
 /// One `rules.http` entry. `headers` are kept as written; each `headerMatches` entry reads as
 /// "name: value", or "name" alone when the policy does not write the value (it may come from
 /// a Secret, which is never read).
-#[cfg_attr(not(test), allow(dead_code))]
 fn http_rule(rule: &Value) -> HttpRule {
     let mut headers = strings(&rule["headers"]);
     for header in list(&rule["headerMatches"]) {
@@ -492,7 +485,6 @@ fn http_rule(rule: &Value) -> HttpRule {
 
 /// A `port` field: `Some(None)` when absent, empty or 0 (every port); a number from 1 to 65535
 /// or a string of digits as a number; any other string as a name; `None` for anything else.
-#[cfg_attr(not(test), allow(dead_code))]
 fn port_value(value: &Value) -> Option<Option<PortValue>> {
     if value.is_null() || value.as_str() == Some("") {
         return Some(None);
@@ -510,7 +502,6 @@ fn port_value(value: &Value) -> Option<Option<PortValue>> {
 }
 
 /// A whole number, written as a number or as a string of digits.
-#[cfg_attr(not(test), allow(dead_code))]
 fn whole_number(value: &Value) -> Option<u64> {
     match value {
         Value::Number(number) => number.as_u64(),
@@ -520,7 +511,6 @@ fn whole_number(value: &Value) -> Option<u64> {
 }
 
 /// A string at `field` that is not empty.
-#[cfg_attr(not(test), allow(dead_code))]
 fn text(value: &Value, field: &str) -> Option<String> {
     value[field]
         .as_str()
@@ -529,13 +519,11 @@ fn text(value: &Value, field: &str) -> Option<String> {
 }
 
 /// The array `value` holds, or nothing.
-#[cfg_attr(not(test), allow(dead_code))]
 fn list(value: &Value) -> &[Value] {
     value.as_array().map_or(&[], Vec::as_slice)
 }
 
 /// The strings of the array `value` holds, leaving out empty ones and other values.
-#[cfg_attr(not(test), allow(dead_code))]
 fn strings(value: &Value) -> Vec<String> {
     list(value)
         .iter()

@@ -12,7 +12,6 @@ pub(crate) enum PolicySource {
 }
 
 /// `namespace` is "" for a cluster-wide policy.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct PolicyId {
     pub source: PolicySource,
@@ -21,7 +20,6 @@ pub(crate) struct PolicyId {
 }
 
 /// `Any` is Cilium's `ANY` (TCP, UDP and SCTP).
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Protocol {
     Tcp,
@@ -31,7 +29,6 @@ pub(crate) enum Protocol {
 }
 
 /// A port as a policy writes it: a number, or the name of a container port.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum PortValue {
     Number(u16),
@@ -39,7 +36,6 @@ pub(crate) enum PortValue {
 }
 
 /// One `rules.http` entry. `headers` are "name: value", or "name" alone.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct HttpRule {
     pub method: Option<String>,
@@ -49,7 +45,6 @@ pub(crate) struct HttpRule {
 }
 
 /// `port: None` is every port of `protocol`. `http` empty: no L7 limit on this port.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PortRule {
     pub protocol: Protocol,
@@ -59,7 +54,6 @@ pub(crate) struct PortRule {
 }
 
 /// A Cilium entity (spec §4.4).
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Entity {
     All,
@@ -74,7 +68,6 @@ pub(crate) enum Entity {
     Ingress,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Entity {
     const EVERY: [Entity; 10] = [
         Entity::All,
@@ -111,7 +104,6 @@ impl Entity {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NamespaceScope {
     /// Only this namespace: a NetworkPolicy peer with a `podSelector` alone.
@@ -122,7 +114,6 @@ pub(crate) enum NamespaceScope {
     Any,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Peer {
     /// Pods in `namespaces` whose labels match `pods`. With `cilium`, `pods` is matched against
@@ -146,14 +137,12 @@ pub(crate) enum Peer {
 }
 
 /// `peers` empty: every peer. `ports` empty: every port and protocol.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Rule {
     pub peers: Vec<Peer>,
     pub ports: Vec<PortRule>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Subject {
     /// The Pods matching `selector` in `namespace`, or in every namespace when `None`.
@@ -166,7 +155,6 @@ pub(crate) enum Subject {
     Host,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PolicyRule {
     pub subject: Subject,
@@ -184,7 +172,6 @@ pub(crate) struct PolicyRule {
 /// "operator <operator>"; and, for the other Cilium fields spec §13 leaves unevaluated,
 /// "fromGroups", "fromNodes", "toNodes", "cidrGroupRef", "cidrGroupSelector",
 /// "entity <name>" and "protocol <protocol>".
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Policy {
     pub id: PolicyId,
@@ -192,7 +179,6 @@ pub(crate) struct Policy {
     pub notes: Vec<String>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Policy {
     /// At least one rule, and every rule is `Subject::Host`.
     pub(crate) fn is_host(&self) -> bool {
@@ -236,7 +222,6 @@ impl Policy {
 
 /// Adds `item` unless it is there already, so notes, peers and texts keep the order they were
 /// found in, once each.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn push_unique<T: PartialEq>(items: &mut Vec<T>, item: T) {
     if !items.contains(&item) {
         items.push(item);

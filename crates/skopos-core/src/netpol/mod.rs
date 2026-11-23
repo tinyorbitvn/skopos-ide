@@ -9,14 +9,11 @@ mod parse;
 pub(crate) mod pods;
 mod selector;
 
-#[allow(unused_imports)]
 pub(crate) use eval::Index;
 pub(crate) use model::{
     Entity, HttpRule, NamespaceScope, Peer, Policy, PolicyId, PolicyRule, PolicySource, PortRule,
     PortValue, Protocol, Rule, Subject,
 };
-#[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use parse::parse_policy;
-#[allow(unused_imports)]
 pub(crate) use pods::{namespace_info, pod_info, NamespaceInfo, PodInfo};
 pub(crate) use selector::LabelSelector;

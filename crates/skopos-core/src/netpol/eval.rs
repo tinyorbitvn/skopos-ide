@@ -498,9 +498,8 @@ impl Index {
         &self.pods
     }
 
-    /// The Namespace named `name`, when it was read. Nothing outside tests calls it yet: the
-    /// first task that does removes the `cfg_attr`.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The Namespace named `name`, when it was read. Only tests call it.
+    #[cfg(test)]
     pub(crate) fn namespace(&self, name: &str) -> Option<&NamespaceInfo> {
         self.namespaces
             .iter()
