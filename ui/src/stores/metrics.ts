@@ -108,9 +108,21 @@ interface Poller {
   ask(): void;
 }
 
+/**
+ * How many Prometheus answers are kept for targets no panel shows any more. Showing one of
+ * them again draws its last answer at once; past the limit the oldest is dropped, so
+ * opening pod after pod does not keep every pod's series.
+ */
+export const IDLE_QUERY_LIMIT = 16;
+
 const pollers = new Map<string, Poller>();
-// Each ask of a key takes the next number; only the newest one's answer is kept.
+// Each ask of a key takes the next number; only the newest one's answer is kept. The
+// numbers never repeat across keys, so a dropped key's answer still on its way never
+// matches a later ask of the same key.
 const seqs = new Map<string, number>();
+let lastSeq = 0;
+// Query keys whose poller stopped, the one that stopped longest ago first.
+const idleQueries = new Set<string>();
 const providerSeq = new Map<string, number>();
 const providerLoads = new Map<string, Promise<void>>();
 // By usage key: how many readers want each item's history, ALL_ITEMS for every item.
@@ -139,9 +151,31 @@ export function queryKey(
 }
 
 function nextSeq(key: string): number {
-  const mine = (seqs.get(key) ?? 0) + 1;
-  seqs.set(key, mine);
-  return mine;
+  lastSeq += 1;
+  seqs.set(key, lastSeq);
+  return lastSeq;
+}
+
+/** The query `key` lost its last watcher: it is kept, and the oldest idle ones past the limit go. */
+function markQueryIdle(key: string): void {
+  idleQueries.delete(key);
+  idleQueries.add(key);
+  if (idleQueries.size <= IDLE_QUERY_LIMIT) return;
+  const dropped: string[] = [];
+  for (const old of idleQueries) {
+    if (idleQueries.size - dropped.length <= IDLE_QUERY_LIMIT) break;
+    dropped.push(old);
+  }
+  for (const old of dropped) {
+    idleQueries.delete(old);
+    // An ask still on its way finds no number for its key and is dropped.
+    seqs.delete(old);
+  }
+  useMetrics.setState((s) => {
+    const queries = { ...s.queries };
+    for (const old of dropped) delete queries[old];
+    return { queries };
+  });
 }
 
 /**
@@ -256,6 +290,7 @@ function watch(
     };
     created.timer = window.setInterval(() => tick(created), every);
     pollers.set(key, created);
+    idleQueries.delete(key);
     tick(created);
     poller = created;
   }
@@ -272,6 +307,8 @@ function watch(
     if (mine.usage) {
       // Nothing polls this key any more: its history would only age in memory.
       patchUsage(key, { nextAt: null, history: {}, historyVersion: 0 });
+    } else {
+      markQueryIdle(key);
     }
     if (pollers.size === 0) stopListening();
   };
@@ -383,7 +420,12 @@ export function forgetQueries(clusterId: string): void {
   for (const poller of pollers.values()) {
     if (!poller.usage && poller.clusterId === clusterId) keys.add(poller.key);
   }
-  for (const key of keys) nextSeq(key);
+  for (const key of keys) {
+    idleQueries.delete(key);
+    // A dropped number makes an answer still on its way miss; a polled key asks again below.
+    if (pollers.has(key)) nextSeq(key);
+    else seqs.delete(key);
+  }
   useMetrics.setState((s) => {
     const queries = { ...s.queries };
     for (const key of keys) delete queries[key];
@@ -676,6 +718,8 @@ export function resetMetricsForTest(): void {
   for (const poller of pollers.values()) window.clearInterval(poller.timer);
   pollers.clear();
   seqs.clear();
+  lastSeq = 0;
+  idleQueries.clear();
   providerSeq.clear();
   providerLoads.clear();
   historyReaders.clear();
