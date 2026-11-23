@@ -1,0 +1,13 @@
+/* The Argo logo in the theme's variant: the files are never recoloured (spec §3.3). The
+   rules are in source order, so the later one wins whatever the specificity. */
+.logoDark {
+  display: none;
+}
+
+:global([data-theme="dark"]) .logoLight {
+  display: none;
+}
+
+:global([data-theme="dark"]) .logoDark {
+  display: inline;
+}

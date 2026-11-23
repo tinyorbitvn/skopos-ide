@@ -1,6 +1,8 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mapSvgForExport } from "../exportMap";
 import { ORDER } from "../layout/constants";
+import { ARGO_ICONS } from "./argoIcons";
 import { iconName, KindIcon } from "./KindIcon";
 import { K8S_ICONS } from "./k8sIcons";
 
@@ -24,10 +26,28 @@ const SET = [
   "rb",
   "c-role",
   "crb",
+  "netpol",
 ] as const;
 
+const POLICY_KINDS = [
+  "NetworkPolicy",
+  "CiliumNetworkPolicy",
+  "CiliumClusterwideNetworkPolicy",
+];
+
+/** The Argo logo files as they sit in the source tree. */
+const ARGO_FILES: Record<string, string> = import.meta.glob<string>(
+  "/src/design/logos/argo-icon-*.svg",
+  { query: "?raw", import: "default", eager: true },
+);
+
+afterEach(() => {
+  document.documentElement.removeAttribute("data-theme");
+  vi.restoreAllMocks();
+});
+
 describe("k8sIcons", () => {
-  it("packs the 19 icons of the set as path data", () => {
+  it("packs the 20 icons of the set as path data", () => {
     expect(Object.keys(K8S_ICONS).sort()).toEqual([...SET].sort());
     for (const name of SET) {
       const icon = K8S_ICONS[name];
@@ -41,6 +61,30 @@ describe("k8sIcons", () => {
   });
 });
 
+describe("argoIcons", () => {
+  it("packs the two Argo logo files with their shapes and colours unchanged", () => {
+    for (const [variant, colour] of [
+      ["black", "#000"],
+      ["white", "#fff"],
+    ] as const) {
+      const file = ARGO_FILES[`/src/design/logos/argo-icon-${variant}.svg`];
+      const icon = ARGO_ICONS[variant];
+      expect(icon.vb, variant).toBe(/viewBox="([^"]+)"/.exec(file)?.[1]);
+      expect(
+        icon.paths.map((p) => p.d),
+        variant,
+      ).toEqual([...file.matchAll(/ d="([^"]+)"/g)].map((m) => m[1]));
+      expect(
+        icon.paths.map((p) => [p.s, p.t]),
+        variant,
+      ).toEqual([
+        [`fill:${colour}`, ""],
+        [`fill:${colour};fill-rule:evenodd`, ""],
+      ]);
+    }
+  });
+});
+
 describe("KindIcon", () => {
   it("gives every kind of the map an icon of its own", () => {
     for (const kind of [...Object.keys(ORDER), "Namespace"]) {
@@ -49,6 +93,11 @@ describe("KindIcon", () => {
     expect(iconName("Pod")).toBe("pod");
     expect(iconName("PersistentVolumeClaim")).toBe("pvc");
     expect(iconName("Gateway")).toBe("Gateway");
+    expect(iconName("Application")).toBe("argo");
+    expect(iconName("ApplicationSet")).toBe("ApplicationSet");
+    expect(iconName("AppProject")).toBe("AppProject");
+    for (const kind of POLICY_KINDS)
+      expect(iconName(kind), kind).toBe("netpol");
   });
 
   it("draws the RBAC kinds with the set's role, rb, c-role and crb icons", () => {
@@ -69,6 +118,23 @@ describe("KindIcon", () => {
       expect(icon?.getAttribute("viewBox"), kind).toBe(K8S_ICONS[name].vb);
       expect(icon?.querySelectorAll("path"), kind).toHaveLength(
         K8S_ICONS[name].paths.length,
+      );
+      unmount();
+    }
+  });
+
+  it("draws the three policy kinds with the set's netpol icon", () => {
+    for (const kind of POLICY_KINDS) {
+      const { container, unmount } = render(
+        <svg aria-hidden="true">
+          <KindIcon kind={kind} size={44} />
+        </svg>,
+      );
+      const icon = container.querySelector("svg svg");
+      expect(icon?.getAttribute("data-icon"), kind).toBe("netpol");
+      expect(icon?.getAttribute("viewBox"), kind).toBe(K8S_ICONS.netpol.vb);
+      expect(icon?.querySelectorAll("path"), kind).toHaveLength(
+        K8S_ICONS.netpol.paths.length,
       );
       unmount();
     }
@@ -114,5 +180,65 @@ describe("KindIcon", () => {
     expect(lb.querySelector("g")?.getAttribute("transform")).toMatch(
       /^rotate\(90 /,
     );
+  });
+
+  it("frames Lucide's Boxes for an ApplicationSet and FolderKanban for an AppProject", () => {
+    const { container } = render(
+      <svg aria-hidden="true">
+        <KindIcon kind="ApplicationSet" size={44} />
+        <KindIcon kind="AppProject" size={44} />
+      </svg>,
+    );
+    const [set, project] = container.querySelectorAll("svg > svg");
+    expect(set.getAttribute("data-icon")).toBe("ApplicationSet");
+    expect(set.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-boxes",
+    );
+    expect(set.querySelector("svg")?.getAttribute("stroke")).toBe("#ffffff");
+    expect(project.getAttribute("data-icon")).toBe("AppProject");
+    expect(project.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-folder-kanban",
+    );
+  });
+
+  it("draws the Argo logo for an Application, black in the light theme and white in the dark one", () => {
+    const { container } = render(
+      <svg aria-hidden="true">
+        <KindIcon kind="Application" size={44} />
+      </svg>,
+    );
+    const icon = container.querySelector("svg svg");
+    expect(icon?.getAttribute("data-icon")).toBe("argo");
+    expect(icon?.getAttribute("viewBox")).toBe(ARGO_ICONS.black.vb);
+    const light = container.querySelector('[data-variant="light"]') as Element;
+    const dark = container.querySelector('[data-variant="dark"]') as Element;
+    const fills = (g: Element) =>
+      [...g.querySelectorAll("path")].map((p) => p.getAttribute("fill"));
+    expect(fills(light)).toEqual(["#000", "#000"]);
+    expect(fills(dark)).toEqual(["#fff", "#fff"]);
+    expect(getComputedStyle(light).display).not.toBe("none");
+    expect(getComputedStyle(dark).display).toBe("none");
+    document.documentElement.dataset.theme = "dark";
+    expect(getComputedStyle(light).display).toBe("none");
+    expect(getComputedStyle(dark).display).not.toBe("none");
+  });
+
+  it("keeps only the theme's Argo logo in an export", () => {
+    document.documentElement.dataset.theme = "dark";
+    const { container } = render(
+      <svg aria-hidden="true">
+        <KindIcon kind="Application" size={44} />
+      </svg>,
+    );
+    const outer = container.querySelector("svg") as SVGSVGElement;
+    vi.spyOn(outer, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 100, 100),
+    );
+    const { svg } = mapSvgForExport(container, "");
+    const display = (variant: string) =>
+      (svg.querySelector(`[data-variant="${variant}"]`) as SVGElement).style
+        .display;
+    expect(display("light")).toBe("none");
+    expect(display("dark")).not.toBe("none");
   });
 });

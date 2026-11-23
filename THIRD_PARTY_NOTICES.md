@@ -43,12 +43,12 @@ The Argo CD actions write an Application the way the Argo CD API server does
 - License: Apache-2.0, text under [License texts](#license-texts), chosen of the two the set
   offers (Apache-2.0 and CC-BY-4.0). Copyright The Kubernetes Authors.
 
-The resource map draws 19 of these icons (`pod`, `deploy`, `rs`, `sts`, `ds`, `job`,
+The resource map draws 20 of these icons (`pod`, `deploy`, `rs`, `sts`, `ds`, `job`,
 `cronjob`, `svc`, `ing`, `cm`, `secret`, `sa`, `pvc`, `ns`, `crd`, `role`, `rb`, `c-role`,
-`crb`). `ui/scripts/packK8sIcons.mjs` packs them into path data in
+`crb`, `netpol`). `ui/scripts/packK8sIcons.mjs` packs them into path data in
 `ui/src/features/map/icons/k8sIcons.ts` and leaves their shapes and colours unchanged. The
-Gateway, HTTPRoute and GatewayClass icons put a Lucide glyph in the frame of the set's Ingress
-icon; see [npm packages](#npm-packages).
+Gateway, HTTPRoute, GatewayClass, ApplicationSet and AppProject icons put a Lucide glyph in the
+frame of the set's Ingress icon; see [npm packages](#npm-packages).
 
 The Kubernetes logo is a registered trademark of The Linux Foundation; its use here does not
 imply endorsement by The Linux Foundation or the CNCF.
@@ -63,9 +63,12 @@ imply endorsement by The Linux Foundation or the CNCF.
   usage guidelines (https://www.linuxfoundation.org/trademark-usage); it states no copyright license.
 
 The cluster sidebar shows these icons, in `ui/src/design/logos/`, beside the Helm and Argo sections
-only to identify those projects. Their shapes and colours are unchanged; the Helm files lose only
-their editor's layer name. Helm and Argo are trademarks of The Linux Foundation; their use here does
-not imply that The Linux Foundation or its projects sponsor or endorse SkoposIDE.
+only to identify those projects. The resource map draws the Argo icon for Argo CD Applications, only
+to identify them: `ui/scripts/packArgoIcons.mjs` packs the two Argo files into path data in
+`ui/src/features/map/icons/argoIcons.ts`, black in the light theme and white in the dark one. Their
+shapes and colours are unchanged; the Helm files lose only their editor's layer name. Helm and Argo
+are trademarks of The Linux Foundation; their use here does not imply that The Linux Foundation or
+its projects sponsor or endorse SkoposIDE.
 
 ## Reading the reference locally
 
@@ -146,8 +149,8 @@ MIT:
 ISC:
 
 - `lucide-react`: Copyright (c) 2026 Lucide Icons and Contributors. The resource map's Gateway,
-  HTTPRoute and GatewayClass icons put a Lucide glyph in the frame of the Kubernetes Ingress icon,
-  and the project site draws Lucide's icons.
+  HTTPRoute, GatewayClass, ApplicationSet and AppProject icons put a Lucide glyph in the frame of
+  the Kubernetes Ingress icon, and the project site draws Lucide's icons.
 - `yaml`: Copyright Eemeli Aro
 
 Apache-2.0, text under [License texts](#license-texts):

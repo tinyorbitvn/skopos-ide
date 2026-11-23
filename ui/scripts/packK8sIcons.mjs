@@ -27,6 +27,7 @@ const NAMES = [
   "rb",
   "c-role",
   "crb",
+  "netpol",
 ];
 const XLINK = "http://www.w3.org/1999/xlink";
 const PAINT = [
@@ -171,7 +172,7 @@ function walk(el, transforms, inherited, out, ids) {
   for (const child of el.children) walk(child, chain, paint, out, ids);
 }
 
-function pack(file) {
+export function pack(file) {
   const raw = readFileSync(file, "utf8");
   if (/<!(DOCTYPE|ENTITY)/i.test(raw)) {
     throw new Error(`${file} declares a DTD; refusing to parse it`);
@@ -225,7 +226,7 @@ function main() {
   );
 }
 
-// Packs only when run as a script, so tests can import `shape`.
+// Packs only when run as a script, so tests can import `shape` and packArgoIcons.mjs `pack`.
 if (
   process.argv[1] &&
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)

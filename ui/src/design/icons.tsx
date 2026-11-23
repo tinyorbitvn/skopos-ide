@@ -129,7 +129,9 @@ import { UsersFillIcon } from "@thesvg/ui-react/users";
 import { XFillIcon } from "@thesvg/ui-react/x";
 import { ZapFillIcon } from "@thesvg/ui-react/zap";
 import {
+  Boxes as LucideBoxes,
   DoorOpen as LucideDoorOpen,
+  FolderKanban as LucideFolderKanban,
   type LucideIcon,
   Layers as LucideLayers,
   Route as LucideRoute,
@@ -204,7 +206,9 @@ function icon(name: string, drawing: string, Drawing: Drawing): IconComponent {
  * where the box an icon of this module brings cannot go.
  */
 export const SVG_ART = {
+  Boxes: LucideBoxes,
   DoorOpen: LucideDoorOpen,
+  FolderKanban: LucideFolderKanban,
   Layers: LucideLayers,
   Route: LucideRoute,
   Split: LucideSplit,
