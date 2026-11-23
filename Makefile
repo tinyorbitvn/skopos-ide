@@ -29,6 +29,7 @@ e2e-build:
 e2e: e2e-build
 	scripts/kind-up.sh
 	cargo build -p skopos-fakekube
+	cargo build -p skopos-core --bin skopos-fakeagent
 	SKOPOS_E2E_SPEC_SET=full $(XVFB) pnpm -C e2e exec wdio run wdio.conf.ts
 test-kind:
 	scripts/kind-up.sh
