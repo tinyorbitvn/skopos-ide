@@ -382,6 +382,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   },
   "terminal-restart-2-verify": { kubeconfigs: {}, envGroup: "terminal-restart" },
   "port-forward": { kubeconfigs: {}, start: startKindFixture },
+  "cert-users": { kubeconfigs: {}, start: startKindFixture },
   "app-shell": { kubeconfigs: {}, start: startKindFixture },
   "port-forward-restart-1-save": {
     kubeconfigs: {},

@@ -1,4 +1,9 @@
-import { baseColumns, numberColumn, textColumn } from "../columns";
+import {
+  baseColumns,
+  numberColumn,
+  statusColumn,
+  textColumn,
+} from "../columns";
 import { registerKind } from "../registry";
 import {
   RoleBindingDetail,
@@ -7,6 +12,9 @@ import {
 } from "./AccessDetails";
 import { subjectsText } from "./access";
 import { saveKubeconfigAction } from "./actions";
+import { CsrDetail } from "./CsrDetail";
+import { csrCondition, durationText } from "./csr";
+import { CSR_ACTIONS } from "./csrActions";
 
 const RBAC = "rbac.authorization.k8s.io";
 
@@ -48,3 +56,19 @@ for (const plural of ["rolebindings", "clusterrolebindings"]) {
     detail: RoleBindingDetail,
   });
 }
+
+registerKind("certificates.k8s.io", "certificatesigningrequests", {
+  columns: (info) =>
+    baseColumns(
+      info.resource,
+      textColumn("signer", "Signer", (o) => o.spec?.signerName),
+      textColumn("requestor", "Requestor", (o) => o.spec?.username),
+      textColumn("duration", "Duration", (o) =>
+        durationText(o.spec?.expirationSeconds),
+      ),
+      statusColumn(csrCondition, { id: "condition", header: "Condition" }),
+    ),
+  actions: CSR_ACTIONS,
+  detail: CsrDetail,
+  ownConditions: true,
+});

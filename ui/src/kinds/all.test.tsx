@@ -198,6 +198,7 @@ test("every kind of the plan is registered", () => {
     "autoscaling/horizontalpodautoscalers",
     "batch/cronjobs",
     "batch/jobs",
+    "certificates.k8s.io/certificatesigningrequests",
     "coordination.k8s.io/leases",
     "discovery.k8s.io/endpointslices",
     "gateway.networking.k8s.io/backendtlspolicies",

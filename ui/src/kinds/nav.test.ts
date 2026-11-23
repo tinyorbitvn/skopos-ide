@@ -116,10 +116,12 @@ const EXPECTED: [string, string[]][] = [
     "access",
     [
       "/serviceaccounts",
+      "route:users-groups",
       "rbac.authorization.k8s.io/clusterroles",
       "rbac.authorization.k8s.io/roles",
       "rbac.authorization.k8s.io/clusterrolebindings",
       "rbac.authorization.k8s.io/rolebindings",
+      "certificates.k8s.io/certificatesigningrequests",
     ],
   ],
   [
@@ -537,4 +539,28 @@ test("custom resources leave out the kinds a section lists, and both Gateway API
   expect(groups).toEqual([
     { group: "argoproj.io", items: [{ label: "Rollout", plural: "rollouts" }] },
   ]);
+});
+
+test("Users & Groups shows when either binding kind is listable", () => {
+  const access = (resources: ApiResourceInfo[]) =>
+    visibleSections(resources)
+      .find((s) => s.id === "access")
+      ?.items.map(navItemKey);
+  expect(access([info("rbac.authorization.k8s.io", "rolebindings")])).toEqual([
+    "route:users-groups",
+    "rbac.authorization.k8s.io/rolebindings",
+  ]);
+  expect(
+    access([info("rbac.authorization.k8s.io", "clusterrolebindings")]),
+  ).toContain("route:users-groups");
+  expect(access([info("", "serviceaccounts")])).toEqual(["/serviceaccounts"]);
+});
+
+test("a route that requires one kind still needs it", () => {
+  const nodes = (resources: ApiResourceInfo[]) =>
+    visibleSections(resources)
+      .find((s) => s.id === "nodes")
+      ?.items.map(navItemKey);
+  expect(nodes([info("", "pods")])).toBeUndefined();
+  expect(nodes([info("", "nodes")])).toContain("route:node-topology");
 });

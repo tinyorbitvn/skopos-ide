@@ -1,4 +1,7 @@
+import { Link } from "react-router";
+import { usersGroupsPath } from "../../features/access/subjects";
 import { Facts, ObjectLink, Part, SimpleTable } from "../detail/parts";
+import styles from "../detail/parts.module.css";
 import type { DetailProps } from "../registry";
 import { ruleRows, subjectRows } from "./access";
 
@@ -109,6 +112,15 @@ export function RoleBindingDetail({
                 namespace={s.namespace}
                 apiVersion="v1"
               />
+            ) : s.kind === "User" || s.kind === "Group" ? (
+              <Link
+                key={s.name}
+                className={styles.link}
+                to={usersGroupsPath(clusterId, s.kind, s.name)}
+                aria-label={`${s.kind} ${s.name}`}
+              >
+                {s.name}
+              </Link>
             ) : (
               s.name
             ),

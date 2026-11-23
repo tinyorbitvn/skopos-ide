@@ -8,8 +8,12 @@ import type { AppInfo } from "./generated/AppInfo";
 import type { ApplyResult } from "./generated/ApplyResult";
 import type { ArgoRollbackOptions } from "./generated/ArgoRollbackOptions";
 import type { ArgoSyncOptions } from "./generated/ArgoSyncOptions";
+import type { BindingRef } from "./generated/BindingRef";
 import type { CatalogFolder } from "./generated/CatalogFolder";
 import type { CatalogFolders } from "./generated/CatalogFolders";
+import type { CertificateRequestInfo } from "./generated/CertificateRequestInfo";
+import type { CertUserEvent } from "./generated/CertUserEvent";
+import type { CertUserRequest } from "./generated/CertUserRequest";
 import type { ChangeAnswer } from "./generated/ChangeAnswer";
 import type { ChartSearch } from "./generated/ChartSearch";
 import type { ChartVersion } from "./generated/ChartVersion";
@@ -23,6 +27,8 @@ import type { ClusterSettings } from "./generated/ClusterSettings";
 import type { ConnectionLogEntry } from "./generated/ConnectionLogEntry";
 import type { ConnectionState } from "./generated/ConnectionState";
 import type { ControlPlane } from "./generated/ControlPlane";
+import type { CsrDecision } from "./generated/CsrDecision";
+import type { CsrReview } from "./generated/CsrReview";
 import type { DataChange } from "./generated/DataChange";
 import type { DrainEvent } from "./generated/DrainEvent";
 import type { DrainOptions } from "./generated/DrainOptions";
@@ -67,6 +73,8 @@ import type { SecretChange } from "./generated/SecretChange";
 import type { SecretValue } from "./generated/SecretValue";
 import type { SessionEvent } from "./generated/SessionEvent";
 import type { StoredChat } from "./generated/StoredChat";
+import type { SubjectRef } from "./generated/SubjectRef";
+import type { SubjectRemoval } from "./generated/SubjectRemoval";
 import type { SyncWarning } from "./generated/SyncWarning";
 import type { JsonValue } from "./generated/serde_json/JsonValue";
 import type { TerminalSize } from "./generated/TerminalSize";
@@ -413,6 +421,43 @@ export const api = {
     }),
   nodeDrainCancel: (drainId: string) =>
     call<void>("node_drain_cancel", { drainId }),
+  certUserCreateStart: (
+    clusterId: string,
+    request: CertUserRequest,
+    suggestedName: string,
+    onEvent: (event: CertUserEvent) => void,
+  ) =>
+    call<string | null>("cert_user_create_start", {
+      clusterId,
+      request,
+      suggestedName,
+      onEvent: new Channel<CertUserEvent>(onEvent),
+    }),
+  certUserCreateCancel: (runId: string) =>
+    call<void>("cert_user_create_cancel", { runId }),
+  accessSubjectRemove: (
+    clusterId: string,
+    subject: SubjectRef,
+    bindings: BindingRef[],
+  ) =>
+    call<SubjectRemoval[]>("access_subject_remove", {
+      clusterId,
+      subject,
+      bindings,
+    }),
+  csrSetApproval: (
+    clusterId: string,
+    name: string,
+    uid: string,
+    decision: CsrDecision,
+  ) => call<void>("csr_set_approval", { clusterId, name, uid, decision }),
+  csrReview: (clusterId: string, name: string) =>
+    call<CsrReview>("csr_review", { clusterId, name }),
+  certificateRequestDescribe: (request: string, certificate: string | null) =>
+    call<CertificateRequestInfo>("certificate_request_describe", {
+      request,
+      certificate,
+    }),
   secretReveal: (
     clusterId: string,
     namespace: string,

@@ -1,0 +1,89 @@
+.lead {
+  margin: var(--space-3) 0 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-5) 0 0;
+  padding: var(--space-5);
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-control);
+}
+
+.notice p {
+  margin: 0;
+}
+
+.danger {
+  border-color: var(--status-critical);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.help {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.rows {
+  margin: 0;
+  padding: 0 0 0 var(--space-6);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mark {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+}
+
+.pending {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--text-secondary);
+}
+
+.command {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.waiting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-5) 0 0;
+}
+
+.waiting p {
+  margin: 0;
+}

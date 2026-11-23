@@ -4,6 +4,7 @@ import {
   Blocks,
   Box,
   Boxes,
+  Certificate,
   CronJob,
   Database,
   Deploy,
@@ -27,6 +28,7 @@ import {
   Replica,
   Secret,
   Server,
+  Users,
 } from "../../design/icons";
 
 /** The kinds of `resources_names`, by plural. */
@@ -45,6 +47,7 @@ export const KIND_ICONS: Partial<Record<string, IconComponent>> = {
   persistentvolumeclaims: HardDrive,
   nodes: Server,
   namespaces: Namespace,
+  certificatesigningrequests: Certificate,
 };
 
 /** Pages of other kinds take their sidebar section's icon. */
@@ -67,6 +70,7 @@ export const ROUTE_ICONS: Partial<Record<string, IconComponent>> = {
   "helm/charts": Package,
   "helm/releases": PackageCheck,
   "node-topology": LayoutGrid,
+  "users-groups": Users,
 };
 
 export const OVERVIEW_ICON: IconComponent = LayoutDashboard;

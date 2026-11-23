@@ -165,6 +165,12 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::actions::node_set_unschedulable,
             commands::actions::node_drain_start,
             commands::actions::node_drain_cancel,
+            commands::access::cert_user_create_start,
+            commands::access::cert_user_create_cancel,
+            commands::access::access_subject_remove,
+            commands::access::csr_review,
+            commands::access::csr_set_approval,
+            commands::access::certificate_request_describe,
             commands::actions::secret_reveal,
             commands::actions::secret_update,
             commands::actions::configmap_update,
@@ -295,14 +301,15 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             let state = webview.state::<AppState>();
             match payload.event() {
                 // This window is replacing its page, and the new one cannot know the old
-                // one's drains, sessions or subscriptions; other windows keep theirs (P36).
+                // one's drains, certificate user runs, sessions or subscriptions; other windows keep theirs (P36).
                 // Route changes use the hash, so they load nothing. Port-forwards go on:
                 // the new page lists them. No automated test reaches this hook. The core's
-                // `sessions_stop_owned`, `node_drain_cancel_owned` and
-                // `subscriptions_stop_owned` have their own tests.
+                // `sessions_stop_owned`, `node_drain_cancel_owned`,
+                // `cert_user_create_cancel_owned` and `subscriptions_stop_owned` have their own tests.
                 PageLoadEvent::Started => {
                     tracing::info!("window {} started loading its page", webview.label());
                     state.core.node_drain_cancel_owned(webview.label());
+                    state.core.cert_user_create_cancel_owned(webview.label());
                     state.core.sessions_stop_owned(webview.label());
                     state.core.subscriptions_stop_owned(webview.label());
                 }

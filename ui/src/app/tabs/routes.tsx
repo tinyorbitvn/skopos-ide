@@ -20,7 +20,9 @@ import {
   Settings,
   SlidersHorizontal,
   SquareDashed,
+  Users,
 } from "../../design/icons";
+import { UsersGroupsRoute } from "../../features/access/UsersGroupsScreen";
 import { CatalogScreen } from "../../features/catalog/CatalogScreen";
 import { ClusterOverview } from "../../features/cluster/ClusterHome";
 import { ClusterScreen } from "../../features/cluster/ClusterScreen";
@@ -65,6 +67,7 @@ export function tabRoutes(): RouteObject[] {
         { path: "storage", element: <StorageOverview /> },
         { path: "r/:group/:plural", element: <ResourceRoute /> },
         { path: "port-forwards", element: <PortForwardsRoute /> },
+        { path: "users-groups", element: <UsersGroupsRoute /> },
         { path: "helm/charts", element: <HelmChartsRoute /> },
         { path: "helm/releases", element: <HelmReleasesRoute /> },
         { path: "helm/install", element: <HelmInstallRoute /> },
@@ -167,6 +170,11 @@ const SCREENS: readonly Screen[] = [
     pattern: "/cluster/:id/port-forwards",
     name: named("Port Forwarding"),
     icon: ArrowRightLeft,
+  },
+  {
+    pattern: "/cluster/:id/users-groups",
+    name: named("Users & Groups"),
+    icon: Users,
   },
   {
     pattern: "/cluster/:id/helm/charts",
