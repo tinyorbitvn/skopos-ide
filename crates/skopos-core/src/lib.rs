@@ -12,6 +12,7 @@ pub mod kubeconfig;
 pub mod map_export;
 pub mod metrics;
 pub mod navigation;
+mod netpol;
 pub mod openapi;
 pub mod paths;
 pub mod portforward;
