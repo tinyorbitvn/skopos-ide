@@ -50,6 +50,9 @@ describe("reachability", () => {
     await openCluster(KIND);
     await clickNav("nav-network/reachability");
     await shown("reachability");
+    // The count chips come with the first snapshot and move the select to the left, so a
+    // click aimed before they arrive lands beside it.
+    await shown("reach-count-kubernetes");
     await pickOption("reach-namespace", NS);
   });
 
