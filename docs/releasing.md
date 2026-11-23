@@ -13,9 +13,14 @@ cancels the older run.
 | `check` | Linux, macOS 15, Windows 2022 | `make check` |
 | `linux-integration` | Linux | `make test-kind`, then `make e2e` on a kind cluster |
 | `smoke` | macOS 15, Windows 2022 | `make e2e-smoke` against the fake cluster |
+| `sbom` | Linux | `make sbom`; the SBOM is kept as the run's `sbom` artifact |
 
 Hosted macOS runners cannot run the kind cluster, so the kind and full end-to-end suites run on
 Linux only. The jobs share their toolchain and cache setup through `.github/actions/setup`.
+
+`.github/workflows/dependency-review.yml` runs on the same pushes and pull requests and checks
+the dependency advisories each change adds; see
+[Dependencies and advisories](#dependencies-and-advisories).
 
 ## Cutting a release
 
@@ -47,10 +52,13 @@ Linux only. The jobs share their toolchain and cache setup through `.github/acti
       `.sig`, and each macOS build adds `SkoposIDE_aarch64.app.tar.gz` or
       `SkoposIDE_x64.app.tar.gz` and its `.sig`. A build stops at once when the updater key's
       secret, or on macOS an Apple secret, is not set.
-   5. **publish:** once all four builds pass, `scripts/updater-manifest.mjs` builds
+   5. **sbom:** once the draft exists, `make sbom` builds the SBOM and uploads it to the draft as
+      `SkoposIDE_<version>.cdx.json` (see [SBOM](#sbom)).
+   6. **publish:** once all four builds and the SBOM pass, `scripts/updater-manifest.mjs` builds
       `latest.json` from the draft's updater files and signatures and uploads it to the draft.
       The draft must then hold the five installers (AppImage, deb, arm64 and x64 dmg, Windows
-      setup exe), the updater files and `latest.json`; then it is published and marked Latest.
+      setup exe), the updater files, `latest.json` and the SBOM; then it is published and marked
+      Latest.
       A tag with a pre-release suffix, such as `v0.7.0-rc.1`, is published as a pre-release,
       which installed copies are not offered. For a stable release, the job then checks that
       `releases/latest/download/latest.json` offers the new version and that each of its
@@ -158,6 +166,71 @@ release workflow changes.
    Keychain; later updates must not ask.
 5. On the deb, check that cancelling the password prompt shows "The package was not installed.
    If you cancelled the password prompt, try again." and that Try Again works.
+
+## SBOM
+
+Each release carries `SkoposIDE_<version>.cdx.json`, a CycloneDX 1.6 software bill of materials
+of what the installers ship:
+
+- The crates compiled into `skopos-app` for the four release targets, from `cargo cyclonedx`, one
+  run per target. Each crate has a `skopos:target` property for every target that compiles it.
+  Build dependencies are listed with `scope: "excluded"`, since they do not ship.
+  `cargo cyclonedx` reads `cargo metadata`, which turns features on across the whole workspace
+  and for build scripts too, so the list also holds a few crates the app does not link (15 at
+  0.12.1, such as `httpdate` and `swift-rs`). No crate the app links is missing.
+- The npm packages in the UI's `dependencies`, from `pnpm list --prod`, with their license, the
+  lock file's SHA-512 and the registry tarball.
+
+Dev dependencies, the `e2e` package, `skopos-fakekube` and the GitHub Actions are left out.
+`scripts/sbom.mjs` joins the parts and refuses a BOM whose dependencies name a missing component.
+
+To build it locally, install the pinned cargo-cyclonedx (`CARGO_CYCLONEDX_VERSION` in the
+`Makefile`) and run `make sbom`:
+
+```sh
+cargo install --locked cargo-cyclonedx@0.5.10
+make sbom   # writes tmp/sbom/SkoposIDE.cdx.json
+```
+
+CI's `sbom` job builds it on every push and pull request, so a broken generator stops a release
+before the draft. To move to another cargo-cyclonedx, change the `Makefile` and both workflows
+together; `scripts/sbom-workflow.test.mjs` checks that they match.
+
+## Dependencies and advisories
+
+Dependabot watches `Cargo.lock` and `pnpm-lock.yaml` against GitHub's advisory database. The
+repository's security settings have Dependabot alerts and Dependabot security updates turned on.
+It raises an alert when an advisory is published for a version the lock files hold, so no scan
+runs on a schedule.
+
+- **The policy:** a Rust advisory of any severity is fixed or accepted, and so is any other at
+  high or critical. Low and moderate advisories in npm packages are warnings. An advisory with
+  no severity counts as critical.
+- **Fixing:** merge the security update pull request Dependabot opens. When it cannot lift an npm
+  package that another package pins, add an override to `pnpm-workspace.yaml` with a comment that
+  names the advisory, as for dompurify, glob and minimatch. For a crate, run
+  `cargo update -p <crate> --precise <fixed version>`, which also lifts what the fixed version
+  needs, or lift the dependency that holds it back.
+- **Accepting:** when an advisory does not affect SkoposIDE or has no fix yet, dismiss the alert on
+  the Security tab with the reason that fits (Tolerable risk, Not used, Inaccurate) and a comment
+  that says why. The glib alert is one: glib 0.18 comes through Tauri's GTK 3 stack on Linux, and
+  the fix is in 0.20. Nothing is recorded in the repository.
+  An advisory that a change brings in has no alert until the change is on `main`.
+  `dependency-review` is not a required check, so once a maintainer has decided to accept the
+  advisory, merge the change over the failed check. The run on that push to `main` fails once;
+  dismiss the alert Dependabot then raises, as above, and later changes pass.
+- **Each change:** the `dependency-review` workflow asks GitHub's dependency graph what a pull
+  request or a push to `main` changes (`dependency-graph/compare`) and runs
+  `scripts/advisories.mjs review`. It fails when the change brings in an advisory the policy does
+  not allow and warns about the others, in the log and the job summary. An advisory the base
+  already has does not count, so lifting a package with an accepted advisory passes. When the
+  comparison fails three times, the job fails; re-run it.
+- **Locally:** `make audit` lists the open Dependabot alerts with `gh` and fails when one breaks
+  the policy. It needs `gh auth login`.
+- **What Dependabot misses:** it reads only GitHub's advisory database, which gets RustSec
+  advisories late or not at all, and has no notices for unmaintained crates. In November 2026
+  neither RUSTSEC-2026-0592 (`url`) nor RUSTSEC-2026-0594 (`cookie`) was there. When lifting
+  crates, also check https://rustsec.org/advisories/.
 
 ## Project site
 

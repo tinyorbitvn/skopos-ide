@@ -95,9 +95,22 @@ test("the draft must hold every updater file and latest.json before it is publis
     '"SkoposIDE_x64.app.tar.gz"',
     '"SkoposIDE_x64.app.tar.gz.sig"',
     '"latest.json"',
+    '"SkoposIDE_${version}.cdx.json"',
   ]) {
     assert.ok(publish.includes(name), name);
   }
+});
+
+test("the release uploads the SBOM to the draft, and publish waits for it", () => {
+  const sbom = job("sbom");
+  assert.match(sbom, /^ {4}needs: draft$/m);
+  assert.match(sbom, /^ {6}contents: write$/m);
+  inOrder(sbom, [
+    "run: make sbom",
+    'name="SkoposIDE_${GITHUB_REF_NAME#v}.cdx.json"',
+    'gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name" --clobber',
+  ]);
+  assert.match(job("publish"), /^ {4}needs: \[verify, draft, build, sbom\]$/m);
 });
 
 test("the build job uses the release environment and leaves time for notarization", () => {
