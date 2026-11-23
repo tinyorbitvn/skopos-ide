@@ -33,6 +33,7 @@ use crate::paths::AppPaths;
 use crate::portforward::{PortForward, PortForwards};
 use crate::prefs::{ClusterSettings, Prefs};
 use crate::quit::QuitWatch;
+use crate::reachability::ReachabilityHub;
 use crate::resources::{ApiResourceInfo, RunningCertUser, RunningDrain, SingleFlight, WatchHub};
 use crate::secrets::{MemorySecretStore, SecretStore, Secrets};
 use crate::sessions::SessionRegistry;
@@ -115,6 +116,7 @@ struct Inner {
     watches: Arc<WatchHub>,
     graphs: Arc<GraphHub>,
     topologies: Arc<TopologyHub>,
+    reachabilities: Arc<ReachabilityHub>,
     drains: DashMap<(ClusterId, String), RunningDrain>,
     next_drain: AtomicU64,
     /// The create runs of client-certificate users, by run id.
@@ -322,6 +324,7 @@ impl AppCore {
                 watches: Arc::new(WatchHub::default()),
                 graphs: Arc::new(GraphHub::default()),
                 topologies: Arc::new(TopologyHub::default()),
+                reachabilities: Arc::new(ReachabilityHub::default()),
                 drains: DashMap::new(),
                 next_drain: AtomicU64::new(1),
                 cert_users: DashMap::new(),
@@ -678,6 +681,10 @@ impl AppCore {
 
     pub(crate) fn topologies(&self) -> &Arc<TopologyHub> {
         &self.inner.topologies
+    }
+
+    pub(crate) fn reachabilities(&self) -> &Arc<ReachabilityHub> {
+        &self.inner.reachabilities
     }
 
     pub(crate) fn drains(&self) -> &DashMap<(ClusterId, String), RunningDrain> {

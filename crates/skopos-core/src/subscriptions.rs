@@ -61,13 +61,14 @@ impl Subscriptions {
 }
 
 impl AppCore {
-    /// Ends the list, object, map, node topology and Helm subscriptions the window `owner`
-    /// started, on every cluster, for when its page loads again or it closes. A watch that
-    /// no other window reads stops as it does after an unsubscribe.
+    /// Ends the list, object, map, node topology, reachability and Helm subscriptions the
+    /// window `owner` started, on every cluster, for when its page loads again or it closes. A
+    /// watch that no other window reads stops as it does after an unsubscribe.
     pub fn subscriptions_stop_owned(&self, owner: &str) {
         self.watches().stop_owned(owner);
         self.graphs().stop_owned(owner);
         self.topologies().stop_owned(owner);
+        self.reachabilities().stop_owned(owner);
         self.helm_releases_stop_owned(owner);
     }
 }
