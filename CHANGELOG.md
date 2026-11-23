@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-23
+
 - **The sidebar's glass shows the design's wallpaper:** the hotbar and the sidebar now let the design's desktop wallpaper through their frosted glass, in soft blue and orange shapes that differ between the light and dark themes, where they showed one flat tint before. The header, the panes and the dock stay solid
 - **Resize the columns of every table:** the tables of Helm releases, Helm charts, port forwards and Users & Groups keep the column widths you give them after a restart too, as a kind's list does. The tables in drawers, such as a workload's pods, a Helm release's resources and history and a chart's versions, now resize the same way: drag the right edge of a column's header, or focus it and use Left and Right; the last column takes the rest of the width
 - **Fit a column to its content:** a double-click on a column's edge, or Enter on its focused edge, makes the column as wide as its header and the rows on screen need, where it gave the column back its own width before
