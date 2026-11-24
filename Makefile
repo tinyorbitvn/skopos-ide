@@ -1,8 +1,10 @@
 .PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens audit sbom
 ifeq ($(shell uname -s),Linux)
 XVFB := xvfb-run -a --server-args="-screen 0 1600x1000x24"
+XVFB_SCREENS := xvfb-run -a --server-args="-screen 0 2048x1280x24"
 else
 XVFB :=
+XVFB_SCREENS :=
 endif
 # The release SBOM (docs/releasing.md, "SBOM"). Both workflows install this version too.
 CARGO_CYCLONEDX_VERSION := 0.5.10
@@ -55,7 +57,7 @@ e2e-smoke: e2e-build
 e2e-screens: e2e-build
 	scripts/kind-up.sh
 	cargo build -p skopos-fakekube
-	SKOPOS_E2E_SPEC_SET=screens $(XVFB) pnpm -C e2e exec wdio run wdio.conf.ts
+	SKOPOS_E2E_SPEC_SET=screens $(XVFB_SCREENS) pnpm -C e2e exec wdio run wdio.conf.ts
 site:
 	node scripts/build-site.mjs --out tmp/site
 site-screens:

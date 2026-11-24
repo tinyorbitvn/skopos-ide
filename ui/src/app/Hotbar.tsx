@@ -37,7 +37,10 @@ import {
 } from "../design/icons";
 import { agentsSupported } from "../features/agents/supported";
 import { settingsPath } from "../features/settings/paths";
-import { checkForUpdates } from "../features/updates/updateStore";
+import {
+  checkForUpdates,
+  useStoreManaged,
+} from "../features/updates/updateStore";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { useCatalog } from "../stores/catalog";
 import { connectCluster, disconnectCluster } from "../stores/clusters";
@@ -182,6 +185,7 @@ function RailNotice(props: { label: string; icon: React.ReactNode }) {
  */
 function HelpMenu() {
   const open = useShell((s) => s.open);
+  const storeManaged = useStoreManaged();
   return (
     <Menu
       trigger={
@@ -215,13 +219,17 @@ function HelpMenu() {
           testId: "help-about",
           onSelect: () => open("about"),
         },
-        {
-          id: "check-updates",
-          label: "Check for Updates…",
-          icon: <RefreshCw size={14} aria-hidden="true" />,
-          testId: "help-check-updates",
-          onSelect: () => void checkForUpdates(),
-        },
+        ...(storeManaged
+          ? []
+          : [
+              {
+                id: "check-updates",
+                label: "Check for Updates…",
+                icon: <RefreshCw size={14} aria-hidden="true" />,
+                testId: "help-check-updates",
+                onSelect: () => void checkForUpdates(),
+              },
+            ]),
       ]}
     />
   );

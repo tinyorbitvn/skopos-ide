@@ -8,7 +8,7 @@ use tokio::sync::{broadcast, watch};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use super::{Progress, UpdateMemory, UpdatePhase, UpdateSource, UpdateState};
+use super::{Progress, UpdateMemory, UpdatePhase, UpdateSource, UpdateState, STORE_MANAGED};
 use crate::app_core::CoreEvent;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::prefs::Prefs;
@@ -105,6 +105,13 @@ impl Updates {
         if automatic {
             tokio::spawn(schedule(self.clone(), prefs));
         }
+    }
+
+    /// A Microsoft Store copy: the Store updates it, so there is no source, no scheduler and
+    /// no check, and the phase stays `StoreManaged`. Called instead of `start`.
+    pub fn start_store_managed(&self) {
+        *lock(&self.inner.phase) = UpdatePhase::StoreManaged;
+        self.publish(None);
     }
 
     /// Stops the scheduler.
@@ -287,6 +294,9 @@ impl Updates {
     /// the app when this returns `Ok`. Refused while another install runs, when there is
     /// nothing to install, and when this copy cannot update itself.
     pub async fn install(&self) -> CoreResult<()> {
+        if *lock(&self.inner.phase) == UpdatePhase::StoreManaged {
+            return Err(IpcError::new(ErrorCode::Conflict, STORE_MANAGED));
+        }
         let source = self.source()?;
         if let Some(blocker) = source.blocker() {
             return Err(IpcError::new(ErrorCode::Conflict, blocker));

@@ -233,6 +233,45 @@ runs on a schedule.
   neither RUSTSEC-2026-0592 (`url`) nor RUSTSEC-2026-0594 (`cookie`) was there. When lifting
   crates, also check https://rustsec.org/advisories/.
 
+## Microsoft Store
+
+The `store` job of `release.yml` publishes each stable release to the Microsoft Store as an MSIX
+(Store spec in the local specs). It packs the exe that `build (windows)` made for `setup.exe`
+with `scripts/msix.mjs`, checks the package with `scripts/msix-install-check.ps1` (install,
+start, the `install channel: microsoft-store` log line under the real `%APPDATA%`, no Visual C++
+runtime import), keeps the unsigned `.msix` as the workflow artifact `msix` for 30 days, and,
+when the repository variable `STORE_SUBMIT` is `true`, submits it with `msstore publish`. The
+Store signs the package. Pre-release tags skip the job.
+
+- The job runs after `publish`, so its failure never affects the GitHub release. Rerun it alone
+  from the run's page, but only within 7 days of the run: the `windows-app` artifact it downloads
+  expires then, and a later rerun fails at download-artifact. Rerunning the whole run would rebuild
+  into the published release, so after 7 days cut a new tag instead. Certification takes up to a
+  few business days; the job does not wait.
+- The job signs in to Partner Center as a Microsoft Entra application. Set it up once in
+  Partner Center: Account settings › Tenants associates a Microsoft Entra tenant with the
+  account (an account without one can create one there), then Account settings › User
+  management › Microsoft Entra applications › Add Microsoft Entra application creates the
+  application. Give it the Manager role. On the application's page, Add new key shows the key
+  once.
+- The values live in the repository environment `store`, which only `v*` tags may use:
+
+  | Secret | From |
+  |---|---|
+  | `MSSTORE_TENANT_ID` | the application's page in Partner Center › Tenant ID |
+  | `MSSTORE_CLIENT_ID` | the application's page › Client ID |
+  | `MSSTORE_CLIENT_SECRET` | the application's page › Add new key › Key |
+  | `MSSTORE_SELLER_ID` | Partner Center › Account settings › Legal info › Seller ID |
+
+- The key expires on the date the application's page shows. Before then, add a new key and
+  replace `MSSTORE_CLIENT_SECRET`; after it, submissions fail with an authentication error.
+- `crates/skopos-app/msix/store.json` holds the package identity from Partner Center's Product
+  identity page; it is public. The package's logos come from `crates/skopos-app/icons/`.
+- The first submission is manual: download the `msix` artifact and follow
+  [docs/store-listing.md](store-listing.md).
+- If the Store refuses `unvirtualizedResources`, stop submitting (`STORE_SUBMIT=false`) and
+  revisit the design: without it the Store copy's AppData is separate from `setup.exe`'s.
+
 ## Project site
 
 The project site at https://vanlongme.github.io/skopos-ide/ is built from `site/` by

@@ -12,6 +12,7 @@ use tauri::utils::config::BundleType;
 use tauri::{AppHandle, Manager, Url};
 use tauri_plugin_updater::{Update, Updater, UpdaterExt};
 
+use crate::install_channel::InstallChannel;
 use crate::state::AppState;
 
 /// Automatic checks are off in debug and e2e builds; manual ones work everywhere (spec §5.2).
@@ -239,8 +240,12 @@ impl UpdateSource for PluginSource {
     }
 }
 
-/// Starts the core's update service with the plugin as its source.
-pub fn start(app: &AppHandle, core: &AppCore) {
+/// Starts in-app updates; a Microsoft Store copy gets none, since the Store updates it.
+pub fn start(app: &AppHandle, core: &AppCore, channel: InstallChannel) {
+    if channel == InstallChannel::MicrosoftStore {
+        core.updates_start_store_managed();
+        return;
+    }
     let source = Arc::new(PluginSource {
         app: app.clone(),
         found: Mutex::new(None),

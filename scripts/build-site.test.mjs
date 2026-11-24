@@ -21,7 +21,8 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_URL = "https://github.com/vanlongme/skopos-ide";
 // The pages link only to the repository and the maintainer's GitHub Sponsors page.
-const SITE_LINK = /^https:\/\/github\.com\/(vanlongme\/skopos-ide($|[/#])|sponsors\/vanlongme$)/;
+const SITE_LINK =
+  /^https:\/\/(github\.com\/(vanlongme\/skopos-ide($|[/#])|sponsors\/vanlongme$)|apps\.microsoft\.com\/detail\/[0-9A-Z]{12}$)/;
 const SIZES = {
   "amd64.AppImage": 93891064,
   "amd64.deb": 16582772,
@@ -841,6 +842,41 @@ describe("page", () => {
   test("hides the orbit frame and its stars on narrow screens", () => {
     const block = /@media \(max-width: 760px\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
     assert.match(block, /\.frame,\s*\.rule__star,\s*\.nav__links \{\s*display: none;\s*\}/);
+  });
+});
+
+describe("privacy page", () => {
+  const release = parseRelease(releaseJson());
+  let out;
+  let html;
+
+  before(() => {
+    out = tempOut();
+    build({ release, out, root: ROOT });
+    html = fs.readFileSync(path.join(out, "docs", "privacy.html"), "utf8");
+  });
+  after(() => fs.rmSync(out, { recursive: true, force: true }));
+
+  test("renders with its title, no placeholder left and no telemetry", () => {
+    assert.ok(!html.includes("{{"));
+    assert.ok(html.includes("<title>Privacy · SkoposIDE docs</title>"));
+    assert.match(html, /no telemetry/);
+  });
+
+  test("every relative link and source exists, from the page's folder", () => {
+    const refs = [...html.matchAll(/\s(?:href|src)="([^"#]+)(?:#[^"]*)?"/g)]
+      .map((m) => m[1])
+      .filter((ref) => !/^[a-z]+:/.test(ref));
+    assert.ok(refs.length > 0);
+    for (const ref of refs) {
+      assert.ok(fs.existsSync(path.join(out, "docs", ...ref.split("/"))), ref);
+    }
+  });
+
+  test("the home page's Legal links lead to it", () => {
+    const index = fs.readFileSync(path.join(out, "index.html"), "utf8");
+    const legal = index.slice(index.indexOf('<nav aria-label="Legal">'));
+    assert.ok(legal.includes('<li><a href="docs/privacy.html">Privacy</a></li>'));
   });
 });
 

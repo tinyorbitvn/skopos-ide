@@ -228,3 +228,11 @@ test("a failed check offers Try Again, which checks again", async () => {
   await act(flush);
   expect(backend.callsTo("update_check")).toHaveLength(1);
 });
+
+test("a Microsoft Store copy says where its updates come from and offers nothing to run", () => {
+  show(updateState({ phase: { type: "storeManaged" } }));
+  expect(
+    within(dialog()).getByText("Updates come from the Microsoft Store"),
+  ).toBeTruthy();
+  expect(buttons()).toEqual(["Close"]);
+});

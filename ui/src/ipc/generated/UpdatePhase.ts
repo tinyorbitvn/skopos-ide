@@ -4,4 +4,4 @@ import type { Release } from "./Release";
 /**
  * Where the update flow is. The dialog and the status bar are drawn from it.
  */
-export type UpdatePhase = { "type": "idle" } | { "type": "checking" } | { "type": "upToDate" } | { "type": "available", release: Release, } | { "type": "failed", message: string, release: Release | null, } | { "type": "downloading", version: string, received: number, total: number | null, } | { "type": "installing", version: string, };
+export type UpdatePhase = { "type": "idle" } | { "type": "checking" } | { "type": "upToDate" } | { "type": "available", release: Release, } | { "type": "failed", message: string, release: Release | null, } | { "type": "downloading", version: string, received: number, total: number | null, } | { "type": "installing", version: string, } | { "type": "storeManaged" };

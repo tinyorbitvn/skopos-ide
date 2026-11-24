@@ -331,3 +331,32 @@ test("the scrub step deletes the .p8 and empties the Apple values", { skip: noBa
   assert.ok(!result.files.includes("AuthKey_K1.p8"));
   assert.deepEqual(Object.values(result.exported), ["", "", "", "", "", "", ""]);
 });
+
+test("the Windows build hands its exe to the store job", () => {
+  const build = job("build");
+  assert.match(build, /- name: Keep the exe for the Microsoft Store\n {8}if: runner\.os == 'Windows'\n {8}uses: actions\/upload-artifact@v4\n {8}with:\n {10}name: windows-app\n {10}path: target\/release\/skopos-app\.exe\n/);
+});
+
+test("the store job runs after publish, for stable tags only, in its own environment", () => {
+  const store = job("store");
+  assert.match(store, /^ {4}needs: \[verify, publish\]$/m);
+  assert.match(store, /^ {4}if: needs\.verify\.outputs\.prerelease != 'true'$/m);
+  assert.match(store, /^ {4}runs-on: windows-2022$/m);
+  assert.match(store, /^ {4}environment: store$/m);
+  assert.match(store, /msix-install-check\.ps1 -Msix .* -CheckRuntime/);
+  assert.match(store, /uses: microsoft\/setup-msstore-cli@[0-9a-f]{40} # v\S+/);
+  // Nothing waits for the Store: the GitHub release never depends on it.
+  assert.doesNotMatch(release, /needs: \[[^\]]*\bstore\b/);
+});
+
+test("the store job submits only when STORE_SUBMIT is true, with secrets in env only", () => {
+  const store = job("store");
+  for (const name of ["Install the Store CLI", "Submit to the Microsoft Store"]) {
+    assert.match(store, new RegExp(`- name: ${name}\\n {8}if: vars\\.STORE_SUBMIT == 'true'\\n`));
+  }
+  const secretLines = store.split("\n").filter((line) => line.includes("secrets."));
+  assert.ok(secretLines.length === 4, secretLines.join("\n"));
+  for (const line of secretLines) {
+    assert.match(line, /^ {10}(MSSTORE_[A-Z_]+): \$\{\{ secrets\.\1 \}\}$/);
+  }
+});

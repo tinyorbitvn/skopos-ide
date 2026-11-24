@@ -34,7 +34,10 @@ import { mapPath } from "../features/map/paths";
 import { OVERVIEW_ICONS } from "../features/palette/icons";
 import { settingsPath } from "../features/settings/paths";
 import { topologyPath } from "../features/topology/paths";
-import { checkForUpdates } from "../features/updates/updateStore";
+import {
+  checkForUpdates,
+  isStoreManaged,
+} from "../features/updates/updateStore";
 import type { ApiResourceInfo } from "../ipc/generated/ApiResourceInfo";
 import type { Theme } from "../ipc/generated/Theme";
 import { visibleSections } from "../kinds/nav";
@@ -368,7 +371,7 @@ export const COMMANDS: readonly AppCommand[] = [
     id: "check-updates",
     label: () => "Check for Updates",
     icon: RefreshCw,
-    available: always,
+    available: () => !isStoreManaged(),
     run: () => void checkForUpdates(),
   },
   theme("theme-dark", "Theme: Dark", Moon, "dark"),

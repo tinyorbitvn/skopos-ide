@@ -94,6 +94,16 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Smoke tests
         run: make e2e-smoke
+      - name: Pack the MSIX
+        if: runner.os == 'Windows'
+        run: |
+          # An rc tag leaves x.y.z-rc.N in tauri.conf.json; the test package takes the stable part.
+          version="$(node -p "require('./crates/skopos-app/tauri.conf.json').version")"
+          node scripts/msix.mjs --exe target/debug/skopos-app.exe --identity test --version "${version%%-*}" --out tmp/msix
+      - name: Install and start the MSIX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/msix-install-check.ps1 -Msix (Get-ChildItem tmp/msix/*.msix).FullName
       # As in linux-integration: only a failed run, or one that killed a stalled app, has logs.
       - name: Upload logs
         if: always()

@@ -373,6 +373,25 @@ test("a saved updateCheck of false shows the switch off", async () => {
   expect((toggle as HTMLInputElement).checked).toBe(false);
 });
 
+test("Updates in a Microsoft Store copy: the Store's sentence, no switch and no Check Now", async () => {
+  show(saved);
+  await screen.findByRole("switch", {
+    name: "Check for updates automatically",
+  });
+  act(() =>
+    useUpdates.setState({
+      state: updateState({ phase: { type: "storeManaged" } }),
+    }),
+  );
+  expect(screen.getByTestId("prefs-store-managed").textContent).toBe(
+    "Updates come from the Microsoft Store",
+  );
+  expect(
+    screen.queryByRole("switch", { name: "Check for updates automatically" }),
+  ).toBeNull();
+  expect(screen.queryByTestId("prefs-check-now")).toBeNull();
+});
+
 test("the agent sections show when agents are supported", async () => {
   setAgentsSupportedForTest(true);
   show();

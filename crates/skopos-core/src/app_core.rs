@@ -761,6 +761,12 @@ impl AppCore {
         );
     }
 
+    /// A Microsoft Store copy: no update source and no checks (Store spec §3). Called by the
+    /// app instead of `updates_start`.
+    pub fn updates_start_store_managed(&self) {
+        self.inner.updates.start_store_managed();
+    }
+
     /// Where `resources_discover(refresh)` calls of this cluster share their runs.
     pub(crate) fn discovery_flight(
         &self,

@@ -140,7 +140,10 @@ make e2e-smoke  # smoke end-to-end tests, no Docker
 ## First run
 
 - **macOS**: builds are signed with a Developer ID certificate and notarized by Apple. Drag the app to Applications and open it.
-- **Windows**: builds are unsigned for now. In SmartScreen choose "More info", then "Run anyway".
+- **Windows**: install SkoposIDE from the [Microsoft Store](https://apps.microsoft.com/detail/9PC8GNRRQB5Q),
+  which signs it, so Windows shows no warning. The installer from the releases page is not signed
+  yet: in SmartScreen choose "More info", then "Run anyway". Install one of the two: both use the
+  same settings.
 - **Linux**: mark the AppImage executable with `chmod +x` and run it.
 
 ## Updates
@@ -154,9 +157,10 @@ checks its signature, installs it and restarts SkoposIDE with its windows and ta
 - **macOS**: the app must be in Applications. A copy run from the disk image can't update
   itself. After an update, macOS may ask again for the passwords SkoposIDE keeps in the
   Keychain, because each build has its own ad-hoc signature; choose Always Allow.
-- **Windows**: the installer closes SkoposIDE, installs the update and starts it. If the
-  installer fails after SkoposIDE has closed, start SkoposIDE again: the old version is still
-  installed.
+- **Windows**: the Store updates the Microsoft Store build, which never checks by itself. For
+  the build from the releases page, the installer closes SkoposIDE, installs the update and
+  starts it. If the installer fails after SkoposIDE has closed, start SkoposIDE again: the old
+  version is still installed.
 - **Linux**: the AppImage replaces itself. The deb asks for your password to install the
   package. Other packages can't update themselves.
 

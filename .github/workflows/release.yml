@@ -190,6 +190,13 @@ jobs:
           # latest.json is built once, by the publish job, from all four builds.
           includeUpdaterJson: false
           args: ${{ matrix.args }} --config crates/skopos-app/tauri.conf.json --config crates/skopos-app/tauri.updater.conf.json
+      - name: Keep the exe for the Microsoft Store
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: target/release/skopos-app.exe
+          retention-days: 7
       # Tauri notarized and stapled the app and signed the dmg; the dmg itself is ours.
       - name: Notarize and staple the dmg
         if: runner.os == 'macOS'
@@ -337,3 +344,53 @@ jobs:
               exit 1
             }
           done < "$RUNNER_TEMP/urls.txt"
+
+  # The Microsoft Store build (Store spec §4): the same exe as setup.exe, packed as an MSIX that
+  # the Store signs. It runs after publish, so a failure here never touches the GitHub release.
+  store:
+    needs: [verify, publish]
+    if: needs.verify.outputs.prerelease != 'true'
+    runs-on: windows-2022
+    environment: store
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-app
+          path: tmp/windows-app
+      - name: Pack the MSIX
+        run: node scripts/msix.mjs --exe tmp/windows-app/skopos-app.exe --identity crates/skopos-app/msix/store.json --version "${GITHUB_REF_NAME#v}" --out tmp/msix
+      - name: Install and start the MSIX
+        shell: pwsh
+        run: ./scripts/msix-install-check.ps1 -Msix (Get-ChildItem tmp/msix/*.msix).FullName -CheckRuntime
+      - name: Keep the MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix
+          path: tmp/msix/*.msix
+          retention-days: 30
+      - name: Install the Store CLI
+        if: vars.STORE_SUBMIT == 'true'
+        uses: microsoft/setup-msstore-cli@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+      - name: Submit to the Microsoft Store
+        if: vars.STORE_SUBMIT == 'true'
+        env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: |
+          msstore reconfigure --tenantId "$MSSTORE_TENANT_ID" --sellerId "$MSSTORE_SELLER_ID" \
+            --clientId "$MSSTORE_CLIENT_ID" --clientSecret "$MSSTORE_CLIENT_SECRET"
+          store_id="$(node -p "require('./crates/skopos-app/msix/store.json').storeId")"
+          # The CLI's first argument is a project folder; -i names the package inside it.
+          msstore publish tmp/msix -i "tmp/msix/SkoposIDE_${GITHUB_REF_NAME#v}_x64.msix" -id "$store_id"
