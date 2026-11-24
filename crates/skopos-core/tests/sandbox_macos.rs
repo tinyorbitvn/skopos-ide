@@ -388,48 +388,25 @@ mkdir -p "$own" && echo note > "$own/note" && echo "own made $own""#;
     assert_eq!(std::fs::read_to_string(own.join("note")).unwrap(), "note\n");
 }
 
-/// Claude Code's sign-in lives in the login keychain, whose file the Security framework reads
-/// in the agent's own process. The agent may read the keychains but not change them, and the
-/// rest of `~/Library` stays hidden.
+/// Every item of the login keychain that `/usr/bin/security` made opens to any process that
+/// runs it and reads the keychain's file, such as another CLI's token. The agent may not read
+/// the keychains; the app hands Claude its own sign-in instead.
 #[tokio::test]
-async fn the_agent_may_read_the_keychains_but_not_change_them() {
+async fn the_agent_cannot_read_the_keychains() {
     if !enabled().await {
         return;
     }
     let machine = machine();
     let keychain = machine.home.join("Library/Keychains/login.keychain-db");
-    let preferences = machine
-        .home
-        .join("Library/Preferences/com.apple.security.plist");
-    for (file, contents) in [(&keychain, "keychain"), (&preferences, "preferences")] {
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, contents).unwrap();
-    }
-    let read = [text(&keychain), text(&preferences)];
+    std::fs::create_dir_all(keychain.parent().unwrap()).unwrap();
+    std::fs::write(&keychain, "keychain").unwrap();
+    let read = [text(&keychain)];
     let (code, stdout) = machine.run(&machine.probe(PRINT_EACH, &read)).await;
     assert_eq!(code, Some(0));
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
-        [
-            format!("{}=keychain", read[0]),
-            format!("{}=refused", read[1])
-        ]
+        [format!("{}=refused", read[0])]
     );
-    let written = [
-        text(&keychain),
-        text(machine.home.join("Library/Keychains/new.keychain-db")),
-    ];
-    let (code, stdout) = machine.run(&machine.probe(WRITE_EACH, &written)).await;
-    assert_eq!(code, Some(0));
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(
-        lines[..2],
-        [
-            format!("refused {}", written[0]),
-            format!("refused {}", written[1])
-        ]
-    );
-    assert_eq!(std::fs::read_to_string(&keychain).unwrap(), "keychain");
 }
 
 #[tokio::test]
