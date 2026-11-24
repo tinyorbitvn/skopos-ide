@@ -157,10 +157,10 @@ checks its signature, installs it and restarts SkoposIDE with its windows and ta
 - **macOS**: the app must be in Applications. A copy run from the disk image can't update
   itself. After an update, macOS may ask again for the passwords SkoposIDE keeps in the
   Keychain, because each build has its own ad-hoc signature; choose Always Allow.
-- **Windows**: The Microsoft Store build is updated by the Store and never checks by itself.
-  The installer closes SkoposIDE, installs the update and starts it. If the
-  installer fails after SkoposIDE has closed, start SkoposIDE again: the old version is still
-  installed.
+- **Windows**: the Store updates the Microsoft Store build, which never checks by itself. For
+  the build from the releases page, the installer closes SkoposIDE, installs the update and
+  starts it. If the installer fails after SkoposIDE has closed, start SkoposIDE again: the old
+  version is still installed.
 - **Linux**: the AppImage replaces itself. The deb asks for your password to install the
   package. Other packages can't update themselves.
 
