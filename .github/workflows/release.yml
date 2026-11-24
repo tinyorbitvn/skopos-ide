@@ -369,8 +369,9 @@ jobs:
           path: tmp/windows-app
       - name: Pack the MSIX
         run: node scripts/msix.mjs --exe tmp/windows-app/skopos-app.exe --identity crates/skopos-app/msix/store.json --version "${GITHUB_REF_NAME#v}" --out tmp/msix
+      # Windows PowerShell: PowerShell 7 can't load the Appx module on windows-2022.
       - name: Install and start the MSIX
-        shell: pwsh
+        shell: powershell
         run: ./scripts/msix-install-check.ps1 -Msix (Get-ChildItem tmp/msix/*.msix).FullName -CheckRuntime
       - name: Keep the MSIX
         uses: actions/upload-artifact@v4

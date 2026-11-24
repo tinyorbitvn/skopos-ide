@@ -112,8 +112,15 @@ test("the Windows smoke job packs the e2e build and install-checks it", () => {
   assert.match(smoke, /- name: Pack the MSIX\n {8}if: runner\.os == 'Windows'\n/);
   assert.match(smoke, /node scripts\/msix\.mjs --exe target\/debug\/skopos-app\.exe --identity test /);
   assert.match(smoke, /--version "\$\{version%%-\*\}"/);
-  assert.match(smoke, /- name: Install and start the MSIX\n {8}if: runner\.os == 'Windows'\n {8}shell: pwsh\n {8}run: \.\/scripts\/msix-install-check\.ps1 -Msix /);
+  assert.match(smoke, /- name: Install and start the MSIX\n {8}if: runner\.os == 'Windows'\n {8}shell: powershell\n {8}run: \.\/scripts\/msix-install-check\.ps1 -Msix /);
   assert.doesNotMatch(smoke, /-CheckRuntime/);
+});
+
+// PowerShell 7 can't load the Appx module on windows-2022, so the check runs under Windows
+// PowerShell 5.1, which reads a file without a byte order mark as ANSI.
+test("the install check is plain ASCII", () => {
+  const text = fs.readFileSync(path.join(ROOT, "scripts", "msix-install-check.ps1"), "utf8");
+  assert.doesNotMatch(text, /[^\x00-\x7f]/);
 });
 
 test("store.json holds the Partner Center identity and the site links its Store page", () => {

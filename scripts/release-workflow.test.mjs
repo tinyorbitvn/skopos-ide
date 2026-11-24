@@ -344,6 +344,7 @@ test("the store job runs after publish, for stable tags only, in its own environ
   assert.match(store, /^ {4}runs-on: windows-2022$/m);
   assert.match(store, /^ {4}environment: store$/m);
   assert.match(store, /msix-install-check\.ps1 -Msix .* -CheckRuntime/);
+  assert.match(store, /- name: Install and start the MSIX\n {8}shell: powershell\n/);
   assert.match(store, /uses: microsoft\/setup-msstore-cli@[0-9a-f]{40} # v\S+/);
   // Nothing waits for the Store: the GitHub release never depends on it.
   assert.doesNotMatch(release, /needs: \[[^\]]*\bstore\b/);

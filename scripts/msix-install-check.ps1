@@ -1,8 +1,11 @@
 <#
 .SYNOPSIS
-Installs an MSIX for a check (Store spec §4): signs a copy with a throwaway certificate,
-installs it, starts the app and checks that it logs its Microsoft Store channel to the real
-%APPDATA%, then removes everything. It never touches an already installed copy.
+Installs an MSIX for a check (Store spec, section 4): signs a copy with a throwaway
+certificate, installs it, starts the app and checks that it logs its Microsoft Store channel to
+the real %APPDATA%, then removes everything. It never touches an already installed copy.
+
+Run it with Windows PowerShell 5.1 (powershell.exe): PowerShell 7 can't load the Appx module
+on windows-2022. Keep the file ASCII, which 5.1 reads the same without a byte order mark.
 #>
 param(
     [Parameter(Mandatory)] [string] $Msix,
