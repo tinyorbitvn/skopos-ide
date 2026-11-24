@@ -6,11 +6,7 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
-- **Network policies on the map:** NetworkPolicies, CiliumNetworkPolicies and CiliumClusterwideNetworkPolicies, each joined to the Pods it selects.
-- **Argo CD on the map:** Applications joined to the objects they manage, with their AppProjects and ApplicationSets.
-- **Reachability:** Network › Reachability shows which workloads of a namespace may talk to which, by port and HTTP rule, from Kubernetes and Cilium policies.
-
-## [0.13.0] - 2026-11-23
+## [0.13.0] - 2026-11-24
 
 - **The sidebar's glass shows the design's wallpaper:** the hotbar and the sidebar now let the design's desktop wallpaper through their frosted glass, in soft blue and orange shapes that differ between the light and dark themes, where they showed one flat tint before. The header, the panes and the dock stay solid
 - **Resize the columns of every table:** the tables of Helm releases, Helm charts, port forwards and Users & Groups keep the column widths you give them after a restart too, as a kind's list does. The tables in drawers, such as a workload's pods, a Helm release's resources and history and a chart's versions, now resize the same way: drag the right edge of a column's header, or focus it and use Left and Right; the last column takes the rest of the width
@@ -19,6 +15,9 @@ release notes (see `docs/releasing.md`).
 - **AI agents:** the header's sparkles button or Ctrl+J (⌘J on macOS) opens an agent panel beside the page. Chat with the agent CLI you installed (Claude Code, Codex, OpenCode, Gemini CLI or your own ACP command) about one cluster or several. The agent runs in an OS sandbox on Linux and macOS and reaches your clusters only through SkoposIDE's tools; each read shows as a card, and each change shows its diff and waits for Approve, Approve for this chat or Deny, then follows the rollout. Not available on Windows.
 - **Ask the agent about an object:** a drawer's More actions and the command palette offer Ask the agent about this Pod (or any kind), which opens a new chat with the object attached.
 - **Agent settings:** Preferences lists the agents found on this computer with their state, lets you add your own and pick the default, shows the sandbox's status and the domains and folders agents may use, and sets per cluster whether changes ask every time, are read only or run without asking. A cluster's Settings page has an Agent card for that setting, the namespaces the agent can see, Secret values, commands in containers, the default agent and notes sent with every chat; the hotbar's right-click menu opens it with Agent settings.
+- **Network policies on the map:** NetworkPolicies, CiliumNetworkPolicies and CiliumClusterwideNetworkPolicies, each joined to the Pods it selects.
+- **Argo CD on the map:** Applications joined to the objects they manage, with their AppProjects and ApplicationSets.
+- **Reachability:** Network › Reachability shows which workloads of a namespace may talk to which, by port and HTTP rule, from Kubernetes and Cilium policies.
 
 ## [0.12.1] - 2026-11-23
 
