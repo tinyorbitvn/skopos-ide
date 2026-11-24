@@ -105,3 +105,12 @@ test("a pre-release version stops the script before it writes anything", () => {
   assert.match(run.stderr, /stable versions only/);
   assert.equal(fs.existsSync(path.join(dir, "out")), false);
 });
+
+test("the Windows smoke job packs the e2e build and install-checks it", () => {
+  const ci = fs.readFileSync(path.join(ROOT, ".github", "workflows", "ci.yml"), "utf8");
+  const smoke = ci.slice(ci.indexOf("\n  smoke:\n"), ci.indexOf("\n  sbom:\n"));
+  assert.match(smoke, /- name: Pack the MSIX\n {8}if: runner\.os == 'Windows'\n/);
+  assert.match(smoke, /node scripts\/msix\.mjs --exe target\/debug\/skopos-app\.exe --identity test /);
+  assert.match(smoke, /- name: Install and start the MSIX\n {8}if: runner\.os == 'Windows'\n {8}shell: pwsh\n {8}run: \.\/scripts\/msix-install-check\.ps1 -Msix /);
+  assert.doesNotMatch(smoke, /-CheckRuntime/);
+});
