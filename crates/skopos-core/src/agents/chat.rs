@@ -226,7 +226,7 @@ mod running {
     use crate::agents::mcp::{scope_names, serve_mcp, ScopeCluster, ToolContext, ToolScope};
     use crate::agents::prompt::{hidden_block, object_line, PromptContext};
     use crate::agents::proxy::{self, ProxyConfig, Resolver};
-    use crate::agents::registry::{default_agent, AgentSpec, AgentState};
+    use crate::agents::registry::{default_agent, sign_in_hint, AgentSpec, AgentState};
     use crate::agents::sandbox::env::{agent_env, path_of, proxy_url};
     use crate::agents::sandbox::paths::kubeconfig_files;
     use crate::agents::sandbox::spec::{MCP_SOCKET, PROXY_SOCKET};
@@ -466,6 +466,7 @@ mod running {
             id: id.clone(),
             owner: owner.to_owned(),
             agent_name: agent.name.clone(),
+            sign_in_hint: sign_in_hint(&agent),
             clusters,
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
@@ -612,6 +613,8 @@ mod running {
         /// The window that started it.
         owner: String,
         agent_name: String,
+        /// How to sign in to the agent, for a notice when a turn needs it.
+        sign_in_hint: Option<&'static str>,
         clusters: Vec<ScopeCluster>,
         global: bool,
         /// `None` once the chat closes.
@@ -865,6 +868,7 @@ mod running {
             &end,
             chat.stop_requested.load(Ordering::SeqCst),
             &chat.agent_name,
+            chat.sign_in_hint,
         );
         if exited {
             // Spec §8: waiting approvals close as stopped.
@@ -879,9 +883,14 @@ mod running {
         let _ = done.send(());
     }
 
-    /// The notice a turn's end leaves (spec §3.3). A Stop wins over how the agent ended,
-    /// unless it exited.
-    fn turn_notice(end: &TurnEnd, stopped: bool, agent: &str) -> Option<ChatNotice> {
+    /// The notice a turn's end leaves (spec §3.3), a sign-in with `sign_in_hint`. A Stop wins
+    /// over how the agent ended, unless it exited.
+    fn turn_notice(
+        end: &TurnEnd,
+        stopped: bool,
+        agent: &str,
+        sign_in_hint: Option<&str>,
+    ) -> Option<ChatNotice> {
         let agent = agent.to_owned();
         match end {
             TurnEnd::Exited(reason) => Some(ChatNotice::Exited {
@@ -897,6 +906,10 @@ mod running {
             TurnEnd::Error(message) => Some(ChatNotice::AgentError {
                 agent,
                 message: message.clone(),
+            }),
+            TurnEnd::SignInNeeded => Some(ChatNotice::SignInNeeded {
+                agent,
+                hint: sign_in_hint.map(str::to_owned),
             }),
         }
     }
@@ -1684,8 +1697,22 @@ mod running {
         #[test]
         fn turn_ends_map_to_the_spec_s_notices() {
             let text = |end: TurnEnd, stopped: bool| {
-                turn_notice(&end, stopped, "Fake").map(|notice| notice.text())
+                turn_notice(
+                    &end,
+                    stopped,
+                    "Fake",
+                    Some("Run fake login, then check again."),
+                )
+                .map(|notice| notice.text())
             };
+            assert_eq!(
+                text(TurnEnd::SignInNeeded, false).as_deref(),
+                Some("Fake needs you to sign in. Run fake login, then check again.")
+            );
+            assert_eq!(
+                text(TurnEnd::SignInNeeded, true).as_deref(),
+                Some("Stopped.")
+            );
             assert_eq!(text(TurnEnd::EndTurn, false), None);
             assert_eq!(text(TurnEnd::EndTurn, true).as_deref(), Some("Stopped."));
             assert_eq!(text(TurnEnd::Cancelled, false).as_deref(), Some("Stopped."));

@@ -192,6 +192,17 @@ fn path_dirs<'a>(found: impl IntoIterator<Item = &'a Located>) -> Vec<PathBuf> {
     dirs
 }
 
+/// How to sign in to `agent`: its built-in agent's hint, `None` for the person's own agents.
+pub fn sign_in_hint(agent: &AgentSpec) -> Option<&'static str> {
+    if agent.custom {
+        return None;
+    }
+    BUILTIN_AGENTS
+        .iter()
+        .find(|def| def.id == agent.id)
+        .map(|def| def.sign_in_hint)
+}
+
 /// Finds a built-in agent on `path_var`, else in `folders`, the known install folders. Its
 /// program alone makes it installed; its CLI goes in `cli_env` when found too. A CLI found
 /// without its adapter gives the detail line that says the adapter is missing.
@@ -651,6 +662,20 @@ mod tests {
             status.hint.as_deref(),
             Some("Install codex-acp (npm install -g @agentclientprotocol/codex-acp), then check again.")
         );
+    }
+
+    #[test]
+    fn a_running_agents_sign_in_hint_is_its_built_in_ones_and_none_for_the_persons_own() {
+        let mut agent = crate::agents::sandbox::test_agent(std::path::Path::new("/bin/claude"));
+        agent.id = "claude".to_owned();
+        assert_eq!(sign_in_hint(&agent), None);
+        agent.custom = false;
+        assert_eq!(
+            sign_in_hint(&agent),
+            Some("Run claude in a terminal and sign in, then check again.")
+        );
+        agent.id = "unknown".to_owned();
+        assert_eq!(sign_in_hint(&agent), None);
     }
 
     #[test]

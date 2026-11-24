@@ -74,12 +74,31 @@ impl ChatItemBody {
 #[ts(export)]
 pub enum ChatNotice {
     Stopped,
-    BlockedHost { host: String },
-    Exited { agent: String, reason: String },
-    AgentError { agent: String, message: String },
-    LengthLimit { agent: String },
-    TooManySteps { agent: String },
-    Declined { agent: String },
+    BlockedHost {
+        host: String,
+    },
+    Exited {
+        agent: String,
+        reason: String,
+    },
+    AgentError {
+        agent: String,
+        message: String,
+    },
+    /// The agent asked for a sign-in during a turn; `hint` says how, for a built-in agent.
+    SignInNeeded {
+        agent: String,
+        hint: Option<String>,
+    },
+    LengthLimit {
+        agent: String,
+    },
+    TooManySteps {
+        agent: String,
+    },
+    Declined {
+        agent: String,
+    },
 }
 
 impl ChatNotice {
@@ -94,6 +113,10 @@ impl ChatNotice {
             ChatNotice::AgentError { agent, message } => {
                 format!("{agent} reported an error: {}.", sentence(message))
             }
+            ChatNotice::SignInNeeded { agent, hint } => match hint {
+                Some(hint) => format!("{agent} needs you to sign in. {hint}"),
+                None => format!("{agent} needs you to sign in."),
+            },
             ChatNotice::LengthLimit { agent } => {
                 format!("{agent} stopped: the reply hit its length limit.")
             }
@@ -148,6 +171,19 @@ mod tests {
             message: "rate limited".to_owned(),
         };
         assert_eq!(error.text(), "Claude reported an error: rate limited.");
+        let signed_out = ChatNotice::SignInNeeded {
+            agent: claude(),
+            hint: Some("Run claude in a terminal and sign in, then check again.".to_owned()),
+        };
+        assert_eq!(
+            signed_out.text(),
+            "Claude needs you to sign in. Run claude in a terminal and sign in, then check again."
+        );
+        let signed_out = ChatNotice::SignInNeeded {
+            agent: "Mine".to_owned(),
+            hint: None,
+        };
+        assert_eq!(signed_out.text(), "Mine needs you to sign in.");
         assert_eq!(
             ChatNotice::LengthLimit { agent: claude() }.text(),
             "Claude stopped: the reply hit its length limit."

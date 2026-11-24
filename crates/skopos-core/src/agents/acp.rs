@@ -130,6 +130,8 @@ pub enum TurnEnd {
     Refusal,
     /// The agent answered the prompt with an error: its message.
     Error(String),
+    /// The agent answered the prompt with ACP's authentication-required error.
+    SignInNeeded,
     /// The agent exited: the reason (its last stderr line, or the exit code).
     Exited(String),
 }
@@ -235,7 +237,7 @@ impl AcpSession {
         match self.running.answer(reply).await {
             Ok(answer) => turn_end(answer.stop_reason),
             Err(Failure::Exited(reason)) => TurnEnd::Exited(reason),
-            Err(Failure::Error(error)) => TurnEnd::Error(error_text(&error)),
+            Err(Failure::Error(error)) => turn_error(&error),
         }
     }
 
@@ -778,6 +780,16 @@ fn turn_end(reason: StopReason) -> TurnEnd {
     }
 }
 
+/// How a turn the agent answered with `error` ended: a sign-in for authentication required,
+/// else the error's message.
+fn turn_error(error: &AcpError) -> TurnEnd {
+    if error.code == AcpError::auth_required().code {
+        TurnEnd::SignInNeeded
+    } else {
+        TurnEnd::Error(error_text(error))
+    }
+}
+
 fn start_error(failure: Failure) -> StartError {
     match failure {
         Failure::Exited(reason) => StartError::Failed(reason),
@@ -1100,6 +1112,17 @@ mod tests {
         let reason = exit_reason(Some("login failed: token=abc123def".to_owned()), Some(1));
         assert!(reason.starts_with("login failed: token="), "{reason}");
         assert!(!reason.contains("abc123def"), "{reason}");
+    }
+
+    #[test]
+    fn a_prompt_answered_with_auth_required_asks_to_sign_in() {
+        assert_eq!(
+            turn_error(&AcpError::auth_required()),
+            TurnEnd::SignInNeeded
+        );
+        let mut error = AcpError::internal_error();
+        error.message = "Overloaded.".to_owned();
+        assert_eq!(turn_error(&error), TurnEnd::Error("Overloaded".to_owned()));
     }
 
     #[test]

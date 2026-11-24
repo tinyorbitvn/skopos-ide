@@ -175,3 +175,34 @@ test("notices offer the sandbox section and a new chat", () => {
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   expect(props.onNewChat).toHaveBeenCalled();
 });
+
+test("a sign-in notice reads as an error with its hint", () => {
+  show([
+    {
+      id: "n1",
+      body: {
+        type: "notice",
+        notice: { kind: "stopped" },
+        text: "Stopped.",
+      },
+    },
+    {
+      id: "n2",
+      body: {
+        type: "notice",
+        notice: {
+          kind: "signInNeeded",
+          agent: "Claude",
+          hint: "Run claude in a terminal and sign in, then check again.",
+        },
+        text: "Claude needs you to sign in. Run claude in a terminal and sign in, then check again.",
+      },
+    },
+  ]);
+  const [stopped, signIn] = screen.getAllByTestId("agent-notice");
+  expect(signIn.textContent).toBe(
+    "Claude needs you to sign in. Run claude in a terminal and sign in, then check again.",
+  );
+  expect(signIn.className).toBe("noticeDanger");
+  expect(stopped.className).toBe("notice");
+});

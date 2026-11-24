@@ -45,7 +45,8 @@ function NoticeLine(props: {
   onNewChat(): void;
 }) {
   const { kind } = props.notice;
-  const danger = kind === "exited" || kind === "agentError";
+  const danger =
+    kind === "exited" || kind === "agentError" || kind === "signInNeeded";
   return (
     <p
       className={danger ? styles.noticeDanger : styles.notice}
