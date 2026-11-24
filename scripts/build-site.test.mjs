@@ -844,6 +844,41 @@ describe("page", () => {
   });
 });
 
+describe("privacy page", () => {
+  const release = parseRelease(releaseJson());
+  let out;
+  let html;
+
+  before(() => {
+    out = tempOut();
+    build({ release, out, root: ROOT });
+    html = fs.readFileSync(path.join(out, "docs", "privacy.html"), "utf8");
+  });
+  after(() => fs.rmSync(out, { recursive: true, force: true }));
+
+  test("renders with its title, no placeholder left and no telemetry", () => {
+    assert.ok(!html.includes("{{"));
+    assert.ok(html.includes("<title>Privacy · SkoposIDE docs</title>"));
+    assert.match(html, /no telemetry/);
+  });
+
+  test("every relative link and source exists, from the page's folder", () => {
+    const refs = [...html.matchAll(/\s(?:href|src)="([^"#]+)(?:#[^"]*)?"/g)]
+      .map((m) => m[1])
+      .filter((ref) => !/^[a-z]+:/.test(ref));
+    assert.ok(refs.length > 0);
+    for (const ref of refs) {
+      assert.ok(fs.existsSync(path.join(out, "docs", ...ref.split("/"))), ref);
+    }
+  });
+
+  test("the home page's Legal links lead to it", () => {
+    const index = fs.readFileSync(path.join(out, "index.html"), "utf8");
+    const legal = index.slice(index.indexOf('<nav aria-label="Legal">'));
+    assert.ok(legal.includes('<li><a href="docs/privacy.html">Privacy</a></li>'));
+  });
+});
+
 describe("docs pages", () => {
   const release = parseRelease(releaseJson());
   const template = fs.readFileSync(path.join(ROOT, "site", "docs", "metrics.html"), "utf8");

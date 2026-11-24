@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Privacy · SkoposIDE docs</title>
+<meta name="description" content="What SkoposIDE keeps on your computer and where it connects: no telemetry, no analytics and no account.">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body id="top">
+{{sprite}}
+<a class="skip" href="#main">Skip to content</a>
+<div class="frame" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="wrap nav__bar">
+    <a class="brand" href="../index.html">
+      <img src="../icon.svg" alt="" width="28" height="28">
+      <span class="brand__name">SkoposIDE</span>
+    </a>
+    <nav class="nav__links" aria-label="Sections">
+      <a href="../index.html#features">Features</a>
+      <a href="../index.html#download">Download</a>
+      <a href="../index.html#roadmap">Roadmap</a>
+      <a href="metrics.html">Docs</a>
+      <a href="https://github.com/vanlongme/skopos-ide/blob/main/CHANGELOG.md">Changelog</a>
+    </nav>
+    <div class="nav__actions">
+      <a class="quiet nav__sponsor" href="https://github.com/sponsors/vanlongme"><svg class="icon" aria-hidden="true"><use href="#i-heart"/></svg>Sponsor</a>
+      <a class="quiet nav__source" href="https://github.com/vanlongme/skopos-ide"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Source</a>
+      <a class="button button--primary button--sm" href="../index.html#download"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download<svg class="icon icon--sm" aria-hidden="true"><use href="#i-chevron-right"/></svg></a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="wrap doc">
+  <p class="overline overline--accent">Docs</p>
+  <h1 class="doc__title">Privacy</h1>
+  <p class="doc__lead">SkoposIDE has no telemetry, no analytics and no account. The project receives no data from the app.</p>
+
+  <h2>What stays on your computer</h2>
+  <p>The kubeconfig files SkoposIDE reads, its catalog, preferences and logs stay in its folders on your computer. Passwords and tokens it keeps go to the operating system's credential store: Windows Credential Manager, the macOS Keychain or the Secret Service on Linux.</p>
+
+  <h2>Where it connects</h2>
+  <ul>
+    <li>The API servers of the clusters you connect, and the metrics sources you set up for them.</li>
+    <li>GitHub, to check for and download updates, in builds downloaded from GitHub. The Microsoft Store build does not check: the Store updates it.</li>
+    <li>get.helm.sh and dl.k8s.io, when you ask SkoposIDE to download helm or kubectl.</li>
+    <li>The proxy you set in Preferences, if any.</li>
+    <li>On Linux and macOS, the AI agent CLI you installed and start from SkoposIDE talks to its own provider under that provider's terms. SkoposIDE limits it to the provider's hosts and the domains you add.</li>
+  </ul>
+
+  <h2>Microsoft Store</h2>
+  <p>Installing SkoposIDE from the Microsoft Store is covered by Microsoft's privacy statement.</p>
+
+  <h2>Questions</h2>
+  <p>Open an issue at <a href="https://github.com/vanlongme/skopos-ide/issues">github.com/vanlongme/skopos-ide/issues</a>.</p>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <p class="footer__bottom"><span>Copyright Nguyen Van Long · PolyForm Shield 1.0.0</span><span class="mono">latest: {{release.tag}} · {{release.isoDate}}</span></p>
+  </div>
+</footer>
+</body>
+</html>

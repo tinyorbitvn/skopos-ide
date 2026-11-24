@@ -94,7 +94,9 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   and control heights. Stores are zustand in `ui/src/stores/`, per-kind logic in
   `ui/src/kinds/`, icons from `@thesvg/ui-react`.
 - Releases: the tag builds signed updater files and `latest.json`; only the release build makes
-  them, so CI, e2e and local builds need no key.
+  them, so CI, e2e and local builds need no key. Stable tags also run the release's store job,
+  which packs the Windows exe as an MSIX (scripts/msix.mjs) and submits it to the Microsoft Store;
+  a Store copy reports StoreManaged and never checks for updates.
 
 ## Conventions
 
