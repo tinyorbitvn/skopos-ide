@@ -23,6 +23,30 @@ const NS = "skopos-test-screens";
 // The worktree's git-ignored tmp/, three levels up from e2e/specs/screens.
 const OUT = path.resolve(__dirname, "../../../tmp/screens");
 
+/** The Store wants desktop screenshots of at least 1366×768 (Store spec §5). */
+const SHOT = { width: 1920, height: 1080 };
+const STORE_MIN = { width: 1366, height: 768 };
+
+interface TauriGlobal {
+  window: { getCurrentWindow(): { setSize(size: unknown): Promise<void> } };
+  dpi: { LogicalSize: new (width: number, height: number) => unknown };
+}
+
+async function sizeWindow(): Promise<void> {
+  await browser.execute(async (size) => {
+    const tauri = (window as unknown as { __TAURI__: TauriGlobal }).__TAURI__;
+    await tauri.window
+      .getCurrentWindow()
+      .setSize(new tauri.dpi.LogicalSize(size.width, size.height));
+  }, SHOT);
+  await browser.pause(500);
+}
+
+function pngSize(file: string): { width: number; height: number } {
+  const png = fs.readFileSync(file);
+  return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+}
+
 async function setTheme(theme: "light" | "dark"): Promise<void> {
   await browser.execute((t) => {
     document.documentElement.dataset.theme = t;
@@ -42,7 +66,11 @@ async function setTheme(theme: "light" | "dark"): Promise<void> {
 async function shoot(name: string): Promise<void> {
   for (const theme of ["light", "dark"] as const) {
     await setTheme(theme);
-    await browser.saveScreenshot(path.join(OUT, `${name}-${theme}.png`));
+    const file = path.join(OUT, `${name}-${theme}.png`);
+    await browser.saveScreenshot(file);
+    const size = pngSize(file);
+    expect(size.width).toBeGreaterThanOrEqual(STORE_MIN.width);
+    expect(size.height).toBeGreaterThanOrEqual(STORE_MIN.height);
   }
 }
 
@@ -58,6 +86,7 @@ describe("screens", () => {
       "screens",
       "--from-literal=key=value",
     ]);
+    await sizeWindow();
   });
 
   after(async () => {
