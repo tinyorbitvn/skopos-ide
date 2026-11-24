@@ -25,10 +25,10 @@ import {
 } from "./updateStore";
 import {
   DOWNLOAD_PAGE,
-  STORE_MANAGED_TEXT,
   downloadedText,
   downloadPercent,
   releasePage,
+  STORE_MANAGED_TEXT,
   willStopText,
   youHaveText,
 } from "./updateText";
