@@ -22,6 +22,16 @@ let started: Promise<void> | null = null;
 /** How many `update://state` events came, so a reply can tell whether one came meanwhile. */
 let stateEvents = 0;
 
+/** True in a Microsoft Store copy, which the Store updates (Store spec §3). */
+export function useStoreManaged(): boolean {
+  return useUpdates((s) => s.state?.phase.type === "storeManaged");
+}
+
+/** The same, outside React, for command availability. */
+export function isStoreManaged(): boolean {
+  return useUpdates.getState().state?.phase.type === "storeManaged";
+}
+
 export function openUpdates(): void {
   useShell.getState().open("updates");
 }

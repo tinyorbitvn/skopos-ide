@@ -10,6 +10,10 @@ import { useLocation } from "react-router";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
 import { setAgentsSupportedForTest } from "../features/agents/supported";
+import {
+  resetUpdatesForTest,
+  useUpdates,
+} from "../features/updates/updateStore";
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
@@ -67,6 +71,7 @@ function shownOrder(): (string | null)[] {
 beforeEach(() => {
   resetCatalogForTest();
   resetShellForTest();
+  resetUpdatesForTest();
   // One Catalog tab, focused.
   resetWindowLayoutForTest();
 });
@@ -375,4 +380,20 @@ test("the Help menu's Check for Updates opens the update dialog and checks", asy
   fireEvent.click(await screen.findByTestId("help-check-updates"));
   expect(useShell.getState().dialog).toBe("updates");
   await waitFor(() => expect(ipc.callsTo("update_check")).toHaveLength(1));
+});
+
+test("a Microsoft Store copy's Help menu has no Check for Updates", async () => {
+  await show([alpha], []);
+  act(() =>
+    useUpdates.setState({
+      state: updateState({ phase: { type: "storeManaged" } }),
+    }),
+  );
+  fireEvent.keyDown(screen.getByTestId("hotbar-help"), { key: "Enter" });
+  const items = await screen.findAllByRole("menuitem");
+  expect(items.map((item) => item.getAttribute("data-testid"))).toEqual([
+    "help-palette",
+    "help-shortcuts",
+    "help-about",
+  ]);
 });

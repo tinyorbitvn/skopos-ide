@@ -21,8 +21,12 @@ import type { SyncSource } from "../../ipc/generated/SyncSource";
 import type { Theme } from "../../ipc/generated/Theme";
 import { classifySourcePath, usePrefs } from "../../stores/prefs";
 import { agentsSupported } from "../agents/supported";
-import { checkForUpdates, useUpdates } from "../updates/updateStore";
-import { lastCheckedText } from "../updates/updateText";
+import {
+  checkForUpdates,
+  useStoreManaged,
+  useUpdates,
+} from "../updates/updateStore";
+import { lastCheckedText, STORE_MANAGED_TEXT } from "../updates/updateText";
 import { AgentChangesSection } from "./AgentChangesSection";
 import { AgentSandboxSection } from "./AgentSandboxSection";
 import { AgentsSection } from "./AgentsSection";
@@ -140,6 +144,17 @@ function UpdatesSection({ enabled }: { enabled: boolean }) {
   const checking = useUpdates((s) => s.state?.phase.type === "checking");
   // The shared clock moves "Last checked" on while Preferences stays open.
   const now = useNow();
+  const storeManaged = useStoreManaged();
+  if (storeManaged) {
+    return (
+      <section className={styles.section}>
+        <h3 className={styles.heading}>Updates</h3>
+        <p className={styles.muted} data-testid="prefs-store-managed">
+          {STORE_MANAGED_TEXT}
+        </p>
+      </section>
+    );
+  }
   return (
     <section className={styles.section}>
       <h3 className={styles.heading}>Updates</h3>

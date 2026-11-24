@@ -522,6 +522,15 @@ test("Check for Updates opens the update dialog and checks", async () => {
   );
 });
 
+test("a Microsoft Store copy has no Check for Updates command", () => {
+  useUpdates.setState({
+    state: updateState({ phase: { type: "storeManaged" } }),
+  });
+  expect(commandById("check-updates").available(context())).toBe(false);
+  useUpdates.setState({ state: updateState() });
+  expect(commandById("check-updates").available(context())).toBe(true);
+});
+
 test("the macOS menu's check_updates runs the same command", async () => {
   const ipc = mockBackend({
     update_check: () => updateState({ phase: { type: "upToDate" } }),
