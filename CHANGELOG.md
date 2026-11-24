@@ -6,6 +6,9 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Agents found where they are installed:** Preferences › Agents also looks for agent CLIs and their ACP adapters in the folders they install into when the login shell's PATH misses them: `~/.local/bin`, `~/.opencode/bin`, `~/.bun/bin`, `~/.npm-global/bin`, Volta, Yarn, Cargo, pnpm, the Node versions of nvm and fnm, and Homebrew's folders on macOS. When Claude Code or Codex is installed without its ACP adapter, the row names the CLI it found and the adapter that is missing, where it said only Not installed before.
+- **Claude starts in the macOS sandbox:** Claude no longer stops with `EEXIST: file already exists, mkdir '/tmp/claude-501'` when Claude Code has run on the Mac before; it keeps its temporary files in the chat's own folder.
+
 ## [0.13.0] - 2026-11-24
 
 - **The sidebar's glass shows the design's wallpaper:** the hotbar and the sidebar now let the design's desktop wallpaper through their frosted glass, in soft blue and orange shapes that differ between the light and dark themes, where they showed one flat tint before. The header, the panes and the dock stay solid

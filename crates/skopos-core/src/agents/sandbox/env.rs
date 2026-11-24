@@ -2,11 +2,13 @@
 //! the agent's own pairs and its own provider keys. Nothing else the app has, such as
 //! `KUBECONFIG`, cloud, SSH or Docker variables, reaches the agent (spec §6.2).
 
+use std::ffi::{OsStr, OsString};
 use std::fmt::Display;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::paths::real_path;
 use crate::agents::registry::AgentSpec;
+use crate::tools::append_to_path;
 
 /// The locale categories passed on when the app has them: spec §4.6's `LC_*`.
 pub const LC_VARS: [&str; 13] = [
@@ -28,9 +30,13 @@ pub const LC_VARS: [&str; 13] = [
 pub const NO_PROXY: &str = "localhost,127.0.0.1,::1";
 
 /// The agent's whole environment, in this order: `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, the
-/// `LC_*` variables, `TZ`, `TERM=dumb`, `TMPDIR`, the proxy variables, `NODE_USE_ENV_PROXY=1`,
-/// the agent's own pairs, then each of its provider keys. `get` reads the app's environment;
-/// what it does not return is left out, and nothing else of it is read.
+/// `LC_*` variables, `TZ`, `TERM=dumb`, `TMPDIR`, `CLAUDE_CODE_TMPDIR`, the proxy variables,
+/// `NODE_USE_ENV_PROXY=1`, the agent's own pairs, then each of its provider keys. `get` reads
+/// the app's environment; what it does not return is left out, and nothing else of it is read.
+///
+/// `PATH` ends with the folders the agent was found in off the app's `PATH`. Claude Code keeps
+/// its temporary files in `/tmp/claude-<uid>` unless `CLAUDE_CODE_TMPDIR` names another folder,
+/// and the macOS sandbox lets no agent read or write `/tmp`: both variables name the chat's own.
 pub fn agent_env(
     get: &dyn Fn(&str) -> Option<String>,
     agent: &AgentSpec,
@@ -44,7 +50,9 @@ pub fn agent_env(
             env.push((name.to_owned(), value));
         }
     };
-    pass(&mut env, "PATH");
+    if let Some(path) = agent_path(get("PATH"), &agent.path_dirs) {
+        env.push(pair("PATH", path));
+    }
     env.push(pair("HOME", home.display()));
     for name in ["USER", "LOGNAME", "LANG"] {
         pass(&mut env, name);
@@ -55,6 +63,7 @@ pub fn agent_env(
     pass(&mut env, "TZ");
     env.push(pair("TERM", "dumb"));
     env.push(pair("TMPDIR", tmp_dir.display()));
+    env.push(pair("CLAUDE_CODE_TMPDIR", tmp_dir.display()));
     for name in ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] {
         env.push(pair(name, proxy_url));
     }
@@ -69,6 +78,20 @@ pub fn agent_env(
         pass(&mut env, name.as_str());
     }
     env
+}
+
+/// The `PATH` in an agent's environment: the one its `#!/usr/bin/env` lines are resolved on.
+pub fn path_of(env: &[(String, String)]) -> Option<OsString> {
+    env.iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| OsString::from(value))
+}
+
+/// The app's `PATH` with `extra` at its end, leaving out the folders it has already.
+fn agent_path(app_path: Option<String>, extra: &[PathBuf]) -> Option<String> {
+    let added = append_to_path(app_path.as_deref().map(OsStr::new), extra)
+        .and_then(|path| path.into_string().ok());
+    added.or(app_path)
 }
 
 /// The proxy URL the agent's proxy variables hold: `http://skopos:<token>@127.0.0.1:<port>`.
@@ -94,7 +117,8 @@ fn agent_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::Path;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
 
     use super::*;
     use crate::agents::registry::AgentSpec;
@@ -195,6 +219,7 @@ mod tests {
                 "TZ",
                 "TERM",
                 "TMPDIR",
+                "CLAUDE_CODE_TMPDIR",
                 "HTTPS_PROXY",
                 "HTTP_PROXY",
                 "https_proxy",
@@ -210,6 +235,10 @@ mod tests {
         assert_eq!(value(&env, "HOME"), Some("/home/me"));
         assert_eq!(value(&env, "TERM"), Some("dumb"));
         assert_eq!(value(&env, "TMPDIR"), Some("/data/agents/run/0a1b2c3d/tmp"));
+        assert_eq!(
+            value(&env, "CLAUDE_CODE_TMPDIR"),
+            Some("/data/agents/run/0a1b2c3d/tmp")
+        );
         for name in ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"] {
             assert_eq!(
                 value(&env, name),
@@ -225,6 +254,45 @@ mod tests {
             value(&env, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
             Some("1")
         );
+    }
+
+    #[test]
+    fn the_folders_an_agent_was_found_in_off_path_end_its_path() {
+        let mut agent = claude();
+        agent.path_dirs = vec![
+            PathBuf::from("/home/me/.nvm/versions/node/v22.11.0/bin"),
+            PathBuf::from("/usr/bin"),
+        ];
+        let env = env_of(&agent);
+        // `/usr/bin` is on the app's PATH already, so it is not added twice.
+        assert_eq!(
+            value(&env, "PATH"),
+            Some("/usr/bin:/bin:/home/me/.nvm/versions/node/v22.11.0/bin")
+        );
+        assert_eq!(
+            path_of(&env),
+            Some(OsString::from(
+                "/usr/bin:/bin:/home/me/.nvm/versions/node/v22.11.0/bin"
+            ))
+        );
+        // Found on PATH: the app's PATH as it is.
+        assert_eq!(value(&env_of(&claude()), "PATH"), Some("/usr/bin:/bin"));
+    }
+
+    #[test]
+    fn an_agent_found_off_path_gets_its_folder_when_the_app_has_no_path() {
+        let mut agent = claude();
+        agent.path_dirs = vec![PathBuf::from("/home/me/.local/bin")];
+        let get = |_: &str| None;
+        let env = agent_env(
+            &get,
+            &agent,
+            &proxy_url("t0k3n", 3128),
+            Path::new("/data/agents/run/0a1b2c3d/tmp"),
+            Path::new("/home/me"),
+        );
+        assert_eq!(value(&env, "PATH"), Some("/home/me/.local/bin"));
+        assert_eq!(path_of(&[]), None);
     }
 
     #[test]

@@ -165,6 +165,7 @@ impl Setup {
                 ..DownloadLimits::default()
             },
             https_only: false,
+            ..ToolsConfig::default()
         });
         Setup { core, root }
     }

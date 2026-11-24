@@ -1,6 +1,6 @@
 //! The agents SkoposIDE runs (agents spec §3.5): the four built-in ones and the ones the
-//! person adds by command, found on PATH. Finding an agent runs nothing; its probe (spec
-//! §4.2) gives its state.
+//! person adds by command, found on PATH, else in the known install folders. Finding an agent
+//! runs nothing; its probe (spec §4.2) gives its state.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -131,27 +131,92 @@ pub struct AgentSpec {
     /// The real paths of the command and of the CLI, whose install roots the sandbox makes
     /// readable.
     pub install_paths: Vec<PathBuf>,
+    /// The folders its command or CLI was found in off `PATH`, among the known install
+    /// folders, which its `PATH` ends with: a script's `#!/usr/bin/env node` finds the `node`
+    /// beside it.
+    pub path_dirs: Vec<PathBuf>,
     pub custom: bool,
 }
 
-/// An agent found, or the hint that says how to install it.
+/// An agent found, or the hint that says how to install it, with the detail line of what was
+/// found when that is a CLI without its adapter.
 // Built once per row and moved out at once: boxing the spec would buy nothing.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolved {
     Found(AgentSpec),
-    NotInstalled { hint: String },
+    NotInstalled {
+        hint: String,
+        detail: Option<String>,
+    },
 }
 
-/// Finds a built-in agent on `path_var`. Its program alone makes it installed; its CLI goes
-/// in `cli_env` when PATH has it too.
-pub fn resolve(def: &AgentDef, path_var: Option<&OsStr>, home: &Path) -> Resolved {
-    let Some(program) = find_on_path(def.program, path_var) else {
+/// A program found: where, and the known folder it was found in when `PATH` lacks it.
+struct Located {
+    path: PathBuf,
+    known_folder: Option<PathBuf>,
+}
+
+/// `name` on `path_var`, else in the first of `folders` that has it (`find_on_path` for a
+/// name with a `/`).
+fn locate(name: &str, path_var: Option<&OsStr>, folders: &[PathBuf]) -> Option<Located> {
+    if let Some(path) = find_on_path(name, path_var) {
+        return Some(Located {
+            path,
+            known_folder: None,
+        });
+    }
+    if name.contains('/') {
+        return None;
+    }
+    folders
+        .iter()
+        .find(|folder| is_executable(&folder.join(name)))
+        .map(|folder| Located {
+            path: folder.join(name),
+            known_folder: Some(folder.clone()),
+        })
+}
+
+/// The known folders the programs were found in, each once, in the programs' order.
+fn path_dirs<'a>(found: impl IntoIterator<Item = &'a Located>) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for folder in found
+        .into_iter()
+        .filter_map(|located| located.known_folder.clone())
+    {
+        if !dirs.contains(&folder) {
+            dirs.push(folder);
+        }
+    }
+    dirs
+}
+
+/// Finds a built-in agent on `path_var`, else in `folders`, the known install folders. Its
+/// program alone makes it installed; its CLI goes in `cli_env` when found too. A CLI found
+/// without its adapter gives the detail line that says the adapter is missing.
+pub fn resolve(
+    def: &AgentDef,
+    path_var: Option<&OsStr>,
+    folders: &[PathBuf],
+    home: &Path,
+) -> Resolved {
+    let cli = def.cli.and_then(|cli| locate(cli, path_var, folders));
+    let Some(program) = locate(def.program, path_var, folders) else {
+        let detail = match (&cli, def.adapter) {
+            (Some(cli), Some(adapter)) => Some(format!(
+                "{} · ACP adapter {adapter} missing",
+                shown(&cli.path, home)
+            )),
+            _ => None,
+        };
         return Resolved::NotInstalled {
             hint: def.install_hint.to_owned(),
+            detail,
         };
     };
-    let cli = def.cli.and_then(|cli| find_on_path(cli, path_var));
+    let dirs = path_dirs(std::iter::once(&program).chain(&cli));
+    let (program, cli) = (program.path, cli.map(|cli| cli.path));
     let mut env = Vec::new();
     let mut install_paths = vec![real_path(&program)];
     if let (Some(cli), Some(var)) = (&cli, def.cli_env) {
@@ -182,15 +247,23 @@ pub fn resolve(def: &AgentDef, path_var: Option<&OsStr>, home: &Path) -> Resolve
         hosts: owned(def.hosts),
         key_vars: owned(def.key_vars),
         install_paths,
+        path_dirs: dirs,
         custom: false,
     })
 }
 
 /// Finds the program of an agent the person added: the first word of its command, split as
-/// a shell splits it. It gets no settings, hosts or keys (spec §4.6, §4.7).
-pub fn resolve_custom(agent: &CustomAgent, path_var: Option<&OsStr>, home: &Path) -> Resolved {
+/// a shell splits it, on `path_var` or else in `folders`. It gets no settings, hosts or keys
+/// (spec §4.6, §4.7).
+pub fn resolve_custom(
+    agent: &CustomAgent,
+    path_var: Option<&OsStr>,
+    folders: &[PathBuf],
+    home: &Path,
+) -> Resolved {
     let not_found = |word: &str| Resolved::NotInstalled {
         hint: format!("No such command: {word}"),
+        detail: None,
     };
     // An unclosed quote: name the first word as typed.
     let Ok(words) = shell_words::split(&agent.command) else {
@@ -199,10 +272,11 @@ pub fn resolve_custom(agent: &CustomAgent, path_var: Option<&OsStr>, home: &Path
     let Some((first, args)) = words.split_first() else {
         return not_found("");
     };
-    let Some(program) = locate_word(first, path_var, home) else {
+    let Some(located) = locate_word(first, path_var, folders, home) else {
         return not_found(first);
     };
-    let program = real_path(&program);
+    let dirs = path_dirs([&located]);
+    let program = real_path(&located.path);
     Resolved::Found(AgentSpec {
         id: agent.id.clone(),
         name: agent.name.clone(),
@@ -214,17 +288,26 @@ pub fn resolve_custom(agent: &CustomAgent, path_var: Option<&OsStr>, home: &Path
         hosts: Vec::new(),
         key_vars: Vec::new(),
         install_paths: vec![program],
+        path_dirs: dirs,
         custom: true,
     })
 }
 
-/// `~/x` is a path under the home folder; any other word is what `find_on_path` takes.
-fn locate_word(word: &str, path_var: Option<&OsStr>, home: &Path) -> Option<PathBuf> {
+/// `~/x` is a path under the home folder; any other word is what `locate` takes.
+fn locate_word(
+    word: &str,
+    path_var: Option<&OsStr>,
+    folders: &[PathBuf],
+    home: &Path,
+) -> Option<Located> {
     if word.starts_with("~/") {
         let path = expand_home(word, home);
-        return is_executable(&path).then_some(path);
+        return is_executable(&path).then_some(Located {
+            path,
+            known_folder: None,
+        });
     }
-    find_on_path(word, path_var)
+    locate(word, path_var, folders)
 }
 
 /// `path` with its links resolved, as the sandbox must bind it; `path` itself when that fails.
@@ -268,8 +351,8 @@ pub struct AgentStatus {
     pub id: String,
     pub name: String,
     pub state: AgentState,
-    /// The monospace line: where the agent is, or the person's command. `None` for a
-    /// built-in agent that is not installed.
+    /// The monospace line: where the agent is, or the person's command. For a built-in agent
+    /// that is not installed, its CLI found without the adapter, else `None`.
     pub detail: Option<String>,
     /// How to install it or sign in, or why it doesn't start.
     pub hint: Option<String>,
@@ -337,10 +420,15 @@ impl Listed<'_> {
         }
     }
 
-    pub(crate) fn resolve(&self, path_var: Option<&OsStr>, home: &Path) -> Resolved {
+    pub(crate) fn resolve(
+        &self,
+        path_var: Option<&OsStr>,
+        folders: &[PathBuf],
+        home: &Path,
+    ) -> Resolved {
         match self {
-            Listed::Builtin(def) => resolve(def, path_var, home),
-            Listed::Custom(agent) => resolve_custom(agent, path_var, home),
+            Listed::Builtin(def) => resolve(def, path_var, folders, home),
+            Listed::Custom(agent) => resolve_custom(agent, path_var, folders, home),
         }
     }
 
@@ -378,7 +466,9 @@ pub(crate) fn status_of(
     probe: Option<AgentState>,
 ) -> AgentStatus {
     let (state, detail, hint) = match resolved {
-        Resolved::NotInstalled { hint } => (AgentState::NotInstalled, None, Some(hint.clone())),
+        Resolved::NotInstalled { hint, detail } => {
+            (AgentState::NotInstalled, detail.clone(), Some(hint.clone()))
+        }
         Resolved::Found(spec) => {
             let state = probe.unwrap_or(AgentState::Unknown);
             let hint = match &state {
@@ -408,6 +498,9 @@ pub(crate) fn status_of(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::ffi::OsString;
+
     use super::*;
 
     fn builtin(id: &str) -> &'static AgentDef {
@@ -547,6 +640,7 @@ mod tests {
         let codex = Listed::Builtin(builtin("codex"));
         let missing = Resolved::NotInstalled {
             hint: builtin("codex").install_hint.to_owned(),
+            detail: None,
         };
 
         let status = status_of(&codex, &missing, Some(AgentState::Ready));
@@ -579,6 +673,7 @@ mod tests {
 
         let missing = Resolved::NotInstalled {
             hint: "No such command: my-agent".to_owned(),
+            detail: None,
         };
         let status = status_of(&mine, &missing, None);
         assert_eq!(status.state, AgentState::NotInstalled);
@@ -646,5 +741,195 @@ mod tests {
         assert_eq!(probes.get("codex"), None);
         probes.clear("claude");
         assert_eq!(probes.get("claude"), None);
+    }
+
+    /// A temp home folder, by its real path as `resolve` gives programs, with an empty `bin/`
+    /// that is the whole `PATH`.
+    #[cfg(unix)]
+    struct Home {
+        _root: tempfile::TempDir,
+        home: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl Home {
+        fn new() -> Home {
+            let root = tempfile::tempdir().unwrap();
+            let home = real_path(root.path());
+            std::fs::create_dir_all(home.join("bin")).unwrap();
+            Home { _root: root, home }
+        }
+
+        fn path_var(&self) -> OsString {
+            self.home.join("bin").into_os_string()
+        }
+
+        /// An executable `name` in `folder`, a folder under the home folder.
+        fn program(&self, folder: &str, name: &str) -> PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let folder = self.home.join(folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            let path = folder.join(name);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        fn folder(&self, folder: &str) -> PathBuf {
+            self.home.join(folder)
+        }
+
+        fn resolve(&self, id: &str, known: &[&str]) -> Resolved {
+            let known: Vec<PathBuf> = known.iter().map(|folder| self.folder(folder)).collect();
+            resolve(
+                builtin(id),
+                Some(self.path_var().as_os_str()),
+                &known,
+                &self.home,
+            )
+        }
+    }
+
+    #[cfg(unix)]
+    fn spec_of(resolved: Resolved) -> AgentSpec {
+        match resolved {
+            Resolved::Found(spec) => spec,
+            Resolved::NotInstalled { hint, .. } => panic!("not found: {hint}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_off_path_is_found_in_a_known_folder_which_its_path_then_ends_with() {
+        let home = Home::new();
+        let opencode = home.program(".opencode/bin", "opencode");
+
+        let spec = spec_of(home.resolve("opencode", &[".local/bin", ".opencode/bin"]));
+
+        assert_eq!(spec.program, opencode);
+        assert_eq!(spec.install_paths, [opencode]);
+        assert_eq!(spec.detail, "~/.opencode/bin/opencode · built-in ACP");
+        assert_eq!(spec.path_dirs, [home.folder(".opencode/bin")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_comes_before_the_known_folders() {
+        let home = Home::new();
+        let on_path = home.program("bin", "gemini");
+        home.program(".local/bin", "gemini");
+
+        let spec = spec_of(home.resolve("gemini", &[".local/bin"]));
+
+        assert_eq!(spec.program, on_path);
+        assert!(spec.path_dirs.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_adapter_and_its_cli_are_each_found_where_they_are() {
+        let home = Home::new();
+        let adapter = home.program(".nvm/versions/node/v22.11.0/bin", "claude-agent-acp");
+        let cli = home.program(".local/bin", "claude");
+
+        let spec =
+            spec_of(home.resolve("claude", &[".local/bin", ".nvm/versions/node/v22.11.0/bin"]));
+
+        assert_eq!(spec.program, adapter);
+        assert_eq!(spec.install_paths, [adapter, cli.clone()]);
+        assert_eq!(
+            spec.env[0],
+            (
+                "CLAUDE_CODE_EXECUTABLE".to_owned(),
+                cli.display().to_string()
+            )
+        );
+        assert_eq!(
+            spec.detail,
+            "~/.local/bin/claude · ACP adapter claude-agent-acp"
+        );
+        // The adapter's folder first: its `node` is the one a script there means.
+        assert_eq!(
+            spec.path_dirs,
+            [
+                home.folder(".nvm/versions/node/v22.11.0/bin"),
+                home.folder(".local/bin")
+            ]
+        );
+
+        // The adapter on PATH and the CLI off it: only the CLI's folder is added.
+        let home = Home::new();
+        home.program("bin", "codex-acp");
+        home.program(".local/bin", "codex");
+        let spec = spec_of(home.resolve("codex", &[".local/bin"]));
+        assert_eq!(spec.path_dirs, [home.folder(".local/bin")]);
+        assert_eq!(spec.detail, "~/.local/bin/codex · ACP adapter codex-acp");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_without_its_adapter_names_the_adapter_that_is_missing() {
+        let home = Home::new();
+        home.program(".local/bin", "codex");
+        let codex = builtin("codex");
+
+        let resolved = home.resolve("codex", &[".local/bin"]);
+
+        assert_eq!(
+            resolved,
+            Resolved::NotInstalled {
+                hint: codex.install_hint.to_owned(),
+                detail: Some("~/.local/bin/codex · ACP adapter codex-acp missing".to_owned()),
+            }
+        );
+        let status = status_of(&Listed::Builtin(codex), &resolved, Some(AgentState::Ready));
+        assert_eq!(status.state, AgentState::NotInstalled);
+        assert_eq!(
+            status.detail.as_deref(),
+            Some("~/.local/bin/codex · ACP adapter codex-acp missing")
+        );
+        assert_eq!(status.hint.as_deref(), Some(codex.install_hint));
+
+        // Neither the CLI nor the adapter: nothing to show but the hint.
+        let empty = Home::new();
+        assert_eq!(
+            empty.resolve("codex", &[".local/bin"]),
+            Resolved::NotInstalled {
+                hint: codex.install_hint.to_owned(),
+                detail: None,
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_custom_command_is_found_in_a_known_folder_too() {
+        let home = Home::new();
+        let mine = home.program(".bun/bin", "my-agent");
+        let agent = CustomAgent {
+            id: "custom-0a1b2c3d".to_owned(),
+            name: "Mine".to_owned(),
+            command: "my-agent --acp".to_owned(),
+        };
+
+        let spec = spec_of(resolve_custom(
+            &agent,
+            Some(home.path_var().as_os_str()),
+            &[home.folder(".bun/bin")],
+            &home.home,
+        ));
+
+        assert_eq!(spec.program, mine);
+        assert_eq!(spec.args, ["--acp"]);
+        assert_eq!(spec.path_dirs, [home.folder(".bun/bin")]);
+        // Not in any folder searched.
+        let missing = resolve_custom(&agent, Some(home.path_var().as_os_str()), &[], &home.home);
+        assert_eq!(
+            missing,
+            Resolved::NotInstalled {
+                hint: "No such command: my-agent".to_owned(),
+                detail: None,
+            }
+        );
     }
 }

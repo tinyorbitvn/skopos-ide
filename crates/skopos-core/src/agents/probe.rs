@@ -12,7 +12,7 @@ use super::acp::{AcpSession, StartError};
 use super::endpoint::{new_token, Endpoint, Listen};
 use super::proxy::{self, ProxyConfig, Resolver};
 use super::registry::{AgentSpec, AgentState, AgentStatus};
-use super::sandbox::env::{agent_env, proxy_url};
+use super::sandbox::env::{agent_env, path_of, proxy_url};
 use super::sandbox::paths::kubeconfig_files;
 use super::sandbox::spec::PROXY_SOCKET;
 use super::sandbox::{
@@ -150,7 +150,7 @@ impl AppCore {
                 .collect(),
             kubeconfigs,
             app_binary: std::env::current_exe()?,
-            path_var: std::env::var_os("PATH"),
+            path_var: path_of(&env),
             env,
         });
         let command = if sandboxed {

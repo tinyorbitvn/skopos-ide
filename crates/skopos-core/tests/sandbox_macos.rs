@@ -133,6 +133,7 @@ impl Machine {
             hosts: Vec::new(),
             key_vars: vec!["PROBE_API_KEY".to_owned()],
             install_paths: vec![PathBuf::from(program)],
+            path_dirs: Vec::new(),
             custom: true,
         };
         let path = std::env::var("PATH").ok();
@@ -356,6 +357,35 @@ async fn the_agent_cannot_write_outside_its_folder() {
     assert!(files[0].exists() && files[1].exists());
     assert!(!files[2].exists() && !files[3].exists() && !files[4].exists());
     assert_eq!(std::fs::read_dir(&tmp_dir).unwrap().count(), 1);
+}
+
+/// Claude Code keeps its temporary files in `claude-<uid>` under `CLAUDE_CODE_TMPDIR`, else
+/// under `/tmp`, where the person's own Claude Code may have made that folder already: there
+/// `mkdir` fails, since the agent may not see the folder. In the chat's own folder it works.
+#[tokio::test]
+async fn claude_codes_temporary_folder_is_made_in_the_chats_own() {
+    if !enabled().await {
+        return;
+    }
+    let machine = machine();
+    // Stands in for the `/tmp/claude-<uid>` of the person's own Claude Code.
+    let persons = tempfile::tempdir_in("/private/tmp").unwrap();
+    let script = r#"if mkdir -p "$1" 2>/dev/null; then echo "shared made"; else echo "shared refused"; fi
+own="$CLAUDE_CODE_TMPDIR/claude-test"
+mkdir -p "$own" && echo note > "$own/note" && echo "own made $own""#;
+    let (code, stdout) = machine
+        .run(&machine.probe(script, &[text(persons.path())]))
+        .await;
+    assert_eq!(code, Some(0));
+    let own = machine.run_dir.join("tmp/claude-test");
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        [
+            "shared refused".to_owned(),
+            format!("own made {}", text(&own))
+        ]
+    );
+    assert_eq!(std::fs::read_to_string(own.join("note")).unwrap(), "note\n");
 }
 
 #[tokio::test]

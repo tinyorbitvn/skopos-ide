@@ -227,7 +227,7 @@ mod running {
     use crate::agents::prompt::{hidden_block, object_line, PromptContext};
     use crate::agents::proxy::{self, ProxyConfig, Resolver};
     use crate::agents::registry::{default_agent, AgentSpec, AgentState};
-    use crate::agents::sandbox::env::{agent_env, proxy_url};
+    use crate::agents::sandbox::env::{agent_env, path_of, proxy_url};
     use crate::agents::sandbox::paths::kubeconfig_files;
     use crate::agents::sandbox::spec::{MCP_SOCKET, PROXY_SOCKET};
     use crate::agents::sandbox::{
@@ -1211,7 +1211,7 @@ mod running {
                 .collect(),
             kubeconfigs: kubeconfig_files(&prefs.sync_sources, &catalog, kubeconfig_env.as_deref()),
             app_binary: app_binary.to_path_buf(),
-            path_var: std::env::var_os("PATH"),
+            path_var: path_of(&env),
             env,
         });
         if sandboxed {

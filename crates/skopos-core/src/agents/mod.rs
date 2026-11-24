@@ -11,6 +11,7 @@ pub mod chats;
 pub mod diff;
 pub mod endpoint;
 pub mod events;
+pub mod known_folders;
 pub mod mcp;
 pub mod modes;
 pub mod probe;
@@ -21,12 +22,14 @@ pub mod sandbox;
 pub mod settings;
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::prefs::{AgentChanges, AgentPrefs, ClusterAgentSettings, CustomAgent};
 use crate::sessions::random_hex;
+use known_folders::known_folders;
 use registry::{
     default_agent, listed, resolve_custom, status_of, AgentSpec, AgentStatus, Listed, Resolved,
 };
@@ -137,17 +140,18 @@ impl AppCore {
     }
 
     /// Preferences → Agents (spec §3.5): the built-in agents, then the person's in the order
-    /// added, each found on PATH or not. Nothing runs here: an installed agent shows the
+    /// added, each found on PATH, in a known install folder, or not. Nothing runs here: an installed agent shows the
     /// state its last probe of this app run gave (spec §4.2), `Unknown` before one.
     pub fn agents_status(&self) -> CoreResult<Vec<AgentStatus>> {
         supported()?;
         let prefs = self.agent_prefs();
         let path_var = self.agent_path_var();
+        let folders = self.agent_folders();
         let home = self.home_dir();
         let mut statuses: Vec<AgentStatus> = listed(&prefs)
             .iter()
             .map(|agent| {
-                let resolved = agent.resolve(path_var.as_deref(), home);
+                let resolved = agent.resolve(path_var.as_deref(), &folders, home);
                 status_of(agent, &resolved, self.agent_probes().get(agent.id()))
             })
             .collect();
@@ -173,8 +177,9 @@ impl AppCore {
             command: command.to_owned(),
         };
         let path_var = self.agent_path_var();
-        let resolved = resolve_custom(&draft, path_var.as_deref(), self.home_dir());
-        if let Resolved::NotInstalled { hint } = &resolved {
+        let folders = self.agent_folders();
+        let resolved = resolve_custom(&draft, path_var.as_deref(), &folders, self.home_dir());
+        if let Resolved::NotInstalled { hint, .. } = &resolved {
             return Err(IpcError::new(ErrorCode::InvalidInput, hint.clone()));
         }
         let wanted = name.to_lowercase();
@@ -246,9 +251,12 @@ impl AppCore {
             .find(|agent| agent.id() == id)
             .ok_or_else(unknown_agent)?;
         let path_var = self.agent_path_var();
-        match agent.resolve(path_var.as_deref(), self.home_dir()) {
+        let folders = self.agent_folders();
+        match agent.resolve(path_var.as_deref(), &folders, self.home_dir()) {
             Resolved::Found(spec) => Ok(spec),
-            Resolved::NotInstalled { hint } => Err(IpcError::new(ErrorCode::InvalidInput, hint)),
+            Resolved::NotInstalled { hint, .. } => {
+                Err(IpcError::new(ErrorCode::InvalidInput, hint))
+            }
         }
     }
 
@@ -256,6 +264,14 @@ impl AppCore {
     /// §4.2), or the one a test sets with `set_tools_config_for_test`.
     pub(crate) fn agent_path_var(&self) -> Option<OsString> {
         self.tools().search_path()
+    }
+
+    /// The folders searched after that PATH: the known install folders of this OS under the
+    /// home folder, or the ones a test sets with `set_tools_config_for_test`.
+    pub(crate) fn agent_folders(&self) -> Vec<PathBuf> {
+        self.tools()
+            .agent_folders()
+            .unwrap_or_else(|| known_folders(self.home_dir()))
     }
 }
 

@@ -1,5 +1,6 @@
 //! Finding the agents (agents spec §3.5, §4.2) with fake agent CLIs: shell scripts in the
-//! temp home's `bin/`, the only folder on the core's PATH, as `tests/helm.rs` fakes helm.
+//! temp home's `bin/`, the only folder on the core's PATH, as `tests/helm.rs` fakes helm, or in
+//! the known install folders under that home.
 //! Each script leaves a mark when it runs, so the tests also show that finding agents runs
 //! none of them: probes come later.
 #![cfg(unix)]
@@ -58,6 +59,11 @@ impl Fixture {
         self.script(&self.bin().join(name), name)
     }
 
+    /// A fake `name` in `folder`, a folder under the home folder off PATH.
+    fn install_in(&self, folder: &str, name: &str) -> PathBuf {
+        self.script(&self.home().join(folder).join(name), name)
+    }
+
     /// A fake `name` as npm installs one: a script in its package, linked from the PATH
     /// folder. Gives the script's path.
     fn install_linked(&self, name: &str) -> PathBuf {
@@ -74,14 +80,22 @@ impl Fixture {
             .is_none()
     }
 
-    /// A core whose PATH is `home/bin` alone.
+    /// A core whose PATH is `home/bin` alone, and that looks in no other folder.
     async fn core(&self) -> AppCore {
+        self.core_with(Some(Vec::new())).await
+    }
+
+    /// A core whose PATH is `home/bin` alone, and that looks in `agent_folders` after it:
+    /// `None` for the known install folders of this OS under the temp home (and Homebrew's on
+    /// macOS).
+    async fn core_with(&self, agent_folders: Option<Vec<PathBuf>>) -> AppCore {
         let paths = AppPaths::under(&self.root.path().join("app"), &self.home());
         let core = AppCore::start_with_kubeconfig_env(paths, None)
             .await
             .unwrap();
         core.set_tools_config_for_test(ToolsConfig {
             search_path: Some(self.bin().into_os_string()),
+            agent_folders,
             ..ToolsConfig::default()
         });
         core
@@ -157,6 +171,64 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
     assert!(mine.hosts.is_empty());
     // No agent is Ready before a probe and none was chosen, so none is the default yet.
     assert!(statuses.iter().all(|status| !status.is_default));
+    assert!(fixture.nothing_ran());
+    core.shutdown().await;
+}
+
+#[tokio::test]
+async fn agents_off_path_are_found_in_the_known_folders_and_a_cli_names_its_missing_adapter() {
+    let fixture = Fixture::new();
+    fixture.install_in(".local/bin", "codex");
+    let opencode = fixture.install_in(".opencode/bin", "opencode");
+    let adapter = fixture.install_in(".nvm/versions/node/v22.11.0/bin", "claude-agent-acp");
+    fixture.install_in(".nvm/versions/node/v20.18.1/bin", "claude-agent-acp");
+    let core = fixture.core_with(None).await;
+    let home = fixture.home();
+
+    let statuses = core.agents_status().unwrap();
+
+    let codex = row(&statuses, "codex");
+    assert_eq!(codex.state, AgentState::NotInstalled);
+    assert_eq!(
+        codex.detail.as_deref(),
+        Some("~/.local/bin/codex · ACP adapter codex-acp missing")
+    );
+    assert_eq!(
+        codex.hint.as_deref(),
+        Some(
+            "Install codex-acp (npm install -g @agentclientprotocol/codex-acp), then check again."
+        )
+    );
+    let row_of_opencode = row(&statuses, "opencode");
+    assert_eq!(row_of_opencode.state, AgentState::Unknown);
+    assert_eq!(
+        row_of_opencode.detail.as_deref(),
+        Some("~/.opencode/bin/opencode · built-in ACP")
+    );
+    // The newest Node version's copy.
+    let claude = row(&statuses, "claude");
+    assert_eq!(claude.state, AgentState::Unknown);
+    assert_eq!(
+        claude.detail.as_deref(),
+        Some("~/.nvm/versions/node/v22.11.0/bin/claude-agent-acp · ACP adapter claude-agent-acp")
+    );
+
+    let spec = core.agent_spec("opencode").unwrap();
+    assert_eq!(spec.program, real(&opencode));
+    assert_eq!(spec.path_dirs, [home.join(".opencode/bin")]);
+    let spec = core.agent_spec("claude").unwrap();
+    assert_eq!(spec.program, real(&adapter));
+    assert_eq!(
+        spec.path_dirs,
+        [home.join(".nvm/versions/node/v22.11.0/bin")]
+    );
+    let err = core.agent_spec("codex").unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+
+    // Found on PATH, nothing is added to the agent's PATH.
+    fixture.install("opencode");
+    let spec = core.agent_spec("opencode").unwrap();
+    assert!(spec.path_dirs.is_empty());
     assert!(fixture.nothing_ran());
     core.shutdown().await;
 }

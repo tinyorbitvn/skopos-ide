@@ -159,6 +159,7 @@ impl Machine {
             hosts: Vec::new(),
             key_vars: vec!["PROBE_API_KEY".to_owned()],
             install_paths: vec![PathBuf::from(program)],
+            path_dirs: Vec::new(),
             custom: true,
         };
         let path = std::env::var("PATH").ok();
@@ -210,6 +211,23 @@ async fn run(spec: &SandboxSpec) -> (Option<i32>, String) {
         output.status.code(),
         String::from_utf8(output.stdout).unwrap(),
     )
+}
+
+/// Claude Code keeps its temporary files in `claude-<uid>` under `CLAUDE_CODE_TMPDIR`: the
+/// chat's own temporary folder, which the agent may write.
+#[tokio::test]
+async fn claude_codes_temporary_folder_is_made_in_the_chats_own() {
+    if !enabled().await {
+        return;
+    }
+    let machine = machine();
+    let script = r#"own="$CLAUDE_CODE_TMPDIR/claude-test"
+mkdir -p "$own" && echo note > "$own/note" && echo "own made $own""#;
+    let (code, stdout) = run(&machine.probe(script, &[])).await;
+    assert_eq!(code, Some(0));
+    let own = machine.run_dir.join("tmp/claude-test");
+    assert_eq!(stdout.trim_end(), format!("own made {}", text(&own)));
+    assert_eq!(std::fs::read_to_string(own.join("note")).unwrap(), "note\n");
 }
 
 #[tokio::test]

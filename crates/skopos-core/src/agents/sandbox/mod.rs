@@ -150,6 +150,7 @@ pub(crate) fn test_agent(program: &std::path::Path) -> crate::agents::registry::
         hosts: Vec::new(),
         key_vars: Vec::new(),
         install_paths: vec![program.to_path_buf()],
+        path_dirs: Vec::new(),
         custom: true,
     }
 }

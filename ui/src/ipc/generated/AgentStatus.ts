@@ -6,8 +6,8 @@ import type { AgentState } from "./AgentState";
  */
 export type AgentStatus = { id: string, name: string, state: AgentState, 
 /**
- * The monospace line: where the agent is, or the person's command. `None` for a
- * built-in agent that is not installed.
+ * The monospace line: where the agent is, or the person's command. For a built-in agent
+ * that is not installed, its CLI found without the adapter, else `None`.
  */
 detail: string | null, 
 /**

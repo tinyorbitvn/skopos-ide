@@ -296,6 +296,8 @@ pub struct ToolsConfig {
     pub downloads: Vec<PinnedDownload>,
     /// `None` reads `PATH` from the environment each time.
     pub search_path: Option<OsString>,
+    /// Where agents are looked for after `search_path`. `None` is `agents::known_folders`.
+    pub agent_folders: Option<Vec<PathBuf>>,
     pub limits: DownloadLimits,
     /// Tests serve downloads over plain HTTP from a local server.
     pub https_only: bool,
@@ -306,6 +308,7 @@ impl Default for ToolsConfig {
         ToolsConfig {
             downloads: pinned_downloads(),
             search_path: None,
+            agent_folders: None,
             limits: DownloadLimits::default(),
             https_only: true,
         }
@@ -371,6 +374,10 @@ impl Tools {
             .search_path
             .clone()
             .or_else(|| std::env::var_os("PATH"))
+    }
+
+    pub(crate) fn agent_folders(&self) -> Option<Vec<PathBuf>> {
+        lock(&self.config).agent_folders.clone()
     }
 
     /// The pinned download for this OS and architecture.
