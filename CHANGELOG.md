@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-11-24
+
 - **Claude signs in on macOS:** Claude in the macOS sandbox reads the sign-in Claude Code keeps in the Keychain, where it said only Authentication required before. Agents may read the Keychain's files but not change them, and macOS still asks before an agent opens an item another app made.
 - **A chat says how to sign in:** when the agent asks for a sign-in during a chat, the chat says so with the agent's sign-in steps, such as Run claude in a terminal and sign in, where it showed only the agent's error.
 
