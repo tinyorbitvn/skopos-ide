@@ -318,7 +318,7 @@
   <section class="wrap section" id="download" aria-labelledby="download-title">
     <p class="overline overline--accent">Download</p>
     <h2 class="section__title" id="download-title">SkoposIDE <span class="grad">{{release.version}}</span></h2>
-    <p class="section__lead">Released {{release.date}}. Every file comes from <a href="{{release.url}}">GitHub Releases</a>. Builds are not signed yet, so each platform has one first-run step.</p>
+    <p class="section__lead">Released {{release.date}}. The files come from <a href="{{release.url}}">GitHub Releases</a>; Windows can also install from the Microsoft Store, marked Next release until the Store has approved it. Each platform's first-run step is below its files.</p>
     <div class="downloads">
       <article class="platform" data-os="mac">
         <div class="platform__head">
@@ -346,12 +346,16 @@
         </div>
         <ul class="files">
           <li class="file">
+            <span class="file__text"><span class="file__label">Microsoft Store <span class="badge next-release">Next release</span></span><span class="file__meta">Signed by Microsoft, updated by the Store</span></span>
+            <a class="button button--line button--sm" href="https://apps.microsoft.com/detail/9PC8GNRRQB5Q" aria-label="Get SkoposIDE from the Microsoft Store">Get it</a>
+          </li>
+          <li class="file">
             <span class="file__text"><span class="file__label">64-bit installer</span><span class="file__meta">{{asset:x64-setup.exe:name}} · {{asset:x64-setup.exe:size}}</span></span>
             <a class="button button--line button--sm" href="{{asset:x64-setup.exe:url}}" data-asset="x64-setup.exe" data-name="{{asset:x64-setup.exe:name}}" data-size="{{asset:x64-setup.exe:size}}" aria-label="Download {{asset:x64-setup.exe:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
         </ul>
         <div class="first-run">
-          <p><strong>First run.</strong> In SmartScreen, choose More info, then Run anyway.</p>
+          <p><strong>First run.</strong> The Microsoft Store build opens with no prompt. For the installer, in SmartScreen choose More info, then Run anyway.</p>
         </div>
       </article>
       <article class="platform" data-os="linux">

@@ -115,3 +115,13 @@ test("the Windows smoke job packs the e2e build and install-checks it", () => {
   assert.match(smoke, /- name: Install and start the MSIX\n {8}if: runner\.os == 'Windows'\n {8}shell: pwsh\n {8}run: \.\/scripts\/msix-install-check\.ps1 -Msix /);
   assert.doesNotMatch(smoke, /-CheckRuntime/);
 });
+
+test("store.json holds the Partner Center identity and the site links its Store page", () => {
+  const file = path.join(ROOT, "crates", "skopos-app", "msix", "store.json");
+  const identity = readIdentity(file);
+  assert.match(identity.publisher, /^CN=/);
+  const { storeId } = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.match(storeId, /^[0-9A-Z]{12}$/);
+  const site = fs.readFileSync(path.join(ROOT, "site", "index.html"), "utf8");
+  assert.ok(site.includes(`href="https://apps.microsoft.com/detail/${storeId}"`));
+});

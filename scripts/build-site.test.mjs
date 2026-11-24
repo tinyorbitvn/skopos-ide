@@ -21,7 +21,8 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_URL = "https://github.com/vanlongme/skopos-ide";
 // The pages link only to the repository and the maintainer's GitHub Sponsors page.
-const SITE_LINK = /^https:\/\/github\.com\/(vanlongme\/skopos-ide($|[/#])|sponsors\/vanlongme$)/;
+const SITE_LINK =
+  /^https:\/\/(github\.com\/(vanlongme\/skopos-ide($|[/#])|sponsors\/vanlongme$)|apps\.microsoft\.com\/detail\/[0-9A-Z]{12}$)/;
 const SIZES = {
   "amd64.AppImage": 93891064,
   "amd64.deb": 16582772,
