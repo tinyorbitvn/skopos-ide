@@ -117,7 +117,6 @@ fn agent_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::ffi::OsString;
     use std::path::{Path, PathBuf};
 
     use super::*;
