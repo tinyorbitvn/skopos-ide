@@ -248,18 +248,23 @@ Store signs the package. Pre-release tags skip the job.
   expires then, and a later rerun fails at download-artifact. Rerunning the whole run would rebuild
   into the published release, so after 7 days cut a new tag instead. Certification takes up to a
   few business days; the job does not wait.
+- The job signs in to Partner Center as a Microsoft Entra application. Set it up once in
+  Partner Center: Account settings › Tenants associates a Microsoft Entra tenant with the
+  account (an account without one can create one there), then Account settings › User
+  management › Microsoft Entra applications › Add Microsoft Entra application creates the
+  application. Give it the Manager role. On the application's page, Add new key shows the key
+  once.
 - The values live in the repository environment `store`, which only `v*` tags may use:
 
   | Secret | From |
   |---|---|
-  | `MSSTORE_TENANT_ID` | Microsoft Entra ID › the app registration › Directory (tenant) ID |
-  | `MSSTORE_CLIENT_ID` | the app registration › Application (client) ID |
-  | `MSSTORE_CLIENT_SECRET` | the app registration › Certificates & secrets |
+  | `MSSTORE_TENANT_ID` | the application's page in Partner Center › Tenant ID |
+  | `MSSTORE_CLIENT_ID` | the application's page › Client ID |
+  | `MSSTORE_CLIENT_SECRET` | the application's page › Add new key › Key |
   | `MSSTORE_SELLER_ID` | Partner Center › Account settings › Legal info › Seller ID |
 
-- The client secret lasts at most 24 months. Before it expires, create a new one under
-  Certificates & secrets and replace `MSSTORE_CLIENT_SECRET`; until then submissions fail with
-  an authentication error.
+- The key expires on the date the application's page shows. Before then, add a new key and
+  replace `MSSTORE_CLIENT_SECRET`; after it, submissions fail with an authentication error.
 - `crates/skopos-app/msix/store.json` holds the package identity from Partner Center's Product
   identity page; it is public. The package's logos come from `crates/skopos-app/icons/`.
 - The first submission is manual: download the `msix` artifact and follow
