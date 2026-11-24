@@ -1,5 +1,6 @@
 mod commands;
 mod events;
+mod install_channel;
 mod keychain;
 mod menu;
 mod state;
@@ -73,6 +74,8 @@ pub fn run(shell_env_warning: Option<String>) {
         tracing::warn!("{warning}");
     }
     tracing::info!("starting skopos {}", skopos_core::VERSION);
+    let channel = install_channel::detect();
+    tracing::info!("install channel: {}", channel.label());
     let started = paths.and_then(|paths| {
         let secrets = Arc::new(KeychainStore::new(keychain::SERVICE));
         let kubeconfig_env = std::env::var_os("KUBECONFIG");
@@ -83,7 +86,7 @@ pub fn run(shell_env_warning: Option<String>) {
         ))
     });
     match started {
-        Ok(core) => run_app(core, log_guard, context),
+        Ok(core) => run_app(core, log_guard, context, channel),
         Err(err) => {
             report_failure(&err);
             drop(log_guard);
@@ -127,7 +130,12 @@ fn sandbox_off_requested(value: Option<&std::ffi::OsStr>) -> bool {
     value.is_some_and(|value| value == "1")
 }
 
-fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<Wry>) {
+fn run_app(
+    core: AppCore,
+    mut log_guard: Option<WorkerGuard>,
+    context: Context<Wry>,
+    channel: install_channel::InstallChannel,
+) {
     #[cfg(feature = "e2e")]
     if sandbox_off_requested(std::env::var_os(E2E_AGENT_SANDBOX_OFF).as_deref()) {
         core.agent_sandbox_off_for_test();
@@ -309,7 +317,7 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             let updates_core = forwarded.clone();
             // The forwarder subscribes first, so the update service's first state is sent on.
             events::spawn_forwarder(app.handle().clone(), forwarded);
-            updates::start(app.handle(), &updates_core);
+            updates::start(app.handle(), &updates_core, channel);
             #[cfg(target_os = "macos")]
             menu::install(app.handle())?;
             Ok(())
