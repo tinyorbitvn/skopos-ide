@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Claude signs in on macOS:** Claude in the macOS sandbox reads the sign-in Claude Code keeps in the Keychain, where it said only Authentication required before. Agents may read the Keychain's files but not change them, and macOS still asks before an agent opens an item another app made.
+
 ## [0.13.1] - 2026-11-24
 
 - **Agents found where they are installed:** Preferences › Agents also looks for agent CLIs and their ACP adapters in the folders they install into when the login shell's PATH misses them: `~/.local/bin`, `~/.opencode/bin`, `~/.bun/bin`, `~/.npm-global/bin`, Volta, Yarn, Cargo, pnpm, the Node versions of nvm and fnm, and Homebrew's folders on macOS. When Claude Code or Codex is installed without its ACP adapter, the row names the CLI it found and the adapter that is missing, where it said only Not installed before.

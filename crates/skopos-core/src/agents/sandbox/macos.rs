@@ -33,6 +33,12 @@ pub const MACH_SERVICES: &[&str] = &[
     "com.apple.trustd.agent",
     "com.apple.logd",
 ];
+/// The person's keychains under the home folder, which the agent may read but not change. The
+/// Security framework reads a keychain's file in the agent's own process, and an agent's sign-in
+/// may live there: Claude Code keeps its own in the login keychain. An item's secret still comes
+/// only through `securityd` and the item's access list, which asks the person before an item
+/// another app made is opened.
+const KEYCHAINS: &str = "Library/Keychains";
 /// Spec §4.6's check that Seatbelt can start a sandbox here.
 const STATUS_PROFILE: &str = "(version 1)(allow default)";
 const STATUS_PROGRAM: &str = "/usr/bin/true";
@@ -112,8 +118,8 @@ fn configured_folder(name: c_int) -> Option<PathBuf> {
 /// The profile, one rule a line, in this order: the opening rules; no reading under the home
 /// folder or `temp_folders`, except the folders above an allowed path or a link the agent
 /// passes, which it may `stat` on its way down; reading again each `read_write` and
-/// `read_only` path, and each link in a covered folder on the way to a `linked` path, which a
-/// lookup through it reads; writing each
+/// `read_only` path, then the person's `KEYCHAINS`, and each link in a covered folder on the way
+/// to a `linked` path, which a lookup through it reads; writing each
 /// `read_write` path, `/dev/null` and its controlling terminal; no reading or writing the
 /// hidden kubeconfig files and the person's other terminals, last among the file rules so that
 /// no allowed folder opens them again; connecting to `localhost:<proxy>` and `localhost:<mcp>`
@@ -121,7 +127,8 @@ fn configured_folder(name: c_int) -> Option<PathBuf> {
 fn profile_with(spec: &SandboxSpec, ports: ChatPorts, temp_folders: &[PathBuf]) -> String {
     let home = real_path(&spec.home);
     let read_write: Vec<PathBuf> = spec.read_write.iter().map(|path| real_path(path)).collect();
-    let read_only: Vec<PathBuf> = spec.read_only.iter().map(|path| real_path(path)).collect();
+    let mut read_only: Vec<PathBuf> = spec.read_only.iter().map(|path| real_path(path)).collect();
+    read_only.push(home.join(KEYCHAINS));
     let allowed: Vec<&PathBuf> = read_write.iter().chain(&read_only).collect();
     let mut rules: Vec<String> = OPENING.iter().map(|rule| rule.to_string()).collect();
     let covered: Vec<&PathBuf> = std::iter::once(&home).chain(temp_folders).collect();
@@ -375,6 +382,7 @@ mod tests {
             format!(r#"(allow file-read* (subpath "{PACKAGE}"))"#),
             r#"(allow file-read* (subpath "/opt/skopos-test/node"))"#.to_owned(),
             format!(r#"(allow file-read* (subpath "{APP_FOLDER}"))"#),
+            format!(r#"(allow file-read* (subpath "{HOME}/Library/Keychains"))"#),
             format!(r#"(allow file-write* (subpath "{work}"))"#),
             format!(r#"(allow file-write* (subpath "{HOME}/.claude"))"#),
             format!(r#"(allow file-write* (subpath "{tmp}"))"#),
@@ -399,6 +407,33 @@ mod tests {
         let text = profile_with(&fixed_spec(), PORTS, &fixed_temp_folders());
         assert_eq!(text.lines().collect::<Vec<_>>(), expected);
         assert!(text.ends_with(")\n"));
+    }
+
+    #[test]
+    fn the_keychains_may_be_read_but_not_written() {
+        let mut spec = fixed_spec();
+        spec.read_write = Vec::new();
+        spec.read_only = Vec::new();
+        let text = profile_with(&spec, PORTS, &fixed_temp_folders());
+        let lines: Vec<&str> = text.lines().collect();
+        let keychains = format!("{HOME}/Library/Keychains");
+        let wanted = [
+            format!(r#"(deny file-read* (subpath "{HOME}"))"#),
+            format!(r#"(allow file-read-metadata (literal "{HOME}"))"#),
+            format!(r#"(allow file-read-metadata (literal "{HOME}/Library"))"#),
+            format!(r#"(allow file-read* (subpath "{keychains}"))"#),
+        ];
+        let at: Vec<usize> = wanted
+            .iter()
+            .map(|rule| lines.iter().position(|line| line == rule).expect(rule))
+            .collect();
+        assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{text}");
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.contains("file-write") && line.contains(&keychains)),
+            "{text}"
+        );
     }
 
     fn fixed_temp_folders() -> Vec<PathBuf> {
@@ -485,10 +520,16 @@ mod tests {
             .map(|rule| lines.iter().position(|line| line == rule).expect(rule))
             .collect();
         assert!(at.windows(2).all(|pair| pair[0] < pair[1]), "{lines:?}");
+        let keychains = format!(
+            "(allow file-read* (subpath {}))",
+            quoted(&home.join(KEYCHAINS))
+        );
         let opened: Vec<&&str> = lines
             .iter()
             .filter(|line| {
-                line.starts_with("(allow file-read* ") && line.contains(&*home.to_string_lossy())
+                line.starts_with("(allow file-read* ")
+                    && line.contains(&*home.to_string_lossy())
+                    && **line != keychains
             })
             .collect();
         assert_eq!(opened.len(), 2, "only the two links: {opened:?}");
