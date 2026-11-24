@@ -57,3 +57,21 @@ test("CI keeps the SBOM as the run's sbom artifact", () => {
     /^ {10}name: sbom\n {10}path: tmp\/sbom\/SkoposIDE\.cdx\.json$/m,
   );
 });
+
+test("the sbom jobs skip the Linux build libraries, which make sbom does not use", () => {
+  // A slow apt mirror once took 19 minutes of the CI job's 20, before make sbom ran.
+  for (const [name, text] of Object.entries(workflows)) {
+    assert.match(
+      job(text, "sbom"),
+      /^ {6}- uses: \.\/\.github\/actions\/setup\n {8}with:\n {10}linux-libraries: "false"$/m,
+      name,
+    );
+  }
+  const setup = read(".github", "actions", "setup", "action.yml");
+  assert.match(setup, /^ {2}linux-libraries:\n(?: {4}.*\n)*? {4}default: "true"$/m);
+  const aptSteps = setup.split(/\n(?= {4}- )/).filter((step) => step.includes("apt-get"));
+  assert.equal(aptSteps.length, 2);
+  for (const step of aptSteps) {
+    assert.match(step, /^ {6}if: runner\.os == 'Linux' && inputs\.linux-libraries == 'true'$/m);
+  }
+});

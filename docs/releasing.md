@@ -16,7 +16,8 @@ cancels the older run.
 | `sbom` | Linux | `make sbom`; the SBOM is kept as the run's `sbom` artifact |
 
 Hosted macOS runners cannot run the kind cluster, so the kind and full end-to-end suites run on
-Linux only. The jobs share their toolchain and cache setup through `.github/actions/setup`.
+Linux only. The jobs share their toolchain and cache setup through `.github/actions/setup`; the
+`sbom` jobs skip its Linux build libraries, which `make sbom` does not use.
 
 `.github/workflows/dependency-review.yml` runs on the same pushes and pull requests and checks
 the dependency advisories each change adds; see
