@@ -5,6 +5,9 @@ export const RELEASES = "https://github.com/vanlongme/skopos-ide/releases";
 /** Where to download the app by hand. */
 export const DOWNLOAD_PAGE = `${RELEASES}/latest`;
 
+/** What a Microsoft Store copy shows instead of update checks (Store spec §3). */
+export const STORE_MANAGED_TEXT = "Updates come from the Microsoft Store";
+
 /** The release's page, with its full notes. */
 export function releasePage(version: string): string {
   return `${RELEASES}/tag/v${version}`;

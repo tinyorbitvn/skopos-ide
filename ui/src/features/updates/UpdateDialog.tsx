@@ -25,6 +25,7 @@ import {
 } from "./updateStore";
 import {
   DOWNLOAD_PAGE,
+  STORE_MANAGED_TEXT,
   downloadedText,
   downloadPercent,
   releasePage,
@@ -181,6 +182,8 @@ function UpdateBody(props: { state: UpdateState | null; onClose(): void }) {
           onClose={onClose}
         />
       );
+    case "storeManaged":
+      return <View title={STORE_MANAGED_TEXT} onClose={onClose} />;
     case "available":
       return state === null ? null : (
         <Available state={state} release={phase.release} onClose={onClose} />

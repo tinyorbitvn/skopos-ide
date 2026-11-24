@@ -55,7 +55,13 @@ pub enum UpdatePhase {
     Installing {
         version: String,
     },
+    /// This copy came from the Microsoft Store, which updates it: the app never checks or
+    /// installs (Store spec §3).
+    StoreManaged,
 }
+
+/// Why a Microsoft Store copy neither checks nor installs (Store spec §3).
+pub const STORE_MANAGED: &str = "Updates come from the Microsoft Store";
 
 /// What every window shows, sent as one value after every change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

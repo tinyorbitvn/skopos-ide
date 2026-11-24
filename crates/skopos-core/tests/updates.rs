@@ -5,7 +5,9 @@ use std::sync::Arc;
 use skopos_core::app_core::{AppCore, CoreEvent};
 use skopos_core::error::CoreResult;
 use skopos_core::paths::AppPaths;
-use skopos_core::updates::{BoxFuture, Package, Progress, Release, UpdatePhase, UpdateSource};
+use skopos_core::updates::{
+    BoxFuture, Package, Progress, Release, UpdatePhase, UpdateSource, STORE_MANAGED,
+};
 
 struct OneRelease;
 
@@ -76,4 +78,30 @@ async fn a_manual_check_reaches_subscribers_and_a_skip_is_kept_across_runs() {
     assert_eq!(again.update_state().skipped.as_deref(), Some("0.10.0"));
     assert_eq!(again.update_state().phase, UpdatePhase::Idle);
     again.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_store_copy_never_checks_and_refuses_to_install() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+    let core = AppCore::start_with_kubeconfig_env(paths, None)
+        .await
+        .unwrap();
+    let mut events = core.subscribe();
+    core.updates_start_store_managed();
+
+    assert_eq!(core.update_state().phase, UpdatePhase::StoreManaged);
+    assert_eq!(core.update_check().await.phase, UpdatePhase::StoreManaged);
+    let refused = core.update_install().await.unwrap_err();
+    assert_eq!(refused.message, STORE_MANAGED);
+    assert_eq!(core.update_state().phase, UpdatePhase::StoreManaged);
+
+    let mut phases = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let CoreEvent::UpdateState { state } = event {
+            phases.push(state.phase);
+        }
+    }
+    assert_eq!(phases, vec![UpdatePhase::StoreManaged]);
+    core.shutdown().await;
 }
