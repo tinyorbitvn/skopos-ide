@@ -20,6 +20,7 @@ impl InstallChannel {
 /// `ERROR_INSUFFICIENT_BUFFER`: the process has a package name that did not fit an empty buffer.
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 /// `APPMODEL_ERROR_NO_PACKAGE`: the process has no package identity.
+#[cfg(any(not(windows), test))]
 const APPMODEL_ERROR_NO_PACKAGE: u32 = 15700;
 
 /// How this copy was installed, asked of Windows once at startup.

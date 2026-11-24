@@ -244,7 +244,10 @@ when the repository variable `STORE_SUBMIT` is `true`, submits it with `msstore 
 Store signs the package. Pre-release tags skip the job.
 
 - The job runs after `publish`, so its failure never affects the GitHub release. Rerun it alone
-  from the run's page. Certification takes up to a few business days; the job does not wait.
+  from the run's page, but only within 7 days of the run: the `windows-app` artifact it downloads
+  expires then, and a later rerun fails at download-artifact. Rerunning the whole run would rebuild
+  into the published release, so after 7 days cut a new tag instead. Certification takes up to a
+  few business days; the job does not wait.
 - The values live in the repository environment `store`, which only `v*` tags may use:
 
   | Secret | From |
