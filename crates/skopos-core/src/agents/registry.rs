@@ -9,6 +9,7 @@ use dashmap::DashMap;
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::agents::cli_login::KeychainLogin;
 use crate::agents::settings::expand_home;
 use crate::prefs::{AgentPrefs, CustomAgent};
 use crate::tools::{find_on_path, is_executable};
@@ -37,6 +38,8 @@ pub struct AgentDef {
     pub extra_env: &'static [(&'static str, &'static str)],
     pub install_hint: &'static str,
     pub sign_in_hint: &'static str,
+    /// Where its CLI keeps its sign-in in the macOS keychain, which the app hands it.
+    pub keychain_login: Option<KeychainLogin>,
 }
 
 /// The built-in agents in the order Preferences → Agents lists them.
@@ -60,6 +63,10 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         extra_env: &[("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")],
         install_hint: "Install claude-agent-acp (npm install -g @agentclientprotocol/claude-agent-acp), then check again.",
         sign_in_hint: "Run claude in a terminal and sign in, then check again.",
+        keychain_login: Some(KeychainLogin {
+            service: "Claude Code-credentials",
+            var: "CLAUDE_CODE_OAUTH_TOKEN",
+        }),
     },
     AgentDef {
         id: "codex",
@@ -75,6 +82,7 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         extra_env: &[],
         install_hint: "Install codex-acp (npm install -g @agentclientprotocol/codex-acp), then check again.",
         sign_in_hint: "Run codex login in a terminal, then check again.",
+        keychain_login: None,
     },
     AgentDef {
         id: "opencode",
@@ -90,6 +98,7 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         extra_env: &[],
         install_hint: "Install OpenCode, then check again.",
         sign_in_hint: "Run opencode auth login in a terminal, then check again.",
+        keychain_login: None,
     },
     AgentDef {
         id: "gemini",
@@ -109,6 +118,7 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         extra_env: &[],
         install_hint: "Install Gemini CLI, then check again.",
         sign_in_hint: "Run gemini in a terminal and sign in, then check again.",
+        keychain_login: None,
     },
 ];
 
@@ -201,6 +211,18 @@ pub fn sign_in_hint(agent: &AgentSpec) -> Option<&'static str> {
         .iter()
         .find(|def| def.id == agent.id)
         .map(|def| def.sign_in_hint)
+}
+
+/// Where `agent`'s CLI keeps its sign-in in the macOS keychain: its built-in agent's, `None` for
+/// the person's own agents.
+pub fn keychain_login(agent: &AgentSpec) -> Option<&'static KeychainLogin> {
+    if agent.custom {
+        return None;
+    }
+    BUILTIN_AGENTS
+        .iter()
+        .find(|def| def.id == agent.id)
+        .and_then(|def| def.keychain_login.as_ref())
 }
 
 /// Finds a built-in agent on `path_var`, else in `folders`, the known install folders. Its
@@ -676,6 +698,23 @@ mod tests {
         );
         agent.id = "unknown".to_owned();
         assert_eq!(sign_in_hint(&agent), None);
+    }
+
+    #[test]
+    fn only_claude_keeps_its_sign_in_in_the_keychain() {
+        let mut agent = crate::agents::sandbox::test_agent(std::path::Path::new("/bin/claude"));
+        agent.id = "claude".to_owned();
+        assert_eq!(keychain_login(&agent), None);
+        agent.custom = false;
+        assert_eq!(
+            keychain_login(&agent),
+            Some(&KeychainLogin {
+                service: "Claude Code-credentials",
+                var: "CLAUDE_CODE_OAUTH_TOKEN",
+            })
+        );
+        agent.id = "codex".to_owned();
+        assert_eq!(keychain_login(&agent), None);
     }
 
     #[test]

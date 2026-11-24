@@ -219,6 +219,7 @@ mod running {
     use crate::agents::acp::{AcpSession, AcpUpdate, McpEntry, PlanEntry, StartError, TurnEnd};
     use crate::agents::approvals::{Approvals, ChangeAnswer, ChangeCard};
     use crate::agents::chats::{ChatStore, ChatSummary, StoredChat};
+    use crate::agents::cli_login;
     use crate::agents::endpoint::{new_token, read_token_line, AsyncStream, Endpoint, Listen};
     use crate::agents::events::{ChatEvent, ChatItem, ChatItemBody, ChatNotice, ObjectRef};
     use crate::agents::mcp::cards::ToolCard;
@@ -377,6 +378,19 @@ mod running {
         )
         .await?;
         let app_binary = chats.app_binary()?;
+        // The macOS sandbox hides the keychains, where Claude Code keeps its sign-in: the app
+        // reads it and hands the agent only its access token.
+        let login = if sandboxed && cfg!(target_os = "macos") {
+            cli_login::agent_login(
+                &agent,
+                &|name: &str| std::env::var(name).ok(),
+                Path::new(cli_login::SECURITY),
+                cli_login::now_ms(),
+            )
+            .await
+        } else {
+            None
+        };
         let command = agent_command(
             core,
             &agent,
@@ -385,6 +399,7 @@ mod running {
             &wiring,
             &app_binary,
             sandboxed,
+            login,
         )?;
         let mcp = McpEntry {
             command: app_binary,
@@ -1181,7 +1196,9 @@ mod running {
     }
 
     /// The agent's command: inside the sandbox, or directly while it is off for tests (R2).
-    /// Either way the agent gets only spec §4.6's environment.
+    /// Either way the agent gets only spec §4.6's environment, with `login`, its CLI's
+    /// sign-in, as one of its provider keys.
+    #[allow(clippy::too_many_arguments)]
     fn agent_command(
         core: &AppCore,
         agent: &AgentSpec,
@@ -1190,17 +1207,20 @@ mod running {
         wiring: &Wiring,
         app_binary: &Path,
         sandboxed: bool,
+        login: Option<(String, String)>,
     ) -> CoreResult<Command> {
         let home = core.home_dir().to_path_buf();
         let prefs = core.prefs_get();
         let proxy = proxy_url(&wiring.token, wiring.ports.proxy);
-        let env = agent_env(
-            &|name: &str| std::env::var(name).ok(),
-            agent,
-            &proxy,
-            &run.join(TMP),
-            &home,
-        );
+        let get = |name: &str| {
+            std::env::var(name).ok().or_else(|| {
+                login
+                    .as_ref()
+                    .filter(|(var, _)| var == name)
+                    .map(|(_, token)| token.clone())
+            })
+        };
+        let env = agent_env(&get, agent, &proxy, &run.join(TMP), &home);
         let catalog: Vec<PathBuf> = core
             .catalog_list()
             .into_iter()

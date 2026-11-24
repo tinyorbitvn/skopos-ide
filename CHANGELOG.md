@@ -8,6 +8,7 @@ release notes (see `docs/releasing.md`).
 
 ## [0.13.2] - 2026-11-24
 
+- **Claude uses your Claude Code sign-in on macOS:** a chat with Claude on macOS uses the sign-in of the Claude Code you signed in to on this Mac, where it said only Authentication required before. SkoposIDE reads Claude Code's sign-in from the Keychain itself and hands Claude only its access token; agents still cannot read the Keychain. When that token has run out, the chat asks you to sign in: run claude in a terminal, then start a new chat.
 - **A chat says how to sign in:** when the agent asks for a sign-in during a chat, the chat says so with the agent's sign-in steps, such as Run claude in a terminal and sign in, where it showed only the agent's error.
 
 ## [0.13.1] - 2026-11-24

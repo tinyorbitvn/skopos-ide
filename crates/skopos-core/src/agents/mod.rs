@@ -8,6 +8,7 @@ pub mod approvals;
 pub mod bridge;
 pub mod chat;
 pub mod chats;
+pub mod cli_login;
 pub mod diff;
 pub mod endpoint;
 pub mod events;
