@@ -105,11 +105,18 @@ mod tests {
         }
     }
 
+    /// The folders under `home`, relative to it and with `/` between their parts on every OS.
     fn under(home: &Path, folders: &[PathBuf]) -> Vec<String> {
         folders
             .iter()
             .filter_map(|folder| folder.strip_prefix(home).ok())
-            .map(|folder| folder.display().to_string())
+            .map(|folder| {
+                folder
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
             .collect()
     }
 

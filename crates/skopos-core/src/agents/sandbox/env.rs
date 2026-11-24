@@ -256,6 +256,9 @@ mod tests {
         );
     }
 
+    // The app's PATH here has two folders joined with `:`, as on Linux and macOS, the only
+    // OSes agents run on; Windows splits PATH at `;`.
+    #[cfg(unix)]
     #[test]
     fn the_folders_an_agent_was_found_in_off_path_end_its_path() {
         let mut agent = claude();
