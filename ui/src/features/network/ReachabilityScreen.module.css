@@ -1,0 +1,177 @@
+/* The Reachability page (network policies spec §3.2, the canvas board's option A). */
+.screen {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5) var(--space-8);
+  padding: var(--space-7) var(--space-8);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 560px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-15);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.caption {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.fieldLabel {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.chip,
+.warnChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--control-xs);
+  padding: 0 var(--space-5) 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-full);
+  font: var(--type-caption);
+  white-space: nowrap;
+}
+
+.chip {
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  background: var(--surface-accent-soft);
+  color: var(--text-on-accent-soft);
+}
+
+.tag[data-source="cilium"] {
+  background: var(--status-neutral-soft);
+  color: var(--status-neutral-text);
+}
+
+.warnChip {
+  padding-left: var(--space-5);
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+  cursor: default;
+}
+
+.warnChip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tipLine {
+  display: block;
+}
+
+.filter {
+  width: 200px;
+}
+
+.error,
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  margin: var(--space-7) var(--space-8) 0;
+  padding: var(--space-5) var(--space-7);
+  border-radius: var(--radius-sm);
+}
+
+.error {
+  border: 1px solid var(--status-critical);
+  background: var(--status-critical-soft);
+  color: var(--status-critical-text);
+}
+
+.errorText {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.banner {
+  border: 1px solid var(--status-warning);
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+}
+
+.bannerLines {
+  flex: 1;
+  min-width: 0;
+}
+
+.bannerLine {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.state {
+  padding: var(--space-8);
+}
+
+.split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* The matrix scrolls in its own box, under its sticky header row and first column. */
+.matrixPane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-8) var(--space-8);
+}
+
+.cap {
+  margin: var(--space-5) 0 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}

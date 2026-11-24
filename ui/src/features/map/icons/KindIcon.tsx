@@ -1,7 +1,9 @@
 import { SVG_ART, type SvgArt } from "../../../design/icons";
+import { ARGO_ICONS } from "./argoIcons";
+import styles from "./KindIcon.module.css";
 import { type IconPath, K8S_ICONS, type K8sIconName } from "./k8sIcons";
 
-/** The Kubernetes Icons Set file of each kind that has one (spec E §14.1). */
+/** The Kubernetes Icons Set file of each kind that has one (spec E §14.1, spec §3.3). */
 const FILE: Readonly<Record<string, K8sIconName>> = {
   Pod: "pod",
   Deployment: "deploy",
@@ -21,6 +23,9 @@ const FILE: Readonly<Record<string, K8sIconName>> = {
   RoleBinding: "rb",
   ClusterRole: "c-role",
   ClusterRoleBinding: "crb",
+  NetworkPolicy: "netpol",
+  CiliumNetworkPolicy: "netpol",
+  CiliumClusterwideNetworkPolicy: "netpol",
 };
 
 /** Kinds the set has no icon for: the set's frame with a white Lucide glyph. */
@@ -28,11 +33,20 @@ const FRAMED: Readonly<Record<string, SvgArt>> = {
   Gateway: SVG_ART.DoorOpen,
   HTTPRoute: SVG_ART.Route,
   GatewayClass: SVG_ART.Layers,
+  ApplicationSet: SVG_ART.Boxes,
+  AppProject: SVG_ART.FolderKanban,
 };
 
-/** The name of the icon a kind gets: its file, a framed glyph, the load balancer badge or `crd`. */
+/** The icon of an Argo CD Application: the Argo logo (spec §3.3). */
+const ARGO = "argo";
+
+/**
+ * The name of the icon a kind gets: its file, the Argo logo, a framed glyph, the load
+ * balancer badge or `crd`.
+ */
 export function iconName(kind: string): string {
   if (FILE[kind]) return FILE[kind];
+  if (kind === "Application") return ARGO;
   if (FRAMED[kind]) return kind;
   if (kind === "LoadBalancer") return kind;
   return "crd";
@@ -89,7 +103,12 @@ export interface KindIconProps {
   y?: number;
 }
 
-/** A kind's icon at `size` pixels, hidden from assistive technology (spec E §14.1). */
+/**
+ * A kind's icon at `size` pixels, hidden from assistive technology (spec E §14.1). An
+ * Application draws both files of the Argo logo: the stylesheet shows the black one in the
+ * light theme and the white one in the dark theme, and an export keeps that choice, as it
+ * inlines each element's computed `display`.
+ */
 export function KindIcon({ kind, size, x, y }: KindIconProps) {
   const name = iconName(kind);
   const file: K8sIconName | undefined = FILE[kind];
@@ -98,7 +117,9 @@ export function KindIcon({ kind, size, x, y }: KindIconProps) {
     ? K8S_ICONS[file]
     : name === "crd"
       ? K8S_ICONS.crd
-      : K8S_ICONS.ing;
+      : name === ARGO
+        ? ARGO_ICONS.black
+        : K8S_ICONS.ing;
   return (
     <svg
       x={x}
@@ -113,6 +134,20 @@ export function KindIcon({ kind, size, x, y }: KindIconProps) {
       {file || name === "crd"
         ? packed.paths.map((p) => <Path key={`${p.t}${p.d}`} path={p} />)
         : null}
+      {name === ARGO ? (
+        <>
+          <g className={styles.logoLight} data-variant="light">
+            {ARGO_ICONS.black.paths.map((p) => (
+              <Path key={`${p.t}${p.d}`} path={p} />
+            ))}
+          </g>
+          <g className={styles.logoDark} data-variant="dark">
+            {ARGO_ICONS.white.paths.map((p) => (
+              <Path key={`${p.t}${p.d}`} path={p} />
+            ))}
+          </g>
+        </>
+      ) : null}
       {framed ? (
         <>
           {K8S_ICONS.ing.paths.slice(0, 2).map((p) => (

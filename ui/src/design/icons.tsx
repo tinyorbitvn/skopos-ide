@@ -133,7 +133,9 @@ import { UsersFillIcon } from "@thesvg/ui-react/users";
 import { XFillIcon } from "@thesvg/ui-react/x";
 import { ZapFillIcon } from "@thesvg/ui-react/zap";
 import {
+  Boxes as LucideBoxes,
   DoorOpen as LucideDoorOpen,
+  FolderKanban as LucideFolderKanban,
   type LucideIcon,
   Layers as LucideLayers,
   Route as LucideRoute,
@@ -213,7 +215,9 @@ export const MessageSquarePlus = /* @__PURE__ */ icon(
   MessageSquarePlusFillIcon,
 );
 export const SVG_ART = {
+  Boxes: LucideBoxes,
   DoorOpen: LucideDoorOpen,
+  FolderKanban: LucideFolderKanban,
   Layers: LucideLayers,
   Route: LucideRoute,
   Split: LucideSplit,

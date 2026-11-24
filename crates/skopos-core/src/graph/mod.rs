@@ -11,3 +11,9 @@ mod types;
 pub(crate) use hub::GraphHub;
 pub(crate) use pod::{is_init_progress, pod_summary};
 pub use types::{GraphEdge, GraphEvent, GraphNamespaceCount, GraphNode, GraphRel, GraphStatus};
+
+// The reachability hub reads the cluster through the graph's store (network policies spec
+// §7.3).
+pub(crate) use build::Store;
+pub(crate) use extract::Netpol;
+pub(crate) use kinds::{served_kinds, Kind};

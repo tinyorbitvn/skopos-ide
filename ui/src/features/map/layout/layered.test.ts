@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARGO,
   DEMO,
   demoGraph,
   ownsCycle,
+  POLICY,
+  policyArgoGraph,
   RBAC,
   rbacGraph,
 } from "../../../test/graph";
@@ -154,4 +157,28 @@ describe("owners that own each other", () => {
       expectPlacedApart(model, ids, layoutFocus(model, ids));
     });
   }
+});
+
+describe("ranks of policies and Argo CD", () => {
+  it("puts a policy with the Services, an Application before what it manages and its project after it", () => {
+    const { nodes, edges } = policyArgoGraph();
+    const model = buildModel(nodes, edges);
+    const rank = ranks(model, [
+      DEMO.deployment,
+      DEMO.replicaSet,
+      DEMO.podA,
+      DEMO.podB,
+      DEMO.service,
+      POLICY.netpol,
+      ARGO.app,
+      ARGO.appSet,
+      ARGO.project,
+    ]);
+    expect(rank[POLICY.netpol]).toBe(rank[DEMO.service]);
+    expect(rank[DEMO.service]).toBe(rank[DEMO.podA] - 1);
+    expect(rank[ARGO.app]).toBe(rank[DEMO.deployment] - 1);
+    expect(rank[ARGO.appSet]).toBe(rank[ARGO.app] - 1);
+    expect(rank[ARGO.appSet]).toBe(0);
+    expect(rank[ARGO.project]).toBe(rank[ARGO.app] + 1);
+  });
 });

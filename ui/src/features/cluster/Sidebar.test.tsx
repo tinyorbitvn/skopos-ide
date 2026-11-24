@@ -106,7 +106,11 @@ test("shows the visible sections and items", async () => {
     within(network)
       .getAllByRole("link")
       .map((a) => a.getAttribute("data-testid")),
-  ).toEqual(["nav-overview-network", "nav-port-forwards"]);
+  ).toEqual([
+    "nav-overview-network",
+    "nav-network/reachability",
+    "nav-port-forwards",
+  ]);
   expect(screen.queryByTestId("nav-item-batch-jobs")).toBeNull();
   fireEvent.click(screen.getByTestId("nav-crd-toggle-acme.io"));
   await act(flush);
@@ -268,6 +272,18 @@ test("Port Forwarding links to the cluster's port forwards and is active there",
   expect(link.getAttribute("aria-current")).toBe("page");
   expect(
     screen.getByTestId("nav-overview").getAttribute("aria-current"),
+  ).toBeNull();
+});
+
+test("Reachability links to the cluster's Reachability page and is active there", async () => {
+  await show({}, "/cluster/c1/network/reachability");
+  openSections("network");
+  const link = screen.getByTestId("nav-network/reachability");
+  expect(link.textContent).toBe("Reachability");
+  expect(link.getAttribute("href")).toBe("/cluster/c1/network/reachability");
+  expect(link.getAttribute("aria-current")).toBe("page");
+  expect(
+    screen.getByTestId("nav-overview-network").getAttribute("aria-current"),
   ).toBeNull();
 });
 

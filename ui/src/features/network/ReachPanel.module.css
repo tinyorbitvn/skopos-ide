@@ -1,0 +1,185 @@
+/* The workload panel (network policies spec §3.2, the canvas board's option A). */
+.panel {
+  flex: 0 0 340px;
+  width: 340px;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+  padding: var(--space-8) var(--space-9);
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.name {
+  margin: 0;
+  font: var(--type-subheading);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.header {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.warning {
+  margin: 0;
+  padding: var(--space-5) var(--space-7);
+  border-radius: var(--radius-sm);
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+  font: var(--type-caption);
+}
+
+.direction {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.directionTitle {
+  margin: 0;
+  font: var(--type-overline);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-7);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.entryHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.peer {
+  min-width: 0;
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.ports {
+  flex: none;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  background: var(--status-nominal-soft);
+  color: var(--status-nominal-text);
+}
+
+.ports[data-tone="open"] {
+  background: var(--status-warning-soft);
+  color: var(--status-warning-text);
+}
+
+.ports[data-tone="denied"] {
+  background: var(--status-critical-soft);
+  color: var(--status-critical-text);
+}
+
+.detail {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.http {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  height: 22px;
+  padding: 0 var(--space-4) 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-hairline);
+  color: var(--text-primary);
+  font: var(--type-caption);
+}
+
+button.chip {
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+
+button.chip:hover {
+  background: var(--surface-hover);
+}
+
+button.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  background: var(--surface-accent-soft);
+  color: var(--text-on-accent-soft);
+}
+
+.tag[data-source="cilium"],
+.tag[data-source="ciliumClusterwide"] {
+  background: var(--status-neutral-soft);
+  color: var(--status-neutral-text);
+}
+
+.chipName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foot {
+  margin: 0;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}

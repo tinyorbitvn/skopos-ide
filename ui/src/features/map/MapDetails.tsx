@@ -11,6 +11,7 @@ import type { GraphRel } from "../../ipc/generated/GraphRel";
 import type { GraphStatus } from "../../ipc/generated/GraphStatus";
 import { ageCell } from "../../kinds/registry";
 import { ownerTarget } from "../details/ownerLinks";
+import { reachabilityPath } from "../network/paths";
 import { KindIcon } from "./icons/KindIcon";
 import { FOCUSABLE } from "./layout/constants";
 import styles from "./MapDetails.module.css";
@@ -35,6 +36,8 @@ export const REL_OUT: Readonly<Record<GraphRel, string>> = {
   class: "Uses class",
   binds: "Binds",
   grants: "Grants",
+  manages: "Manages",
+  project: "Project",
 };
 
 export const REL_IN: Readonly<Record<GraphRel, string>> = {
@@ -48,6 +51,8 @@ export const REL_IN: Readonly<Record<GraphRel, string>> = {
   class: "Class of",
   binds: "Bound by",
   grants: "Granted by",
+  manages: "Managed by",
+  project: "Applications",
 };
 
 /** The status dot's tone of a node's status. */
@@ -118,6 +123,29 @@ export function connectionRows(model: MapModel, id: string): Row[] {
     }
   }
   return rows;
+}
+
+/**
+ * The namespace "Open in Reachability" opens (spec §3.3, R12): a policy's own, and for a
+ * CiliumClusterwideNetworkPolicy the namespace of the first Pod it selects on the map, by
+ * id. Null for other kinds and for a cluster-wide policy that selects no Pod here.
+ */
+function reachabilityNamespace(
+  model: MapModel,
+  node: GraphNode,
+): string | null {
+  if (node.kind === "NetworkPolicy" || node.kind === "CiliumNetworkPolicy") {
+    return node.namespace;
+  }
+  if (node.kind !== "CiliumClusterwideNetworkPolicy") return null;
+  const pods = linksOf(model, node.id)
+    .filter(
+      (l) =>
+        l.out && l.rel === "selects" && nodeOf(model, l.other).kind === "Pod",
+    )
+    .map((l) => l.other)
+    .sort();
+  return pods.length > 0 ? nodeOf(model, pods[0]).namespace : null;
 }
 
 export interface MapDetailsProps {
@@ -278,6 +306,7 @@ export function MapDetails({
           resources,
         );
   const status = statusLine(node);
+  const reachNamespace = reachabilityNamespace(model, node);
 
   return (
     <aside
@@ -320,6 +349,18 @@ export function MapDetails({
             onClick={() => navigate(`/cluster/${clusterId}${target}`)}
           >
             {`Open in ${listLabel(node.plural, node.kind)}`}
+          </Button>
+        ) : null}
+        {reachNamespace !== null ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="map-open-reachability"
+            onClick={() =>
+              navigate(reachabilityPath(clusterId, reachNamespace))
+            }
+          >
+            Open in Reachability
           </Button>
         ) : null}
       </div>

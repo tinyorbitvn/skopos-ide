@@ -9,7 +9,9 @@ import {
   Network,
   Server,
   Settings,
+  ShieldCheck,
 } from "../../design/icons";
+import { ReachabilityScreen } from "../../features/network/ReachabilityScreen";
 import { NamespacesOverview } from "../../features/sections/NamespacesOverview";
 import { NetworkOverview } from "../../features/sections/NetworkOverview";
 import { NodesOverview } from "../../features/sections/NodesOverview";
@@ -41,6 +43,7 @@ test("every screen of today's route table is a tab route, with its query", () =>
     "/cluster/kind-a/settings",
     "/cluster/kind-a/map?object=x",
     "/cluster/kind-a/node-topology?q=worker&ns=shop",
+    "/cluster/kind-a/network/reachability?ns=payments",
   ]) {
     expect(isTabRoute(path), path).toBe(true);
   }
@@ -81,6 +84,13 @@ test("a cluster tab's title is the screen, then the cluster (P9)", () => {
     screen: "Topology",
     icon: LayoutGrid,
   });
+  expect(
+    tabInfo("/cluster/kind-a/network/reachability?ns=payments", CLUSTERS),
+  ).toMatchObject({
+    title: "Reachability · kind-a",
+    screen: "Reachability",
+    icon: ShieldCheck,
+  });
 });
 
 test("a section overview's tab is named after its page, with its section's icon (spec §3.7)", () => {
@@ -114,6 +124,7 @@ test("each overview route shows its page, and every sidebar Overview has one", (
   expect(page("namespaces")).toBe(NamespacesOverview);
   expect(page("network")).toBe(NetworkOverview);
   expect(page("storage")).toBe(StorageOverview);
+  expect(page("network/reachability")).toBe(ReachabilityScreen);
   for (const section of NAV_SECTIONS) {
     if (section.overview === undefined) continue;
     expect([section.id, page(section.overview) === null]).toEqual([

@@ -6,6 +6,7 @@ import type { Positions } from "./grouped";
 const SELECTS: ReadonlySet<GraphRel> = new Set(["selects"]);
 const ROUTES: ReadonlySet<GraphRel> = new Set(["routes"]);
 const OWNS: ReadonlySet<GraphRel> = new Set(["owns"]);
+const MANAGES: ReadonlySet<GraphRel> = new Set(["manages"]);
 const BINDS: ReadonlySet<GraphRel> = new Set(["binds"]);
 const GRANTS: ReadonlySet<GraphRel> = new Set(["grants"]);
 const BINDINGS: ReadonlySet<string> = new Set([
@@ -13,12 +14,21 @@ const BINDINGS: ReadonlySet<string> = new Set([
   "ClusterRoleBinding",
 ]);
 const ROLES: ReadonlySet<string> = new Set(["Role", "ClusterRole"]);
+/** Kinds that select Pods: a Service, and the policies of spec §3.3. */
+const SELECTORS: ReadonlySet<string> = new Set([
+  "Service",
+  "NetworkPolicy",
+  "CiliumNetworkPolicy",
+  "CiliumClusterwideNetworkPolicy",
+]);
 
 /**
- * Each node's rank: ownership first (Deployment → ReplicaSet → Pod), then a Service one
- * rank before the Pods it selects, routes before their Services, Gateways before their
- * routes, load balancers first, config one rank after the Pods that use it, a binding one
- * rank after the ServiceAccounts it binds and a role one after the bindings that grant it.
+ * Each node's rank: ownership first (Deployment → ReplicaSet → Pod), then a Service or a
+ * policy one rank before the Pods it selects, routes before their Services, Gateways before
+ * their routes, load balancers first, an Application one rank before the objects it manages
+ * and its ApplicationSet one before it (spec §3.3), config and AppProjects one rank after
+ * what uses them, a binding one rank after the ServiceAccounts it binds and a role one after
+ * the bindings that grant it.
  */
 export function ranks(
   model: MapModel,
@@ -61,7 +71,7 @@ export function ranks(
     for (const id of rest.filter(pick)) rank[id] = place(id);
   };
   pass(
-    (id) => kind(id) === "Service",
+    (id) => SELECTORS.has(kind(id)),
     (id) => {
       const p = linked(id, SELECTS, "out");
       return p.length ? Math.min(...p) - 1 : ownerNext(id);
@@ -80,6 +90,21 @@ export function ranks(
     const first = Math.min(...lbs.map((id) => rank[id]));
     for (const id of lbs) rank[id] = first;
   }
+  // Argo CD comes before what it manages, and an ApplicationSet before its Applications.
+  pass(
+    (id) => kind(id) === "Application",
+    (id) => {
+      const m = linked(id, MANAGES, "out");
+      return m.length ? Math.min(...m) - 1 : ownerNext(id);
+    },
+  );
+  pass(
+    (id) => kind(id) === "ApplicationSet",
+    (id) => {
+      const a = linked(id, OWNS, "out");
+      return a.length ? Math.min(...a) - 1 : 0;
+    },
+  );
   pass(
     (id) => !(id in rank) && !BINDINGS.has(kind(id)) && !ROLES.has(kind(id)),
     (id) => {

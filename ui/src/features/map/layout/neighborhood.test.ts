@@ -5,6 +5,8 @@ import {
   gedge,
   gnode,
   ownsCycle,
+  POLICY,
+  policyArgoGraph,
   RBAC,
   rbacGraph,
 } from "../../../test/graph";
@@ -214,5 +216,37 @@ describe("geometry", () => {
     expect(headW(deployment)).toBe(
       Math.ceil(46 + "Deployment · 1 of 2 available".length * 7.2 + 16),
     );
+  });
+});
+
+describe("neighborhood with policies and Argo CD", () => {
+  it("ends a path at a policy, so it brings none of the other Pods it selects", () => {
+    const { nodes, edges } = policyArgoGraph();
+    const ids = neighborhood(buildModel(nodes, edges), DEMO.dbPod, "all");
+    expect(ids).toContain(POLICY.scrape);
+    expect(ids).not.toContain(DEMO.jobPod);
+    const deny = "NetworkPolicy/a/deny-all";
+    const pair = buildModel(
+      [gnode("Pod/a/x"), gnode("Pod/a/y"), gnode(deny)],
+      [gedge(deny, "selects", "Pod/a/x"), gedge(deny, "selects", "Pod/a/y")],
+    );
+    expect(neighborhood(pair, "Pod/a/x", "all")).toEqual(["Pod/a/x", deny]);
+  });
+
+  it("walks through an Application to what it manages, and ends at its AppProject", () => {
+    const a = "Application/argocd/a";
+    const b = "Application/argocd/b";
+    const project = "AppProject/argocd/default";
+    const web = "Deployment/shop/web";
+    const model = buildModel(
+      [gnode(a), gnode(b), gnode(project), gnode(web)],
+      [
+        gedge(a, "manages", web),
+        gedge(a, "project", project),
+        gedge(b, "project", project),
+      ],
+    );
+    expect(neighborhood(model, web, "all")).toEqual([web, a, project]);
+    expect(neighborhood(model, a, "all")).toEqual([a, web, project]);
   });
 });

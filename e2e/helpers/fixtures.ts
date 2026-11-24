@@ -182,6 +182,8 @@ async function startAgentsFixture() {
 }
 
 const MAP_NAMESPACE = "skopos-e2e-map";
+// The map's Argo CD objects, in a namespace of their own as Argo CD's are.
+const MAP_ARGO_NAMESPACE = "skopos-e2e-map-argocd";
 // Cluster-scoped, so deleting the namespace leaves it: it is deleted on its own.
 const MAP_CLUSTER_ROLE_BINDING = "skopos-e2e-map-web-view";
 const MAP_OBJECTS = path.resolve(__dirname, "..", "fixtures", "map.yaml");
@@ -189,11 +191,12 @@ const GATEWAY_API_CRDS =
   "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.7.0/standard-install.yaml";
 
 /**
- * The kind cluster with the resource map's objects (spec E §18.3). The graph reads
- * discovery once, when it starts, so the Gateway API CRDs and the objects are in
- * place before the app connects. The CRDs stay installed, as the backend's kind
- * test leaves them; the namespace and the ClusterRoleBinding are deleted when the run
- * ends.
+ * The kind cluster with the resource map's objects (spec E §18.3), with its network
+ * policies and Argo CD objects (spec §3.3). The graph reads discovery once, when it
+ * starts, so the CRDs (Gateway API here; Cilium and Argo CD from scripts/kind-up.sh) and
+ * the objects are in place before the app connects. The CRDs stay installed, as the
+ * backend's kind test leaves them; the namespaces and the ClusterRoleBinding are deleted
+ * when the run ends.
  */
 async function startMapFixture() {
   await kubectl([
@@ -218,14 +221,25 @@ async function startMapFixture() {
     "crd/udproutes.gateway.networking.k8s.io",
     "crd/backendtlspolicies.gateway.networking.k8s.io",
   ]);
+  // Installed by scripts/kind-up.sh; the map draws these kinds (spec §3.3).
   await kubectl([
-    "delete",
-    "namespace",
-    MAP_NAMESPACE,
-    "--ignore-not-found",
-    "--wait=true",
-    "--timeout=120s",
+    "wait",
+    "--for=condition=Established",
+    "--timeout=60s",
+    "crd/ciliumnetworkpolicies.cilium.io",
+    "crd/appprojects.argoproj.io",
+    "crd/applications.argoproj.io",
   ]);
+  for (const namespace of [MAP_NAMESPACE, MAP_ARGO_NAMESPACE]) {
+    await kubectl([
+      "delete",
+      "namespace",
+      namespace,
+      "--ignore-not-found",
+      "--wait=true",
+      "--timeout=120s",
+    ]);
+  }
   await kubectl([
     "delete",
     "clusterrolebinding",
@@ -244,13 +258,15 @@ async function startMapFixture() {
   return {
     kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
     async stop() {
-      await kubectl([
-        "delete",
-        "namespace",
-        MAP_NAMESPACE,
-        "--ignore-not-found",
-        "--wait=false",
-      ]);
+      for (const namespace of [MAP_NAMESPACE, MAP_ARGO_NAMESPACE]) {
+        await kubectl([
+          "delete",
+          "namespace",
+          namespace,
+          "--ignore-not-found",
+          "--wait=false",
+        ]);
+      }
       await kubectl([
         "delete",
         "clusterrolebinding",
@@ -317,6 +333,85 @@ async function startTopologyFixture() {
         TOPOLOGY_WORKER,
         `${TOPOLOGY_ZONE_LABEL}-`,
       ]).catch(() => "");
+    },
+  };
+}
+
+const REACH_NAMESPACES = [
+  "skopos-e2e-reach",
+  "skopos-e2e-reach-ingress",
+  "skopos-e2e-reach-monitoring",
+];
+// Cluster-scoped, so deleting the namespaces leaves it: it is deleted on its own.
+const REACH_CLUSTERWIDE_POLICY = "skopos-e2e-reach-allow-prometheus-scrape";
+const REACH_OBJECTS = path.resolve(
+  __dirname,
+  "..",
+  "fixtures",
+  "reachability.yaml",
+);
+
+/**
+ * The kind cluster with the Reachability page's sample namespace (network policies
+ * contract C13). scripts/kind-up.sh installs the Cilium CRDs; the policies need them
+ * established. The namespaces and the cluster-wide policy go when the run ends.
+ */
+async function startReachabilityFixture() {
+  await kubectl([
+    "wait",
+    "--for=condition=Established",
+    "--timeout=60s",
+    "crd/ciliumnetworkpolicies.cilium.io",
+    "crd/ciliumclusterwidenetworkpolicies.cilium.io",
+  ]);
+  await kubectl([
+    "delete",
+    "namespace",
+    ...REACH_NAMESPACES,
+    "--ignore-not-found",
+    "--wait=true",
+    "--timeout=120s",
+  ]);
+  await kubectl([
+    "delete",
+    "ciliumclusterwidenetworkpolicies.cilium.io",
+    REACH_CLUSTERWIDE_POLICY,
+    "--ignore-not-found",
+  ]);
+  await kubectl(["apply", "-f", REACH_OBJECTS]);
+  for (const [namespace, workload] of [
+    ["skopos-e2e-reach", "deployment/web"],
+    ["skopos-e2e-reach", "deployment/api"],
+    ["skopos-e2e-reach", "deployment/worker"],
+    ["skopos-e2e-reach", "statefulset/db"],
+    ["skopos-e2e-reach-ingress", "deployment/ingress-nginx-controller"],
+    ["skopos-e2e-reach-monitoring", "deployment/prometheus"],
+  ]) {
+    await kubectl([
+      "-n",
+      namespace,
+      "rollout",
+      "status",
+      workload,
+      "--timeout=120s",
+    ]);
+  }
+  return {
+    kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
+    async stop() {
+      await kubectl([
+        "delete",
+        "namespace",
+        ...REACH_NAMESPACES,
+        "--ignore-not-found",
+        "--wait=false",
+      ]);
+      await kubectl([
+        "delete",
+        "ciliumclusterwidenetworkpolicies.cilium.io",
+        REACH_CLUSTERWIDE_POLICY,
+        "--ignore-not-found",
+      ]);
     },
   };
 }
@@ -419,6 +514,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },
   topology: { kubeconfigs: {}, start: startTopologyFixture },
+  reachability: { kubeconfigs: {}, start: startReachabilityFixture },
   tabs: { kubeconfigs: {}, start: startKindFixture },
   "sidebar-rail": { kubeconfigs: {}, start: startKindFixture },
   "tabs-restart-1-save": {

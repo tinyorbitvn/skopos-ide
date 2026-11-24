@@ -53,6 +53,14 @@ const CONFIG = `ConfigMap/${NS}/web-config`;
 const SECRET = `Secret/${NS}/web-secret`;
 const ACCOUNT = `ServiceAccount/${NS}/web`;
 const CLAIM = `PersistentVolumeClaim/${NS}/web-data`;
+// The policies and the Argo CD objects (spec §3.3). The Application and its AppProject
+// live in a namespace of their own, which stays hidden: the namespace view brings them in
+// because the Application manages the Deployment.
+const ARGO_NS = `${NS}-argocd`;
+const NETPOL = `NetworkPolicy/${NS}/web-ingress`;
+const CILIUM_POLICY = `CiliumNetworkPolicy/${NS}/web-l7`;
+const APP = `Application/${ARGO_NS}/web`;
+const PROJECT = `AppProject/${ARGO_NS}/${NS}`;
 const OBJECTS = [
   DEPLOYMENT,
   REPLICA_SET,
@@ -66,6 +74,10 @@ const OBJECTS = [
   SECRET,
   ACCOUNT,
   CLAIM,
+  NETPOL,
+  CILIUM_POLICY,
+  APP,
+  PROJECT,
 ];
 
 // The ServiceAccount's access (spec O §8.3). The Role web-leader does not exist.
@@ -255,6 +267,16 @@ async function expectEdges(
       timeoutMsg: `no ${rel} edge from ${from} to ${to}`,
     });
   }
+}
+
+/** The text of the details pane's fact `label`, once the pane lists it. */
+async function fact(label: string): Promise<string> {
+  const value = $(`[data-testid="map-fact"][data-label="${label}"] dd`);
+  await value.waitForExist({
+    timeout: 15000,
+    timeoutMsg: `the details never listed ${label}`,
+  });
+  return value.getText();
 }
 
 /**
@@ -498,6 +520,13 @@ describe("resource map", () => {
       timeoutMsg: "no bridge from the Deployment to its ConfigMap",
     });
     expect(await mounts.getAttribute("data-via")).toBe("Pod,ReplicaSet");
+    // A policy's selects is carried like a Service's (spec §3.3).
+    const policy = edge(NETPOL, "selects", DEPLOYMENT);
+    await policy.waitForExist({
+      timeout: 15000,
+      timeoutMsg: "no bridge from the NetworkPolicy to the Deployment",
+    });
+    expect(await policy.getAttribute("data-via")).toBe("Pod,ReplicaSet");
 
     // 3. The legend names bridges while one is drawn.
     await clickWhenShown("map-legend-toggle");
@@ -750,5 +779,75 @@ describe("resource map", () => {
       ids.includes(rowId(NS, pod)) &&
       ids.some((id) => id.startsWith("resource-row-kube-system-")),
     );
+  });
+
+  it("draws the network policies with the Pods they select, and their facts", async () => {
+    await clickWhenShown("nav-map");
+    await onlyNamespace(NS);
+    await chooseLayout("layered");
+    await expectEdges([
+      [NETPOL, "selects", POD],
+      [CILIUM_POLICY, "selects", POD],
+    ]);
+    expect(await node(NETPOL).getAttribute("data-status")).toBe("neutral");
+    await select(NETPOL, "NetworkPolicy web-ingress");
+    expect(await fact("Source")).toBe("Kubernetes");
+    expect(await fact("Selector")).toBe("app=web");
+    expect(await fact("Types")).toBe("Ingress");
+    await select(CILIUM_POLICY, "CiliumNetworkPolicy web-l7");
+    expect(await fact("Source")).toBe("Cilium");
+    expect(await fact("Types")).toBe("Ingress");
+    await clickWhenShown("map-details-close");
+  });
+
+  it("joins the Argo CD Application to what it manages and to its project", async () => {
+    await chooseLayout("layered");
+    await expectEdges([
+      [APP, "manages", DEPLOYMENT],
+      [APP, "manages", SERVICE],
+      [APP, "project", PROJECT],
+    ]);
+    expect(await node(APP).getAttribute("data-status")).toBe("nominal");
+    await select(APP, "Application web");
+    expect(await fact("Project")).toBe(NS);
+    expect(await fact("Health")).toBe("Healthy");
+    expect(await fact("Sync")).toBe("Synced");
+    expect(await fact("Revision")).toBe("4f2c9a1");
+    expect(await fact("Destination")).toBe(NS);
+    expect(await fact("Other resources")).toBe("1 (Namespace)");
+    expect(await byTestId("map-details").getText()).toContain(
+      "Healthy · Synced",
+    );
+    const managed = $(
+      `[data-testid="map-connection"][data-dir="out"][data-rel="manages"][data-id="${DEPLOYMENT}"]`,
+    );
+    await managed.waitForExist({
+      timeout: 15000,
+      timeoutMsg: "the Application never listed the Deployment it manages",
+    });
+    expect(await managed.getText()).toContain("Manages Deployment");
+    await select(DEPLOYMENT, "Deployment web");
+    const manager = $(
+      `[data-testid="map-connection"][data-dir="in"][data-rel="manages"][data-id="${APP}"]`,
+    );
+    await manager.waitForExist({
+      timeout: 15000,
+      timeoutMsg: "the Deployment never listed its Application",
+    });
+    expect(await manager.getText()).toContain("Managed by Application");
+    await clickWhenShown("map-details-close");
+  });
+
+  it("opens Reachability on the namespace of a policy", async () => {
+    await chooseLayout("layered");
+    await select(NETPOL, "NetworkPolicy web-ingress");
+    await clickWhenShown("map-open-reachability");
+    await shown("reachability", 30000);
+    // Rows are the workloads of the namespace shown, so this row names it.
+    await byTestId(`reach-row-Deployment/${NS}/web`).waitForExist({
+      timeout: 30000,
+      timeoutMsg: `Reachability never showed the web Deployment of ${NS}`,
+    });
+    expect(await byTestId("reach-namespace").getText()).toContain(NS);
   });
 });

@@ -221,6 +221,8 @@ fn run_app(core: AppCore, mut log_guard: Option<WorkerGuard>, context: Context<W
             commands::graph::resource_graph_unsubscribe,
             commands::topology::node_topology_subscribe,
             commands::topology::node_topology_unsubscribe,
+            commands::network::network_reachability_subscribe,
+            commands::network::network_reachability_unsubscribe,
             commands::map::map_export,
             commands::resources::resources_list,
             commands::resources::resource_get,

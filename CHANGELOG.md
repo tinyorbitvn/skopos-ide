@@ -6,6 +6,10 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Network policies on the map:** NetworkPolicies, CiliumNetworkPolicies and CiliumClusterwideNetworkPolicies, each joined to the Pods it selects.
+- **Argo CD on the map:** Applications joined to the objects they manage, with their AppProjects and ApplicationSets.
+- **Reachability:** Network › Reachability shows which workloads of a namespace may talk to which, by port and HTTP rule, from Kubernetes and Cilium policies.
+
 ## [0.13.0] - 2026-11-23
 
 - **The sidebar's glass shows the design's wallpaper:** the hotbar and the sidebar now let the design's desktop wallpaper through their frosted glass, in soft blue and orange shapes that differ between the light and dark themes, where they showed one flat tint before. The header, the panes and the dock stay solid

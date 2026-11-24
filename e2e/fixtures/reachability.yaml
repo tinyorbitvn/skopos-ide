@@ -1,0 +1,331 @@
+# The Reachability page's sample namespace (network policies contract C13), with the prefix
+# skopos-e2e-reach. e2e/helpers/fixtures.ts applies this before the app starts, once the
+# Cilium CRDs that scripts/kind-up.sh installs are established. kube-system's CoreDNS is the
+# kind cluster's own.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skopos-e2e-reach
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skopos-e2e-reach-ingress
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: skopos-e2e-reach-monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: skopos-e2e-reach
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web, tier: frontend }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9090 }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: skopos-e2e-reach
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api, tier: backend }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9090 }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: skopos-e2e-reach
+spec:
+  clusterIP: None
+  selector: { app: db }
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  namespace: skopos-e2e-reach
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels: { app: db }
+  template:
+    metadata:
+      labels: { app: db, tier: data }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          ports:
+            - { name: postgres, containerPort: 5432 }
+            - { name: metrics, containerPort: 9090 }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: skopos-e2e-reach
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-nginx-controller
+  namespace: skopos-e2e-reach-ingress
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: ingress-nginx }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: ingress-nginx }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          ports:
+            - { containerPort: 80 }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: skopos-e2e-reach-monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10
+          ports:
+            - { containerPort: 9090 }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: skopos-e2e-reach
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app, operator: In, values: [web, api, db] }
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-from-ingress
+  namespace: skopos-e2e-reach
+spec:
+  podSelector:
+    matchLabels: { app: web }
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: skopos-e2e-reach-ingress
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db-from-api
+  namespace: skopos-e2e-reach
+spec:
+  podSelector:
+    matchLabels: { app: db }
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: api }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-to-api
+  namespace: skopos-e2e-reach
+spec:
+  podSelector:
+    matchLabels: { app: web }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: api }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-db
+  namespace: skopos-e2e-reach
+spec:
+  podSelector:
+    matchLabels: { app: api }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: db }
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: skopos-e2e-reach
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app, operator: In, values: [web, api, db] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-api-from-web
+  namespace: skopos-e2e-reach
+spec:
+  endpointSelector:
+    matchLabels: { app: api }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: web }
+      toPorts:
+        - ports:
+            - { port: "8080", protocol: TCP }
+          rules:
+            http:
+              - { method: GET, path: "/api/.*" }
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api-egress-stripe
+  namespace: skopos-e2e-reach
+spec:
+  endpointSelector:
+    matchLabels: { app: api }
+  egress:
+    - toFQDNs:
+        - matchName: api.stripe.com
+      toPorts:
+        - ports:
+            - { port: "443", protocol: TCP }
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: db-no-internet
+  namespace: skopos-e2e-reach
+spec:
+  endpointSelector:
+    matchLabels: { app: db }
+  egressDeny:
+    - toEntities: [world]
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: skopos-e2e-reach-allow-prometheus-scrape
+spec:
+  endpointSelector:
+    matchLabels:
+      io.kubernetes.pod.namespace: skopos-e2e-reach
+    matchExpressions:
+      - { key: app, operator: In, values: [web, api, db] }
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": skopos-e2e-reach-monitoring
+            app: prometheus
+      toPorts:
+        - ports:
+            - { port: "9090", protocol: TCP }

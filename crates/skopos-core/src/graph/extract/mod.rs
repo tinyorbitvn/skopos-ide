@@ -2,8 +2,10 @@
 //! selector, and the references it gives (spec E §4.4 to §4.6, O §4.2 and §4.4). Values are read
 //! leniently: a field of another type than expected counts as absent, and nothing here panics.
 
+mod argo;
 mod config;
 mod network;
+mod policy;
 mod rbac;
 mod workloads;
 
@@ -13,6 +15,7 @@ use serde_json::Value;
 
 use super::kinds::Kind;
 use super::types::{GraphRel, GraphStatus};
+use crate::netpol::{namespace_info, pod_info, NamespaceInfo, PodInfo, Policy, PolicySource};
 
 /// An object the graph points at.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -41,6 +44,18 @@ pub(crate) struct Ref {
     pub inbound: bool,
 }
 
+/// What the policy module (network policies spec §7.1) reads of an object, kept on its item
+/// so a build evaluates the policies without parsing anything again: a Pod's labels and
+/// ports, a Namespace's labels, or a parsed policy.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) enum Netpol {
+    #[default]
+    None,
+    Pod(PodInfo),
+    Namespace(NamespaceInfo),
+    Policy(Policy),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Item {
     pub kind: Kind,
@@ -63,6 +78,8 @@ pub(crate) struct Item {
     /// The load balancer addresses in front of this object.
     pub addresses: Vec<String>,
     pub refs: Vec<Ref>,
+    /// What the policy module reads of a Pod, a Namespace or a policy.
+    pub netpol: Netpol,
 }
 
 impl Item {
@@ -213,9 +230,15 @@ pub(crate) fn extract(kind: Kind, object: &Value) -> Option<Item> {
         scaled_to_zero: false,
         addresses: Vec::new(),
         refs: Vec::new(),
+        netpol: Netpol::None,
     };
     match kind {
-        Kind::Pod => workloads::pod(&mut item, object),
+        Kind::Pod => {
+            workloads::pod(&mut item, object);
+            if let Some(pod) = pod_info(object) {
+                item.netpol = Netpol::Pod(pod);
+            }
+        }
         Kind::Deployment => workloads::deployment(&mut item, object),
         Kind::StatefulSet => workloads::stateful_set(&mut item, object),
         Kind::DaemonSet => workloads::daemon_set(&mut item, object),
@@ -233,6 +256,19 @@ pub(crate) fn extract(kind: Kind, object: &Value) -> Option<Item> {
         Kind::PersistentVolumeClaim => config::claim(&mut item, object),
         Kind::Role | Kind::ClusterRole => rbac::role(&mut item, object),
         Kind::RoleBinding | Kind::ClusterRoleBinding => rbac::binding(&mut item, object),
+        Kind::Namespace => {
+            if let Some(namespace) = namespace_info(object) {
+                item.netpol = Netpol::Namespace(namespace);
+            }
+        }
+        Kind::NetworkPolicy => policy::policy(&mut item, object, PolicySource::Kubernetes),
+        Kind::CiliumNetworkPolicy => policy::policy(&mut item, object, PolicySource::Cilium),
+        Kind::CiliumClusterwideNetworkPolicy => {
+            policy::policy(&mut item, object, PolicySource::CiliumClusterwide)
+        }
+        Kind::Application => argo::application(&mut item, object),
+        Kind::ApplicationSet => argo::application_set(&mut item, object),
+        Kind::AppProject => argo::app_project(&mut item, object),
     }
     Some(item)
 }
@@ -363,5 +399,47 @@ mod tests {
         assert_eq!(said(Some(&json!({ "status": "False" }))), Said::False(None));
         assert_eq!(said(Some(&json!({ "status": "Unknown" }))), Said::Unknown);
         assert_eq!(said(None), Said::Unknown);
+    }
+
+    #[test]
+    fn a_pod_and_a_namespace_keep_what_the_policies_read() {
+        let object = json!({
+            "metadata": { "name": "web-1", "namespace": "a", "labels": { "app": "web" } },
+            "spec": {
+                "serviceAccountName": "web",
+                "containers": [{
+                    "name": "app",
+                    "ports": [{ "name": "http", "containerPort": 8080, "protocol": "TCP" }],
+                }],
+            },
+            "status": { "phase": "Running" },
+        });
+        let pod = item(Kind::Pod, object.clone());
+        assert_eq!(
+            pod.netpol,
+            Netpol::Pod(pod_info(&object).expect("a Pod with a name"))
+        );
+        assert!(
+            matches!(&pod.netpol, Netpol::Pod(info) if info.service_account == "web" && info.ports.len() == 1),
+            "{:?}",
+            pod.netpol
+        );
+        assert_eq!(pod.facts[0].0, "Ready", "the Pod keeps its own facts");
+
+        let object = json!({ "metadata": { "name": "a", "labels": { "team": "x" } } });
+        let namespace = item(Kind::Namespace, object.clone());
+        assert_eq!(namespace.id(), "Namespace//a");
+        assert_eq!(
+            namespace.netpol,
+            Netpol::Namespace(namespace_info(&object).expect("a Namespace with a name"))
+        );
+        assert!(namespace.facts.is_empty() && namespace.refs.is_empty());
+        assert_eq!(namespace.status, GraphStatus::Neutral);
+
+        let deployment = item(
+            Kind::Deployment,
+            json!({ "metadata": { "name": "web", "namespace": "a" } }),
+        );
+        assert_eq!(deployment.netpol, Netpol::None);
     }
 }

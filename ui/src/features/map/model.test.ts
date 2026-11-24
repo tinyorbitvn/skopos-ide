@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARGO,
   DEMO,
   demoGraph,
   gedge,
   gnode,
+  POLICY,
+  policyArgoGraph,
   RBAC,
   rbacGraph,
 } from "../../test/graph";
@@ -326,5 +329,66 @@ describe("texts", () => {
     expect(statusLine(gnode("Pod/shop/x"))).toBe("Healthy");
     const node = model.byId.get(DEMO.podB);
     expect(node && statusLine(node)).toBe("CrashLoopBackOff");
+  });
+});
+
+describe("the namespace view of policies and Argo CD", () => {
+  function policyArgoModel() {
+    const { nodes, edges } = policyArgoGraph();
+    return buildModel(nodes, edges);
+  }
+
+  it("brings a cluster-wide policy that selects a member, and an Application that manages one with its project and ApplicationSet", () => {
+    // The shop shown: its policies are members; the cluster-wide one selects the db Pod;
+    // Application shop manages the Deployment. Application nightly manages only the hidden
+    // CronJob and stays out, and the host policy selects nothing.
+    expect(
+      namespaceView(policyArgoModel(), new Set(["edge", "jobs", "argocd"])),
+    ).toEqual([
+      ...namespaceView(demoModel(), new Set(["edge", "jobs"])),
+      POLICY.netpol,
+      POLICY.cilium,
+      POLICY.scrape,
+      ARGO.appSet,
+      ARGO.app,
+      ARGO.project,
+    ]);
+  });
+
+  it("walks on from nothing it brings", () => {
+    // The jobs shown: the cluster-wide policy and Application nightly come in, with its
+    // project and ApplicationSet, but neither the db Pod the policy also selects nor the
+    // Application shop the ApplicationSet also owns.
+    expect(
+      namespaceView(policyArgoModel(), new Set(["shop", "edge", "argocd"])),
+    ).toEqual([
+      DEMO.cronJob,
+      DEMO.job,
+      DEMO.jobPod,
+      DEMO.token,
+      POLICY.scrape,
+      ARGO.appSet,
+      ARGO.nightly,
+      ARGO.project,
+    ]);
+  });
+
+  it("never brings what a shown Application manages", () => {
+    expect(
+      namespaceView(policyArgoModel(), new Set(["shop", "edge", "jobs"])),
+    ).toEqual([ARGO.appSet, ARGO.app, ARGO.nightly, ARGO.project]);
+  });
+
+  it("levels the Argo CD kinds before the way in and the policies with the Services", () => {
+    expect(levelOf("ApplicationSet")).toBe(-2);
+    expect(levelOf("Application")).toBe(-1);
+    expect(levelOf("AppProject")).toBe(-1);
+    for (const kind of [
+      "NetworkPolicy",
+      "CiliumNetworkPolicy",
+      "CiliumClusterwideNetworkPolicy",
+    ]) {
+      expect(levelOf(kind), kind).toBe(levelOf("Service"));
+    }
   });
 });

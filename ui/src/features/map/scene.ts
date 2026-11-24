@@ -109,9 +109,12 @@ export interface Scene {
   tree: GroupTree | null;
 }
 
-/** An edge's style (spec E §8.1, O §5.1). */
+/**
+ * An edge's style (spec E §8.1, O §5.1). An Application's `manages` is drawn like
+ * ownership (spec §3.3).
+ */
 const styleOf = (rel: GraphRel): EdgeStyle =>
-  rel === "owns"
+  rel === "owns" || rel === "manages"
     ? "own"
     : USE.has(rel)
       ? "use"
