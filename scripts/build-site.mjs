@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const FONTS = [
+export const FONTS = [
   ["manrope", "manrope-latin-400-normal.woff2"],
   ["manrope", "manrope-latin-500-normal.woff2"],
   ["manrope", "manrope-latin-600-normal.woff2"],
