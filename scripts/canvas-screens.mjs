@@ -385,7 +385,7 @@ function serve(canvasDir) {
 }
 
 /** A DevTools Protocol client over the browser's WebSocket, with flat sessions. */
-async function connect(wsUrl) {
+export async function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
   await new Promise((resolve, reject) => {
     ws.addEventListener("open", resolve, { once: true });
@@ -410,7 +410,7 @@ async function connect(wsUrl) {
   return { send, close: () => ws.close() };
 }
 
-function launchChrome(binary, profile) {
+export function launchChrome(binary, profile) {
   const child = spawn(
     binary,
     [
@@ -437,7 +437,7 @@ function launchChrome(binary, profile) {
   return { child, ws };
 }
 
-async function evaluate(cdp, sessionId, expression) {
+export async function evaluate(cdp, sessionId, expression) {
   const result = await cdp.send(
     "Runtime.evaluate",
     { expression, awaitPromise: true, returnByValue: true },

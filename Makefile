@@ -1,4 +1,4 @@
-.PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens audit sbom
+.PHONY: check ui-build build dev fmt e2e-build e2e e2e-smoke e2e-screens test-kind test-argocd test-metrics release site site-screens site-social audit sbom
 ifeq ($(shell uname -s),Linux)
 XVFB := xvfb-run -a --server-args="-screen 0 1600x1000x24"
 XVFB_SCREENS := xvfb-run -a --server-args="-screen 0 2048x1280x24"
@@ -63,6 +63,8 @@ site:
 	node scripts/build-site.mjs --out tmp/site
 site-screens:
 	node scripts/canvas-screens.mjs --canvas tmp/canvas --out site/images
+site-social:
+	node scripts/social-image.mjs
 release:
 	scripts/release.sh bump $(VERSION)
 # Open Dependabot alerts against the advisory policy (docs/releasing.md); needs gh auth.
