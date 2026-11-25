@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **The map rings the object you select:** on the resource map, the object you click, reach with the arrow keys or pick in the details panel gets a soft accent halo around its ring or box. The halo grows out of it and blinks three times, then stays while the object is selected, and clicking the object again plays it again. A selected box's line is also thicker. With reduced motion turned on, the halo shows at once and does not blink.
+
 ## [0.14.0] - 2026-11-25
 
 - **New home for the project:** SkoposIDE moved to https://github.com/tinyorbitvn/skopos-ide and its site to https://tinyorbitvn.github.io/skopos-ide/. The app checks for updates and links to release notes there; the old addresses on GitHub redirect to the new ones.

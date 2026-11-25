@@ -385,6 +385,28 @@ async function inBox(box: string, ids: string[]): Promise<boolean[]> {
   );
 }
 
+/** How many selection halos are drawn, and how many of them around `id` (a prefix when it ends in "-"). */
+async function halos(id: string): Promise<{ all: number; on: number }> {
+  return browser.execute(
+    (on) => ({
+      all: document.querySelectorAll('[data-testid="map-halo"]').length,
+      on: document.querySelectorAll(on).length,
+    }),
+    `[data-testid="map-halo"]${idMatch("data-for", id)}`,
+  );
+}
+
+/** Waits until the selection's halo is drawn around `id` alone. */
+async function haloOn(id: string, what: string): Promise<void> {
+  await until(
+    async () => {
+      const { all, on } = await halos(id);
+      return all === 1 && on === 1;
+    },
+    `the halo never ringed ${what} alone`,
+  );
+}
+
 describe("resource map", () => {
   let pod = "";
 
@@ -468,6 +490,7 @@ describe("resource map", () => {
 
   it("shows the Pod's facts and connections, and a row selects the Service", async () => {
     await select(POD, `Pod ${pod}`);
+    await haloOn(POD, "the Pod");
     const labels = await browser.execute(() =>
       Array.from(document.querySelectorAll('[data-testid="map-fact"]')).map(
         (el) => el.getAttribute("data-label"),
@@ -487,6 +510,7 @@ describe("resource map", () => {
         "Service web",
       "the Service row never selected the Service",
     );
+    await haloOn(SERVICE, "the Service");
   });
 
   it("opens the Deployment's object map at 2 hops; 1 hop draws less; Back returns", async () => {
@@ -496,6 +520,8 @@ describe("resource map", () => {
       async () => (await focus()) === DEPLOYMENT,
       "the object map never opened",
     );
+    // The object map opens with its focus selected, so the Deployment has the halo.
+    await haloOn(DEPLOYMENT, "the Deployment");
     expect(await (await byTestId("map-depth-2").$("input")).isSelected()).toBe(
       true,
     );

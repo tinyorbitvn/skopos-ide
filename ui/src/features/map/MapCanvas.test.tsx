@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CSS_FILES, cssRules } from "../../test/css";
 import {
   DEMO,
   demoGraph,
@@ -555,5 +556,79 @@ describe("MapCanvas", () => {
     expect(line.querySelector(".key-bridge")).not.toBeNull();
     // Grouped draws the bridged owns edges as branches in the owner's box.
     expect(edges()).toContain(`${DEMO.deployment} owns ${DEMO.podA}`);
+  });
+});
+
+describe("the selection's halo", () => {
+  const halos = () => screen.queryAllByTestId("map-halo");
+  const num = (el: Element | null | undefined, name: string) =>
+    Number(el?.getAttribute(name));
+
+  it("rings a selected node outside its line and follows the selection", () => {
+    const { rerender, props } = draw({ selected: DEMO.podB });
+    expect(halos().map((h) => h.getAttribute("data-for"))).toEqual([DEMO.podB]);
+    const halo = halos()[0];
+    expect(halo.getAttribute("transform")).toBe(
+      node(DEMO.podB).getAttribute("transform"),
+    );
+    const ring = node(DEMO.podB).querySelector("circle");
+    // The ring's 4 px line ends 2 px out; the halo's 6 px line starts there.
+    expect(num(halo.querySelector("circle"), "r")).toBe(num(ring, "r") + 5);
+    rerender(<MapCanvas {...props} selected={DEMO.podA} />);
+    expect(halos().map((h) => h.getAttribute("data-for"))).toEqual([DEMO.podA]);
+    rerender(<MapCanvas {...props} selected={null} />);
+    expect(halos()).toEqual([]);
+  });
+
+  it("frames a selected box outside its line", () => {
+    draw({ selected: DEMO.deployment });
+    const frame = node(DEMO.deployment).querySelector("rect");
+    const halo = halos()[0].querySelector("rect");
+    expect(halos()[0].getAttribute("data-for")).toBe(DEMO.deployment);
+    // The box's 2.5 px line ends 1.25 px out; the halo's 6 px line starts there.
+    expect([
+      num(halo, "x"),
+      num(halo, "y"),
+      num(halo, "width"),
+      num(halo, "height"),
+    ]).toEqual([
+      num(frame, "x") - 4.25,
+      num(frame, "y") - 4.25,
+      num(frame, "width") + 8.5,
+      num(frame, "height") + 8.5,
+    ]);
+  });
+
+  it("fades with its node when the search leaves the node out", () => {
+    draw({ selected: DEMO.podB, search: "WEB-7D9-A" });
+    expect(halos()[0].classList.contains("dim")).toBe(true);
+  });
+
+  it("plays again when the selected node is clicked again", () => {
+    const { props } = draw({ selected: DEMO.service });
+    const before = halos()[0];
+    fireEvent.click(node(DEMO.service));
+    expect(props.onSelect).toHaveBeenCalledWith(DEMO.service);
+    expect(halos()).toHaveLength(1);
+    expect(halos()[0]).not.toBe(before);
+  });
+
+  it("grows, blinks three times and stays, and holds still under reduced motion", () => {
+    const css = CSS_FILES["/src/features/map/MapCanvas.module.css"] ?? "";
+    const rules = cssRules(css).filter((r) => r.selector === ".halo");
+    const animation = rules.map(
+      (r) => r.decls.find(([p]) => p === "animation")?.[1] ?? "",
+    );
+    expect(animation.map((a) => a.replace(/\s+/g, " "))).toEqual([
+      "halo-grow var(--dur-slow) var(--ease-out), halo-blink var(--dur-sheet) var(--ease-in-out) var(--dur-slow) 3",
+      "none",
+    ]);
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.halo \{\s*animation: none;/,
+    );
+    const line = cssRules(css).find(
+      (r) => r.selector === ".box.selected > rect",
+    );
+    expect(line?.decls).toContainEqual(["stroke-width", "2.5"]);
   });
 });

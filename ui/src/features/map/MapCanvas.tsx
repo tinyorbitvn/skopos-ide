@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -294,6 +295,49 @@ const MapIcon = memo(function MapIcon(props: {
   );
 });
 
+/**
+ * The selection's halo (spec E §8.4): a soft accent line just outside the selected node's
+ * line, which grows out of it, blinks three times and stays. A new key plays it again.
+ * Half its 6 px line, from the outer edge of the selected line to the halo's middle.
+ */
+const HALO_HALF = 3;
+
+/** Around a selected icon, whose 4 px ring ends 2 px outside its radius. */
+function IconHalo(props: { icon: SceneIcon; dim: boolean }) {
+  const s = props.icon;
+  return (
+    <g
+      data-testid="map-halo"
+      data-for={s.id}
+      className={props.dim ? styles.dim : undefined}
+      transform={`translate(${s.x} ${s.y})`}
+    >
+      <circle r={s.size / 2 + 4 + 2 + HALO_HALF} className={styles.halo} />
+    </g>
+  );
+}
+
+/** Around a selected box, whose 2.5 px line ends 1.25 px outside its frame. */
+function BoxHalo(props: { box: SceneBox; id: string; dim: boolean }) {
+  const r = props.box.rect;
+  const out = 1.25 + HALO_HALF;
+  return (
+    <g
+      data-testid="map-halo"
+      data-for={props.id}
+      className={props.dim ? styles.dim : undefined}
+    >
+      <rect
+        x={r.x0 - out}
+        y={r.y0 - out}
+        width={r.x1 - r.x0 + 2 * out}
+        height={r.y1 - r.y0 + 2 * out}
+        className={styles.halo}
+      />
+    </g>
+  );
+}
+
 function matches(search: string, name: string, kind: string): boolean {
   const q = search.trim().toLowerCase();
   return (
@@ -388,6 +432,8 @@ export function MapCanvas({
   const drag = useRef<Drag | null>(null);
   const clickBlocked = useRef(false);
   const [legend, setLegend] = useState(false);
+  // Each pick counts, so picking the selected node again plays its halo again.
+  const [picks, setPicks] = useState(0);
 
   const extent = scene.extent;
   const fitView = useCallback(() => {
@@ -599,6 +645,7 @@ export function MapCanvas({
       clickBlocked.current = false;
       return;
     }
+    setPicks((n) => n + 1);
     onSelect(id);
   };
 
@@ -691,16 +738,25 @@ export function MapCanvas({
         {scene.hulls.map((h) => (
           <MapHull key={h.namespace} namespace={h.namespace} rect={h.rect} />
         ))}
-        {scene.boxes.map((b) => (
-          <MapBox
-            key={b.key}
-            box={b}
-            status={b.node ? model.byId.get(b.node.id)?.status : undefined}
-            focus={b.node !== null && b.node.id === focusId}
-            selected={b.node !== null && b.node.id === selected}
-            dim={searching && b.node !== null && !lit(b.node.id)}
-          />
-        ))}
+        {scene.boxes.map((b) => {
+          const on = b.node !== null && b.node.id === selected;
+          const dim = searching && b.node !== null && !lit(b.node.id);
+          return (
+            <Fragment key={b.key}>
+              {/* Over the boxes around it, under the box itself. */}
+              {on && b.node ? (
+                <BoxHalo key={picks} box={b} id={b.node.id} dim={dim} />
+              ) : null}
+              <MapBox
+                box={b}
+                status={b.node ? model.byId.get(b.node.id)?.status : undefined}
+                focus={b.node !== null && b.node.id === focusId}
+                selected={on}
+                dim={dim}
+              />
+            </Fragment>
+          );
+        })}
         <g>
           {edges.map((e) => (
             <MapEdgeLine key={e.key} edge={e} dim={dimEdge(e)} />
@@ -708,11 +764,19 @@ export function MapCanvas({
         </g>
       </>
     ),
-    [scene, model, edges, focusId, selected, searching, lit, dimEdge],
+    [scene, model, edges, focusId, selected, searching, lit, dimEdge, picks],
   );
-  const over = useMemo(
-    () => (
+  const over = useMemo(() => {
+    const picked = scene.icons.find((s) => s.id === selected);
+    return (
       <>
+        {picked ? (
+          <IconHalo
+            key={`${picked.id}|${picks}`}
+            icon={picked}
+            dim={searching && !lit(picked.id)}
+          />
+        ) : null}
         {scene.icons.map((s) => (
           <MapIcon
             key={s.id}
@@ -732,9 +796,8 @@ export function MapCanvas({
           ))}
         </g>
       </>
-    ),
-    [scene, model, hot, selected, searching, lit],
-  );
+    );
+  }, [scene, model, hot, selected, searching, lit, picks]);
 
   // Nodes, boxes and areas are found from the event's target, so the drawing itself
   // holds no handlers.

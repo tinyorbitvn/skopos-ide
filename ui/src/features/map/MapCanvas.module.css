@@ -141,14 +141,49 @@
   fill: var(--surface-card);
 }
 
-.box.selected > rect {
-  stroke: var(--border-accent);
-  stroke-width: 1.5;
-}
-
 .box.focus > rect {
   stroke: var(--border-accent);
   stroke-width: 2;
+}
+
+/* After the focus, so the selected focus takes the selection's line. */
+.box.selected > rect {
+  stroke: var(--border-accent);
+  stroke-width: 2.5;
+}
+
+/* The selection's halo (spec E §8.4): a soft accent line outside the selected line. It
+   grows out of that line, blinks three times and stays; reduced motion shows it at rest. */
+.halo {
+  fill: none;
+  stroke: var(--border-accent);
+  stroke-opacity: 0.3;
+  stroke-width: 6;
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation:
+    halo-grow var(--dur-slow) var(--ease-out),
+    halo-blink var(--dur-sheet) var(--ease-in-out) var(--dur-slow) 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halo {
+    animation: none;
+  }
+}
+
+@keyframes halo-grow {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+@keyframes halo-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 .boxTitle {

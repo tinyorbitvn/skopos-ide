@@ -172,6 +172,21 @@ describe("mapSvgForExport", () => {
     );
   });
 
+  it("saves the selection's halo at rest, whatever moment of its blink it catches", () => {
+    const canvas = canvasOf(1000, 600);
+    // Mid-blink, the halo's line has an opacity of its own; a dim halo's group keeps its own.
+    canvas
+      .querySelector("svg > g")
+      ?.insertAdjacentHTML(
+        "beforeend",
+        '<g data-testid="map-halo" class="dim"><circle class="halo" r="31" style="opacity: 0.4"/></g>',
+      );
+    const { svg } = mapSvgForExport(canvas, "", "view");
+    const halo = svg.querySelector<SVGElement>('[data-testid="map-halo"]');
+    expect(halo?.style.opacity).toBe("0.25");
+    expect(halo?.querySelector<SVGElement>("circle")?.style.opacity).toBe("");
+  });
+
   it("leaves the canvas on the page as it was", () => {
     const canvas = canvasOf(1000, 600);
     const before = canvas.innerHTML;

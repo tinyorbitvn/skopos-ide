@@ -168,6 +168,13 @@ export function mapSvgForExport(
     }
     target.removeAttribute("class");
   });
+  // The selection's halo is saved at rest, whatever moment of its grow-in or blink the
+  // export catches; its group keeps its own opacity, the dim one.
+  for (const line of copy.querySelectorAll<SVGElement>(
+    '[data-testid="map-halo"] > *',
+  )) {
+    line.style.removeProperty("opacity");
+  }
   if (extent) {
     copy
       .querySelector(":scope > g")
