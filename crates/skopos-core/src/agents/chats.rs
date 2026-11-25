@@ -13,6 +13,7 @@ use ts_rs::TS;
 use super::chat::ChatScope;
 use super::events::{ChatItem, ChatItemBody};
 use super::mcp::cards::CardDetails;
+use super::permissions::PermissionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::paths::create_private_dir;
 
@@ -142,7 +143,8 @@ impl ChatStore {
     }
 
     /// One stored chat. `NotFound` for an id that is not 8 hex characters, a missing file,
-    /// and a file that cannot be read (logged).
+    /// and a file that cannot be read (logged). A permission card still waiting when the chat
+    /// ended reads back cancelled (native agents spec §4.2).
     pub fn get(&self, id: &str) -> CoreResult<StoredChat> {
         let missing = || IpcError::new(ErrorCode::NotFound, format!("No chat {id}."));
         if !valid_id(id) {
@@ -150,7 +152,10 @@ impl ChatStore {
         }
         let path = self.file(id);
         match read_json::<StoredChat>(&path) {
-            Ok(chat) if chat.id == id => Ok(chat),
+            Ok(mut chat) if chat.id == id => {
+                cancel_waiting_permissions(&mut chat);
+                Ok(chat)
+            }
             Ok(_) => {
                 tracing::warn!("chat file {} names another chat", path.display());
                 Err(missing())
@@ -219,6 +224,16 @@ impl ChatStore {
             }
         }
         heads
+    }
+}
+
+fn cancel_waiting_permissions(chat: &mut StoredChat) {
+    for item in &mut chat.items {
+        if let ChatItemBody::Permission { card } = &mut item.body {
+            if card.state == PermissionState::Waiting {
+                card.state = PermissionState::Cancelled;
+            }
+        }
     }
 }
 
@@ -291,6 +306,9 @@ mod tests {
     use crate::agents::editor_tab::EditorTabMode;
     use crate::agents::events::ChatNotice;
     use crate::agents::mcp::cards::{CardTone, ToolCard};
+    use crate::agents::permissions::{
+        ChoiceKind, PermissionCard, PermissionChoice, PermissionState,
+    };
     use crate::agents::tabs::{ProposalCard, ProposalState};
 
     fn store() -> (tempfile::TempDir, ChatStore) {
@@ -500,6 +518,54 @@ mod tests {
             ChatItemBody::AgentTool { details, .. } => details,
             other => panic!("not an agent tool: {other:?}"),
         }
+    }
+
+    fn permission(id: &str, state: PermissionState) -> ChatItem {
+        ChatItem {
+            id: format!("item-{id}"),
+            body: ChatItemBody::Permission {
+                card: Box::new(PermissionCard {
+                    id: id.to_owned(),
+                    tool_call_id: "own-1".to_owned(),
+                    title: "Run ls".to_owned(),
+                    kind: "execute".to_owned(),
+                    command: Some("ls".to_owned()),
+                    diffs: Vec::new(),
+                    url: None,
+                    raw: None,
+                    options: vec![PermissionChoice {
+                        id: "allow_once".to_owned(),
+                        name: "Allow".to_owned(),
+                        kind: ChoiceKind::AllowOnce,
+                    }],
+                    state,
+                }),
+            },
+        }
+    }
+
+    #[test]
+    fn a_permission_card_still_waiting_reads_back_cancelled() {
+        let (_dir, store) = store();
+        let mut saved = chat(3, scope(&["c1"], false));
+        let chosen = PermissionState::Chosen {
+            option_id: "allow_once".to_owned(),
+            kind: ChoiceKind::AllowOnce,
+        };
+        saved.items.push(permission("p1", chosen.clone()));
+        saved.items.push(permission("p2", PermissionState::Waiting));
+        store.save(&saved).unwrap();
+        let states: Vec<PermissionState> = store
+            .get(&id(3))
+            .unwrap()
+            .items
+            .into_iter()
+            .filter_map(|item| match item.body {
+                ChatItemBody::Permission { card } => Some(card.state),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(states, [chosen, PermissionState::Cancelled]);
     }
 
     #[test]

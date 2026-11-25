@@ -160,7 +160,6 @@ test("an agent row's state becomes the matching start failure", () => {
     hint: "Run codex login in a terminal, then check again.",
     isDefault: false,
     custom: false,
-    hosts: [],
   };
   expect(
     failureFromRow({ ...row, state: { state: "signInNeeded" } }, "m"),

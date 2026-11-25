@@ -1,5 +1,4 @@
 //! The fake ACP agent on its own: raw JSON-RPC lines over its stdio, as a client sends them.
-#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -21,12 +20,17 @@ impl Wire {
     fn start(dir: &Path, script: Value) -> Wire {
         let script_file = dir.join("script.json");
         std::fs::write(&script_file, script.to_string()).unwrap();
-        let mut child = Command::new(FAKE_AGENT)
+        let mut command = Command::new(FAKE_AGENT);
+        command.env_clear();
+        // Windows starts no networking process without it.
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", root);
+        }
+        let mut child = command
             .arg("--script")
             .arg(&script_file)
             .arg("--log")
             .arg(log_file(dir))
-            .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

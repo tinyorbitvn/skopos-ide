@@ -13,7 +13,7 @@ pub use control_plane::{
     ApiServer, ControlPlane, ControlPlaneComponent, HealthCheck, HealthState, Leader, PodCounts,
 };
 pub use distribution::detect_distribution;
-pub(crate) use exec_command::ExecConsent;
+pub(crate) use exec_command::{exec_command, ExecConsent};
 pub use exec_command::{ExecCommandKind, ExecEnvVar, ExecRequest, ExecRequestDetails};
 pub(crate) use manager::{ClusterManager, HeldExec};
 pub use manager::{ConnectionLogEntry, LogLevel};

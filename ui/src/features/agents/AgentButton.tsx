@@ -5,14 +5,12 @@ import { Sparkles } from "../../design/icons";
 import { useAgentChat } from "../../stores/agentChat";
 import styles from "./AgentButton.module.css";
 import { waitingCount } from "./chatModel";
-import { agentsSupported } from "./supported";
 
 /** The header's agent button (spec §3.1): toggles the panel, with a dot while a change waits. */
 export function AgentButton() {
   const open = useAgentChat((s) => s.open);
   const waiting = useAgentChat((s) => waitingCount(s.items) > 0);
   const page = useCurrentCluster();
-  if (!agentsSupported()) return null;
   const keys = shortKeys("agent", IS_MAC);
   const dot = waiting && !open;
   return (

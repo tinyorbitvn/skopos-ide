@@ -30,7 +30,6 @@ import {
   connectClusters,
   installFakeViews,
 } from "../../test/terminal";
-import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetSessionsForTest } from "../terminal/sessions";
 import { setTermViewFactory } from "../terminal/termView";
 import { Dock } from "./Dock";
@@ -85,7 +84,6 @@ let backend: Backend;
 
 beforeEach(() => {
   resetDockForTest();
-  setAgentsSupportedForTest(true);
   vi.stubGlobal("innerHeight", 1000);
   installFakeViews();
   captureResizeObservers();
@@ -666,11 +664,4 @@ test("Draft with AI opens a blank create tab with its AI bar open", async () => 
   expect(
     (screen.getByTestId("yaml-ai-input") as HTMLTextAreaElement).placeholder,
   ).toBe("Describe the objects to create");
-});
-
-test("Draft with AI is not offered where agents are not supported", async () => {
-  setAgentsSupportedForTest(false);
-  await show();
-  fireEvent.click(screen.getByTestId("dock-new"));
-  expect(screen.queryByTestId("dock-ai-draft")).toBeNull();
 });

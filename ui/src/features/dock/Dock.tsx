@@ -48,7 +48,6 @@ import {
   tabsForCluster,
   useDock,
 } from "../../stores/dock";
-import { agentsSupported } from "../agents/supported";
 import { CreateResourceTab } from "../editor/CreateResourceTab";
 import { EditResourceTab } from "../editor/EditResourceTab";
 import { servedKinds } from "../editor/servedKinds";
@@ -365,17 +364,13 @@ export function Dock(props: {
                     onSelect: () =>
                       useDock.getState().open(newCreateTab(clusterId)),
                   },
-                  ...(agentsSupported()
-                    ? [
-                        {
-                          id: "ai-draft",
-                          label: "Draft with AI",
-                          icon: <Sparkles size={14} aria-hidden="true" />,
-                          testId: "dock-ai-draft",
-                          onSelect: () => openAiDraft(clusterId),
-                        },
-                      ]
-                    : []),
+                  {
+                    id: "ai-draft",
+                    label: "Draft with AI",
+                    icon: <Sparkles size={14} aria-hidden="true" />,
+                    testId: "dock-ai-draft",
+                    onSelect: () => openAiDraft(clusterId),
+                  },
                   {
                     id: "terminal",
                     label: "Terminal session",

@@ -1,22 +1,54 @@
 //! The text block that starts a chat's first prompt, which the stream does not show, and the
 //! line an attached object adds (spec §4.3).
 
+use std::path::{Path, PathBuf};
+
 use crate::agents::editor_tab::{EditTarget, EditorTabMode};
 use crate::prefs::ClusterAgentSettings;
 
-/// The intro, around what the chat reaches: one cluster's name, or `these clusters: <a, b>`.
-const INTRO_START: &str =
-    "You are running inside SkoposIDE, a Kubernetes desktop app. You can reach ";
-const INTRO_END: &str =
-    " only through the tools of the skopos MCP server; there is no kubectl and \
-    no kubeconfig in your sandbox. Reads run at once. A change may wait for the person's approval, \
-    and the person may deny it. Before a change, read the object and say what you will change.";
+/// The intro: what the chat reaches (`reach`), and the chat's own kubeconfig with its contexts
+/// (`names`); the clusters left out of it (`outside`) are named for the skopos tools only.
+fn intro(reach: &str, kubeconfig: &Path, names: &[&str], outside: &[String]) -> String {
+    let holds = if names.is_empty() {
+        "That file holds no contexts.".to_owned()
+    } else {
+        format!(
+            "That file holds only these contexts, each named after its cluster: {}.",
+            names.join(", ")
+        )
+    };
+    let tools_only = if outside.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Reach {} only through the skopos tools.",
+            outside.join(", ")
+        )
+    };
+    format!(
+        "You are running inside SkoposIDE, a Kubernetes desktop app, on the person's computer. \
+         You can reach {reach} through the tools of the skopos MCP server, and through your own \
+         shell, where KUBECONFIG is set to {path}. {holds}{tools_only} For kubectl, helm and any \
+         other Kubernetes client, use only that kubeconfig and those contexts. Never use \
+         ~/.kube/config, another kubeconfig file or another context, and never change \
+         KUBECONFIG or pass --kubeconfig or --context for another cluster. Prefer the skopos \
+         tools: reads run at once, and a change may wait for the person's approval, and the \
+         person may deny it. Keep to the limits below in your own commands too. Before a change, \
+         read the object and say what you will change.",
+        path = kubeconfig.display(),
+    )
+}
 
 /// The clusters of one chat with their agent settings, in the chat's order.
 pub struct PromptContext {
     pub clusters: Vec<(String, ClusterAgentSettings)>,
     /// A global chat reaches every cluster it lists; a per-cluster chat lists one.
     pub global: bool,
+    /// The chat's own kubeconfig, the only one the agent may use.
+    pub kubeconfig: PathBuf,
+    /// The chat's clusters left out of that kubeconfig, because their kubeconfig runs a command
+    /// for credentials that the person has not allowed.
+    pub outside: Vec<String>,
 }
 
 /// The hidden block: the intro; then the limits, one line each, per cluster in order (its
@@ -30,7 +62,12 @@ pub fn hidden_block(ctx: &PromptContext) -> String {
     } else {
         names.first().copied().unwrap_or_default().to_owned()
     };
-    let mut paragraphs = vec![format!("{INTRO_START}{reach}{INTRO_END}")];
+    let in_file: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| !ctx.outside.iter().any(|left| left == name))
+        .collect();
+    let mut paragraphs = vec![intro(&reach, &ctx.kubeconfig, &in_file, &ctx.outside)];
     let mut limits: Vec<String> = Vec::new();
     for (name, settings) in &ctx.clusters {
         if let Some(namespaces) = &settings.namespaces {
@@ -162,14 +199,10 @@ mod tests {
     }
 
     /// The intro typed out from spec §4.3, with `reach` filled in.
-    fn intro(reach: &str) -> String {
-        format!(
-            "You are running inside SkoposIDE, a Kubernetes desktop app. You can reach {reach} \
-             only through the tools of the skopos MCP server; there is no kubectl and no \
-             kubeconfig in your sandbox. Reads run at once. A change may wait for the person's \
-             approval, and the person may deny it. Before a change, read the object and say what \
-             you will change."
-        )
+    const KUBECONFIG: &str = "/run/chat/kubeconfig";
+
+    fn intro_for(reach: &str, names: &[&str]) -> String {
+        super::intro(reach, Path::new(KUBECONFIG), names, &[])
     }
 
     fn cluster(name: &str, settings: ClusterAgentSettings) -> (String, ClusterAgentSettings) {
@@ -181,10 +214,15 @@ mod tests {
         let ctx = PromptContext {
             clusters: vec![cluster("prod-eu-west", ClusterAgentSettings::default())],
             global: false,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec![],
         };
         assert_eq!(
             hidden_block(&ctx),
-            "You are running inside SkoposIDE, a Kubernetes desktop app. You can reach prod-eu-west only through the tools of the skopos MCP server; there is no kubectl and no kubeconfig in your sandbox. Reads run at once. A change may wait for the person's approval, and the person may deny it. Before a change, read the object and say what you will change.\n\nOn prod-eu-west Secret values are hidden."
+            format!(
+                "{}\n\nOn prod-eu-west Secret values are hidden.",
+                intro_for("prod-eu-west", &["prod-eu-west"])
+            )
         );
     }
 
@@ -199,13 +237,15 @@ mod tests {
         let ctx = PromptContext {
             clusters: vec![cluster("prod-eu-west", settings)],
             global: false,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec![],
         };
         assert_eq!(
             hidden_block(&ctx),
             format!(
                 "{}\n\nOn prod-eu-west you may see only these namespaces: ingest, payments.\n\n\
                  Notes from the person about prod-eu-west:\nDeploys go through Argo CD.",
-                intro("prod-eu-west")
+                intro_for("prod-eu-west", &["prod-eu-west"])
             )
         );
     }
@@ -219,13 +259,15 @@ mod tests {
         let ctx = PromptContext {
             clusters: vec![cluster("dev", settings)],
             global: false,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec![],
         };
         assert_eq!(
             hidden_block(&ctx),
             format!(
                 "{}\n\nOn dev you may see only these namespaces: kube-system.\n\
                  On dev Secret values are hidden.",
-                intro("dev")
+                intro_for("dev", &["dev"])
             )
         );
     }
@@ -244,6 +286,8 @@ mod tests {
         let ctx = PromptContext {
             clusters: vec![cluster("staging", staging), cluster("prod", prod)],
             global: true,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec![],
         };
         assert_eq!(
             hidden_block(&ctx),
@@ -251,7 +295,7 @@ mod tests {
                 "{}\n\nOn staging Secret values are hidden.\n\
                  On prod you may see only these namespaces: web.\n\n\
                  Notes from the person about staging:\nStaging is rebuilt every night.",
-                intro("these clusters: staging, prod")
+                intro_for("these clusters: staging, prod", &["staging", "prod"])
             )
         );
     }
@@ -266,8 +310,75 @@ mod tests {
         let ctx = PromptContext {
             clusters: vec![cluster("dev", settings)],
             global: false,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec![],
         };
-        assert_eq!(hidden_block(&ctx), intro("dev"));
+        assert_eq!(hidden_block(&ctx), intro_for("dev", &["dev"]));
+    }
+
+    #[test]
+    fn the_intro_names_the_chat_kubeconfig_and_its_contexts() {
+        let ctx = PromptContext {
+            clusters: vec![
+                cluster("prod", ClusterAgentSettings::default()),
+                cluster("stage", ClusterAgentSettings::default()),
+            ],
+            global: true,
+            kubeconfig: PathBuf::from("/run/chat/kubeconfig"),
+            outside: vec![],
+        };
+        let block = hidden_block(&ctx);
+        assert!(
+            block.contains("KUBECONFIG is set to /run/chat/kubeconfig"),
+            "{block}"
+        );
+        assert!(
+            block.contains("each named after its cluster: prod, stage."),
+            "{block}"
+        );
+        assert!(block.contains("Never use ~/.kube/config"), "{block}");
+        assert!(!block.contains("sandbox"), "{block}");
+    }
+
+    #[test]
+    fn a_cluster_left_out_of_the_kubeconfig_is_reached_only_through_the_tools() {
+        let ctx = PromptContext {
+            clusters: vec![
+                cluster("prod", ClusterAgentSettings::default()),
+                cluster("eks", ClusterAgentSettings::default()),
+            ],
+            global: true,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec!["eks".into()],
+        };
+        let block = hidden_block(&ctx);
+        assert!(
+            block.contains("these clusters: prod, eks through"),
+            "{block}"
+        );
+        assert!(
+            block.contains(
+                "each named after its cluster: prod. Reach eks only through the skopos tools. For kubectl"
+            ),
+            "{block}"
+        );
+    }
+
+    #[test]
+    fn a_kubeconfig_without_contexts_says_so() {
+        let ctx = PromptContext {
+            clusters: vec![cluster("eks", ClusterAgentSettings::default())],
+            global: false,
+            kubeconfig: PathBuf::from(KUBECONFIG),
+            outside: vec!["eks".into()],
+        };
+        let block = hidden_block(&ctx);
+        assert!(
+            block.contains(
+                "That file holds no contexts. Reach eks only through the skopos tools. For kubectl"
+            ),
+            "{block}"
+        );
     }
 
     #[test]

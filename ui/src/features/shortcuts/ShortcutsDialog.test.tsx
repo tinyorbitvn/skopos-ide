@@ -273,12 +273,12 @@ test("the dialog opens with the focus in the filter, and Close gives it back", a
   );
 });
 
-test("Agent is listed with Mod+J, except on Windows", () => {
+test("Agent is listed with Mod+J on every platform, Windows too", () => {
   const { unmount } = render(
     <ShortcutsBody platform="linux" onClose={() => {}} />,
   );
   expect(screen.getByText("Agent")).toBeTruthy();
   unmount();
   render(<ShortcutsBody platform="windows" onClose={() => {}} />);
-  expect(screen.queryByText("Agent")).toBeNull();
+  expect(screen.getByText("Agent")).toBeTruthy();
 });

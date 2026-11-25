@@ -11,6 +11,8 @@ use serde_json::{Map, Value};
 pub const SCRIPT_VAR: &str = "SKOPOS_FAKEAGENT_SCRIPT";
 /// The variable that names the request log when `--log` is not given.
 pub const LOG_VAR: &str = "SKOPOS_FAKEAGENT_LOG";
+/// The variable that names the env file when `--env-file` is not given.
+pub const ENV_FILE_VAR: &str = "SKOPOS_FAKEAGENT_ENV_FILE";
 
 /// A whole script. Every field may be left out: `{}` signs in, cannot load sessions and
 /// ends every turn at once with `end_turn`.
@@ -54,6 +56,10 @@ pub enum Step {
     Tool(ToolStep),
     /// A `tool_call` of the agent's own, with a permission request when asked.
     OwnTool(OwnToolStep),
+    /// A `tool_call` of the agent's own that asks for permission, then runs or not.
+    Permission(PermissionStep),
+    /// Several `permission` steps whose requests wait at the same time.
+    Permissions(Vec<PermissionStep>),
     /// Exits the process with this code in the middle of the turn.
     Exit(i32),
     /// Waits this many milliseconds; `session/cancel` ends the wait.
@@ -96,6 +102,18 @@ pub struct OwnToolStep {
     pub permission: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PermissionStep {
+    pub title: String,
+    /// The ACP tool kind, such as `execute`; `other` when left out.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The tool call's `rawInput.command`.
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StopKind {
@@ -111,17 +129,20 @@ impl Script {
     }
 }
 
-/// Where the script and the log are.
+/// Where the script, the log and the env file are.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub script: Option<PathBuf>,
     pub log: Option<PathBuf>,
+    /// Written at start: `pid=<id>`, then one `NAME=value` line per environment variable.
+    pub env_file: Option<PathBuf>,
 }
 
 impl Options {
-    /// Reads `SKOPOS_FAKEAGENT_SCRIPT` and `SKOPOS_FAKEAGENT_LOG` through `var`, then
-    /// `--script <file>` and `--log <file>` from `args` (the arguments after the program),
-    /// which win: an agent the core starts gets only the variables of spec §4.6.
+    /// Reads `SKOPOS_FAKEAGENT_SCRIPT`, `SKOPOS_FAKEAGENT_LOG` and `SKOPOS_FAKEAGENT_ENV_FILE`
+    /// through `var`, then `--script <file>`, `--log <file>` and `--env-file <file>` from
+    /// `args` (the arguments after the program), which win, so a test need not depend on the
+    /// agent's environment.
     pub fn from_args(
         mut args: impl Iterator<Item = String>,
         var: impl Fn(&str) -> Option<OsString>,
@@ -129,11 +150,13 @@ impl Options {
         let mut options = Options {
             script: var(SCRIPT_VAR).map(PathBuf::from),
             log: var(LOG_VAR).map(PathBuf::from),
+            env_file: var(ENV_FILE_VAR).map(PathBuf::from),
         };
         while let Some(arg) = args.next() {
             let slot = match arg.as_str() {
                 "--script" => &mut options.script,
                 "--log" => &mut options.log,
+                "--env-file" => &mut options.env_file,
                 _ => return Err(format!("unknown argument: {arg}")),
             };
             let file = args.next().ok_or_else(|| format!("{arg} needs a file"))?;
@@ -168,6 +191,8 @@ mod tests {
         { "say": "text chunk" },
         { "tool": { "name": "list_objects", "args": { "kind": "Pod", "namespace": "payments" } } },
         { "ownTool": { "title": "Run ls", "permission": true } },
+        { "permission": { "title": "Run ls", "kind": "execute", "command": "ls -la" } },
+        { "permissions": [ { "title": "Read a" }, { "title": "Run b", "command": "b" } ] },
         { "exit": 3 },
         { "stop": "end_turn" }
       ] } ] }"#;
@@ -208,6 +233,23 @@ mod tests {
                             title: "Run ls".to_owned(),
                             permission: true,
                         }),
+                        Step::Permission(PermissionStep {
+                            title: "Run ls".to_owned(),
+                            kind: Some("execute".to_owned()),
+                            command: Some("ls -la".to_owned()),
+                        }),
+                        Step::Permissions(vec![
+                            PermissionStep {
+                                title: "Read a".to_owned(),
+                                kind: None,
+                                command: None,
+                            },
+                            PermissionStep {
+                                title: "Run b".to_owned(),
+                                kind: None,
+                                command: Some("b".to_owned()),
+                            },
+                        ]),
                         Step::Exit(3),
                         Step::Stop(StopKind::EndTurn),
                     ],
@@ -295,14 +337,21 @@ mod tests {
         let env = vars(&[
             (SCRIPT_VAR, "/env/script.json"),
             (LOG_VAR, "/env/agent.log"),
+            (ENV_FILE_VAR, "/env/agent.env"),
         ]);
-        let options =
-            Options::from_args(words(&["--script", "/arg/script.json"]).into_iter(), env).unwrap();
+        let args = words(&[
+            "--script",
+            "/arg/script.json",
+            "--env-file",
+            "/arg/agent.env",
+        ]);
+        let options = Options::from_args(args.into_iter(), env).unwrap();
         assert_eq!(
             options,
             Options {
                 script: Some(PathBuf::from("/arg/script.json")),
                 log: Some(PathBuf::from("/env/agent.log")),
+                env_file: Some(PathBuf::from("/arg/agent.env")),
             }
         );
     }
@@ -312,10 +361,12 @@ mod tests {
         let env = vars(&[
             (SCRIPT_VAR, "/env/script.json"),
             (LOG_VAR, "/env/agent.log"),
+            (ENV_FILE_VAR, "/env/agent.env"),
         ]);
         let options = Options::from_args(Vec::new().into_iter(), env).unwrap();
         assert_eq!(options.script, Some(PathBuf::from("/env/script.json")));
         assert_eq!(options.log, Some(PathBuf::from("/env/agent.log")));
+        assert_eq!(options.env_file, Some(PathBuf::from("/env/agent.env")));
 
         let options = Options::from_args(Vec::new().into_iter(), vars(&[])).unwrap();
         assert_eq!(options, Options::default());
@@ -332,6 +383,10 @@ mod tests {
             Options::from_args(words(&["--log"]).into_iter(), vars(&[])),
             Err("--log needs a file".to_owned())
         );
+        assert_eq!(
+            Options::from_args(words(&["--env-file"]).into_iter(), vars(&[])),
+            Err("--env-file needs a file".to_owned())
+        );
     }
 
     #[test]
@@ -342,6 +397,7 @@ mod tests {
         let options = Options {
             script: Some(good),
             log: None,
+            env_file: None,
         };
         assert!(options.load_script().unwrap().load_session);
 
@@ -349,6 +405,7 @@ mod tests {
         let options = Options {
             script: Some(missing.clone()),
             log: None,
+            env_file: None,
         };
         let error = options.load_script().unwrap_err();
         assert!(
@@ -361,6 +418,7 @@ mod tests {
         let options = Options {
             script: Some(bad.clone()),
             log: None,
+            env_file: None,
         };
         let error = options.load_script().unwrap_err();
         assert!(

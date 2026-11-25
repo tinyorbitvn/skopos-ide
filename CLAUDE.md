@@ -23,7 +23,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   not list are hidden), and ServiceAccount kubeconfigs.
 - **Tools and updates:** managed `helm` and `kubectl` downloads; signed in-app updates.
 - **AI agents:** chats with the agent CLIs the person installed (Claude Code, Codex, OpenCode,
-  Gemini CLI, custom) over ACP, in an OS sandbox, reaching clusters only through the app's tools.
+  Gemini CLI, custom) over ACP, natively as the person, with a per-chat kubeconfig.
   The panel beside the page, Preferences and each cluster's Agent card drive it.
 
 ## Binding rules
@@ -37,7 +37,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 - Nothing from closed-source products. Only `THIRD_PARTY_NOTICES.md` may name another desktop
   product; `scripts/check-provenance.sh` enforces this. Third-party services and their domains
   may be used where a feature needs them, such as tool and update downloads, and the agent CLIs
-  the person installs, with their model providers' hosts in the agent sandbox's allowlist.
+  the person installs.
   Third-party icons and logos may be used, such as the Kubernetes Icons Set and the official
   icons of the projects we integrate with (Helm, Argo CD), when their license or trademark policy
   allows it and `THIRD_PARTY_NOTICES.md` credits them. Use them only to identify that project,
@@ -80,13 +80,12 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 - Agents (`skopos-core/src/agents/`): an ACP client over the agent's stdio and a per-chat MCP
   server (rmcp) with the cluster tools. The change gate (`Ask every time` by default,
   `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call.
-- Agent sandbox: bubblewrap with seccomp on Linux, Seatbelt on macOS, none on Windows, so no
-  agents there. A per-chat proxy allows only `CONNECT` to port 443 of the agent's provider hosts
-  and the person's domains. The app binary's hidden `--agent-mcp` and `--agent-init` modes are
-  parsed in `main.rs` before Tauri starts.
+- Agents run natively (no sandbox) with the app's environment, `KUBECONFIG` set to the chat's
+  own kubeconfig and the MCP token; on Windows a Job object holds the agent's process tree. The
+  app binary's hidden `--agent-mcp` mode is parsed in `main.rs` before Tauri starts.
 - Test doubles: `skopos-fakekube` is a fake API server for core tests and the smoke e2e;
   `skopos-fakeagent` is a scripted ACP agent and `skopos-agent-host` stands in for the app
-  binary in sandbox tests. None ship.
+  binary as `--agent-mcp` in tests. None ship.
 - E2E: WebdriverIO with `tauri-plugin-wdio-webdriver`, compiled only under the Cargo feature
   `e2e`; `SKOPOS_E2E_SPEC_SET` picks `full`, `smoke` or `screens`.
 - UI: TinyOrbit tokens (`ui/src/design/tinyorbit.css`), semantic tokens only in product CSS, CSS
@@ -116,8 +115,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   the `next-release` marks in `site/index.html` for what it ships.
 - **Tests:** Rust unit tests beside the code; core integration tests in
   `crates/skopos-core/tests/`, where tests that need the kind cluster are `#[ignore]` and named
-  `kind_*`, `argocd_*` or `metrics_*` for their make target. Sandbox tests run with
-  `SKOPOS_SANDBOX_TEST=1`. UI tests sit beside the source as `*.test.ts(x)` (vitest); e2e specs
+  `kind_*`, `argocd_*` or `metrics_*` for their make target. UI tests sit beside the source as `*.test.ts(x)` (vitest); e2e specs
   are `e2e/specs/*.e2e.ts`. Rust code does not `unwrap` or `panic` on input from files, the
   network or the UI.
 - **Dependencies:** versions follow the spec's lines: shared crates in `[workspace.dependencies]`,

@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use dashmap::DashMap;
+use kube::config::Kubeconfig;
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -18,8 +19,8 @@ use crate::agents::registry::AgentProbes;
 use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{
-    ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState, ExecConsent, ExecRequest,
-    ExecRequestDetails, HeldExec,
+    exec_command, ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState,
+    ExecConsent, ExecRequest, ExecRequestDetails, HeldExec,
 };
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::graph::GraphHub;
@@ -126,13 +127,10 @@ struct Inner {
     discoveries: DashMap<ClusterId, Arc<SingleFlight<Vec<ApiResourceInfo>>>>,
     sessions: Arc<SessionRegistry>,
     /// The running chats and the stored ones (agents spec §4.8).
-    #[cfg(unix)]
     chats: crate::agents::chat::Chats,
     home: PathBuf,
     /// The app's data folder; agents keep their folders and run folders under it.
     data: PathBuf,
-    /// R2: chats and probes start agents without the sandbox. Tests only.
-    agent_sandbox_off: std::sync::atomic::AtomicBool,
     portforwards: Arc<PortForwards>,
     tools: Tools,
     helm: Helm,
@@ -331,11 +329,9 @@ impl AppCore {
                 next_cert_user: AtomicU64::new(1),
                 discoveries: DashMap::new(),
                 sessions: Arc::new(SessionRegistry::default()),
-                #[cfg(unix)]
                 chats: crate::agents::chat::Chats::new(&paths.data),
                 home: paths.home.clone(),
                 data: paths.data.clone(),
-                agent_sandbox_off: std::sync::atomic::AtomicBool::new(false),
                 portforwards: Arc::new(PortForwards::new(portforward_definitions, events.clone())),
                 tools: Tools::new(&paths.data),
                 helm,
@@ -659,6 +655,49 @@ impl AppCore {
         self.inner.connections.kubeconfig_path(id)
     }
 
+    /// Writes a single-context kubeconfig for a catalog cluster from its source file, for a
+    /// chat's kubeconfig. It needs no connection, so a chat can start while the cluster is
+    /// offline. A kubeconfig that runs a command for its credentials is kept only when the
+    /// person allowed exactly that command, as a connect requires; otherwise the file is removed
+    /// and the answer is `false`.
+    pub(crate) fn cluster_chat_kubeconfig(&self, id: &ClusterId, dest: &Path) -> CoreResult<bool> {
+        let entry = self
+            .inner
+            .snapshots
+            .borrow()
+            .entries
+            .iter()
+            .find(|entry| entry.id == *id)
+            .cloned()
+            .ok_or_else(|| IpcError::new(ErrorCode::NotFound, format!("no cluster {id}")))?;
+        crate::kubeconfig::extract_context(
+            Path::new(&entry.source_path),
+            &entry.context_name,
+            dest,
+        )?;
+        let Ok(kubeconfig) = Kubeconfig::read_from(dest) else {
+            let _ = std::fs::remove_file(dest);
+            // The parser's message can quote the file, so it is not passed on.
+            return Err(IpcError::new(
+                ErrorCode::InvalidInput,
+                format!("cannot read the kubeconfig of {}", entry.context_name),
+            ));
+        };
+        let Some(command) = exec_command(&kubeconfig) else {
+            return Ok(true);
+        };
+        let allowed = self
+            .inner
+            .exec_consents
+            .get()
+            .get(id)
+            .is_some_and(|consent| consent.fingerprint == command.fingerprint);
+        if !allowed {
+            let _ = std::fs::remove_file(dest);
+        }
+        Ok(allowed)
+    }
+
     pub fn cluster_cancel_token(&self, id: &ClusterId) -> CoreResult<CancellationToken> {
         self.inner.connections.cancel_token(id)
     }
@@ -716,18 +755,6 @@ impl AppCore {
     /// The app's data folder.
     pub(crate) fn data_dir(&self) -> &Path {
         &self.inner.data
-    }
-
-    /// R2: chats and probes that start after this call run their agent directly, without the
-    /// sandbox, with the same environment, proxy and MCP endpoint. Tests only, like
-    /// `set_log_stream_cap_for_test`.
-    pub fn agent_sandbox_off_for_test(&self) {
-        self.inner.agent_sandbox_off.store(true, Ordering::Relaxed);
-    }
-
-    /// Whether `agent_sandbox_off_for_test` was called.
-    pub(crate) fn agent_sandbox_off(&self) -> bool {
-        self.inner.agent_sandbox_off.load(Ordering::Relaxed)
     }
 
     pub(crate) fn tools(&self) -> &Tools {
@@ -797,7 +824,6 @@ impl AppCore {
         &self.inner.sessions
     }
 
-    #[cfg(unix)]
     pub(crate) fn chats(&self) -> &crate::agents::chat::Chats {
         &self.inner.chats
     }

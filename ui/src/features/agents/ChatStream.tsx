@@ -1,4 +1,3 @@
-import { openPath } from "../../app/tabs/navigation";
 import { Button, Markdown, Spinner, toast } from "../../design";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
@@ -6,10 +5,10 @@ import type { ChangeAnswer } from "../../ipc/generated/ChangeAnswer";
 import type { ChangeCard as Card } from "../../ipc/generated/ChangeCard";
 import type { ChatItem } from "../../ipc/generated/ChatItem";
 import type { ChatNotice } from "../../ipc/generated/ChatNotice";
-import { prefsPath } from "../prefs/paths";
 import { ChangeCard } from "./ChangeCard";
 import styles from "./ChatStream.module.css";
 import { objectLabel } from "./chatModel";
+import { PermissionCard } from "./PermissionCard";
 import { PlanCard } from "./PlanCard";
 import { ProposalCard } from "./ProposalCard";
 import { AgentToolCard, ToolCard } from "./ToolCard";
@@ -38,6 +37,7 @@ export interface ChatStreamProps {
   past: string[];
   undone: string[];
   onAnswer(cardId: string, answer: ChangeAnswer): Promise<void>;
+  onChoose(cardId: string, optionId: string): Promise<void>;
   onUndo(card: Card): void;
   onNewChat(): void;
 }
@@ -56,15 +56,6 @@ function NoticeLine(props: {
       data-testid="agent-notice"
     >
       <span>{props.text}</span>
-      {kind === "blockedHost" ? (
-        <button
-          type="button"
-          className={styles.link}
-          onClick={() => openPath(prefsPath("agent-sandbox"), "current")}
-        >
-          Agent sandbox
-        </button>
-      ) : null}
       {kind === "exited" ? (
         <Button size="sm" onClick={props.onNewChat}>
           New chat
@@ -131,6 +122,14 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
           live={props.live}
         />
       );
+    case "permission":
+      return (
+        <PermissionCard
+          card={body.card}
+          live={props.live}
+          onChoose={(optionId) => props.onChoose(body.card.id, optionId)}
+        />
+      );
     case "notice":
       return (
         <NoticeLine
@@ -147,6 +146,13 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
  * while the person has not scrolled up.
  */
 export function ChatStream(props: ChatStreamProps) {
+  const waitingForYou =
+    props.live &&
+    props.items.some(
+      (item) =>
+        item.body.type === "permission" &&
+        item.body.card.state.state === "waiting",
+    );
   return (
     <div
       role="log"
@@ -160,7 +166,13 @@ export function ChatStream(props: ChatStreamProps) {
         ))}
         {props.busy ? (
           <div className={styles.working} data-testid="agent-working">
-            <Spinner label={`${props.agentName} is working…`} />
+            <Spinner
+              label={
+                waitingForYou
+                  ? "Waiting for you"
+                  : `${props.agentName} is working…`
+              }
+            />
           </div>
         ) : null}
       </div>

@@ -25,7 +25,6 @@ import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { clusterSettings, metricsResult, prometheus } from "../../test/metrics";
 import { CONNECTED } from "../../test/terminal";
-import { setAgentsSupportedForTest } from "../agents/supported";
 import { ClusterSettingsRoute } from "./ClusterSettingsScreen";
 import { keptDraft, resetDraftsForTest } from "./drafts";
 
@@ -34,11 +33,9 @@ beforeEach(() => {
   resetMetricsForTest();
   resetDraftsForTest();
   resetAgentsForTest();
-  setAgentsSupportedForTest(true);
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  setAgentsSupportedForTest(true);
 });
 
 function agentRow(partial: Partial<AgentStatus>): AgentStatus {
@@ -50,7 +47,6 @@ function agentRow(partial: Partial<AgentStatus>): AgentStatus {
     hint: null,
     isDefault: false,
     custom: false,
-    hosts: [],
     ...partial,
   };
 }
@@ -1291,11 +1287,4 @@ test("Only these namespaces needs a namespace before Save", async () => {
   );
   expect(within(card).getByText("Pick at least one namespace.")).toBeTruthy();
   expect(button("settings-save").hasAttribute("disabled")).toBe(true);
-});
-
-test("on Windows the page has no Agent card", async () => {
-  setAgentsSupportedForTest(false);
-  await show();
-  await screen.findByTestId("settings-save");
-  expect(screen.queryByTestId("settings-agent-card")).toBeNull();
 });

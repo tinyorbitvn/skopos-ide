@@ -1,7 +1,6 @@
 import type { Tone } from "../../design/Badge";
 import type { AgentChanges } from "../../ipc/generated/AgentChanges";
 import type { AgentState } from "../../ipc/generated/AgentState";
-import type { SandboxStatus } from "../../ipc/generated/SandboxStatus";
 
 /** An agent's state as its Preferences row and the agent popover name it (spec §3.5). */
 export function agentStateView(state: AgentState): {
@@ -34,23 +33,6 @@ export const CHANGES_OPTIONS: { value: AgentChanges; label: string }[] = [
   { value: "readOnly", label: CHANGES_LABELS.readOnly },
   { value: "dontAsk", label: CHANGES_LABELS.dontAsk },
 ];
-
-/** Why the sandbox cannot run agents (spec §3.5), or null when it can. */
-export function sandboxReason(
-  status: SandboxStatus,
-  mac: boolean,
-): string | null {
-  switch (status.status) {
-    case "notInstalled":
-      return "bubblewrap is not installed. Install the bwrap command, then check again.";
-    case "cannotStart":
-      return mac
-        ? `Seatbelt could not start a sandbox: ${status.error}`
-        : `bubblewrap could not start a sandbox: ${status.error}`;
-    default:
-      return null;
-  }
-}
 
 /** `1 cluster`, `3 clusters`. */
 export function countText(n: number, one: string, many: string): string {

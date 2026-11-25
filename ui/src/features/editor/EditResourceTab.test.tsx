@@ -13,7 +13,6 @@ import { resetProposalsForTest, useProposals } from "../../stores/proposals";
 import { CONFIG_MAP } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
 import { proposal } from "../../test/proposals";
-import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { EditResourceTab } from "./EditResourceTab";
@@ -116,7 +115,6 @@ function longData(): string {
 
 beforeEach(() => {
   resetProposalsForTest();
-  setAgentsSupportedForTest(true);
 });
 
 afterEach(() => {

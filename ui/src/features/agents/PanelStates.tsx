@@ -85,19 +85,6 @@ export function FailureState(props: { failure: StartFailure }) {
           }
         />
       );
-    case "sandbox":
-      return (
-        <State
-          kind={failure.kind}
-          title="The agent sandbox isn't ready"
-          body={`${failure.reason} Agents run only inside the sandbox.`}
-          action={
-            <Button onClick={() => openPrefs("agent-sandbox")}>
-              Agent sandbox
-            </Button>
-          }
-        />
-      );
     case "signIn":
       return (
         <State

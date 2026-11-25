@@ -53,6 +53,7 @@ test-metrics:
 
 e2e-smoke: e2e-build
 	cargo build -p skopos-fakekube
+	cargo build -p skopos-core --bin skopos-fakeagent
 	SKOPOS_E2E_SPEC_SET=smoke $(XVFB) pnpm -C e2e exec wdio run wdio.conf.ts
 e2e-screens: e2e-build
 	scripts/kind-up.sh

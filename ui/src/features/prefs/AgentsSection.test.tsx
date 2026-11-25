@@ -20,7 +20,6 @@ function row(partial: Partial<AgentStatus>): AgentStatus {
     hint: null,
     isDefault: false,
     custom: false,
-    hosts: [],
     ...partial,
   };
 }

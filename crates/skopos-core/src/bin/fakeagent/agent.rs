@@ -15,7 +15,7 @@ use agent_client_protocol::v1::schema::{
     NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind, Plan, PlanEntry,
     PlanEntryPriority, PlanEntryStatus, PromptRequest, PromptResponse, RequestPermissionOutcome,
     RequestPermissionRequest, SessionId, SessionNotification, SessionUpdate, StopReason, ToolCall,
-    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{Agent, Client, Error, Stdio};
@@ -25,7 +25,7 @@ use tokio::sync::watch;
 
 use crate::mcp_client::McpClient;
 use crate::script::{
-    Auth, OwnToolStep, PlanItem, PlanItemStatus, Script, Step, StopKind, ToolStep,
+    Auth, OwnToolStep, PermissionStep, PlanItem, PlanItemStatus, Script, Step, StopKind, ToolStep,
 };
 
 /// How long an `exit` step waits before the process ends, so the updates sent before it
@@ -37,6 +37,21 @@ enum Played {
     Stop(StopReason),
     /// With ACP's authentication-required error.
     SignIn,
+}
+
+/// Writes `pid=<this process id>`, then one `NAME=value` line per environment variable, to
+/// `path`, so a test knows which process the core started and with what environment. A name
+/// or value that is not Unicode is written lossily.
+pub fn write_env_file(path: &Path) -> Result<(), String> {
+    let mut text = format!("pid={}\n", std::process::id());
+    for (name, value) in std::env::vars_os() {
+        text.push_str(&format!(
+            "{}={}\n",
+            name.to_string_lossy(),
+            value.to_string_lossy()
+        ));
+    }
+    std::fs::write(path, text).map_err(|error| format!("{}: {error}", path.display()))
 }
 
 pub struct Fake {
@@ -151,6 +166,15 @@ impl Fake {
                 Step::Say(text) => self.say(cx, session, &text)?,
                 Step::Tool(tool) => self.call_skopos(cx, session, tool).await?,
                 Step::OwnTool(tool) => self.own_tool(cx, session, tool).await?,
+                Step::Permission(step) => self.permission(cx, session, step).await?,
+                Step::Permissions(steps) => {
+                    let asked = steps
+                        .into_iter()
+                        .map(|step| self.permission(cx, session, step));
+                    for result in futures::future::join_all(asked).await {
+                        result?;
+                    }
+                }
                 Step::Exit(code) => {
                     tokio::time::sleep(EXIT_PAUSE).await;
                     eprintln!("fake agent exits with code {code}");
@@ -223,14 +247,55 @@ impl Fake {
         let call = ToolCall::new(id.clone(), tool.title.clone()).status(ToolCallStatus::Pending);
         self.send(cx, session, SessionUpdate::ToolCall(call))?;
         let allowed = if tool.permission {
-            self.ask_permission(cx, session, &id, &tool.title).await?
+            let fields = ToolCallUpdateFields::new().title(tool.title.clone());
+            self.ask_permission(cx, session, &id, fields).await?
         } else {
             true
         };
+        self.finish_own_tool(cx, session, id, &tool.title, allowed)
+    }
+
+    /// A `permission` step: a pending `tool_call` of the agent's own with its kind and
+    /// command, a permission request with the same, then its result.
+    async fn permission(
+        &self,
+        cx: &ConnectionTo<Client>,
+        session: &SessionId,
+        step: PermissionStep,
+    ) -> Result<(), Error> {
+        let id = format!("own-{}", self.next_tool_id());
+        let kind: ToolKind = step
+            .kind
+            .as_deref()
+            .and_then(|kind| serde_json::from_value(json!(kind)).ok())
+            .unwrap_or_default();
+        let raw_input = json!({ "command": step.command });
+        let call = ToolCall::new(id.clone(), step.title.clone())
+            .status(ToolCallStatus::Pending)
+            .kind(kind)
+            .raw_input(raw_input.clone());
+        self.send(cx, session, SessionUpdate::ToolCall(call))?;
+        let fields = ToolCallUpdateFields::new()
+            .title(step.title.clone())
+            .kind(kind)
+            .raw_input(raw_input);
+        let allowed = self.ask_permission(cx, session, &id, fields).await?;
+        self.finish_own_tool(cx, session, id, &step.title, allowed)
+    }
+
+    /// The result of a tool of the agent's own: ran when `allowed`, else refused.
+    fn finish_own_tool(
+        &self,
+        cx: &ConnectionTo<Client>,
+        session: &SessionId,
+        id: String,
+        title: &str,
+        allowed: bool,
+    ) -> Result<(), Error> {
         let (status, text) = if allowed {
-            (ToolCallStatus::Completed, format!("ran {}", tool.title))
+            (ToolCallStatus::Completed, format!("ran {title}"))
         } else {
-            (ToolCallStatus::Failed, format!("refused {}", tool.title))
+            (ToolCallStatus::Failed, format!("refused {title}"))
         };
         let fields = ToolCallUpdateFields::new()
             .status(status)
@@ -242,14 +307,15 @@ impl Fake {
         )
     }
 
-    /// Asks with all four option kinds, `allow_once` neither first nor last, and logs the
-    /// answer. `true` when an allow option was picked.
+    /// Asks about the tool call `id` described by `fields` with all four option kinds,
+    /// `allow_once` neither first nor last, and logs the answer. `true` when an allow option
+    /// was picked.
     async fn ask_permission(
         &self,
         cx: &ConnectionTo<Client>,
         session: &SessionId,
         id: &str,
-        title: &str,
+        fields: ToolCallUpdateFields,
     ) -> Result<bool, Error> {
         let options = vec![
             PermissionOption::new("reject_once", "Reject", PermissionOptionKind::RejectOnce),
@@ -265,10 +331,7 @@ impl Fake {
                 PermissionOptionKind::RejectAlways,
             ),
         ];
-        let tool_call = ToolCallUpdate::new(
-            id.to_owned(),
-            ToolCallUpdateFields::new().title(title.to_owned()),
-        );
+        let tool_call = ToolCallUpdate::new(id.to_owned(), fields);
         let request = RequestPermissionRequest::new(session.clone(), tool_call, options);
         let response = cx.send_request(request).block_task().await?;
         let answer = match response.outcome {

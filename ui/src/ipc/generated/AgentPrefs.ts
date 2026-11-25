@@ -2,7 +2,8 @@
 import type { CustomAgent } from "./CustomAgent";
 
 /**
- * Preferences → Agents and Agent sandbox (agents spec §3.5, §4.8).
+ * Preferences → Agents (agents spec §3.5, §4.8). Files saved with the sandbox's `domains`
+ * and `folders` still read: serde ignores fields it does not know.
  */
 export type AgentPrefs = { 
 /**
@@ -12,13 +13,4 @@ defaultAgent: string | null,
 /**
  * The agents the person added, in the order added.
  */
-custom: Array<CustomAgent>, 
-/**
- * Domains every agent may reach besides its provider's, in lower case. Each one
- * allows its subdomains.
- */
-domains: Array<string>, 
-/**
- * Folders agents may read, as typed: `/x` or `~/x`.
- */
-folders: Array<string>, };
+custom: Array<CustomAgent>, };

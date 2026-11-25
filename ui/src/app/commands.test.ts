@@ -10,7 +10,6 @@ import {
   Network,
   Server,
 } from "../design/icons";
-import { setAgentsSupportedForTest } from "../features/agents/supported";
 import { openTerminal } from "../features/dock/openTerminal";
 import {
   resetUpdatesForTest,
@@ -556,12 +555,4 @@ test("Ask the agent is offered only while the drawer shows an object", () => {
   });
   expect(ask.available(ctx)).toBe(true);
   expect(ask.label(ctx)).toBe("Ask the agent about this Pod");
-});
-
-test("the agent commands are absent on Windows", () => {
-  setAgentsSupportedForTest(false);
-  const ctx = { navigate: () => {}, pathname: "/catalog", cluster: null };
-  expect(commandById("agent-open").available(ctx)).toBe(false);
-  expect(commandById("agent-new-chat").available(ctx)).toBe(false);
-  setAgentsSupportedForTest(true);
 });

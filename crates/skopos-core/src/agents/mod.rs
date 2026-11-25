@@ -1,27 +1,26 @@
-//! AI agents (agents spec 2026-11-22): the agent CLIs the person installed, run in a
-//! sandbox, reaching clusters only through SkoposIDE's tools. Agents run on Linux and macOS
-//! only: on Windows every agent call refuses with `Unsupported` and the readers give the
-//! defaults (spec §2, §11).
+//! AI agents (agents spec 2026-11-22): the agent CLIs the person installed, run natively as the
+//! person's own processes on Linux, macOS and Windows (native agents spec §4.1, §4.2), with a
+//! kubeconfig of only their chat's clusters and SkoposIDE's tools.
 
 pub mod acp;
 pub mod approvals;
 pub mod bridge;
 pub mod chat;
 pub mod chats;
-pub mod cli_login;
 pub mod diff;
 pub mod editor_tab;
 pub mod endpoint;
 pub mod events;
 pub mod known_folders;
+pub(crate) mod kubeconfig;
 pub mod mcp;
 pub mod modes;
+pub mod permissions;
 pub mod probe;
 pub mod prompt;
-pub mod proxy;
 pub mod registry;
-pub mod sandbox;
 pub mod settings;
+pub mod spawn;
 pub mod tabs;
 
 use std::ffi::OsString;
@@ -36,90 +35,15 @@ use known_folders::known_folders;
 use registry::{
     default_agent, listed, resolve_custom, status_of, AgentSpec, AgentStatus, Listed, Resolved,
 };
-use settings::{expand_home, normalize_domain, normalize_folder};
 
-/// What every agent call answers on Windows.
-pub const UNSUPPORTED: &str = "Agents are not available on Windows.";
-const DOMAIN_TAKEN: &str = "That domain is already in the list";
-const FOLDER_TAKEN: &str = "That folder is already in the list";
 const NAME_AND_COMMAND: &str = "Enter a name and a command.";
 /// An id no listed agent has, or a built-in agent's id given to a call for the person's.
 const UNKNOWN_AGENT: &str = "That agent is no longer in the list.";
 
-/// Agents never run outside a sandbox, and Windows has none yet (spec §2).
-#[cfg(windows)]
-pub(crate) fn supported() -> CoreResult<()> {
-    Err(IpcError::new(ErrorCode::Unsupported, UNSUPPORTED))
-}
-
-/// Linux runs agents in bubblewrap, macOS in Seatbelt.
-#[cfg(not(windows))]
-pub(crate) fn supported() -> CoreResult<()> {
-    Ok(())
-}
-
 impl AppCore {
     /// The agent settings of Preferences.
     pub fn agent_prefs(&self) -> AgentPrefs {
-        match supported() {
-            Ok(()) => self.prefs_get().agents,
-            Err(_) => AgentPrefs::default(),
-        }
-    }
-
-    /// Lets every agent reach `domain` and its subdomains (spec §3.5).
-    pub fn agent_domain_add(&self, domain: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let domain = normalize_domain(domain)?;
-        self.prefs_try_update(|prefs| {
-            let agents = &mut prefs.agents;
-            if agents.domains.contains(&domain) {
-                return Err(IpcError::new(ErrorCode::InvalidInput, DOMAIN_TAKEN));
-            }
-            agents.domains.push(domain);
-            Ok(agents.clone())
-        })
-    }
-
-    /// Removes `domain`; one that is not in the list changes nothing.
-    pub fn agent_domain_remove(&self, domain: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let domain = domain.trim().to_ascii_lowercase();
-        self.prefs_try_update(|prefs| {
-            prefs.agents.domains.retain(|kept| *kept != domain);
-            Ok(prefs.agents.clone())
-        })
-    }
-
-    /// Lets every agent read `folder` (spec §3.5), kept as typed. The same folder typed
-    /// another way (`~/x` and `/home/me/x`) is already in the list.
-    pub fn agent_folder_add(&self, folder: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let home = self.home_dir();
-        let folder = normalize_folder(folder, home)?;
-        let path = expand_home(&folder, home);
-        self.prefs_try_update(|prefs| {
-            let agents = &mut prefs.agents;
-            if agents
-                .folders
-                .iter()
-                .any(|kept| expand_home(kept, home) == path)
-            {
-                return Err(IpcError::new(ErrorCode::InvalidInput, FOLDER_TAKEN));
-            }
-            agents.folders.push(folder);
-            Ok(agents.clone())
-        })
-    }
-
-    /// Removes `folder` as the list holds it; one that is not there changes nothing.
-    pub fn agent_folder_remove(&self, folder: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let folder = folder.trim();
-        self.prefs_try_update(|prefs| {
-            prefs.agents.folders.retain(|kept| kept != folder);
-            Ok(prefs.agents.clone())
-        })
+        self.prefs_get().agents
     }
 
     /// Sets only what agents may change in `id` (Preferences → Agent changes, spec §4.8):
@@ -129,24 +53,19 @@ impl AppCore {
         id: &ClusterId,
         changes: AgentChanges,
     ) -> CoreResult<()> {
-        supported()?;
         self.cluster_settings_update(id, |settings| settings.agent.changes = changes)
     }
 
     /// The agent settings of `id` as saved now, so a change applies to the next tool call
     /// of a running chat (spec §4.5).
     pub fn cluster_agent_settings(&self, id: &ClusterId) -> ClusterAgentSettings {
-        match supported() {
-            Ok(()) => self.cluster_settings_get(id).agent,
-            Err(_) => ClusterAgentSettings::default(),
-        }
+        self.cluster_settings_get(id).agent
     }
 
     /// Preferences → Agents (spec §3.5): the built-in agents, then the person's in the order
     /// added, each found on PATH, in a known install folder, or not. Nothing runs here: an installed agent shows the
     /// state its last probe of this app run gave (spec §4.2), `Unknown` before one.
     pub fn agents_status(&self) -> CoreResult<Vec<AgentStatus>> {
-        supported()?;
         let prefs = self.agent_prefs();
         let path_var = self.agent_path_var();
         let folders = self.agent_folders();
@@ -169,7 +88,6 @@ impl AppCore {
     /// program on PATH, an absolute path or a path under `~/`; names are compared ignoring
     /// case.
     pub fn agent_custom_add(&self, name: &str, command: &str) -> CoreResult<AgentStatus> {
-        supported()?;
         let (name, command) = (name.trim(), command.trim());
         if name.is_empty() || command.is_empty() {
             return Err(IpcError::new(ErrorCode::InvalidInput, NAME_AND_COMMAND));
@@ -214,7 +132,6 @@ impl AppCore {
     /// Removes an agent the person added. When it was the default, the first Ready agent is
     /// the default again.
     pub fn agent_custom_remove(&self, id: &str) -> CoreResult<()> {
-        supported()?;
         self.prefs_try_update(|prefs| {
             let agents = &mut prefs.agents;
             let before = agents.custom.len();
@@ -233,7 +150,6 @@ impl AppCore {
 
     /// Makes `id` the agent new chats start with where a cluster names none (spec §3.5).
     pub fn agent_default_set(&self, id: &str) -> CoreResult<()> {
-        supported()?;
         self.prefs_try_update(|prefs| {
             if !listed(&prefs.agents).iter().any(|agent| agent.id() == id) {
                 return Err(unknown_agent());
@@ -246,7 +162,6 @@ impl AppCore {
     /// What a chat or a probe starts for `id`: `NotFound` when no listed agent has that id,
     /// `InvalidInput` with its row's hint when it is not installed.
     pub fn agent_spec(&self, id: &str) -> CoreResult<AgentSpec> {
-        supported()?;
         let prefs = self.agent_prefs();
         let agents = listed(&prefs);
         let agent = agents
@@ -280,45 +195,4 @@ impl AppCore {
 
 fn unknown_agent() -> IpcError {
     IpcError::new(ErrorCode::NotFound, UNKNOWN_AGENT)
-}
-
-/// Windows refuses every agent call and reads the defaults. Check it on Linux once by
-/// swapping the cfgs of the two `supported` and setting this module's to `test`.
-#[cfg(all(test, windows))]
-mod tests {
-    use super::*;
-    use crate::paths::AppPaths;
-
-    #[tokio::test]
-    async fn every_agent_call_is_unsupported_on_windows() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
-        let core = AppCore::start_with_kubeconfig_env(paths, None)
-            .await
-            .unwrap();
-        let id = "c".repeat(32);
-        let calls = [
-            core.agent_domain_add("example.com").map(drop),
-            core.agent_domain_remove("example.com").map(drop),
-            core.agent_folder_add("/srv").map(drop),
-            core.agent_folder_remove("/srv").map(drop),
-            core.cluster_agent_changes_set(&id, AgentChanges::ReadOnly),
-            core.agents_status().map(drop),
-            core.agent_custom_add("Mine", "my-agent --acp").map(drop),
-            core.agent_custom_remove("custom-0a1b2c3d"),
-            core.agent_default_set("claude"),
-            core.agent_spec("claude").map(drop),
-        ];
-        for call in calls {
-            let error = call.unwrap_err();
-            assert_eq!(error.code, ErrorCode::Unsupported);
-            assert_eq!(error.message, UNSUPPORTED);
-        }
-        assert_eq!(core.agent_prefs(), AgentPrefs::default());
-        assert_eq!(
-            core.cluster_agent_settings(&id),
-            ClusterAgentSettings::default()
-        );
-        core.shutdown().await;
-    }
 }

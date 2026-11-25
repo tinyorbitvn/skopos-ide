@@ -651,31 +651,6 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   ["agent_default_set", () => api.agentDefaultSet("codex"), { id: "codex" }],
   ["agent_prefs", () => api.agentPrefs(), {}],
   [
-    "agent_domain_add",
-    () => api.agentDomainAdd("example.com"),
-    { domain: "example.com" },
-  ],
-  [
-    "agent_domain_remove",
-    () => api.agentDomainRemove("example.com"),
-    { domain: "example.com" },
-  ],
-  [
-    "agent_folder_add",
-    () => api.agentFolderAdd("~/work"),
-    { folder: "~/work" },
-  ],
-  [
-    "agent_folder_remove",
-    () => api.agentFolderRemove("~/work"),
-    { folder: "~/work" },
-  ],
-  [
-    "agent_sandbox_status",
-    () => api.agentSandboxStatus(true),
-    { refresh: true },
-  ],
-  [
     "cluster_agent_changes_set",
     () => api.clusterAgentChangesSet("c1", "readOnly"),
     { id: "c1", changes: "readOnly" },
@@ -702,6 +677,11 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   ],
   ["chat_stop", () => api.chatStop("a1b2c3d4"), { chatId: "a1b2c3d4" }],
   ["chat_close", () => api.chatClose("a1b2c3d4"), { chatId: "a1b2c3d4" }],
+  [
+    "chat_permission",
+    () => api.chatPermission("a1b2c3d4", "p1", "allow_once"),
+    { chatId: "a1b2c3d4", cardId: "p1", optionId: "allow_once" },
+  ],
   [
     "chat_answer",
     () => api.chatAnswer("a1b2c3d4", "change-1", "approveForChat"),

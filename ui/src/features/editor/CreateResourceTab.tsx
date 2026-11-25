@@ -19,7 +19,6 @@ import {
 } from "../../stores/dock";
 import { useProposals } from "../../stores/proposals";
 import { registerTabSource } from "../../stores/tabSources";
-import { agentsSupported } from "../agents/supported";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { AiBar } from "./AiBar";
 import { useCreateTarget } from "./apiDocsKind";
@@ -186,21 +185,19 @@ export function CreateResourceTab(props: {
           A document with no namespace goes to the first namespace selected in
           the namespace filter, or to default.
         </span>
-        {agentsSupported() ? (
-          <Button
-            size="sm"
-            className={styles.aiToggle}
-            aria-pressed={aiOpen}
-            onClick={() => setAiOpen((open) => !open)}
-            data-testid="yaml-ai"
-          >
-            <Sparkles size={14} aria-hidden="true" />
-            Ask AI
-          </Button>
-        ) : null}
+        <Button
+          size="sm"
+          className={styles.aiToggle}
+          aria-pressed={aiOpen}
+          onClick={() => setAiOpen((open) => !open)}
+          data-testid="yaml-ai"
+        >
+          <Sparkles size={14} aria-hidden="true" />
+          Ask AI
+        </Button>
         <ApiDocsButton />
       </div>
-      {aiOpen && agentsSupported() ? (
+      {aiOpen ? (
         <AiBar
           tabId={id}
           placeholder="Describe the objects to create"

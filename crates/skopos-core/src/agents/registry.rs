@@ -9,13 +9,11 @@ use dashmap::DashMap;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::agents::cli_login::KeychainLogin;
 use crate::agents::settings::expand_home;
 use crate::prefs::{AgentPrefs, CustomAgent};
-use crate::tools::{find_on_path, is_executable};
+use crate::tools::Lookup;
 
-/// A built-in agent: what runs, what the sandbox lets it keep and reach, and its hints
-/// (spec §3.5, §4.6, §4.7).
+/// A built-in agent: what runs, its variables, and its hints (spec §3.5, §4.6, §4.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentDef {
     pub id: &'static str,
@@ -29,17 +27,9 @@ pub struct AgentDef {
     pub cli_env: Option<&'static str>,
     /// The adapter's name in the detail line; `None` for a CLI with ACP built in.
     pub adapter: Option<&'static str>,
-    /// Where it keeps its settings and sign-in, relative to the home folder.
-    pub settings: &'static [&'static str],
-    /// Its model provider's hosts, which the proxy lets it reach.
-    pub hosts: &'static [&'static str],
-    /// The provider keys it gets when the app's environment has them.
-    pub key_vars: &'static [&'static str],
     pub extra_env: &'static [(&'static str, &'static str)],
     pub install_hint: &'static str,
     pub sign_in_hint: &'static str,
-    /// Where its CLI keeps its sign-in in the macOS keychain, which the app hands it.
-    pub keychain_login: Option<KeychainLogin>,
 }
 
 /// The built-in agents in the order Preferences → Agents lists them.
@@ -52,22 +42,9 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         cli: Some("claude"),
         cli_env: Some("CLAUDE_CODE_EXECUTABLE"),
         adapter: Some("claude-agent-acp"),
-        settings: &[".claude", ".claude.json", ".config/anthropic"],
-        hosts: &[
-            "api.anthropic.com",
-            "claude.ai",
-            "platform.claude.com",
-            "claude.com",
-        ],
-        key_vars: &["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
         extra_env: &[("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")],
         install_hint: "Install claude-agent-acp (npm install -g @agentclientprotocol/claude-agent-acp), then check again.",
         sign_in_hint: "Run claude in a terminal and sign in, then check again.",
-        keychain_login: Some(KeychainLogin {
-            service: "Claude Code-credentials",
-            var: "CLAUDE_CODE_OAUTH_TOKEN",
-            hint: "Run claude in a terminal to renew its sign-in, then send your message again.",
-        }),
     },
     AgentDef {
         id: "codex",
@@ -77,13 +54,9 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         cli: Some("codex"),
         cli_env: Some("CODEX_PATH"),
         adapter: Some("codex-acp"),
-        settings: &[".codex"],
-        hosts: &["api.openai.com", "chatgpt.com", "auth.openai.com"],
-        key_vars: &["OPENAI_API_KEY", "CODEX_API_KEY"],
         extra_env: &[],
         install_hint: "Install codex-acp (npm install -g @agentclientprotocol/codex-acp), then check again.",
         sign_in_hint: "Run codex login in a terminal, then check again.",
-        keychain_login: None,
     },
     AgentDef {
         id: "opencode",
@@ -93,13 +66,9 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         cli: None,
         cli_env: None,
         adapter: None,
-        settings: &[".config/opencode", ".local/share/opencode", ".cache/opencode"],
-        hosts: &["opencode.ai"],
-        key_vars: &[],
         extra_env: &[],
         install_hint: "Install OpenCode, then check again.",
         sign_in_hint: "Run opencode auth login in a terminal, then check again.",
-        keychain_login: None,
     },
     AgentDef {
         id: "gemini",
@@ -109,39 +78,24 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         cli: None,
         cli_env: None,
         adapter: None,
-        settings: &[".gemini"],
-        hosts: &[
-            "generativelanguage.googleapis.com",
-            "cloudcode-pa.googleapis.com",
-            "oauth2.googleapis.com",
-        ],
-        key_vars: &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         extra_env: &[],
         install_hint: "Install Gemini CLI, then check again.",
         sign_in_hint: "Run gemini in a terminal and sign in, then check again.",
-        keychain_login: None,
     },
 ];
 
-/// What starts an installed agent: for the sandbox (spec §4.6) and the ACP client.
+/// What starts an installed agent, natively (native agents spec §4.2), for the ACP client.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentSpec {
     pub id: String,
     pub name: String,
-    /// The command's real path, links resolved: the file the sandbox makes readable.
+    /// The command's real path, links resolved.
     pub program: PathBuf,
     pub args: Vec<String>,
     /// The CLI's variable when the CLI was found, then the agent's fixed variables.
     pub env: Vec<(String, String)>,
     /// The detail line of its row.
     pub detail: String,
-    /// Absolute. The sandbox leaves out the ones that do not exist.
-    pub settings: Vec<PathBuf>,
-    pub hosts: Vec<String>,
-    pub key_vars: Vec<String>,
-    /// The real paths of the command and of the CLI, whose install roots the sandbox makes
-    /// readable.
-    pub install_paths: Vec<PathBuf>,
     /// The folders its command or CLI was found in off `PATH`, among the known install
     /// folders, which its `PATH` ends with: a script's `#!/usr/bin/env node` finds the `node`
     /// beside it.
@@ -168,25 +122,29 @@ struct Located {
     known_folder: Option<PathBuf>,
 }
 
-/// `name` on `path_var`, else in the first of `folders` that has it (`find_on_path` for a
-/// name with a `/`).
-fn locate(name: &str, path_var: Option<&OsStr>, folders: &[PathBuf]) -> Option<Located> {
-    if let Some(path) = find_on_path(name, path_var) {
+/// `name` on `path_var`, else in the first of `folders` that has it, by `lookup`'s rules
+/// (`find_on_path` alone for a path).
+fn locate(
+    lookup: &Lookup,
+    name: &str,
+    path_var: Option<&OsStr>,
+    folders: &[PathBuf],
+) -> Option<Located> {
+    if let Some(path) = lookup.find_on_path(name, path_var) {
         return Some(Located {
             path,
             known_folder: None,
         });
     }
-    if name.contains('/') {
+    if lookup.is_path(name) {
         return None;
     }
-    folders
-        .iter()
-        .find(|folder| is_executable(&folder.join(name)))
-        .map(|folder| Located {
-            path: folder.join(name),
+    folders.iter().find_map(|folder| {
+        lookup.runnable(&folder.join(name)).map(|path| Located {
+            path,
             known_folder: Some(folder.clone()),
         })
+    })
 }
 
 /// The known folders the programs were found in, each once, in the programs' order.
@@ -214,18 +172,6 @@ pub fn sign_in_hint(agent: &AgentSpec) -> Option<&'static str> {
         .map(|def| def.sign_in_hint)
 }
 
-/// Where `agent`'s CLI keeps its sign-in in the macOS keychain: its built-in agent's, `None` for
-/// the person's own agents.
-pub fn keychain_login(agent: &AgentSpec) -> Option<&'static KeychainLogin> {
-    if agent.custom {
-        return None;
-    }
-    BUILTIN_AGENTS
-        .iter()
-        .find(|def| def.id == agent.id)
-        .and_then(|def| def.keychain_login.as_ref())
-}
-
 /// Finds a built-in agent on `path_var`, else in `folders`, the known install folders. Its
 /// program alone makes it installed; its CLI goes in `cli_env` when found too. A CLI found
 /// without its adapter gives the detail line that says the adapter is missing.
@@ -235,8 +181,11 @@ pub fn resolve(
     folders: &[PathBuf],
     home: &Path,
 ) -> Resolved {
-    let cli = def.cli.and_then(|cli| locate(cli, path_var, folders));
-    let Some(program) = locate(def.program, path_var, folders) else {
+    let lookup = Lookup::native();
+    let cli = def
+        .cli
+        .and_then(|cli| locate(&lookup, cli, path_var, folders));
+    let Some(program) = locate(&lookup, def.program, path_var, folders) else {
         let detail = match (&cli, def.adapter) {
             (Some(cli), Some(adapter)) => Some(format!(
                 "{} · ACP adapter {adapter} missing",
@@ -252,11 +201,8 @@ pub fn resolve(
     let dirs = path_dirs(std::iter::once(&program).chain(&cli));
     let (program, cli) = (program.path, cli.map(|cli| cli.path));
     let mut env = Vec::new();
-    let mut install_paths = vec![real_path(&program)];
     if let (Some(cli), Some(var)) = (&cli, def.cli_env) {
-        let cli = real_path(cli);
-        env.push((var.to_owned(), cli.display().to_string()));
-        install_paths.push(cli);
+        env.push((var.to_owned(), real_path(cli).display().to_string()));
     }
     env.extend(
         def.extra_env
@@ -273,22 +219,18 @@ pub fn resolve(
     Resolved::Found(AgentSpec {
         id: def.id.to_owned(),
         name: def.name.to_owned(),
-        program: install_paths[0].clone(),
+        program: real_path(&program),
         args: owned(def.args),
         env,
         detail,
-        settings: def.settings.iter().map(|path| home.join(path)).collect(),
-        hosts: owned(def.hosts),
-        key_vars: owned(def.key_vars),
-        install_paths,
         path_dirs: dirs,
         custom: false,
     })
 }
 
 /// Finds the program of an agent the person added: the first word of its command, split as
-/// a shell splits it, on `path_var` or else in `folders`. It gets no settings, hosts or keys
-/// (spec §4.6, §4.7).
+/// this OS splits command lines (`split_command`), on `path_var` or else in `folders`. It gets
+/// no variables of its own (spec §4.6, §4.7).
 pub fn resolve_custom(
     agent: &CustomAgent,
     path_var: Option<&OsStr>,
@@ -300,13 +242,13 @@ pub fn resolve_custom(
         detail: None,
     };
     // An unclosed quote: name the first word as typed.
-    let Ok(words) = shell_words::split(&agent.command) else {
+    let Some(words) = split_command(&agent.command) else {
         return not_found(agent.command.split_whitespace().next().unwrap_or_default());
     };
     let Some((first, args)) = words.split_first() else {
         return not_found("");
     };
-    let Some(located) = locate_word(first, path_var, folders, home) else {
+    let Some(located) = locate_word(&Lookup::native(), first, path_var, folders, home) else {
         return not_found(first);
     };
     let dirs = path_dirs([&located]);
@@ -314,37 +256,90 @@ pub fn resolve_custom(
     Resolved::Found(AgentSpec {
         id: agent.id.clone(),
         name: agent.name.clone(),
-        program: program.clone(),
+        program,
         args: args.to_vec(),
         env: Vec::new(),
         detail: agent.command.clone(),
-        settings: Vec::new(),
-        hosts: Vec::new(),
-        key_vars: Vec::new(),
-        install_paths: vec![program],
         path_dirs: dirs,
         custom: true,
     })
 }
 
+/// The words of a custom agent's command, as this OS's command lines split them; `None` for
+/// an unclosed quote. On Unix as a shell splits them.
+#[cfg(not(windows))]
+fn split_command(text: &str) -> Option<Vec<String>> {
+    shell_words::split(text).ok()
+}
+
+/// The words of a custom agent's command, as this OS's command lines split them; `None` for
+/// an unclosed quote. On Windows, where paths hold backslashes, see `split_windows`.
+#[cfg(windows)]
+fn split_command(text: &str) -> Option<Vec<String>> {
+    split_windows(text)
+}
+
+/// Words split on unquoted whitespace; `"` quotes a run, and backslashes are literal except
+/// `\"` inside quotes, which is a literal quote. `None` for an unclosed quote.
+#[cfg(any(windows, test))]
+fn split_windows(text: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    // A word has begun, so `""` gives an empty word.
+    let mut started = false;
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            '\\' if quoted && chars.peek() == Some(&'"') => {
+                chars.next();
+                word.push('"');
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if quoted {
+        return None;
+    }
+    if started {
+        words.push(word);
+    }
+    Some(words)
+}
+
 /// `~/x` is a path under the home folder; any other word is what `locate` takes.
 fn locate_word(
+    lookup: &Lookup,
     word: &str,
     path_var: Option<&OsStr>,
     folders: &[PathBuf],
     home: &Path,
 ) -> Option<Located> {
     if word.starts_with("~/") {
-        let path = expand_home(word, home);
-        return is_executable(&path).then_some(Located {
-            path,
-            known_folder: None,
-        });
+        return lookup
+            .runnable(&expand_home(word, home))
+            .map(|path| Located {
+                path,
+                known_folder: None,
+            });
     }
-    locate(word, path_var, folders)
+    locate(lookup, word, path_var, folders)
 }
 
-/// `path` with its links resolved, as the sandbox must bind it; `path` itself when that fails.
+/// `path` with its links resolved; `path` itself when that fails.
 fn real_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
@@ -353,7 +348,8 @@ fn real_path(path: &Path) -> PathBuf {
 fn shown(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
         Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-        Ok(rest) => format!("~/{}", rest.display()),
+        // `~` joined, so the rest keeps this OS's separator: `~\bin\claude` on Windows.
+        Ok(rest) => Path::new("~").join(rest).display().to_string(),
         Err(_) => path.display().to_string(),
     }
 }
@@ -393,8 +389,6 @@ pub struct AgentStatus {
     /// The agent new chats start with (spec §3.5).
     pub is_default: bool,
     pub custom: bool,
-    /// Its provider's hosts, for the sandbox's Network rows. None for the person's agents.
-    pub hosts: Vec<String>,
 }
 
 /// The chosen default while it is listed, whatever its state; else the first Ready agent in
@@ -473,13 +467,6 @@ impl Listed<'_> {
             Listed::Custom(_) => None,
         }
     }
-
-    fn hosts(&self) -> Vec<String> {
-        match self {
-            Listed::Builtin(def) => owned(def.hosts),
-            Listed::Custom(_) => Vec::new(),
-        }
-    }
 }
 
 /// The built-in agents, then the person's in the order added.
@@ -526,7 +513,6 @@ pub(crate) fn status_of(
         hint,
         is_default: false,
         custom: matches!(agent, Listed::Custom(_)),
-        hosts: agent.hosts(),
     }
 }
 
@@ -576,15 +562,6 @@ mod tests {
             assert!(def.extra_env.is_empty());
         }
         for def in &BUILTIN_AGENTS {
-            // Relative to the home folder; the sandbox joins them to it.
-            assert!(
-                def.settings
-                    .iter()
-                    .all(|path| !path.starts_with('/') && !path.starts_with('~')),
-                "{}",
-                def.id
-            );
-            assert!(!def.hosts.is_empty(), "{}", def.id);
             assert!(
                 def.install_hint.ends_with(", then check again."),
                 "{}",
@@ -596,6 +573,55 @@ mod tests {
                 def.id
             );
         }
+    }
+
+    /// An empty file in `folder` that the lookup takes for a program.
+    fn program_file(folder: &Path, name: &str) -> PathBuf {
+        std::fs::create_dir_all(folder).unwrap();
+        let path = folder.join(name);
+        std::fs::write(&path, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn under_windows_rules_a_known_folder_and_a_home_path_give_the_cmd_shim() {
+        let home = tempfile::tempdir().unwrap();
+        let npm = home.path().join("npm");
+        // npm's cmd-shim writes a `sh` script beside the `.cmd` one.
+        program_file(&npm, "claude-agent-acp");
+        let cmd = program_file(&npm, "claude-agent-acp.cmd");
+        let rules = Lookup::windows(None);
+
+        let found = locate(&rules, "claude-agent-acp", None, std::slice::from_ref(&npm)).unwrap();
+        assert_eq!(found.path, cmd);
+        assert_eq!(found.known_folder, Some(npm.clone()));
+        let found = locate_word(&rules, "~/npm/claude-agent-acp", None, &[], home.path()).unwrap();
+        assert_eq!(found.path, cmd);
+        assert_eq!(found.known_folder, None);
+        // A path is not looked for in the known folders.
+        assert!(locate(
+            &rules,
+            r"npm\claude-agent-acp",
+            None,
+            &[home.path().to_path_buf()]
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_home_folder_is_shown_with_this_os_s_separator() {
+        let home = std::env::temp_dir();
+        let path = home.join("bin").join("claude");
+        let separator = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            shown(&path, &home),
+            format!("~{separator}bin{separator}claude")
+        );
     }
 
     /// Unix paths: on Windows `/home/me` is not absolute.
@@ -641,12 +667,6 @@ mod tests {
                 hint: None,
                 is_default: false,
                 custom: false,
-                hosts: vec![
-                    "api.anthropic.com".to_owned(),
-                    "claude.ai".to_owned(),
-                    "platform.claude.com".to_owned(),
-                    "claude.com".to_owned(),
-                ],
             }
         );
         let ready = status_of(&claude, &found(detail), Some(AgentState::Ready));
@@ -689,7 +709,7 @@ mod tests {
 
     #[test]
     fn a_running_agents_sign_in_hint_is_its_built_in_ones_and_none_for_the_persons_own() {
-        let mut agent = crate::agents::sandbox::test_agent(std::path::Path::new("/bin/claude"));
+        let mut agent = crate::agents::spawn::test_agent(std::path::Path::new("/bin/claude"));
         agent.id = "claude".to_owned();
         assert_eq!(sign_in_hint(&agent), None);
         agent.custom = false;
@@ -702,26 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn only_claude_keeps_its_sign_in_in_the_keychain() {
-        let mut agent = crate::agents::sandbox::test_agent(std::path::Path::new("/bin/claude"));
-        agent.id = "claude".to_owned();
-        assert_eq!(keychain_login(&agent), None);
-        agent.custom = false;
-        assert_eq!(
-            keychain_login(&agent),
-            Some(&KeychainLogin {
-                service: "Claude Code-credentials",
-                var: "CLAUDE_CODE_OAUTH_TOKEN",
-                hint:
-                    "Run claude in a terminal to renew its sign-in, then send your message again.",
-            })
-        );
-        agent.id = "codex".to_owned();
-        assert_eq!(keychain_login(&agent), None);
-    }
-
-    #[test]
-    fn a_custom_agent_shows_its_command_and_has_no_sign_in_hint_or_hosts() {
+    fn a_custom_agent_shows_its_command_and_has_no_sign_in_hint() {
         let agent = CustomAgent {
             id: "custom-0a1b2c3d".to_owned(),
             name: "Mine".to_owned(),
@@ -736,7 +737,6 @@ mod tests {
         assert_eq!(signed_out.hint, None);
         assert_eq!(signed_out.detail.as_deref(), Some("my-agent --acp"));
         assert!(signed_out.custom);
-        assert!(signed_out.hosts.is_empty());
 
         let missing = Resolved::NotInstalled {
             hint: "No such command: my-agent".to_owned(),
@@ -757,7 +757,6 @@ mod tests {
             hint: None,
             is_default: false,
             custom: false,
-            hosts: Vec::new(),
         }
     }
 
@@ -874,7 +873,6 @@ mod tests {
         let spec = spec_of(home.resolve("opencode", &[".local/bin", ".opencode/bin"]));
 
         assert_eq!(spec.program, opencode);
-        assert_eq!(spec.install_paths, [opencode]);
         assert_eq!(spec.detail, "~/.opencode/bin/opencode · built-in ACP");
         assert_eq!(spec.path_dirs, [home.folder(".opencode/bin")]);
     }
@@ -903,7 +901,6 @@ mod tests {
             spec_of(home.resolve("claude", &[".local/bin", ".nvm/versions/node/v22.11.0/bin"]));
 
         assert_eq!(spec.program, adapter);
-        assert_eq!(spec.install_paths, [adapter, cli.clone()]);
         assert_eq!(
             spec.env[0],
             (
@@ -998,5 +995,62 @@ mod tests {
                 detail: None,
             }
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_commands_keep_backslashes_and_quotes() {
+        assert_eq!(
+            split_command(r#""C:\Program Files\nodejs\claude-agent-acp.cmd" --flag"#).unwrap(),
+            [r"C:\Program Files\nodejs\claude-agent-acp.cmd", "--flag"]
+        );
+        assert_eq!(
+            split_command(r"D:\a\skopos\target\debug\skopos-fakeagent.exe --script D:\a\s.json")
+                .unwrap(),
+            [
+                r"D:\a\skopos\target\debug\skopos-fakeagent.exe",
+                "--script",
+                r"D:\a\s.json"
+            ]
+        );
+        assert!(split_command(r#""unterminated"#).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_commands_split_as_a_shell_splits_them() {
+        assert_eq!(
+            split_command("my-agent --acp 'a b'").unwrap(),
+            ["my-agent", "--acp", "a b"]
+        );
+    }
+
+    /// Windows' rules, on every OS.
+    #[test]
+    fn windows_words_split_on_unquoted_whitespace_and_keep_backslashes() {
+        assert_eq!(
+            split_windows(r#""C:\Program Files\nodejs\claude-agent-acp.cmd" --flag"#).unwrap(),
+            [r"C:\Program Files\nodejs\claude-agent-acp.cmd", "--flag"]
+        );
+        assert_eq!(
+            split_windows(r"D:\a\skopos\target\debug\skopos-fakeagent.exe --script D:\a\s.json")
+                .unwrap(),
+            [
+                r"D:\a\skopos\target\debug\skopos-fakeagent.exe",
+                "--script",
+                r"D:\a\s.json"
+            ]
+        );
+        assert_eq!(
+            split_windows("  agent\t--mode \"a b\"c  ''  ").unwrap(),
+            ["agent", "--mode", "a bc", "''"]
+        );
+        assert_eq!(
+            split_windows(r#"agent "say \"hi\"" "" C:\dir\"#).unwrap(),
+            ["agent", r#"say "hi""#, "", r"C:\dir\"]
+        );
+        assert_eq!(split_windows("").unwrap(), Vec::<String>::new());
+        assert!(split_windows(r#""unterminated"#).is_none());
+        assert!(split_windows(r#"agent "a \""#).is_none());
     }
 }

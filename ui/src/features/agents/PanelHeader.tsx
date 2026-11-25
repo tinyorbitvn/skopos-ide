@@ -1,21 +1,11 @@
-import { useState } from "react";
 import { clusterStatus } from "../../app/clusterStatus";
 import { IS_MAC, shortKeys } from "../../app/shortcuts";
-import { openPath } from "../../app/tabs/navigation";
 import { Badge, IconButton, StatusDot } from "../../design";
-import {
-  ChevronDown,
-  History,
-  MessageSquarePlus,
-  ShieldCheck,
-  X,
-} from "../../design/icons";
+import { ChevronDown, History, MessageSquarePlus, X } from "../../design/icons";
 import { useAgentChat } from "../../stores/agentChat";
 import { useAgents } from "../../stores/agents";
 import { useCatalog } from "../../stores/catalog";
-import { settingsPath } from "../settings/paths";
 import styles from "./AgentPanel.module.css";
-import { CHANGES_LABELS } from "./agentText";
 import { scopeLabel } from "./chatModel";
 
 export type PopoverName = "scope" | "agent" | null;
@@ -44,6 +34,8 @@ export function PanelHeader(props: {
     statuses?.find((s) => s.id === picked)?.name ??
     statuses?.find((s) => s.isDefault)?.name ??
     "Agent";
+  const settings = useAgentChat((s) => s.clusterSettings);
+  const clusterId = scope && !scope.global ? scope.clusters[0] : undefined;
   const chat = useAgentChat.getState();
   const toggle = (name: Exclude<PopoverName, null>) =>
     props.setPopover(props.popover === name ? null : name);
@@ -79,6 +71,11 @@ export function PanelHeader(props: {
         <span className={styles.ellipsis}>{shownAgent}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </button>
+      {clusterId && settings?.changes === "readOnly" ? (
+        <span data-testid="agent-read-only">
+          <Badge tone="neutral">Read only</Badge>
+        </span>
+      ) : null}
       <div className={styles.grow} />
       <IconButton
         label="New chat"
@@ -99,79 +96,6 @@ export function PanelHeader(props: {
         onClick={() => chat.closePanel()}
         data-testid="agent-close"
       />
-    </div>
-  );
-}
-
-/** The sandbox line (spec §3.2) and its details. */
-export function SandboxLine() {
-  const scope = useAgentChat((s) => s.scope);
-  const settings = useAgentChat((s) => s.clusterSettings);
-  const [open, setOpen] = useState(false);
-  const clusterId = scope && !scope.global ? scope.clusters[0] : undefined;
-  return (
-    <div className={styles.sandbox} data-testid="agent-sandbox-line">
-      <div className={styles.sandboxRow}>
-        <span className={styles.shield}>
-          <ShieldCheck size={14} aria-hidden="true" />
-        </span>
-        <span>Sandboxed</span>
-        {clusterId && settings?.changes === "readOnly" ? (
-          <span data-testid="agent-read-only">
-            <Badge tone="neutral">Read only</Badge>
-          </span>
-        ) : null}
-        <button
-          type="button"
-          className={styles.link}
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-          data-testid="agent-sandbox-details"
-        >
-          Details
-        </button>
-      </div>
-      {open ? (
-        <div className={styles.details}>
-          <p>
-            The agent runs in its own folder. It can read its own settings,
-            where it keeps your sign-in, but not the rest of your home folder,
-            your kubeconfig or your keys. It can reach only its model provider
-            and SkoposIDE, and it reaches your clusters only through SkoposIDE's
-            tools.
-          </p>
-          {clusterId ? (
-            <>
-              {settings ? (
-                <ul
-                  className={styles.settingsList}
-                  aria-label="This cluster's agent settings"
-                >
-                  <li>{`Changes: ${CHANGES_LABELS[settings.changes]}`}</li>
-                  <li>
-                    {settings.namespaces
-                      ? `Namespaces: ${settings.namespaces.join(", ")}`
-                      : "Namespaces: all"}
-                  </li>
-                  <li>{`Secret values: ${settings.secretValues ? "readable" : "hidden"}`}</li>
-                  <li>{`Commands in containers: ${settings.exec ? "on" : "off"}`}</li>
-                </ul>
-              ) : null}
-              <button
-                type="button"
-                className={styles.link}
-                onClick={() =>
-                  openPath(settingsPath(clusterId, "agent"), "current")
-                }
-              >
-                Cluster settings
-              </button>
-            </>
-          ) : (
-            <p>Each cluster's own agent settings apply.</p>
-          )}
-        </div>
-      ) : null}
     </div>
   );
 }

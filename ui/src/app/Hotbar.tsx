@@ -35,7 +35,6 @@ import {
   Settings,
   TriangleAlert,
 } from "../design/icons";
-import { agentsSupported } from "../features/agents/supported";
 import { settingsPath } from "../features/settings/paths";
 import {
   checkForUpdates,
@@ -80,16 +79,12 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
             label: "Settings",
             onSelect: () => void openPath(settingsPath(cluster.id), "current"),
           },
-          ...(agentsSupported()
-            ? [
-                {
-                  id: "agent-settings",
-                  label: "Agent settings",
-                  onSelect: () =>
-                    void openPath(settingsPath(cluster.id, "agent"), "current"),
-                },
-              ]
-            : []),
+          {
+            id: "agent-settings",
+            label: "Agent settings",
+            onSelect: () =>
+              void openPath(settingsPath(cluster.id, "agent"), "current"),
+          },
           live
             ? {
                 id: "disconnect",

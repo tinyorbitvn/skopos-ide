@@ -1,4 +1,4 @@
-import { say, tool, writeFakeAgentScript } from "../helpers/fakeagent";
+import { permission, say, tool, writeFakeAgentScript } from "../helpers/fakeagent";
 import {
   createTestNamespace,
   deleteTestNamespace,
@@ -8,6 +8,7 @@ import {
   byTestId,
   clickWhenShown,
   editorContaining,
+  gone,
   hotbarItem,
   newInDock,
   openCluster,
@@ -140,6 +141,16 @@ async function clickInLastCard(testId: string): Promise<void> {
 /** Waits for the chat to be ready, then sends `message`. */
 async function send(message: string): Promise<void> {
   await shown("agent-new-chat-title", 60000);
+  const box = await byTestId("agent-message");
+  await box.setValue(message);
+  const sendButton = await byTestId("agent-send");
+  await sendButton.waitForEnabled({ timeout: 15000 });
+  await sendButton.click();
+}
+
+/** Sends `message` in the open chat once its last turn has ended. */
+async function sendNext(message: string): Promise<void> {
+  await gone("agent-working", 60000);
   const box = await byTestId("agent-message");
   await box.setValue(message);
   const sendButton = await byTestId("agent-send");
@@ -331,5 +342,37 @@ describe("agents", () => {
       "the proposal was never applied",
     );
     expect(await kubectl(["-n", NS, "get", "configmap", "e2e-proposed", "-o", "jsonpath={.data.source}"])).toBe("agent");
+  });
+
+  it("asks before the agent runs its own command and tells it the answer", async () => {
+    writeFakeAgentScript([
+      [permission("Run kubectl get pods", "kubectl get pods"), say("Allowed.")],
+      [permission("Delete the folder", "rm -rf build"), say("Rejected.")],
+    ]);
+    await openCluster(KIND);
+    await shown("agent-panel");
+    await newChat();
+    await send("List the pods.");
+    await shown("agent-permission");
+    await until(
+      async () => (await text("agent-permission")).includes("kubectl get pods"),
+      "the card did not show the command",
+    );
+    await until(
+      async () => (await text("agent-working")).includes("Waiting for you"),
+      "the agent did not say it waits",
+    );
+    await clickWhenShown("agent-permission-allow_once");
+    await until(
+      async () => (await text("agent-stream")).includes("Allowed."),
+      "no answer after Allow",
+    );
+    expect(await text("agent-permission")).toContain("Allowed once");
+    await sendNext("Clean up.");
+    await clickWhenShown("agent-permission-reject_once");
+    await until(
+      async () => (await text("agent-stream")).includes("Rejected once"),
+      "the card never said Rejected once",
+    );
   });
 });

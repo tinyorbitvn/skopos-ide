@@ -9,7 +9,7 @@ import { AgentPopover } from "./AgentPopover";
 import { ChatHistory } from "./ChatHistory";
 import { ChatStream } from "./ChatStream";
 import { Composer } from "./Composer";
-import { PanelHeader, type PopoverName, SandboxLine } from "./PanelHeader";
+import { PanelHeader, type PopoverName } from "./PanelHeader";
 import {
   ConnectBanner,
   FailureState,
@@ -18,7 +18,6 @@ import {
   StartingState,
 } from "./PanelStates";
 import { ScopePopover } from "./ScopePopover";
-import { agentsSupported } from "./supported";
 
 function OpenPanel() {
   const page = useCurrentCluster();
@@ -78,6 +77,7 @@ function OpenPanel() {
         past={past}
         undone={undone}
         onAnswer={(cardId, answer) => chat.answer(cardId, answer)}
+        onChoose={(cardId, optionId) => chat.choose(cardId, optionId)}
         onUndo={(card) => void chat.undo(card)}
         onNewChat={() => void chat.newChat(pageId)}
       />
@@ -102,7 +102,6 @@ function OpenPanel() {
         scopeRef={scopeButton}
         agentRef={agentButton}
       />
-      <SandboxLine />
       <div className={styles.body}>{body}</div>
       {inChat && cannotReopen !== null ? (
         <ReopenBar
@@ -138,10 +137,10 @@ function OpenPanel() {
 
 /**
  * The agent panel (spec §3.2): a column on the right of the shell's body. It starts closed
- * in each window and keeps its chat while closed. No agent UI exists on Windows.
+ * in each window and keeps its chat while closed.
  */
 export function AgentPanel() {
   const open = useAgentChat((s) => s.open);
-  if (!agentsSupported() || !open) return null;
+  if (!open) return null;
   return <OpenPanel />;
 }

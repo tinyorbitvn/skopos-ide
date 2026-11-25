@@ -1,10 +1,9 @@
 //! The ACP client and the probes against the scripted fake agent (`skopos-fakeagent`),
-//! started without the sandbox (R2). The fake names its script and log on its command line,
-//! because an agent gets only the environment of spec §4.6.
-#![cfg(unix)]
+//! started natively, on every OS. The fake names its script and log on its command line, so a
+//! test does not depend on the environment it runs in.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,10 +11,10 @@ use serde_json::{json, Value};
 use skopos_core::agents::acp::{
     AcpSession, AcpUpdate, McpEntry, PlanEntry, PlanStatus, StartError, ToolStatus, TurnEnd,
 };
+use skopos_core::agents::permissions::{PermissionState, Permissions};
 use skopos_core::agents::probe::probe_within;
 use skopos_core::agents::prompt::{hidden_block, object_line, PromptContext};
 use skopos_core::agents::registry::AgentStatus;
-use skopos_core::agents::sandbox::{direct_command, SandboxSpec};
 use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::paths::AppPaths;
@@ -38,7 +37,7 @@ impl Fake {
     fn new(script: Value) -> Fake {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("script.json"), script.to_string()).unwrap();
-        for dir in ["work", "run/tmp", "home", "bin"] {
+        for dir in ["work", "home", "bin"] {
             std::fs::create_dir_all(root.path().join(dir)).unwrap();
         }
         Fake { root }
@@ -61,39 +60,61 @@ impl Fake {
         ]
     }
 
-    /// The fake agent as a chat starts it with the sandbox off.
+    /// The fake agent in its work folder, with a small environment of its own.
     fn command(&self) -> Command {
-        direct_command(&SandboxSpec {
-            agent_dir: self.work(),
-            run_dir: self.path("run"),
-            tmp_dir: self.path("run/tmp"),
-            home: self.path("home"),
-            read_write: Vec::new(),
-            read_only: Vec::new(),
-            linked: Vec::new(),
-            hidden_files: Vec::new(),
-            env: vec![
-                ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
-                ("HOME".to_owned(), self.path("home").display().to_string()),
-            ],
-            app_binary: PathBuf::from(AGENT_HOST),
-            program: PathBuf::from(FAKE_AGENT),
-            args: self.args(),
-        })
+        let mut command = Command::new(FAKE_AGENT);
+        command.args(self.args()).env_clear();
+        // Windows starts no networking process without it.
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", root);
+        }
+        command
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", self.path("home"))
+            .current_dir(self.work())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command
     }
 
     /// The command line of a custom agent that runs this fake.
     fn command_line(&self) -> String {
         let mut words = vec![FAKE_AGENT.to_owned()];
         words.extend(self.args());
-        shell_words::join(words)
+        command_line(&words)
     }
 
     /// A shell script in the fake's `bin/`.
+    #[cfg(unix)]
     fn executable(&self, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
         let path = self.path("bin").join(name);
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    /// A batch file `<name>.cmd` in the fake's `bin/` that does what the shell `body` does:
+    /// `echo <text> >&2` lines and an `exit <code>` line.
+    #[cfg(windows)]
+    fn executable(&self, name: &str, body: &str) -> PathBuf {
+        let path = self.path("bin").join(format!("{name}.cmd"));
+        let mut script = "@echo off\r\n".to_owned();
+        for line in body.lines() {
+            if let Some(text) = line
+                .strip_prefix("echo ")
+                .and_then(|l| l.strip_suffix(" >&2"))
+            {
+                script.push_str(&format!(">&2 echo {text}\r\n"));
+            } else if let Some(code) = line.strip_prefix("exit ") {
+                script.push_str(&format!("exit /b {code}\r\n"));
+            } else {
+                panic!("no batch line for {line:?}");
+            }
+        }
+        std::fs::write(&path, script).unwrap();
         path
     }
 
@@ -132,6 +153,21 @@ impl Fake {
     }
 }
 
+/// `words` as a custom agent's command: as a shell quotes them on Unix; on Windows each in
+/// double quotes, since backslashes there are literal.
+fn command_line<S: AsRef<str>>(words: &[S]) -> String {
+    if cfg!(windows) {
+        let quoted: Vec<String> = words
+            .iter()
+            .map(|word| format!("\"{}\"", word.as_ref()))
+            .collect();
+        quoted.join(" ")
+    } else {
+        shell_words::join(words.iter().map(AsRef::as_ref))
+    }
+}
+
+#[cfg(unix)]
 fn alive(pid: u64) -> bool {
     std::process::Command::new("/bin/sh")
         .arg("-c")
@@ -139,6 +175,17 @@ fn alive(pid: u64) -> bool {
         .status()
         .unwrap()
         .success()
+}
+
+#[cfg(windows)]
+fn alive(pid: u64) -> bool {
+    let filter = format!("PID eq {pid}");
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", filter.as_str(), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap();
+    // A row is `"name","<pid>",…`; without one tasklist prints an INFO line.
+    String::from_utf8_lossy(&out.stdout).contains(&format!(",\"{pid}\","))
 }
 
 /// A `skopos` entry like a chat's, aimed at a port where nothing listens.
@@ -165,9 +212,11 @@ async fn start(fake: &Fake) -> (AcpSession, mpsc::Receiver<AcpUpdate>) {
     let (updates, received) = mpsc::channel(64);
     let started = within(AcpSession::start(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,
+        None,
     ))
     .await;
     match started {
@@ -178,7 +227,16 @@ async fn start(fake: &Fake) -> (AcpSession, mpsc::Receiver<AcpUpdate>) {
 
 async fn start_error(command: Command, cwd: &Path) -> StartError {
     let (updates, _received) = mpsc::channel(64);
-    match within(AcpSession::start(command, cwd, mcp_entry(), updates)).await {
+    match within(AcpSession::start(
+        command,
+        "Fake",
+        cwd,
+        mcp_entry(),
+        updates,
+        None,
+    ))
+    .await
+    {
         Ok(session) => {
             session.close().await;
             panic!("the agent started")
@@ -204,13 +262,12 @@ fn own_tool(status: ToolStatus, details: &str) -> AcpUpdate {
     }
 }
 
-async fn core_without_sandbox() -> (AppCore, TempDir) {
+async fn test_core() -> (AppCore, TempDir) {
     let root = tempfile::tempdir().unwrap();
     let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
     let core = AppCore::start_with_kubeconfig_env(paths, None)
         .await
         .unwrap();
-    core.agent_sandbox_off_for_test();
     (core, root)
 }
 
@@ -283,19 +340,62 @@ async fn a_turn_streams_the_plan_the_text_and_the_agents_own_tool() {
 }
 
 #[tokio::test]
-async fn permission_requests_are_answered_with_allow_once() {
+async fn a_permission_request_waits_for_the_answer_given_through_permissions() {
+    let fake = Fake::new(json!({ "turns": [ { "steps": [
+        { "ownTool": { "title": "Run ls", "permission": true } }
+    ] } ] }));
+    let (cards_sender, mut cards) = mpsc::channel(8);
+    let permissions = Permissions::new(cards_sender);
+    let (updates, mut received) = mpsc::channel(64);
+    let started = within(AcpSession::start(
+        fake.command(),
+        "Fake",
+        &fake.work(),
+        mcp_entry(),
+        updates,
+        Some(permissions.clone()),
+    ))
+    .await;
+    let session = match started {
+        Ok(session) => session,
+        Err(error) => panic!("the fake agent did not start: {error:?}"),
+    };
+    let prompt = session.prompt(vec!["List the files".to_owned()]);
+    let answer = async {
+        let card = cards.recv().await.expect("a permission card");
+        assert_eq!(card.state, PermissionState::Waiting);
+        assert_eq!(card.tool_call_id, "own-1");
+        assert_eq!(card.title, "Run ls");
+        assert!(fake.permission_answers().is_empty());
+        permissions.answer(&card.id, "allow_always").unwrap();
+    };
+    let (end, ()) = within(async { tokio::join!(prompt, answer) }).await;
+    assert_eq!(end, TurnEnd::EndTurn);
+    assert_eq!(fake.permission_answers(), vec![json!("allow_always")]);
+    assert_eq!(
+        drain(&mut received),
+        vec![
+            own_tool(ToolStatus::Pending, ""),
+            own_tool(ToolStatus::Completed, "ran Run ls"),
+        ]
+    );
+    session.close().await;
+}
+
+#[tokio::test]
+async fn without_permissions_a_permission_request_is_cancelled() {
     let fake = Fake::new(json!({ "turns": [ { "steps": [
         { "ownTool": { "title": "Run ls", "permission": true } }
     ] } ] }));
     let (session, mut updates) = start(&fake).await;
     let end = within(session.prompt(vec!["List the files".to_owned()])).await;
     assert_eq!(end, TurnEnd::EndTurn);
-    assert_eq!(fake.permission_answers(), vec![json!("allow_once")]);
+    assert_eq!(fake.permission_answers(), vec![json!("cancelled")]);
     assert_eq!(
         drain(&mut updates),
         vec![
             own_tool(ToolStatus::Pending, ""),
-            own_tool(ToolStatus::Completed, "ran Run ls"),
+            own_tool(ToolStatus::Failed, "refused Run ls"),
         ]
     );
     session.close().await;
@@ -328,6 +428,8 @@ async fn the_prompt_blocks_reach_the_agent_in_order() {
     let block = hidden_block(&PromptContext {
         clusters: vec![("prod".to_owned(), ClusterAgentSettings::default())],
         global: false,
+        kubeconfig: PathBuf::from("/run/chat/kubeconfig"),
+        outside: vec![],
     });
     let object = object_line("Pod", Some("payments"), "api-1", "prod");
     let end = within(session.prompt(vec![
@@ -469,10 +571,12 @@ async fn a_chat_reopens_with_session_load_when_the_agent_can_load() {
     let (updates, mut received) = mpsc::channel(64);
     let loaded = within(AcpSession::load(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,
         "fake-session-7",
+        None,
     ))
     .await;
     let session = match loaded {
@@ -506,10 +610,12 @@ async fn load_is_refused_when_the_agent_cannot_load() {
     let (updates, _received) = mpsc::channel(64);
     let loaded = within(AcpSession::load(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,
         "fake-session-7",
+        None,
     ))
     .await;
     match loaded {
@@ -539,7 +645,7 @@ async fn closing_a_session_ends_the_agent_and_its_updates() {
 #[tokio::test]
 async fn a_probe_marks_an_agent_that_answers_ready() {
     let fake = Fake::new(json!({}));
-    let (core, root) = core_without_sandbox().await;
+    let (core, root) = test_core().await;
     let added = core.agent_custom_add("Fake", &fake.command_line()).unwrap();
     assert_eq!(state(&added), json!({ "state": "unknown" }));
 
@@ -569,7 +675,7 @@ async fn a_probe_marks_an_agent_that_answers_ready() {
 #[tokio::test]
 async fn a_probe_reports_sign_in_needed() {
     let fake = Fake::new(json!({ "auth": "required" }));
-    let (core, _root) = core_without_sandbox().await;
+    let (core, _root) = test_core().await;
     let added = core.agent_custom_add("Fake", &fake.command_line()).unwrap();
     let probed = within(core.agent_probe(&added.id)).await.unwrap();
     assert_eq!(state(&probed), json!({ "state": "signInNeeded" }));
@@ -582,9 +688,9 @@ async fn a_probe_of_an_agent_that_exits_reports_its_last_stderr_line() {
         "broken-agent",
         "echo starting >&2\necho broken setup. >&2\nexit 1",
     );
-    let (core, _root) = core_without_sandbox().await;
+    let (core, _root) = test_core().await;
     let added = core
-        .agent_custom_add("Broken", &program.display().to_string())
+        .agent_custom_add("Broken", &command_line(&[program.display().to_string()]))
         .unwrap();
     let probed = within(core.agent_probe(&added.id)).await.unwrap();
     assert_eq!(
@@ -596,8 +702,15 @@ async fn a_probe_of_an_agent_that_exits_reports_its_last_stderr_line() {
 #[tokio::test]
 async fn a_probe_with_no_answer_gives_up_after_the_limit() {
     let fake = Fake::new(json!({}));
-    let mut command = Command::new("/bin/sleep");
-    command.arg("30");
+    let command = if cfg!(windows) {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/C", "ping -n 30 127.0.0.1 > NUL"]);
+        command
+    } else {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30");
+        command
+    };
     let started = Instant::now();
     let state = probe_within(command, &fake.work(), "Sleepy", Duration::from_secs(2)).await;
     assert_eq!(
@@ -611,9 +724,9 @@ async fn a_probe_with_no_answer_gives_up_after_the_limit() {
 async fn probing_an_agent_whose_command_is_gone_needs_no_probe() {
     let fake = Fake::new(json!({}));
     let program = fake.executable("gone-agent", "exit 0");
-    let (core, root) = core_without_sandbox().await;
+    let (core, root) = test_core().await;
     let added = core
-        .agent_custom_add("Gone", &program.display().to_string())
+        .agent_custom_add("Gone", &command_line(&[program.display().to_string()]))
         .unwrap();
     std::fs::remove_file(&program).unwrap();
     let probed = within(core.agent_probe(&added.id)).await.unwrap();
@@ -624,7 +737,7 @@ async fn probing_an_agent_whose_command_is_gone_needs_no_probe() {
 
 #[tokio::test]
 async fn probing_an_unknown_agent_is_not_found() {
-    let (core, _root) = core_without_sandbox().await;
+    let (core, _root) = test_core().await;
     match core.agent_probe("nobody").await {
         Ok(status) => panic!("probed {}", status.id),
         Err(error) => assert_eq!(error.code, ErrorCode::NotFound),

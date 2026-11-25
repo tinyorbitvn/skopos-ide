@@ -108,7 +108,6 @@ test("the agent popover lists states, picks an agent and links to settings", asy
         hint: null,
         isDefault: true,
         custom: false,
-        hosts: [],
       },
       {
         id: "codex",
@@ -118,7 +117,6 @@ test("the agent popover lists states, picks an agent and links to settings", asy
         hint: null,
         isDefault: false,
         custom: false,
-        hosts: [],
       },
     ],
   });

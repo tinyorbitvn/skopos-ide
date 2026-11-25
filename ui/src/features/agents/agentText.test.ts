@@ -3,7 +3,6 @@ import {
   agentStateView,
   CHANGES_LABELS,
   countText,
-  sandboxReason,
   whenText,
 } from "./agentText";
 
@@ -36,21 +35,6 @@ test("the three change settings have the spec's labels", () => {
     readOnly: "Read only",
     dontAsk: "Don't ask",
   });
-});
-
-test("sandbox reasons name bubblewrap on Linux and Seatbelt on macOS", () => {
-  expect(sandboxReason({ status: "notInstalled" }, false)).toBe(
-    "bubblewrap is not installed. Install the bwrap command, then check again.",
-  );
-  expect(sandboxReason({ status: "cannotStart", error: "denied" }, false)).toBe(
-    "bubblewrap could not start a sandbox: denied",
-  );
-  expect(sandboxReason({ status: "cannotStart", error: "denied" }, true)).toBe(
-    "Seatbelt could not start a sandbox: denied",
-  );
-  expect(
-    sandboxReason({ status: "ready", kind: "bubblewrap" }, false),
-  ).toBeNull();
 });
 
 test("counts use the singular for one", () => {

@@ -69,7 +69,6 @@ import type { Prefs } from "./generated/Prefs";
 import type { Propagation } from "./generated/Propagation";
 import type { ReachEvent } from "./generated/ReachEvent";
 import type { ResourceRef } from "./generated/ResourceRef";
-import type { SandboxStatus } from "./generated/SandboxStatus";
 import type { SavedKubeconfig } from "./generated/SavedKubeconfig";
 import type { SecretChange } from "./generated/SecretChange";
 import type { SecretValue } from "./generated/SecretValue";
@@ -832,10 +831,10 @@ export const api = {
   updateSkip: (version: string) => call<void>("update_skip", { version }),
   /**
    * The built-in agents, then the custom ones, each with its state: `unknown` until a
-   * probe ran. Every agent and chat call rejects with Unsupported on Windows.
+   * probe ran.
    */
   agentsStatus: () => call<AgentStatus[]>("agents_status"),
-  /** Starts the agent in the sandbox once to learn its state, then ends it. */
+  /** Starts the agent once to learn its state, then ends it. */
   agentProbe: (id: string) => call<AgentStatus>("agent_probe", { id }),
   /** Rejects with InvalidInput when the name is taken or the command is not found. */
   agentCustomAdd: (name: string, command: string) =>
@@ -843,19 +842,6 @@ export const api = {
   agentCustomRemove: (id: string) => call<void>("agent_custom_remove", { id }),
   agentDefaultSet: (id: string) => call<void>("agent_default_set", { id }),
   agentPrefs: () => call<AgentPrefs>("agent_prefs"),
-  /** Gives the prefs as saved; rejects with InvalidInput for a domain it refuses. */
-  agentDomainAdd: (domain: string) =>
-    call<AgentPrefs>("agent_domain_add", { domain }),
-  agentDomainRemove: (domain: string) =>
-    call<AgentPrefs>("agent_domain_remove", { domain }),
-  /** `~/x` or `/x`; rejects with InvalidInput for a folder that does not exist. */
-  agentFolderAdd: (folder: string) =>
-    call<AgentPrefs>("agent_folder_add", { folder }),
-  agentFolderRemove: (folder: string) =>
-    call<AgentPrefs>("agent_folder_remove", { folder }),
-  /** Kept for the app run; `refresh` checks again. */
-  agentSandboxStatus: (refresh: boolean) =>
-    call<SandboxStatus>("agent_sandbox_status", { refresh }),
   /** Saves only this setting of the cluster, without the side effects of a full save. */
   clusterAgentChangesSet: (id: string, changes: AgentChanges) =>
     call<void>("cluster_agent_changes_set", { id, changes }),
@@ -892,6 +878,9 @@ export const api = {
   /** NotFound when no change card waits under `cardId`. */
   chatAnswer: (chatId: string, cardId: string, answer: ChangeAnswer) =>
     call<void>("chat_answer", { chatId, cardId, answer }),
+  /** The person's choice on one of the agent's permission requests. */
+  chatPermission: (chatId: string, cardId: string, optionId: string) =>
+    call<void>("chat_permission", { chatId, cardId, optionId }),
   /** The person's answer to a YAML tab proposal. */
   chatProposalAnswer: (chatId: string, proposalId: string, accepted: boolean) =>
     call<void>("chat_proposal_answer", { chatId, proposalId, accepted }),

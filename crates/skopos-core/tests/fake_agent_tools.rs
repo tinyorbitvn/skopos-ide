@@ -1,10 +1,10 @@
 //! The `skopos` MCP server's read tools against the fake API server, through an in-process
 //! MCP client over a duplex pipe, as an agent calls them. The Helm tools run a fake `helm`
-//! shell script, so this file runs on Unix.
-#![cfg(unix)]
+//! shell script, so their test runs on Unix.
 
 mod support;
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,12 +25,15 @@ use skopos_core::agents::mcp::{
 use skopos_core::app_core::AppCore;
 use skopos_core::cluster::ConnectionState;
 use skopos_core::error::{CoreResult, ErrorCode};
+#[cfg(unix)]
 use skopos_core::helm::HelmHomes;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::prefs::ClusterAgentSettings;
+#[cfg(unix)]
 use skopos_core::tools::ToolsConfig;
 use skopos_fakekube::{DenyRule, FakeKubeConfig, FakeLogLine};
 use support::connected_fake;
+#[cfg(unix)]
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -275,14 +278,18 @@ fn pod_metrics(namespace: &str, name: &str, cpu: &str, memory: &str) -> Value {
     })
 }
 
+#[cfg(unix)]
 const HELM_LIST: &str = r#"[{"name":"web","namespace":"shop","revision":"2","updated":"2026-11-09 09:25:49.373528822 +0700 +07","status":"deployed","chart":"skopos-fixture-0.2.0","app_version":"1.1.0"},{"name":"api","namespace":"default","revision":"1","updated":"2026-11-09 09:20:00 +0700 +07","status":"failed","chart":"skopos-fixture-0.1.0","app_version":"1.0.0"}]"#;
 
+#[cfg(unix)]
 const HELM_STATUS: &str = r#"{"name":"web","info":{"first_deployed":"2026-11-09T09:25:49.373528822+07:00","last_deployed":"2026-11-09T09:30:12.1+07:00","description":"Upgrade complete","status":"deployed","notes":"Thanks for installing."},"manifest":"---\n# Source: fixture/templates/secret.yaml\napiVersion: v1\nkind: Secret\nmetadata:\n  name: web-secret\ndata:\n  password: c2VjcmV0\n---\n# Source: fixture/templates/configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: web-config\ndata:\n  greeting: hello\n","version":2,"namespace":"shop"}"#;
 
+#[cfg(unix)]
 const HELM_HISTORY: &str = r#"[{"revision":1,"updated":"2026-11-09T09:25:49.373528822+07:00","status":"superseded","chart":"skopos-fixture-0.1.0","app_version":"1.0.0","description":"Install complete"},{"revision":2,"updated":"2026-11-09T09:30:12.1+07:00","status":"deployed","chart":"skopos-fixture-0.2.0","app_version":"1.1.0","description":"Upgrade complete"}]"#;
 
 /// Makes `core` run a fake helm 4 that prints the fixtures above, with helm's folders in
 /// the returned temp dir.
+#[cfg(unix)]
 fn fake_helm(core: &AppCore) -> TempDir {
     let root = tempfile::tempdir().unwrap();
     let bin = root.path().join("bin");
@@ -1144,6 +1151,7 @@ async fn get_usage_reads_pods_of_a_namespace_and_nodes() {
     assert_eq!(documents(&text(&result))[0]["name"], "dns");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn the_helm_tools_list_and_read_releases() {
     let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;

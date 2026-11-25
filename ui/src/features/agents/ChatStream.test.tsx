@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { expect, test, vi } from "vitest";
 import type { ChatItem } from "../../ipc/generated/ChatItem";
+import type { PermissionCard } from "../../ipc/generated/PermissionCard";
 import { mockBackend } from "../../test/ipc";
 import { ChatStream, type ChatStreamProps } from "./ChatStream";
 
@@ -15,6 +16,7 @@ function show(items: ChatItem[], more: Partial<ChatStreamProps> = {}) {
     past: [],
     undone: [],
     onAnswer: vi.fn(async () => {}),
+    onChoose: vi.fn(async () => {}),
     onUndo: vi.fn(),
     onNewChat: vi.fn(),
     ...more,
@@ -152,13 +154,13 @@ test("the agent's own tool shows its status and content", () => {
   expect(screen.getByText("denied")).toBeTruthy();
 });
 
-test("notices offer the sandbox section and a new chat", () => {
+test("a stored notice of a kind no longer made shows its text, and an exited notice offers a new chat", () => {
   const props = show([
     {
       id: "n1",
       body: {
         type: "notice",
-        notice: { kind: "blockedHost", host: "x.io" },
+        notice: { kind: "unknown" },
         text: "The sandbox blocked x.io.",
       },
     },
@@ -172,7 +174,7 @@ test("notices offer the sandbox section and a new chat", () => {
     },
   ]);
   expect(screen.getByText("The sandbox blocked x.io.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Agent sandbox" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Agent sandbox" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   expect(props.onNewChat).toHaveBeenCalled();
 });
@@ -222,5 +224,40 @@ test("a user message shows the YAML tab it carried", () => {
   ]);
   expect(screen.getByTestId("agent-user-tab").textContent).toBe(
     "YAML tab · New Service",
+  );
+});
+
+function permissionItem(state: PermissionCard["state"]): ChatItem {
+  return {
+    id: "perm",
+    body: {
+      type: "permission",
+      card: {
+        id: "p1",
+        toolCallId: "t1",
+        title: "Run npm test",
+        kind: "execute",
+        command: "npm test",
+        diffs: [],
+        url: null,
+        raw: null,
+        options: [{ id: "allow_once", name: "Allow", kind: "allowOnce" }],
+        state,
+      },
+    },
+  };
+}
+
+test("says Waiting for you while a permission card waits", () => {
+  show([permissionItem({ state: "waiting" })], { busy: true });
+  expect(screen.getByTestId("agent-working").textContent).toContain(
+    "Waiting for you",
+  );
+});
+
+test("says the agent is working when no permission card waits", () => {
+  show([permissionItem({ state: "cancelled" })], { busy: true });
+  expect(screen.getByTestId("agent-working").textContent).toContain(
+    "is working",
   );
 });

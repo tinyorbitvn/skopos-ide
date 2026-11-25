@@ -119,27 +119,12 @@ fn navigation_guard() -> TauriPlugin<Wry> {
         .build()
 }
 
-/// Set to `1` by the end-to-end tests: agents then run without the sandbox, which the test
-/// machine's AppArmor keeps bubblewrap from starting (agents panel plan P15). Only a build
-/// with the `e2e` feature reads it, so a shipped app always sandboxes agents.
-#[cfg(feature = "e2e")]
-const E2E_AGENT_SANDBOX_OFF: &str = "SKOPOS_E2E_AGENT_SANDBOX_OFF";
-
-#[cfg(feature = "e2e")]
-fn sandbox_off_requested(value: Option<&std::ffi::OsStr>) -> bool {
-    value.is_some_and(|value| value == "1")
-}
-
 fn run_app(
     core: AppCore,
     mut log_guard: Option<WorkerGuard>,
     context: Context<Wry>,
     channel: install_channel::InstallChannel,
 ) {
-    #[cfg(feature = "e2e")]
-    if sandbox_off_requested(std::env::var_os(E2E_AGENT_SANDBOX_OFF).as_deref()) {
-        core.agent_sandbox_off_for_test();
-    }
     let builder = tauri::Builder::default();
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
@@ -296,11 +281,6 @@ fn run_app(
             commands::agents::agent_custom_remove,
             commands::agents::agent_default_set,
             commands::agents::agent_prefs,
-            commands::agents::agent_domain_add,
-            commands::agents::agent_domain_remove,
-            commands::agents::agent_folder_add,
-            commands::agents::agent_folder_remove,
-            commands::agents::agent_sandbox_status,
             commands::agents::cluster_agent_changes_set,
             commands::agents::cluster_agent_settings,
             commands::agents::chat_start,
@@ -308,6 +288,7 @@ fn run_app(
             commands::agents::chat_stop,
             commands::agents::chat_close,
             commands::agents::chat_answer,
+            commands::agents::chat_permission,
             commands::agents::chat_proposal_answer,
             commands::agents::chat_detach_tab,
             commands::agents::chat_undo_standing,
@@ -510,18 +491,13 @@ mod command_tests {
     use std::collections::BTreeSet;
 
     /// The agent and chat commands (agents spec §5.2).
-    const AGENT_COMMANDS: [&str; 23] = [
+    const AGENT_COMMANDS: [&str; 19] = [
         "agents_status",
         "agent_probe",
         "agent_custom_add",
         "agent_custom_remove",
         "agent_default_set",
         "agent_prefs",
-        "agent_domain_add",
-        "agent_domain_remove",
-        "agent_folder_add",
-        "agent_folder_remove",
-        "agent_sandbox_status",
         "cluster_agent_changes_set",
         "cluster_agent_settings",
         "chat_start",
@@ -529,6 +505,7 @@ mod command_tests {
         "chat_stop",
         "chat_close",
         "chat_answer",
+        "chat_permission",
         "chat_proposal_answer",
         "chat_detach_tab",
         "chat_undo_standing",
@@ -598,19 +575,5 @@ mod command_tests {
             missing.is_empty(),
             "api.ts calls unregistered commands: {missing:?}"
         );
-    }
-}
-
-#[cfg(all(test, feature = "e2e"))]
-mod e2e_switch_tests {
-    use super::sandbox_off_requested;
-    use std::ffi::OsStr;
-
-    #[test]
-    fn sandbox_off_needs_the_value_one() {
-        assert!(sandbox_off_requested(Some(OsStr::new("1"))));
-        assert!(!sandbox_off_requested(Some(OsStr::new("0"))));
-        assert!(!sandbox_off_requested(Some(OsStr::new(""))));
-        assert!(!sandbox_off_requested(None));
     }
 }

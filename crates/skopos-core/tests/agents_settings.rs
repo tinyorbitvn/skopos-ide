@@ -1,7 +1,6 @@
 //! The agent settings (agents spec §3.5, §3.6, §4.8) against real files in temp dirs:
-//! Preferences' domains and folders, each cluster's agent settings, and files saved before
-//! agents existed. Windows refuses every agent call, which `agents::tests` checks.
-#![cfg(not(windows))]
+//! Preferences' agent settings, each cluster's agent settings, and files saved before
+//! agents existed.
 
 use std::path::PathBuf;
 
@@ -94,93 +93,12 @@ async fn files_saved_before_agents_existed_load_with_the_agent_defaults() {
 }
 
 #[tokio::test]
-async fn domains_are_checked_added_once_and_removed() {
-    let fixture = Fixture::new();
-    let core = fixture.start().await;
-
-    let prefs = core.agent_domain_add(" Registry.NPMJS.org ").unwrap();
-    assert_eq!(prefs.domains, ["registry.npmjs.org"]);
-    let taken = core.agent_domain_add("registry.npmjs.org").unwrap_err();
-    assert_eq!(taken.code, ErrorCode::InvalidInput);
-    assert_eq!(taken.message, "That domain is already in the list");
-    for bad in [
-        "localhost",
-        "10.0.0.1",
-        "example.com:8443",
-        "https://example.com",
-        "my domain.com",
-    ] {
-        let error = core.agent_domain_add(bad).unwrap_err();
-        assert_eq!(error.code, ErrorCode::InvalidInput, "{bad}");
-        assert_eq!(error.message, "Enter a domain such as example.com", "{bad}");
-    }
-    core.agent_domain_add("example.com").unwrap();
-    let prefs = core.agent_domain_remove("registry.npmjs.org").unwrap();
-    assert_eq!(prefs.domains, ["example.com"]);
-    // Removing a domain that is not there changes nothing.
-    let prefs = core.agent_domain_remove("other.example").unwrap();
-    assert_eq!(prefs.domains, ["example.com"]);
-    core.shutdown().await;
-
-    let restarted = fixture.start().await;
-    assert_eq!(restarted.agent_prefs().domains, ["example.com"]);
-    restarted.shutdown().await;
-}
-
-#[tokio::test]
-async fn folders_are_checked_kept_as_typed_and_removed() {
-    let fixture = Fixture::new();
-    let code = fixture.home().join("code");
-    std::fs::create_dir_all(&code).unwrap();
-    let elsewhere = fixture.root.path().join("manifests");
-    std::fs::create_dir_all(&elsewhere).unwrap();
-    let core = fixture.start().await;
-
-    let prefs = core.agent_folder_add(" ~/code/ ").unwrap();
-    assert_eq!(prefs.folders, ["~/code"]);
-    // The same folder typed another way.
-    let taken = core.agent_folder_add(code.to_str().unwrap()).unwrap_err();
-    assert_eq!(taken.code, ErrorCode::InvalidInput);
-    assert_eq!(taken.message, "That folder is already in the list");
-    let cases = [
-        ("code", "Enter a full path"),
-        ("~/missing", "No such folder: ~/missing"),
-        (
-            "~/",
-            "Agents can't read your whole home folder. Pick a folder inside it",
-        ),
-    ];
-    for (typed, message) in cases {
-        let error = core.agent_folder_add(typed).unwrap_err();
-        assert_eq!(error.code, ErrorCode::InvalidInput, "{typed}");
-        assert_eq!(error.message, message, "{typed}");
-    }
-    let prefs = core
-        .agent_folder_add(&format!("{}/", elsewhere.display()))
-        .unwrap();
-    assert_eq!(
-        prefs.folders,
-        ["~/code".to_owned(), elsewhere.display().to_string()]
-    );
-    let prefs = core.agent_folder_remove("~/code").unwrap();
-    assert_eq!(prefs.folders, [elsewhere.display().to_string()]);
-    core.shutdown().await;
-
-    let restarted = fixture.start().await;
-    assert_eq!(
-        restarted.agent_prefs().folders,
-        [elsewhere.display().to_string()]
-    );
-    restarted.shutdown().await;
-}
-
-#[tokio::test]
 async fn saving_preferences_keeps_the_agent_settings() {
     let fixture = Fixture::new();
     let core = fixture.start().await;
-    core.agent_domain_add("example.com").unwrap();
+    core.agent_default_set("claude").unwrap();
 
-    // A Preferences page that read the preferences before the domain was added.
+    // A Preferences page that read the preferences before the default agent was chosen.
     core.prefs_set(Prefs {
         theme: Theme::Dark,
         ..Prefs::default()
@@ -188,7 +106,7 @@ async fn saving_preferences_keeps_the_agent_settings() {
     .unwrap();
 
     assert_eq!(core.prefs_get().theme, Theme::Dark);
-    assert_eq!(core.agent_prefs().domains, ["example.com"]);
+    assert_eq!(core.agent_prefs().default_agent.as_deref(), Some("claude"));
     core.shutdown().await;
 }
 

@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import type { AgentStatus } from "../../ipc/generated/AgentStatus";
 import type { ChatEvent } from "../../ipc/generated/ChatEvent";
 import { resetAgentChatForTest, useAgentChat } from "../../stores/agentChat";
@@ -15,7 +15,6 @@ import { resetAgentsForTest } from "../../stores/agents";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { AgentPanel } from "./AgentPanel";
-import { setAgentsSupportedForTest } from "./supported";
 
 type Channel = { onmessage(event: ChatEvent): void };
 
@@ -36,7 +35,6 @@ const CLAUDE: AgentStatus = {
   hint: null,
   isDefault: true,
   custom: false,
-  hosts: [],
 };
 
 let channel: Channel | null = null;
@@ -90,8 +88,6 @@ beforeEach(() => {
     ],
   });
 });
-
-afterEach(() => setAgentsSupportedForTest(true));
 
 test("a new chat on a cluster page focuses the box and offers the cluster suggestions", async () => {
   backend();
@@ -169,7 +165,7 @@ test("while the agent works Send becomes Stop", async () => {
   expect(within(panel).queryByTestId("agent-send")).toBeNull();
 });
 
-test("a Read only cluster shows the badge and its settings under Details", async () => {
+test("a Read only cluster shows the badge", async () => {
   backend({
     cluster_agent_settings: () => ({
       ...SETTINGS,
@@ -181,49 +177,14 @@ test("a Read only cluster shows the badge and its settings under Details", async
   expect(within(panel).getByTestId("agent-read-only").textContent).toBe(
     "Read only",
   );
-  fireEvent.click(within(panel).getByTestId("agent-sandbox-details"));
-  const list = within(panel).getByRole("list", {
-    name: "This cluster's agent settings",
-  });
-  expect(
-    within(list)
-      .getAllByRole("listitem")
-      .map((li) => li.textContent),
-  ).toEqual([
-    "Changes: Read only",
-    "Namespaces: payments, ingest",
-    "Secret values: hidden",
-    "Commands in containers: off",
-  ]);
   expect(within(panel).getByText("prod-eu-west · 2 namespaces")).toBeTruthy();
 });
 
-test("a sandbox that is not ready shows the reason and the section button", async () => {
-  backend({
-    chat_start: () => {
-      throw { code: "Unavailable", message: "The agent sandbox isn't ready." };
-    },
-    agent_sandbox_status: () => ({
-      status: "cannotStart",
-      error: "userns denied",
-    }),
-  });
+test("shows no Sandboxed line in the header", async () => {
+  backend();
   const panel = await openOn("/cluster/a/overview");
-  const state = within(panel).getByTestId("agent-state");
-  expect(state.dataset.kind).toBe("sandbox");
-  expect(within(state).getByText("The agent sandbox isn't ready")).toBeTruthy();
-  expect(
-    within(state).getByText(
-      /bubblewrap could not start a sandbox: userns denied/,
-    ),
-  ).toBeTruthy();
-  expect(
-    within(state).getByText(/Agents run only inside the sandbox./),
-  ).toBeTruthy();
-  expect(
-    within(state).getByRole("button", { name: "Agent sandbox" }),
-  ).toBeTruthy();
-  expect(within(panel).queryByTestId("agent-message")).toBeNull();
+  expect(within(panel).queryByTestId("agent-sandbox-line")).toBeNull();
+  expect(within(panel).queryByText("Sandboxed")).toBeNull();
 });
 
 test("Sign in needed offers Try again, which probes and starts again", async () => {
@@ -343,16 +304,4 @@ test("Escape closes a popover but not the panel", async () => {
   expect(screen.queryByRole("dialog", { name: "Scope" })).toBeNull();
   expect(screen.getByTestId("agent-panel")).toBeTruthy();
   expect(document.activeElement).toBe(within(panel).getByTestId("agent-scope"));
-});
-
-test("on Windows the panel renders nothing", async () => {
-  setAgentsSupportedForTest(false);
-  backend();
-  render(
-    <MemoryRouter>
-      <AgentPanel />
-    </MemoryRouter>,
-  );
-  act(() => useAgentChat.setState({ open: true }));
-  expect(screen.queryByTestId("agent-panel")).toBeNull();
 });

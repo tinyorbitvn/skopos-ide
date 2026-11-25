@@ -1,21 +1,18 @@
 //! Chats end to end (agents spec §4.1, §4.3, §4.8, §6): fakekube, and the fake agent as a
-//! custom agent behind a shell that notes its process id and environment. The sandbox is off
-//! (R2) except in the last test, which runs only with `SKOPOS_SANDBOX_TEST=1`.
-#![cfg(unix)]
+//! custom agent that notes its process id and environment in a file. Agents run natively, on
+//! every OS (native agents spec §4.2).
 
 mod support;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use serde_json::{json, Value};
 use skopos_core::agents::approvals::{ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
-use skopos_core::agents::cli_login::{now_ms, KeychainLogin, KeychainSource};
 use skopos_core::agents::editor_tab::{EditorTab, EditorTabMode};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
+use skopos_core::agents::permissions::{ChoiceKind, PermissionCard, PermissionState};
 use skopos_core::agents::registry::AgentState;
 use skopos_core::agents::tabs::ProposalState;
 use skopos_core::app_core::AppCore;
@@ -35,19 +32,9 @@ const SCRIPT: &str = "script.json";
 const LOG: &str = "agent.log";
 const SCALE_PATH: &str = "/apis/apps/v1/namespaces/default/deployments/api/scale";
 const CANNOT_REOPEN: &str = "Fake can't reopen old chats. Start a new chat to continue.";
-/// Notes the shell's process id, which `exec` keeps for the agent, and the agent's environment.
-const WRAPPER: &str = "echo $$ > agent.pid; env > agent.env; exec \"$@\"";
+/// Where the fake agent notes its process id and its environment when it starts.
+const ENV_FILE: &str = "agent.env";
 const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}"#;
-
-/// How a test starts the agent.
-enum Sandbox {
-    /// R2: directly, with the same environment, proxy and MCP endpoint.
-    Off,
-    /// Inside the machine's sandbox.
-    On,
-    /// The sandbox reads as not ready.
-    Unready,
-}
 
 struct Bench {
     core: AppCore,
@@ -60,16 +47,7 @@ struct Bench {
 
 impl Bench {
     async fn new(script: Value) -> Bench {
-        Bench::with(script, Sandbox::Off).await
-    }
-
-    async fn with(script: Value, sandbox: Sandbox) -> Bench {
         let (core, fake, cluster, root) = connected_fake(FakeKubeConfig::default()).await;
-        match sandbox {
-            Sandbox::Off => core.agent_sandbox_off_for_test(),
-            Sandbox::On => {}
-            Sandbox::Unready => core.agent_sandbox_unready_for_test(),
-        }
         core.set_agent_app_binary_for_test(PathBuf::from(env!("CARGO_BIN_EXE_skopos-agent-host")));
         let agent = core
             .agent_custom_add("Fake", &fake_agent_command())
@@ -109,15 +87,37 @@ impl Bench {
             .collect()
     }
 
-    /// The process id of the agent started last.
-    fn agent_pid(&self) -> u32 {
-        let text = std::fs::read_to_string(self.agent_dir().join("agent.pid")).unwrap();
-        text.trim().parse().unwrap()
+    /// What the agent started last noted: `pid=<id>`, then one `NAME=value` line per variable.
+    fn env_file(&self) -> String {
+        std::fs::read_to_string(self.agent_dir().join(ENV_FILE)).unwrap()
     }
 
-    /// The environment of the agent started last, as `env` prints it.
+    /// The process id of the agent started last.
+    fn agent_pid(&self) -> u32 {
+        let text = self.env_file();
+        let pid = text
+            .lines()
+            .next()
+            .and_then(|line| line.strip_prefix("pid="));
+        pid.expect("a pid line").parse().unwrap()
+    }
+
+    /// The environment of the agent started last, one `NAME=value` line per variable.
     fn agent_env(&self) -> String {
-        std::fs::read_to_string(self.agent_dir().join("agent.env")).unwrap()
+        let text = self.env_file();
+        text.split_once('\n')
+            .map(|(_, env)| env.to_owned())
+            .unwrap_or_default()
+    }
+
+    /// The catalog name of the chat's cluster.
+    fn scope_cluster_name(&self) -> String {
+        self.core
+            .catalog_list()
+            .into_iter()
+            .find(|entry| entry.id == self.cluster)
+            .map(|entry| entry.name)
+            .expect("cluster in the catalog")
     }
 
     /// How many chat run folders exist.
@@ -257,20 +257,17 @@ impl Events {
     }
 }
 
-/// The fake agent's script and log are relative to its working directory, the agent's folder.
-/// They go as arguments: the agent's environment holds only spec §4.6's variables.
+/// The fake agent's script, log and env file are relative to its working directory, the
+/// agent's folder. They go as arguments, so they do not depend on the agent's environment.
 fn fake_agent_command() -> String {
-    shell_words::join([
-        "sh",
-        "-c",
-        WRAPPER,
-        "sh",
-        env!("CARGO_BIN_EXE_skopos-fakeagent"),
-        "--script",
-        SCRIPT,
-        "--log",
-        LOG,
-    ])
+    let program = env!("CARGO_BIN_EXE_skopos-fakeagent");
+    let args = format!("--script {SCRIPT} --env-file {ENV_FILE} --log {LOG}");
+    // Windows splits a custom command on unquoted whitespace and keeps backslashes.
+    if cfg!(windows) {
+        format!("\"{program}\" {args}")
+    } else {
+        format!("{} {args}", shell_words::quote(program))
+    }
 }
 
 fn script(turns: Vec<Value>) -> Value {
@@ -334,19 +331,6 @@ fn change_of(event: &ChatEvent) -> Option<&ChangeCard> {
 
 fn is_waiting(event: &ChatEvent) -> bool {
     change_of(event).is_some_and(|card| card.state == ChangeState::Waiting)
-}
-
-fn notice_of(event: &ChatEvent) -> Option<&str> {
-    match event {
-        ChatEvent::Item {
-            item:
-                ChatItem {
-                    body: ChatItemBody::Notice { text, .. },
-                    ..
-                },
-        } => Some(text.as_str()),
-        _ => None,
-    }
 }
 
 fn agent_texts(items: &[ChatItem]) -> Vec<String> {
@@ -450,43 +434,8 @@ async fn mcp_answer(address: &str, first_line: &str) -> Option<String> {
     }
 }
 
-/// The proxy's port and token from the agent's `HTTPS_PROXY`.
-fn proxy_of(env: &str) -> (u16, String) {
-    let url = env
-        .lines()
-        .find_map(|line| line.strip_prefix("HTTPS_PROXY="))
-        .unwrap();
-    let (token, address) = url
-        .strip_prefix("http://skopos:")
-        .unwrap()
-        .split_once('@')
-        .unwrap();
-    let port = address
-        .strip_prefix("127.0.0.1:")
-        .unwrap()
-        .trim_end_matches('/')
-        .parse()
-        .unwrap();
-    (port, token.to_owned())
-}
-
-/// The first line of the proxy's answer to a `CONNECT <host>:443` with the chat's token.
-async fn connect_through(port: u16, token: &str, host: &str) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let credentials = STANDARD.encode(format!("skopos:{token}"));
-    let head = format!(
-        "CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\nProxy-Authorization: Basic {credentials}\r\n\r\n"
-    );
-    stream.write_all(head.as_bytes()).await.unwrap();
-    let mut lines = BufReader::new(stream).lines();
-    tokio::time::timeout(WAIT, lines.next_line())
-        .await
-        .expect("the proxy answers")
-        .unwrap()
-        .unwrap_or_default()
-}
-
 /// Whether `pid` runs; a zombie has ended.
+#[cfg(unix)]
 fn is_running(pid: u32) -> bool {
     let out = std::process::Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -495,6 +444,18 @@ fn is_running(pid: u32) -> bool {
     let stat = String::from_utf8_lossy(&out.stdout);
     let stat = stat.trim();
     !stat.is_empty() && !stat.starts_with('Z')
+}
+
+/// Whether `pid` runs.
+#[cfg(windows)]
+fn is_running(pid: u32) -> bool {
+    let filter = format!("PID eq {pid}");
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", filter.as_str(), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap();
+    // A row is `"name","<pid>",…`; without one tasklist prints an INFO line.
+    String::from_utf8_lossy(&out.stdout).contains(&format!(",\"{pid}\","))
 }
 
 async fn wait_gone(pid: u32) {
@@ -589,28 +550,216 @@ async fn a_skopos_tool_call_is_a_tool_card_and_not_an_agent_tool() {
     );
 }
 
-#[tokio::test]
-async fn the_agent_s_permission_requests_are_answered_allow_once() {
-    let own_tool = json!({ "ownTool": { "title": "Run ls", "permission": true } });
-    let bench = Bench::new(script(vec![turn(vec![own_tool, say("Done.")])])).await;
-    let (info, mut events) = bench.start(MAIN).await;
-    bench.ask(&info.chat_id, "List the folder.").await;
-    let log = bench.log();
-    let mut chosen = Vec::new();
-    for line in &log {
-        values_of(line, "optionId", &mut chosen);
+fn permission(title: &str, command: &str) -> Value {
+    json!({ "permission": { "title": title, "kind": "execute", "command": command } })
+}
+
+fn permission_of(event: &ChatEvent) -> Option<&PermissionCard> {
+    match event {
+        ChatEvent::Item { item } => match &item.body {
+            ChatItemBody::Permission { card } => Some(card),
+            _ => None,
+        },
+        _ => None,
     }
-    assert!(!chosen.is_empty(), "{log:#?}");
-    assert!(
-        chosen.iter().all(|id| id.as_str() == Some("allow_once")),
-        "{chosen:?}"
+}
+
+fn is_waiting_permission(event: &ChatEvent) -> bool {
+    permission_of(event).is_some_and(|card| card.state == PermissionState::Waiting)
+}
+
+fn chosen_options(log: &[Value]) -> Vec<String> {
+    let mut found = Vec::new();
+    for line in log {
+        values_of(line, "optionId", &mut found);
+    }
+    found
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .collect()
+}
+
+fn permission_state(items: &[ChatItem]) -> Option<PermissionState> {
+    items.iter().rev().find_map(|item| match &item.body {
+        ChatItemBody::Permission { card } => Some(card.state.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn the_agent_s_permission_request_waits_for_the_person_s_choice() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls -la"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    let waiting = events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    let card = permission_of(&waiting).unwrap().clone();
+    assert_eq!(card.title, "Run ls");
+    assert_eq!(card.kind, "execute");
+    assert_eq!(card.command.as_deref(), Some("ls -la"));
+    assert_eq!(
+        card.options
+            .iter()
+            .map(|option| option.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Reject", "Always allow", "Allow", "Never allow"]
     );
-    let items = events.items();
     assert!(
-        items.iter().any(
-            |item| matches!(&item.body, ChatItemBody::AgentTool { title, .. } if title == "Run ls")
-        ),
-        "{items:#?}"
+        chosen_options(&bench.log()).is_empty(),
+        "answered before the person chose"
+    );
+    bench
+        .core
+        .chat_permission(&info.chat_id, &card.id, "allow_once")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    assert_eq!(chosen_options(&bench.log()), ["allow_once"]);
+    assert_eq!(
+        permission_state(&events.items()),
+        Some(PermissionState::Chosen {
+            option_id: "allow_once".into(),
+            kind: ChoiceKind::AllowOnce
+        })
+    );
+    assert!(agent_texts(&events.items()).contains(&"Done.".to_owned()));
+    let again = bench
+        .core
+        .chat_permission(&info.chat_id, &card.id, "allow_once")
+        .unwrap_err();
+    assert_eq!(again.message, "This request was already answered.");
+}
+
+#[tokio::test]
+async fn an_unknown_option_is_refused_and_the_card_keeps_waiting() {
+    let bench = Bench::new(script(vec![turn(vec![permission("Run ls", "ls")])])).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    let waiting = events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    let id = permission_of(&waiting).unwrap().id.clone();
+    let refused = bench
+        .core
+        .chat_permission(&info.chat_id, &id, "maybe")
+        .unwrap_err();
+    assert_eq!(refused.message, "That option is not on this request.");
+    bench
+        .core
+        .chat_permission(&info.chat_id, &id, "reject_always")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    assert_eq!(chosen_options(&bench.log()), ["reject_always"]);
+}
+
+#[tokio::test]
+async fn stop_cancels_a_waiting_permission_request() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    bench.core.chat_stop(&info.chat_id);
+    let _ = turn.await.unwrap();
+    events
+        .until("a cancelled card", |event| {
+            permission_of(event).is_some_and(|card| card.state == PermissionState::Cancelled)
+        })
+        .await;
+    assert_eq!(chosen_options(&bench.log()), ["cancelled"]);
+}
+
+#[tokio::test]
+async fn close_cancels_a_waiting_permission_request_and_history_keeps_it_cancelled() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    bench.core.chat_close(&info.chat_id).await;
+    let _ = turn.await.unwrap();
+    let stored = bench.core.chat_get(&info.chat_id).unwrap();
+    assert_eq!(
+        permission_state(&stored.items),
+        Some(PermissionState::Cancelled)
+    );
+}
+
+#[tokio::test]
+async fn two_waiting_requests_are_answered_one_by_one() {
+    let both = json!({ "permissions": [
+        { "title": "Run a", "kind": "execute", "command": "a" },
+        { "title": "Run b", "kind": "execute", "command": "b" }
+    ] });
+    let bench = Bench::new(script(vec![turn(vec![both, say("Done.")])])).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "Run both.");
+    let mut ids: Vec<String> = Vec::new();
+    while ids.len() < 2 {
+        let event = events
+            .until("two waiting cards", |event| {
+                permission_of(event).is_some_and(|card| {
+                    card.state == PermissionState::Waiting && !ids.contains(&card.id)
+                })
+            })
+            .await;
+        ids.push(permission_of(&event).unwrap().id.clone());
+    }
+    assert!(chosen_options(&bench.log()).is_empty());
+    bench
+        .core
+        .chat_permission(&info.chat_id, &ids[1], "reject_once")
+        .unwrap();
+    bench
+        .core
+        .chat_permission(&info.chat_id, &ids[0], "allow_once")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    let mut chosen = chosen_options(&bench.log());
+    chosen.sort();
+    assert_eq!(chosen, ["allow_once", "reject_once"]);
+}
+
+#[tokio::test]
+async fn a_stored_chat_keeps_its_permission_card() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List.");
+    let event = events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    let id = permission_of(&event).unwrap().id.clone();
+    bench
+        .core
+        .chat_permission(&info.chat_id, &id, "reject_once")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    bench.core.chat_close(&info.chat_id).await;
+    let stored = bench.core.chat_get(&info.chat_id).unwrap();
+    assert_eq!(
+        permission_state(&stored.items),
+        Some(PermissionState::Chosen {
+            option_id: "reject_once".into(),
+            kind: ChoiceKind::RejectOnce
+        })
     );
 }
 
@@ -648,8 +797,8 @@ async fn the_hidden_block_and_the_object_line_reach_the_agent_first() {
     assert_eq!(first.len(), 3, "{first:#?}");
     assert!(
         first[0].starts_with(
-            "You are running inside SkoposIDE, a Kubernetes desktop app. You can reach fake only \
-             through the tools of the skopos MCP server"
+            "You are running inside SkoposIDE, a Kubernetes desktop app, on the person's computer. \
+             You can reach fake through the tools of the skopos MCP server"
         ),
         "{}",
         first[0]
@@ -850,134 +999,6 @@ async fn a_stored_chat_continues_through_session_load() {
     assert_eq!(bench.core.chat_list(&bench.scope()).unwrap().len(), 1);
 }
 
-/// The fake agent's sign-in, as a keychain item that `security` in `dir` prints.
-const FAKE_LOGIN: KeychainLogin = KeychainLogin {
-    service: "Fake-credentials",
-    var: "FAKE_OAUTH_TOKEN",
-    hint: "Run fake login, then send your message again.",
-};
-const HOUR_MS: i64 = 3_600_000;
-
-/// Has the chats read the fake agent's sign-in from a `security` in `dir`, which prints the
-/// item that `write_item` last wrote.
-fn fake_keychain(core: &AppCore, dir: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let security = dir.join("security");
-    let script = format!(
-        "#!/bin/sh\n[ \"$*\" = 'find-generic-password -s Fake-credentials -w' ] || exit 44\n\
-         cat '{}'\n",
-        dir.join("item").display()
-    );
-    std::fs::write(&security, script).unwrap();
-    std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o755)).unwrap();
-    core.set_agent_keychain_for_test(KeychainSource {
-        security,
-        login: FAKE_LOGIN,
-    });
-}
-
-fn write_item(dir: &std::path::Path, token: &str, ends_ms: i64) {
-    let item = json!({
-        "claudeAiOauth": { "accessToken": token, "refreshToken": "refresh", "expiresAt": ends_ms }
-    });
-    std::fs::write(dir.join("item"), item.to_string()).unwrap();
-}
-
-#[tokio::test]
-async fn a_chat_whose_sign_in_ran_out_reopens_with_the_keychain_s_new_one() {
-    let bench = Bench::new(script(vec![turn(vec![json!("signIn")])])).await;
-    let keychain = bench.root.path().join("keychain");
-    std::fs::create_dir_all(&keychain).unwrap();
-    fake_keychain(&bench.core, &keychain);
-    write_item(&keychain, "old-token", now_ms() - HOUR_MS);
-    let (info, mut events) = bench.start(MAIN).await;
-    assert!(!bench.agent_env().contains("FAKE_OAUTH_TOKEN"));
-    let first_agent = bench.agent_pid();
-    // Nothing newer in the keychain: the same agent answers, and the chat says how to renew.
-    bench.ask(&info.chat_id, "First question").await;
-    assert_eq!(
-        events.notices(),
-        ["Fake needs you to sign in. Run fake login, then send your message again."]
-    );
-    assert!(requests(&bench.log(), "session/load").is_empty());
-    assert_eq!(bench.agent_pid(), first_agent);
-    // The CLI renewed its sign-in: the next message reopens the agent with it, in this chat.
-    write_item(&keychain, "new-token", now_ms() + 8 * HOUR_MS);
-    bench.write_script(&script(vec![turn(vec![say("An answer.")])]));
-    bench.ask(&info.chat_id, "Second question").await;
-    let loads = requests(&bench.log(), "session/load");
-    assert_eq!(loads.len(), 1);
-    assert_eq!(
-        loads[0]["sessionId"],
-        bench
-            .core
-            .chat_get(&info.chat_id)
-            .unwrap()
-            .session_id
-            .unwrap()
-            .as_str()
-    );
-    assert!(bench
-        .agent_env()
-        .lines()
-        .any(|line| line == "FAKE_OAUTH_TOKEN=new-token"));
-    assert_ne!(bench.agent_pid(), first_agent);
-    wait_gone(first_agent).await;
-    assert_eq!(agent_texts(&events.items()), ["An answer."]);
-    assert_eq!(prompts(&bench.log()).last().unwrap(), &["Second question"]);
-    // The window saw one chat throughout.
-    events.drain();
-    assert!(!events
-        .seen
-        .iter()
-        .any(|event| matches!(event, ChatEvent::Closed { .. })));
-    // A token with time left is kept.
-    bench.ask(&info.chat_id, "Third question").await;
-    assert_eq!(requests(&bench.log(), "session/load").len(), 1);
-    let users = bench
-        .core
-        .chat_get(&info.chat_id)
-        .unwrap()
-        .items
-        .into_iter()
-        .filter(|item| matches!(item.body, ChatItemBody::User { .. }))
-        .count();
-    assert_eq!(users, 3);
-}
-
-#[tokio::test]
-async fn a_chat_whose_agent_refused_its_sign_in_reopens_with_another_one() {
-    let bench = Bench::new(script(vec![turn(vec![json!("signIn")])])).await;
-    let keychain = bench.root.path().join("keychain");
-    std::fs::create_dir_all(&keychain).unwrap();
-    fake_keychain(&bench.core, &keychain);
-    write_item(&keychain, "first-token", now_ms() + 8 * HOUR_MS);
-    let (info, mut events) = bench.start(MAIN).await;
-    assert!(bench
-        .agent_env()
-        .lines()
-        .any(|line| line == "FAKE_OAUTH_TOKEN=first-token"));
-    // Signed out elsewhere, say: the agent refuses a token that has time left.
-    bench.ask(&info.chat_id, "First question").await;
-    assert_eq!(
-        events.notices(),
-        ["Fake needs you to sign in. Run fake login, then send your message again."]
-    );
-    // The keychain still holds that token: the same agent gets the next message.
-    bench.ask(&info.chat_id, "Second question").await;
-    assert!(requests(&bench.log(), "session/load").is_empty());
-    // Signed in again: another token, and the chat reopens with it.
-    write_item(&keychain, "second-token", now_ms() + 8 * HOUR_MS);
-    bench.write_script(&script(vec![turn(vec![say("An answer.")])]));
-    bench.ask(&info.chat_id, "Third question").await;
-    assert_eq!(requests(&bench.log(), "session/load").len(), 1);
-    assert!(bench
-        .agent_env()
-        .lines()
-        .any(|line| line == "FAKE_OAUTH_TOKEN=second-token"));
-    assert_eq!(agent_texts(&events.items()), ["An answer."]);
-}
-
 #[tokio::test]
 async fn an_agent_that_cannot_reopen_chats_is_not_continued() {
     let no_load = json!({ "auth": "ok", "loadSession": false, "turns": [turn(vec![say("Hi.")])] });
@@ -1083,54 +1104,6 @@ async fn the_mcp_endpoint_refuses_a_wrong_token() {
 }
 
 #[tokio::test]
-async fn a_blocked_host_reaches_the_stream_as_one_notice() {
-    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
-    let (info, mut events) = bench.start(MAIN).await;
-    let env = bench.agent_env();
-    let (port, token) = proxy_of(&env);
-    let refused = connect_through(port, &token, "blocked.example").await;
-    assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
-    events
-        .until("the blocked-host notice", |event| {
-            notice_of(event) == Some("The sandbox blocked blocked.example.")
-        })
-        .await;
-    let again = connect_through(port, &token, "blocked.example").await;
-    assert!(again.starts_with("HTTP/1.1 403"), "{again}");
-    bench.ask(&info.chat_id, "Hello").await;
-    assert_eq!(events.notices(), ["The sandbox blocked blocked.example."]);
-    // Spec §6.2: what the agent's environment holds.
-    let home = format!("HOME={}", bench.root.path().join("home").display());
-    let lines: Vec<&str> = env.lines().collect();
-    assert!(lines.contains(&"TERM=dumb"), "{env}");
-    assert!(lines.contains(&"NO_PROXY=localhost,127.0.0.1,::1"), "{env}");
-    assert!(lines.contains(&home.as_str()), "{env}");
-    assert!(
-        !lines
-            .iter()
-            .any(|line| line.starts_with("KUBECONFIG=") || line.starts_with("SKOPOS_AGENT_TOKEN=")),
-        "{env}"
-    );
-}
-
-#[tokio::test]
-async fn a_chat_does_not_start_without_a_ready_sandbox() {
-    let bench = Bench::with(script(Vec::new()), Sandbox::Unready).await;
-    let (sender, _events) = Events::new();
-    let error = bench
-        .core
-        .chat_start(bench.start_of(None), sender, MAIN)
-        .await
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::InvalidInput);
-    assert_eq!(error.message, "The agent sandbox isn't ready.");
-    assert!(bench.log().is_empty());
-    assert!(!bench.agent_dir().join("agent.pid").exists());
-    assert_eq!(bench.run_folders(), 0);
-    assert_eq!(bench.core.session_count(), 0);
-}
-
-#[tokio::test]
 async fn a_chat_without_an_agent_starts_the_cluster_s_default() {
     let bench = Bench::new(script(Vec::new())).await;
     let mut settings = bench.core.cluster_settings_get(&bench.cluster);
@@ -1184,33 +1157,30 @@ async fn calls_on_a_chat_that_is_not_running_say_not_found() {
 }
 
 #[tokio::test]
-async fn a_sandboxed_chat_reaches_the_tools_through_the_bridge() {
-    if std::env::var("SKOPOS_SANDBOX_TEST").as_deref() != Ok("1") {
-        eprintln!("skipped: set SKOPOS_SANDBOX_TEST=1");
-        return;
-    }
-    let bench = Bench::with(script(vec![turn(vec![list_pods()])]), Sandbox::On).await;
-    bench.fake.add_pod("default", "api-1");
-    let (info, mut events) = bench.start(MAIN).await;
-    let (address, _) = mcp_entry(&bench.log());
-    if cfg!(target_os = "linux") {
-        // R3: the agent dials the bridge's fixed port inside its own network namespace.
-        assert_eq!(address, "127.0.0.1:3129");
-    }
-    bench.ask(&info.chat_id, "Which Pods run?").await;
-    let items = events.items();
-    assert_eq!(
-        tool_results(&items),
-        [("List Pods · default".to_owned(), "1 Pod".to_owned())]
+async fn a_chat_s_agent_runs_natively_with_the_app_s_environment() {
+    // A variable only this test sets, so parallel tests do not see it.
+    std::env::set_var("SKOPOS_NATIVE_MARKER_7F3A", "seen");
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (info, _events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    assert!(env.contains("SKOPOS_NATIVE_MARKER_7F3A=seen"), "{env}");
+    // The home folder, under the name this OS gives it.
+    let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var(home_var).unwrap();
+    assert!(
+        env.lines().any(|line| line == format!("{home_var}={home}")),
+        "{env}"
     );
     assert!(
-        agent_texts(&items)
-            .iter()
-            .any(|text| text.starts_with("tool:list_objects:")),
-        "{items:#?}"
+        !env.lines().any(|line| line.starts_with("HTTPS_PROXY=")),
+        "{env}"
     );
-    bench.core.chat_close(&info.chat_id).await;
-    assert_eq!(bench.run_folders(), 0);
+    assert!(
+        env.lines()
+            .any(|line| line.starts_with("SKOPOS_AGENT_TOKEN=")),
+        "{env}"
+    );
 }
 
 fn create_tab(cluster: &ClusterId, yaml: &str) -> EditorTab {
@@ -1421,4 +1391,177 @@ async fn a_proposal_outside_the_namespace_limit_is_refused_before_the_dry_run() 
             && texts[0].ends_with(" limits agents to these namespaces: default."),
         "{texts:?}"
     );
+}
+
+#[tokio::test]
+async fn the_agent_gets_the_chat_s_kubeconfig_which_goes_with_the_chat() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (info, _events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    let path = env
+        .lines()
+        .find_map(|line| line.strip_prefix("KUBECONFIG="))
+        .map(PathBuf::from)
+        .expect("KUBECONFIG");
+    assert!(path.ends_with("kubeconfig"), "{path:?}");
+    let doc: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let cluster_name = bench.scope_cluster_name();
+    assert_eq!(doc["current-context"].as_str(), Some(cluster_name.as_str()));
+    assert_eq!(doc["contexts"].as_sequence().unwrap().len(), 1);
+    bench.core.chat_close(&info.chat_id).await;
+    assert!(!path.exists(), "{path:?}");
+}
+
+#[tokio::test]
+async fn a_global_chat_starts_while_one_of_its_clusters_is_not_connected() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let kube_dir = bench.root.path().join("home/.kube");
+    bench
+        .fake
+        .write_kubeconfig(&kube_dir.join("offline.yaml"), "offline")
+        .unwrap();
+    let started = Instant::now();
+    let offline = loop {
+        let found = bench
+            .core
+            .catalog_list()
+            .into_iter()
+            .find(|entry| entry.context_name == "offline");
+        if let Some(entry) = found {
+            break entry.id;
+        }
+        assert!(started.elapsed() < WAIT, "no catalog entry");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let (sender, _events) = Events::new();
+    let start = ChatStart {
+        scope: ChatScope {
+            clusters: vec![bench.cluster.clone(), offline],
+            global: true,
+        },
+        agent: Some(bench.agent.clone()),
+        continue_chat: None,
+    };
+    let info = bench.core.chat_start(start, sender, MAIN).await.unwrap();
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    let path = env
+        .lines()
+        .find_map(|line| line.strip_prefix("KUBECONFIG="))
+        .map(PathBuf::from)
+        .expect("KUBECONFIG");
+    let doc: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(doc["contexts"].as_sequence().unwrap().len(), 2);
+    let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers.len(), 1, "{leftovers:?}");
+}
+
+/// Writes a kubeconfig whose user runs `skopos-test-credentials` for its token, and waits for
+/// its catalog entry.
+async fn exec_cluster(bench: &Bench, context: &str) -> (ClusterId, String) {
+    let path = bench.root.path().join(format!("home/.kube/{context}.yaml"));
+    let text = format!(
+        "apiVersion: v1\nkind: Config\nclusters:\n- name: {context}\n  cluster:\n    server: https://127.0.0.1:1\nusers:\n- name: {context}\n  user:\n    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: skopos-test-credentials\n      args: [token]\n      interactiveMode: Never\ncontexts:\n- name: {context}\n  context:\n    cluster: {context}\n    user: {context}\ncurrent-context: {context}\n"
+    );
+    std::fs::write(&path, text).unwrap();
+    let started = Instant::now();
+    loop {
+        let found = bench
+            .core
+            .catalog_list()
+            .into_iter()
+            .find(|entry| entry.context_name == context);
+        if let Some(entry) = found {
+            return (entry.id, entry.name);
+        }
+        assert!(started.elapsed() < WAIT, "no catalog entry");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Starts a global chat over the bench's cluster and `other`, asks once, and returns the
+/// chat's kubeconfig text and the first prompt's blocks joined.
+async fn global_chat_with(bench: &Bench, other: ClusterId) -> (String, String) {
+    let (sender, _events) = Events::new();
+    let start = ChatStart {
+        scope: ChatScope {
+            clusters: vec![bench.cluster.clone(), other],
+            global: true,
+        },
+        agent: Some(bench.agent.clone()),
+        continue_chat: None,
+    };
+    let info = bench.core.chat_start(start, sender, MAIN).await.unwrap();
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    let path = env
+        .lines()
+        .find_map(|line| line.strip_prefix("KUBECONFIG="))
+        .map(PathBuf::from)
+        .expect("KUBECONFIG");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let first = prompts(&bench.log()).into_iter().next().unwrap_or_default();
+    (text, first.join("\n"))
+}
+
+fn context_names(text: &str) -> Vec<String> {
+    let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).unwrap();
+    doc["contexts"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|context| context["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_cluster_whose_exec_command_is_not_allowed_stays_out_of_the_chat_kubeconfig() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (eks, eks_name) = exec_cluster(&bench, "eks").await;
+    let (text, prompt) = global_chat_with(&bench, eks).await;
+    assert_eq!(context_names(&text), [bench.scope_cluster_name()]);
+    assert!(!text.contains("skopos-test-credentials"), "{text}");
+    assert!(
+        prompt.contains(&format!("Reach {eks_name} only through the skopos tools.")),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn an_allowed_exec_command_puts_its_cluster_in_the_chat_kubeconfig() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (eks, eks_name) = exec_cluster(&bench, "eks").await;
+    // A connect holds the command for the consent dialog; allowing it stores its fingerprint.
+    bench.core.cluster_connect(&eks).await.unwrap();
+    let request = bench.core.cluster_exec_request(&eks).unwrap();
+    bench
+        .core
+        .cluster_exec_allow(&eks, request.request_id)
+        .unwrap();
+    let (text, prompt) = global_chat_with(&bench, eks).await;
+    assert_eq!(context_names(&text), [bench.scope_cluster_name(), eks_name]);
+    assert!(text.contains("skopos-test-credentials"), "{text}");
+    assert!(
+        !prompt.contains("only through the skopos tools"),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn starting_the_app_removes_the_run_folders_a_crash_left() {
+    let root = tempfile::tempdir().unwrap();
+    let stale = root.path().join("app/data/agents/run/old-chat");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("kubeconfig"), "token: secret").unwrap();
+    let paths =
+        skopos_core::paths::AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+    let _core = AppCore::start(paths).await.unwrap();
+    assert!(!stale.exists());
+    assert!(root.path().join("app/data/agents/run").is_dir());
 }

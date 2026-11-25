@@ -1,5 +1,6 @@
 import { act } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
+import { toast } from "../design";
 import type { AgentStatus } from "../ipc/generated/AgentStatus";
 import type { ChatEvent } from "../ipc/generated/ChatEvent";
 import type { EditorTab } from "../ipc/generated/EditorTab";
@@ -35,7 +36,6 @@ function row(partial: Partial<AgentStatus>): AgentStatus {
     hint: null,
     isDefault: true,
     custom: false,
-    hosts: [],
     ...partial,
   };
 }
@@ -175,29 +175,6 @@ test("unknown agents are probed before a start that names none", async () => {
     .map((c) => c.cmd)
     .filter((c) => c.startsWith("agent_probe") || c === "chat_start");
   expect(order).toEqual(["agent_probe", "chat_start"]);
-});
-
-test("a sandbox refusal shows the sandbox state with the reason", async () => {
-  catalog({ a: "prod" });
-  backend({
-    chat_start: () => {
-      throw { code: "Unavailable", message: "The agent sandbox isn't ready." };
-    },
-    agent_sandbox_status: () => ({ status: "notInstalled" }),
-  });
-  await act(async () => {
-    useAgentChat.getState().openPanel(null);
-    await flush();
-    await flush();
-  });
-  expect(useAgentChat.getState().start).toEqual({
-    phase: "failed",
-    failure: {
-      kind: "sandbox",
-      reason:
-        "bubblewrap is not installed. Install the bwrap command, then check again.",
-    },
-  });
 });
 
 test("No agent is ready with an agent that needs sign-in shows Sign in", async () => {
@@ -473,4 +450,34 @@ test("a proposal item reaches the proposals store", async () => {
     });
   });
   expect(useProposals.getState().byTab["create-1"]?.chatId).toBe("c1");
+});
+
+test("choose sends the option for the running chat and toasts a failure", async () => {
+  catalog({ a: "prod" });
+  let fail = false;
+  const { ipc } = backend({
+    chat_permission: () => {
+      if (fail)
+        throw {
+          code: "Conflict",
+          message: "This request was already answered.",
+        };
+      return null;
+    },
+  });
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  await act(() => useAgentChat.getState().choose("p1", "allow_once"));
+  expect(ipc.callsTo("chat_permission")).toEqual([
+    { chatId: "c1", cardId: "p1", optionId: "allow_once" },
+  ]);
+  const error = vi.spyOn(toast, "error");
+  fail = true;
+  await act(() => useAgentChat.getState().choose("p1", "allow_once"));
+  expect(error).toHaveBeenCalledWith(
+    "Could not answer the request",
+    "This request was already answered.",
+  );
 });

@@ -166,19 +166,19 @@ async function startHelmFixture() {
   };
 }
 
-/**
- * The kind cluster and the scripted agent as the default agent, run without the sandbox:
- * the app inherits the switch from the launcher's environment.
- */
+/** The kind cluster and the scripted agent as the default agent, which runs natively. */
 async function startAgentsFixture() {
-  process.env.SKOPOS_E2E_AGENT_SANDBOX_OFF = "1";
   return {
     kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
     prefs: fakeAgentPrefs(),
-    async stop() {
-      delete process.env.SKOPOS_E2E_AGENT_SANDBOX_OFF;
-    },
+    async stop() {},
   };
+}
+
+/** The smoke fixture's fake cluster and the scripted agent as the default agent. */
+async function startSmokeAgentFixture() {
+  const smoke = await startSmokeFixture();
+  return { ...smoke, prefs: fakeAgentPrefs() };
 }
 
 const MAP_NAMESPACE = "skopos-e2e-map";
@@ -510,6 +510,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   screens: { kubeconfigs: {}, start: startKindFixture },
   helm: { kubeconfigs: {}, start: startHelmFixture },
   agents: { kubeconfigs: {}, start: startAgentsFixture },
+  agent: { kubeconfigs: {}, start: startSmokeAgentFixture },
   // e2e/helpers/metrics.ts installs the providers in the spec, which needs a longer timeout.
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },

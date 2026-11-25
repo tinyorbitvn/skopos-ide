@@ -395,6 +395,17 @@ async fn terminate_group(_child: &mut Child, _grace: Duration) -> bool {
     false
 }
 
+/// Pipes stdin, stdout and stderr, ends the child when its handle drops, and applies the
+/// platform's spawn settings: a new process group on Unix, no console window on Windows.
+pub(crate) fn configure_agent(command: &mut Command) {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    configure_platform(command);
+}
+
 #[cfg(unix)]
 fn configure_platform(command: &mut Command) {
     // Its own process group, which a stop then signals as a whole.
@@ -408,6 +419,65 @@ fn configure_platform(command: &mut Command) {
 
 #[cfg(not(any(unix, windows)))]
 fn configure_platform(_command: &mut Command) {}
+
+/// A Windows job that holds an agent and every process it starts; dropping it ends them all
+/// (native agents spec §4.2).
+#[cfg(windows)]
+pub(crate) struct JobGuard(windows_sys::Win32::Foundation::HANDLE);
+
+// The handle is only closed, once, in `drop`.
+#[cfg(windows)]
+unsafe impl Send for JobGuard {}
+#[cfg(windows)]
+unsafe impl Sync for JobGuard {}
+
+#[cfg(windows)]
+impl JobGuard {
+    /// Puts `child` in a new job that ends every process in it when the job closes. What the
+    /// child starts from now on joins the job too.
+    pub(crate) fn contain(child: &tokio::process::Child) -> std::io::Result<JobGuard> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let process = child
+            .raw_handle()
+            .ok_or_else(|| std::io::Error::other("the agent has already ended"))?;
+        // SAFETY: plain Win32 calls on handles this function owns or borrows for the call.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return Err(std::io::Error::last_os_error());
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let set = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if set == 0 || AssignProcessToJobObject(job, process) == 0 {
+                let error = std::io::Error::last_os_error();
+                CloseHandle(job);
+                return Err(error);
+            }
+            Ok(JobGuard(job))
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateJobObjectW and is closed only here.
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -745,5 +815,18 @@ mod tests {
                 .unwrap();
             assert_eq!(output.stdout, b"ran");
         }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn dropping_the_job_ends_the_child_and_its_children() {
+        let mut command = tokio::process::Command::new("cmd.exe");
+        command.args(["/C", "ping -n 30 127.0.0.1 > NUL"]);
+        configure_agent(&mut command);
+        let mut child = command.spawn().unwrap();
+        let job = JobGuard::contain(&child).unwrap();
+        drop(job);
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait()).await;
+        assert!(status.is_ok(), "the child outlived its job");
     }
 }

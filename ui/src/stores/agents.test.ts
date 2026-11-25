@@ -12,7 +12,6 @@ function row(partial: Partial<AgentStatus>): AgentStatus {
     hint: null,
     isDefault: false,
     custom: false,
-    hosts: [],
     ...partial,
   };
 }
@@ -91,18 +90,4 @@ test("a failed load keeps the message", async () => {
   });
   await useAgents.getState().load();
   expect(useAgents.getState().error).toBe("broken");
-});
-
-test("domains and folders save through the core and keep its answer", async () => {
-  const prefs = { defaultAgent: null, custom: [], domains: [], folders: [] };
-  mockBackend({
-    agent_prefs: () => prefs,
-    agent_domain_add: ({ domain }: { domain: string }) => ({
-      ...prefs,
-      domains: [domain],
-    }),
-  });
-  await useAgents.getState().loadPrefs();
-  await useAgents.getState().addDomain("example.com");
-  expect(useAgents.getState().prefs?.domains).toEqual(["example.com"]);
 });
