@@ -8,6 +8,7 @@ import {
   byTestId,
   clickWhenShown,
   editorContaining,
+  gone,
   hotbarItem,
   newInDock,
   openCluster,
@@ -140,6 +141,16 @@ async function clickInLastCard(testId: string): Promise<void> {
 /** Waits for the chat to be ready, then sends `message`. */
 async function send(message: string): Promise<void> {
   await shown("agent-new-chat-title", 60000);
+  const box = await byTestId("agent-message");
+  await box.setValue(message);
+  const sendButton = await byTestId("agent-send");
+  await sendButton.waitForEnabled({ timeout: 15000 });
+  await sendButton.click();
+}
+
+/** Sends `message` in the open chat once its last turn has ended. */
+async function sendNext(message: string): Promise<void> {
+  await gone("agent-working", 60000);
   const box = await byTestId("agent-message");
   await box.setValue(message);
   const sendButton = await byTestId("agent-send");
@@ -357,7 +368,7 @@ describe("agents", () => {
       "no answer after Allow",
     );
     expect(await text("agent-permission")).toContain("Allowed once");
-    await send("Clean up.");
+    await sendNext("Clean up.");
     await clickWhenShown("agent-permission-reject_once");
     await until(
       async () => (await text("agent-stream")).includes("Rejected once"),
