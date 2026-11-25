@@ -13,9 +13,10 @@ import {
   rbacGraph,
 } from "../../../test/graph";
 import { buildModel, type MapModel } from "../model";
-import { leafSize } from "./geometry";
+import { boxText, leafSize } from "./geometry";
 import {
   ACCESS_BOX,
+  appNamespaceKey,
   boxRects,
   EXTERNAL,
   footprint,
@@ -357,35 +358,211 @@ describe("policies and Argo CD", () => {
     return buildModel(nodes, edges);
   }
 
-  it("holds Applications in their ApplicationSet's box, policies with the Services and AppProjects with config", () => {
+  it("holds Applications in their ApplicationSet's box at the root, policies with the Services and AppProjects with config", () => {
     const model = policyArgoModel();
     const ids = model.nodes.map((n) => n.id);
     const tree = groupTree(model, ids);
     expect(tree.parentOf[ARGO.app]).toBe(ARGO.appSet);
     expect(tree.parentOf[ARGO.nightly]).toBe(ARGO.appSet);
-    expect(tree.parentOf[ARGO.appSet]).toBe("ns:argocd");
+    expect(tree.parentOf[ARGO.appSet]).toBe(ROOT);
     expect(tree.parentOf[ARGO.project]).toBe("ns:argocd");
     expect(tree.parentOf[POLICY.netpol]).toBe("ns:shop");
     expect(tree.parentOf[POLICY.scrape]).toBe(ROOT);
     const pos = layoutGrouped(model, ids, "h");
-    expect(pos[POLICY.netpol].x).toBeCloseTo(pos[DEMO.service].x);
-    expect(pos[POLICY.cilium].x).toBeCloseTo(pos[DEMO.service].x);
-    expect(pos[ARGO.project].x).toBeGreaterThan(pos[ARGO.app].x);
+    expect(pos[POLICY.cilium].x).toBeCloseTo(pos[POLICY.netpol].x);
     checkLayout(model, ids, pos);
     checkLayout(model, ids, layoutGrouped(model, ids, "v"));
   });
 
-  it("draws a policy's selects as traffic, manages like ownership and project as a use", () => {
+  it("draws a policy's selects as traffic and project as a use, and no manages into the Application's own box", () => {
     const model = policyArgoModel();
     const ids = model.nodes.map((n) => n.id);
     const tree = groupTree(model, ids);
     const edges = groupedEdges(model, tree, layoutGrouped(model, ids), "h", "");
     const brief = edges.map((e) => `${e.cls} ${e.from} ${e.rel} ${e.to}`);
     expect(brief).toContain(`net ${POLICY.netpol} selects ${DEMO.replicaSet}`);
-    expect(brief).toContain(`own ${ARGO.app} manages ${DEMO.deployment}`);
-    expect(brief).toContain(`own ${ARGO.app} manages ${DEMO.service}`);
-    expect(brief).toContain(`own ${ARGO.nightly} manages ${DEMO.cronJob}`);
     expect(brief).toContain(`use ${ARGO.app} project ${ARGO.project}`);
     expect(brief).toContain(`use ${ARGO.nightly} project ${ARGO.project}`);
+    expect(brief.filter((b) => b.includes(" manages "))).toEqual([]);
+  });
+});
+
+describe("Argo CD Applications as the outer boxes", () => {
+  const app = (name: string) => `Application/argocd/${name}`;
+
+  /** The demo graph with `apps` added and the `manages` edges given. */
+  function argoModel(apps: string[], manages: [string, string][]): MapModel {
+    const { nodes, edges } = demoGraph();
+    return buildModel(
+      [
+        ...nodes,
+        ...apps.map((a) => gnode(a, { statusText: "Healthy · Synced" })),
+      ],
+      [...edges, ...manages.map(([a, to]) => gedge(a, "manages", to))],
+    );
+  }
+
+  it("holds what an Application manages, and what that owns, in its box at the root", () => {
+    const model = argoModel(
+      [ARGO.app],
+      [
+        [ARGO.app, DEMO.deployment],
+        [ARGO.app, DEMO.service],
+        [ARGO.app, DEMO.configMap],
+      ],
+    );
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[ARGO.app]).toBe(ROOT);
+    expect(tree.parentOf[DEMO.deployment]).toBe(ARGO.app);
+    expect(tree.parentOf[DEMO.service]).toBe(ARGO.app);
+    expect(tree.parentOf[DEMO.configMap]).toBe(ARGO.app);
+    expect(tree.parentOf[DEMO.replicaSet]).toBe(DEMO.deployment);
+    expect(tree.parentOf[DEMO.podA]).toBe(DEMO.replicaSet);
+    // What it does not manage stays in its namespace.
+    expect(tree.parentOf[DEMO.secret]).toBe("ns:shop");
+    expect(tree.parentOf[DEMO.statefulSet]).toBe("ns:shop");
+    expect(tree.groups[ARGO.app].place).toBe("shop");
+    expect(boxText(model, tree.groups[ARGO.app])).toEqual({
+      title: "shop",
+      sub: "Application · shop · Healthy · Synced",
+    });
+    const pos = layoutGrouped(model, ids, "h");
+    // Inside, the columns of a namespace: the Service before the workloads, then config.
+    expect(pos[DEMO.service].x).toBeLessThan(pos[DEMO.podA].x);
+    expect(pos[DEMO.podA].x).toBeLessThan(pos[DEMO.configMap].x);
+    checkLayout(model, ids, pos);
+    checkLayout(model, ids, layoutGrouped(model, ids, "v"));
+  });
+
+  it("puts a Pod whose owners are hidden in the Application that manages one of them", () => {
+    const model = argoModel([ARGO.app], [[ARGO.app, DEMO.deployment]]);
+    const tree = groupTree(model, [ARGO.app, DEMO.podA, DEMO.podB]);
+    expect(tree.parentOf[DEMO.podA]).toBe(ARGO.app);
+    expect(tree.parentOf[DEMO.podB]).toBe(ARGO.app);
+  });
+
+  it("gives an Application across namespaces a box for each, with cluster-scoped objects beside them", () => {
+    const model = argoModel(
+      [ARGO.app],
+      [
+        [ARGO.app, DEMO.deployment],
+        [ARGO.app, DEMO.cronJob],
+        [ARGO.app, DEMO.gatewayClass],
+      ],
+    );
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    const shop = appNamespaceKey(ARGO.app, "shop");
+    const jobs = appNamespaceKey(ARGO.app, "jobs");
+    expect(tree.parentOf[DEMO.deployment]).toBe(shop);
+    expect(tree.parentOf[DEMO.cronJob]).toBe(jobs);
+    expect(tree.parentOf[shop]).toBe(ARGO.app);
+    expect(tree.parentOf[jobs]).toBe(ARGO.app);
+    expect(tree.parentOf[DEMO.gatewayClass]).toBe(ARGO.app);
+    expect(tree.groups[shop]).toMatchObject({
+      kind: "Namespace",
+      name: "shop",
+    });
+    expect(tree.groups[ARGO.app].place).toBeUndefined();
+    expect(boxText(model, tree.groups[ARGO.app]).sub).toBe(
+      "Application · Healthy · Synced",
+    );
+    checkLayout(model, ids, layoutGrouped(model, ids, "h"));
+    checkLayout(model, ids, layoutGrouped(model, ids, "v"));
+  });
+
+  it("nests the Applications a parent manages, and breaks a cycle of Applications", () => {
+    const root = app("root");
+    const model = argoModel(
+      [root, ARGO.app, ARGO.nightly],
+      [
+        [root, root],
+        [root, ARGO.app],
+        [root, ARGO.nightly],
+        [ARGO.app, DEMO.deployment],
+        [ARGO.nightly, DEMO.cronJob],
+      ],
+    );
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[root]).toBe(ROOT);
+    expect(tree.parentOf[ARGO.app]).toBe(root);
+    expect(tree.parentOf[ARGO.nightly]).toBe(root);
+    expect(tree.parentOf[DEMO.deployment]).toBe(ARGO.app);
+    // Child Applications are not split by their own namespace.
+    expect(tree.groups[root].place).toBeUndefined();
+    checkLayout(model, ids, layoutGrouped(model, ids, "h"));
+
+    const a = app("a");
+    const b = app("b");
+    const loop = argoModel(
+      [a, b],
+      [
+        [a, b],
+        [b, a],
+      ],
+    );
+    const loopIds = loop.nodes.map((n) => n.id);
+    const loopTree = groupTree(loop, loopIds);
+    const top = [a, b].find((x) => loopTree.parentOf[x] === ROOT);
+    expect(top).toBeDefined();
+    expect(loopTree.parentOf[top === a ? b : a]).toBe(top);
+    checkLayout(loop, loopIds, layoutGrouped(loop, loopIds, "h"));
+  });
+
+  it("puts an object two Applications manage in the first by id and draws the other's manages", () => {
+    const first = app("a");
+    const second = app("b");
+    const model = argoModel(
+      [second, first],
+      [
+        [second, DEMO.service],
+        [first, DEMO.service],
+      ],
+    );
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[DEMO.service]).toBe(first);
+    const brief = groupedEdges(
+      model,
+      tree,
+      layoutGrouped(model, ids),
+      "h",
+      "",
+    ).map((e) => `${e.from} ${e.rel} ${e.to}`);
+    expect(brief).toContain(`${second} manages ${DEMO.service}`);
+    expect(brief).not.toContain(`${first} manages ${DEMO.service}`);
+  });
+
+  it("draws an Application with nothing here as an empty box at the root", () => {
+    const model = argoModel([ARGO.app], []);
+    const ids = model.nodes.map((n) => n.id);
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[ARGO.app]).toBe(ROOT);
+    expect(tree.groups[ARGO.app].kids).toEqual([]);
+    checkLayout(model, ids, layoutGrouped(model, ids, "h"));
+  });
+
+  it("points a link to every Pod of an Application's box at the Pods, not the box", () => {
+    const model = argoModel(
+      [ARGO.app],
+      [
+        [ARGO.app, DEMO.podA],
+        [ARGO.app, DEMO.podB],
+      ],
+    );
+    const ids = [ARGO.app, DEMO.podA, DEMO.podB, DEMO.service];
+    const tree = groupTree(model, ids);
+    expect(tree.parentOf[DEMO.podA]).toBe(ARGO.app);
+    const brief = groupedEdges(
+      model,
+      tree,
+      layoutGrouped(model, ids),
+      "h",
+      "",
+    ).map((e) => `${e.from} ${e.rel} ${e.to}`);
+    expect(brief).toContain(`${DEMO.service} selects ${DEMO.podA}`);
+    expect(brief).toContain(`${DEMO.service} selects ${DEMO.podB}`);
   });
 });

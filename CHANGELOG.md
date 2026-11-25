@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Argo CD Applications hold what they manage on the map:** the Grouped layout draws each Argo CD Application as the outermost box, around the objects it manages and what those own, down to their Pods. Its head names the namespace those objects are in, and an Application whose objects are in several namespaces holds a box for each. An ApplicationSet's box holds its Applications, and an Application that manages other Applications holds their boxes. Objects the Application does not manage stay in their namespace's box.
+
 ## [0.13.3] - 2026-11-25
 
 - **A chat with Claude stays signed in on macOS:** a chat no longer asks you to sign in once the Claude Code sign-in it started with runs out, after about eight hours. Before your next message, SkoposIDE takes Claude Code's renewed sign-in from the Keychain and reopens Claude in the same chat. When the Keychain has nothing newer either, the chat says to run claude in a terminal to renew it, then send your message again.

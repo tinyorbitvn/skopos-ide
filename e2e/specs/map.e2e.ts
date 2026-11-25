@@ -310,6 +310,34 @@ async function exportAs(format: "png" | "pdf", toast: string): Promise<void> {
   await expectToast(toast);
 }
 
+/**
+ * Whether the centre of each node lies inside the box of `box`: a ring for an icon, the
+ * frame for a box. One call reads them all, so a refit cannot move the drawing between
+ * two of them.
+ */
+async function inBox(box: string, ids: string[]): Promise<boolean[]> {
+  return browser.execute(
+    (outer: string, wanted: string[]) => {
+      const frame = document
+        .querySelector(`[data-box="${outer}"] > rect`)
+        ?.getBoundingClientRect();
+      return wanted.map((selector) => {
+        const el = document.querySelector(selector);
+        const shape = el?.querySelector(":scope > rect, :scope > circle");
+        const r = shape?.getBoundingClientRect();
+        if (!frame || !r) return false;
+        const x = r.x + r.width / 2;
+        const y = r.y + r.height / 2;
+        return (
+          x > frame.left && x < frame.right && y > frame.top && y < frame.bottom
+        );
+      });
+    },
+    box,
+    ids.map((id) => `[data-testid="map-node"]${idMatch("data-id", id)}`),
+  );
+}
+
 describe("resource map", () => {
   let pod = "";
 
@@ -798,6 +826,27 @@ describe("resource map", () => {
     expect(await fact("Source")).toBe("Cilium");
     expect(await fact("Types")).toBe("Ingress");
     await clickWhenShown("map-details-close");
+  });
+
+  it("draws the Argo CD Application as the outer box of what it manages", async () => {
+    await chooseLayout("grouped");
+    // The Deployment and its Pods and the Service are in the Application's box; the
+    // ConfigMap, which it does not manage, stays in the namespace's box.
+    await until(
+      async () =>
+        JSON.stringify(await inBox(APP, [DEPLOYMENT, POD, SERVICE, CONFIG])) ===
+        JSON.stringify([true, true, true, false]),
+      "the Application's box never held just what it manages",
+    );
+    const head = await browser.execute(
+      (app: string) =>
+        document.querySelector(`[data-box="${app}"]`)?.textContent ?? "",
+      APP,
+    );
+    expect(head).toContain(`Application · ${NS} · Healthy · Synced`);
+    // The box shows what the Application manages, so no manages link is drawn.
+    expect(await edge(APP, "manages", DEPLOYMENT).isExisting()).toBe(false);
+    expect(await edge(APP, "project", PROJECT).isExisting()).toBe(true);
   });
 
   it("joins the Argo CD Application to what it manages and to its project", async () => {
