@@ -3,6 +3,9 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { flush } from "../../test/ipc";
 import { YamlEditor } from "./YamlEditor";
 
+const hintMock = vi.hoisted(() => ({ setHintSource: vi.fn() }));
+vi.mock("./hintProviders", () => hintMock);
+
 const state = vi.hoisted(() => ({
   editors: [] as FakeEditor[],
   fail: false,
@@ -51,6 +54,7 @@ class FakeEditor {
   }
   getModel() {
     return {
+      uri: { toString: () => "inmemory://model/1" },
       getOffsetAt: (position: { offset: number }) => position.offset,
       dispose: () => (this.modelDisposed = true),
     };
@@ -79,6 +83,7 @@ vi.mock("./monaco", () => ({
 beforeEach(() => {
   state.editors.length = 0;
   state.fail = false;
+  hintMock.setHintSource.mockReset();
 });
 
 async function mounted(value = "a: 1\n") {
@@ -171,4 +176,25 @@ test("going away stops reporting the caret", async () => {
   view.unmount();
 
   expect(editor.caretListener).toBeNull();
+});
+
+test("turns word suggestions off and registers the hint source until unmount", async () => {
+  const hints = { clusterId: "c1", fixedTarget: null, served: [] };
+  const view = render(
+    <YamlEditor value="a: 1\n" onChange={vi.fn()} hints={hints} />,
+  );
+  await act(flush);
+  expect(state.editors[0].options).toMatchObject({
+    wordBasedSuggestions: "off",
+    quickSuggestions: { other: true, comments: false, strings: true },
+  });
+  expect(hintMock.setHintSource).toHaveBeenCalledWith(
+    "inmemory://model/1",
+    hints,
+  );
+  view.unmount();
+  expect(hintMock.setHintSource).toHaveBeenLastCalledWith(
+    "inmemory://model/1",
+    null,
+  );
 });

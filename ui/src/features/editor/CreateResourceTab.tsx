@@ -72,6 +72,10 @@ export function CreateResourceTab(props: {
   const served = useMemo(() => servedKinds(props.resources), [props.resources]);
   const [caret, setCaret] = useState(0);
   const target = useCreateTarget(text, caret);
+  const hints = useMemo(
+    () => ({ clusterId, fixedTarget: null, served }),
+    [clusterId, served],
+  );
 
   const dirty = text.trim() !== "" && text !== baseline;
   // `unchecked` while a long text waits for its check: it is not sent before.
@@ -170,6 +174,7 @@ export function CreateResourceTab(props: {
           onChange={setText}
           onCaret={setCaret}
           readOnly={busy}
+          hints={hints}
           testId="yaml-editor"
         />
       </EditorLayout>

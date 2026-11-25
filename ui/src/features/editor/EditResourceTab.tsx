@@ -16,6 +16,7 @@ import {
 import { editTarget } from "./apiDocsKind";
 import type { CreateDraft } from "./CreateResourceTab";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
+import { servedKinds } from "./servedKinds";
 import { useYamlCheck } from "./useYamlCheck";
 import { stripServerFields, yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
@@ -74,6 +75,11 @@ export function EditResourceTab(props: {
   // `unchecked` while a long text waits for its check: it is not sent before.
   const { check, pending: unchecked } = useYamlCheck(text);
   const target = useMemo(() => editTarget(resource), [resource]);
+  const served = useMemo(() => servedKinds(props.resources), [props.resources]);
+  const hints = useMemo(
+    () => ({ clusterId, fixedTarget: target, served }),
+    [clusterId, target, served],
+  );
   let problem: string | null = null;
   if (!check.ok) problem = yamlProblem(check);
   else if (check.documents !== 1)
@@ -249,6 +255,7 @@ export function EditResourceTab(props: {
             value={text}
             onChange={setText}
             readOnly={busy || gone}
+            hints={hints}
             testId="yaml-editor"
           />
         </EditorLayout>

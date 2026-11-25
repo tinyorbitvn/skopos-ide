@@ -1,6 +1,7 @@
 import type { editor as MonacoEditor } from "monaco-editor/editor/editor.api";
 import { useEffect, useRef, useState } from "react";
 import { ErrorNotice, Spinner } from "../../design";
+import { type HintSource, setHintSource } from "./hintProviders";
 import styles from "./YamlEditor.module.css";
 
 /** A Monaco editor for YAML. The editor's code loads when the first one mounts. */
@@ -11,6 +12,8 @@ export function YamlEditor(props: {
   onCaret?(offset: number): void;
   readOnly?: boolean;
   testId?: string;
+  /** Where hover and completion read the schema; none for no hints. */
+  hints?: HintSource;
 }): React.JSX.Element {
   const { value, readOnly = false } = props;
   const host = useRef<HTMLDivElement>(null);
@@ -23,12 +26,14 @@ export function YamlEditor(props: {
     readOnly,
     onChange: props.onChange,
     onCaret: props.onCaret,
+    hints: props.hints,
   });
   latest.current = {
     value,
     readOnly,
     onChange: props.onChange,
     onCaret: props.onCaret,
+    hints: props.hints,
   };
   // True while `value` is being put in the editor, which is not a user's change.
   const applying = useRef(false);
@@ -54,6 +59,10 @@ export function YamlEditor(props: {
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           tabSize: 2,
+          quickSuggestions: { other: true, comments: false, strings: true },
+          wordBasedSuggestions: "off",
+          suggestOnTriggerCharacters: true,
+          hover: { enabled: "on" },
         });
         const listener = created.onDidChangeModelContent(() => {
           if (!applying.current) latest.current.onChange(created.getValue());
@@ -63,11 +72,15 @@ export function YamlEditor(props: {
           if (offset !== undefined) latest.current.onCaret?.(offset);
         });
         editor.current = created;
+        const uri = created.getModel()?.uri.toString() ?? null;
+        if (uri && latest.current.hints)
+          setHintSource(uri, latest.current.hints);
         setState("ready");
         dispose = () => {
           listener.dispose();
           caret.dispose();
           const model = created.getModel();
+          if (uri) setHintSource(uri, null);
           created.dispose();
           model?.dispose();
           editor.current = null;
@@ -93,6 +106,16 @@ export function YamlEditor(props: {
   useEffect(() => {
     editor.current?.updateOptions({ readOnly });
   }, [readOnly]);
+
+  const hintCluster = props.hints?.clusterId;
+  const hintTarget = props.hints?.fixedTarget;
+  const hintServed = props.hints?.served;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the source's fields are what changes the registration.
+  useEffect(() => {
+    const uri = editor.current?.getModel()?.uri.toString();
+    if (!uri) return;
+    setHintSource(uri, latest.current.hints ?? null);
+  }, [hintCluster, hintTarget, hintServed]);
 
   return (
     <div className={styles.editor} data-testid={props.testId}>
