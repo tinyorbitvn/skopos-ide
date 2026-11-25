@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-11-25
+
 - **A chat with Claude stays signed in on macOS:** a chat no longer asks you to sign in once the Claude Code sign-in it started with runs out, after about eight hours. Before your next message, SkoposIDE takes Claude Code's renewed sign-in from the Keychain and reopens Claude in the same chat. When the Keychain has nothing newer either, the chat says to run claude in a terminal to renew it, then send your message again.
 
 ## [0.13.2] - 2026-11-24
