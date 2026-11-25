@@ -71,7 +71,7 @@ fn read_only_text(cluster: &str) -> String {
     format!("Changes to {cluster} are read only for agents.")
 }
 
-fn limit_text(cluster: &str, namespaces: &[String]) -> String {
+pub(super) fn limit_text(cluster: &str, namespaces: &[String]) -> String {
     format!(
         "{cluster} limits agents to these namespaces: {}.",
         namespaces.join(", ")

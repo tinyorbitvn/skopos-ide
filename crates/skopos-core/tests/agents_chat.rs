@@ -1367,3 +1367,31 @@ async fn a_proposal_the_server_refuses_returns_its_message() {
         "{texts:?}"
     );
 }
+
+#[tokio::test]
+async fn a_proposal_outside_the_namespace_limit_is_refused_before_the_dry_run() {
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "propose_yaml",
+        json!({ "yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n  namespace: payments\n", "summary": "x" }),
+    )])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let mut settings = bench.core.cluster_settings_get(&bench.cluster);
+    settings.agent.namespaces = Some(vec!["default".into()]);
+    bench
+        .core
+        .cluster_settings_set(&bench.cluster, settings)
+        .unwrap();
+    let tab = create_tab(&bench.cluster, "");
+    bench
+        .core
+        .chat_prompt(&info.chat_id, "go".into(), None, Some(tab))
+        .await
+        .unwrap();
+    let texts = agent_texts(&events.items());
+    assert!(
+        texts[0].starts_with("tool:propose_yaml:error: ")
+            && texts[0].ends_with(" limits agents to these namespaces: default."),
+        "{texts:?}"
+    );
+}

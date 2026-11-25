@@ -7,10 +7,13 @@ use std::sync::Arc;
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use serde_json::{json, Value};
 
-use super::changes::one_line;
+use super::changes::{limit_text, one_line};
+use super::trim::namespace_allowed;
 use super::ToolContext;
 use crate::agents::diff::text_diff;
-use crate::agents::editor_tab::{restore_values, EditTarget, EditorTabMode, TAB_TEXT_CAP};
+use crate::agents::editor_tab::{
+    restore_values, tab_namespaces, EditTarget, EditorTabMode, TAB_TEXT_CAP,
+};
 use crate::agents::tabs::{ProposalCard, ProposalState};
 use crate::cluster::ConnectionState;
 use crate::resources::parse_documents;
@@ -137,6 +140,19 @@ async fn propose(ctx: &ToolContext, args: &JsonObject) -> Result<String, String>
         ConnectionState::Connected { .. }
     ) {
         return Err(super::changes::not_connected_text(&cluster.name));
+    }
+    // Namespace limits run in core on every call: the dry run's messages can quote stored
+    // values, so a namespace the agent may not read is refused before it.
+    let settings = ctx.core.cluster_agent_settings(&cluster.id);
+    if let Some(allowed) = &settings.namespaces {
+        let mut restored_tab = tab.clone();
+        restored_tab.yaml = restored.clone();
+        if tab_namespaces(&ctx.core, &restored_tab)
+            .iter()
+            .any(|namespace| !namespace_allowed(&settings, namespace))
+        {
+            return Err(limit_text(&cluster.name, allowed));
+        }
     }
     match (&tab.mode, &tab.target) {
         (EditorTabMode::Edit, Some(target)) => {
