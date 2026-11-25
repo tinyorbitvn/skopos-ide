@@ -469,6 +469,20 @@ test("the + is named New tab and lists a blank draft, the template groups and a 
   );
 });
 
+test("Blank YAML, Draft with AI and Terminal session come first, before the templates", async () => {
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  const ids = within(screen.getByTestId("dock-new-picker"))
+    .getAllByRole("option")
+    .map((option) => option.getAttribute("data-testid"));
+  const terminal = ids.indexOf("dock-terminal");
+  expect(ids[0]).toBe("create-resource");
+  expect(ids.slice(1, terminal)).toEqual(
+    ids.includes("dock-ai-draft") ? ["dock-ai-draft"] : [],
+  );
+  expect(ids.length).toBeGreaterThan(terminal + 1);
+});
+
 test("a template opens a create tab named after it, holding its text, not dirty", async () => {
   await show();
   fireEvent.click(screen.getByTestId("dock-new"));

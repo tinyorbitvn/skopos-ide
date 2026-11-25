@@ -376,14 +376,6 @@ export function Dock(props: {
                         },
                       ]
                     : []),
-                ],
-              },
-              ...templateSections(served, (template) =>
-                openTemplate(clusterId, template),
-              ),
-              {
-                id: "sessions",
-                items: [
                   {
                     id: "terminal",
                     label: "Terminal session",
@@ -393,6 +385,9 @@ export function Dock(props: {
                   },
                 ],
               },
+              ...templateSections(served, (template) =>
+                openTemplate(clusterId, template),
+              ),
             ]}
             trigger={({ open, toggle }) => (
               <IconButton

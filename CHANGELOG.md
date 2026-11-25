@@ -7,7 +7,7 @@ release notes (see `docs/releasing.md`).
 ## [Unreleased]
 
 - **More YAML templates:** creating a resource starts from 36 templates in six groups, including a Deployment with probes and resources, NodePort, LoadBalancer and headless Services, a default-deny NetworkPolicy, TLS and registry Secrets, and RBAC, quota and storage kinds. Kinds the cluster does not serve are dimmed.
-- **New tab button on the dock:** a `+` after the last dock tab opens a searchable list: a blank YAML tab, every template by group, a terminal session, and Draft with AI.
+- **New tab button on the dock:** a `+` after the last dock tab opens a searchable list: a blank YAML tab, Draft with AI and a terminal session first, then every template by group.
 - **Field hints in the YAML editor:** hovering a key shows its type, default, values and description from the cluster's API docs, and completion lists the fields that fit where the caret is, their values, and the kinds and versions the cluster serves.
 - **AI in YAML tabs:** Ask AI in a create or edit tab sends the tab's text to the agent, which proposes new text. The tab shows the proposal as a diff to accept or reject, and Secret values stay hidden from the agent when the cluster hides them.
 
