@@ -58,6 +58,23 @@ pub fn yaml_diff(before: &Value, after: &Value) -> Vec<DiffLine> {
     shown(with_context(&edit_script(&old, &new, TABLE_CELLS)))
 }
 
+/// The changed lines of two texts with their context, then the counts of added and removed
+/// lines (YAML authoring spec A11).
+pub fn text_diff(before: &str, after: &str) -> (Vec<DiffLine>, u32, u32) {
+    let old: Vec<String> = before.lines().map(str::to_owned).collect();
+    let new: Vec<String> = after.lines().map(str::to_owned).collect();
+    let script = edit_script(&old, &new, TABLE_CELLS);
+    let count = |wanted: Edit| {
+        let found = script.iter().filter(|(edit, _)| *edit == wanted).count();
+        u32::try_from(found).unwrap_or(u32::MAX)
+    };
+    (
+        shown(with_context(&script)),
+        count(Edit::Added),
+        count(Edit::Removed),
+    )
+}
+
 /// The object without `status` and the server-set metadata.
 fn comparable(object: &Value) -> Value {
     let mut object = object.clone();
@@ -350,6 +367,23 @@ mod tests {
         assert_eq!(
             serde_json::to_value(line(DiffKind::Removed, "a: 1")).unwrap(),
             json!({ "kind": "removed", "text": "a: 1" })
+        );
+    }
+
+    #[test]
+    fn a_text_diff_counts_added_and_removed_lines() {
+        let (lines, added, removed) = text_diff("a: 1\nb: 2\nc: 3\n", "a: 1\nb: 5\nc: 3\nd: 4\n");
+        assert_eq!((added, removed), (2, 1));
+        assert_eq!(
+            lines.iter().filter(|l| l.kind == DiffKind::Removed).count(),
+            1
+        );
+        assert!(lines
+            .iter()
+            .any(|l| l.kind == DiffKind::Added && l.text == "d: 4"));
+        assert_eq!(
+            text_diff("", "a: 1\n"),
+            (vec![line(DiffKind::Added, "a: 1")], 1, 0)
         );
     }
 }

@@ -10,6 +10,7 @@ pub mod chat;
 pub mod chats;
 pub mod cli_login;
 pub mod diff;
+pub mod editor_tab;
 pub mod endpoint;
 pub mod events;
 pub mod known_folders;

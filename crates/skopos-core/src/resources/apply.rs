@@ -138,7 +138,7 @@ fn merge_into(object: &mut Map<String, Value>, sources: Value) -> Result<(), &'s
 /// Known differences from kubectl, which follows YAML 1.1: a plain `0644` stays the
 /// text `"0644"` where kubectl has 420, and `yes` or `on` stay text where kubectl has
 /// `true`. A quoted `"<<"` key also counts as a merge key here.
-pub(super) fn parse_documents(yaml: &str) -> CoreResult<Vec<Value>> {
+pub(crate) fn parse_documents(yaml: &str) -> CoreResult<Vec<Value>> {
     let mut documents = Vec::new();
     for document in serde_yaml_ng::Deserializer::from_str(yaml) {
         let Merged(value) = Merged::deserialize(document)
