@@ -24,13 +24,13 @@ import {
   useDock,
 } from "../../stores/dock";
 import { resetResourcesForTest } from "../../stores/resources";
-import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, flush, mockBackend } from "../../test/ipc";
 import {
   captureResizeObservers,
   connectClusters,
   installFakeViews,
 } from "../../test/terminal";
+import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetSessionsForTest } from "../terminal/sessions";
 import { setTermViewFactory } from "../terminal/termView";
 import { Dock } from "./Dock";
@@ -85,6 +85,7 @@ let backend: Backend;
 
 beforeEach(() => {
   resetDockForTest();
+  setAgentsSupportedForTest(true);
   vi.stubGlobal("innerHeight", 1000);
   installFakeViews();
   captureResizeObservers();
@@ -101,6 +102,11 @@ beforeEach(() => {
     session_resize: () => null,
     session_stop: () => null,
     cluster_settings_get: () => ({ nodeShellImage: null }),
+    ui_state_get: () => null,
+    ui_state_set: () => null,
+    api_schema: () => {
+      throw new Error("no docs");
+    },
   });
 });
 
@@ -122,9 +128,9 @@ test("with no tabs the dock offers Create and no content", async () => {
   expect(screen.queryByTestId("yaml-editor")).toBeNull();
 });
 
-/** Opens the dock's + menu and picks `item`. */
-function pick(item: "create-resource" | "dock-terminal"): void {
-  fireEvent.keyDown(screen.getByTestId("dock-new"), { key: "Enter" });
+/** Opens the dock's + picker and picks `item`. */
+function pick(item: string): void {
+  fireEvent.click(screen.getByTestId("dock-new"));
   fireEvent.click(screen.getByTestId(item));
 }
 
@@ -448,62 +454,90 @@ function tabIds(): string[] {
   return useDock.getState().tabs.map((t) => t.id);
 }
 
-test("the Create button opens an upward menu: Create resource, then Terminal session (spec Q §4)", async () => {
+test("the + is named New tab and lists a blank draft, the template groups and a terminal", async () => {
   await show();
-  const create = screen.getByRole("button", { name: "Create" });
-  expect([
-    create.getAttribute("data-testid"),
-    create.textContent,
-    create.querySelector("[data-icon]")?.getAttribute("data-icon"),
-    create.classList.contains("create"),
-  ]).toEqual(["dock-new", "Create", "plus", true]);
-  fireEvent.keyDown(create, { key: "Enter" });
-  const menu = screen.getByRole("menu");
-  // Its right edge meets the button's: the button ends the bar, and the menu does not
-  // shift to fit, so a start-aligned menu would run past the window.
-  expect([
-    menu.getAttribute("data-side"),
-    menu.getAttribute("data-align"),
-    menu.classList.contains("createMenu"),
-  ]).toEqual(["top", "end", true]);
+  const plus = screen.getByTestId("dock-new");
+  expect(plus.getAttribute("aria-label")).toBe("New tab");
+  fireEvent.click(plus);
+  const picker = screen.getByTestId("dock-new-picker");
+  expect(within(picker).getByTestId("create-resource").textContent).toContain(
+    "Blank YAML",
+  );
+  expect(within(picker).getByText("Workloads")).toBeTruthy();
+  expect(within(picker).getByTestId("dock-terminal").textContent).toContain(
+    "Terminal session",
+  );
+});
+
+test("Blank YAML, Draft with AI and Terminal session come first, before the templates", async () => {
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  const ids = within(screen.getByTestId("dock-new-picker"))
+    .getAllByRole("option")
+    .map((option) => option.getAttribute("data-testid"));
+  const terminal = ids.indexOf("dock-terminal");
+  expect(ids[0]).toBe("create-resource");
+  expect(ids.slice(1, terminal)).toEqual(
+    ids.includes("dock-ai-draft") ? ["dock-ai-draft"] : [],
+  );
+  expect(ids.length).toBeGreaterThan(terminal + 1);
+});
+
+test("a template opens a create tab named after it, holding its text, not dirty", async () => {
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  fireEvent.change(screen.getByTestId("dock-new-picker-search"), {
+    target: { value: "nodeport" },
+  });
+  fireEvent.click(screen.getByTestId("menu-item-service-nodeport"));
+  await act(flush);
+  const [tab] = useDock.getState().tabs;
+  expect(tab).toMatchObject({
+    kind: "create",
+    clusterId: "c1",
+    title: "New Service · NodePort",
+    dirty: false,
+  });
   expect(
-    screen
-      .getAllByRole("menuitem")
-      .map((item) => [
-        item.getAttribute("data-testid"),
-        item.textContent,
-        item.querySelector("[data-icon]")?.getAttribute("data-icon"),
-      ]),
-  ).toEqual([
-    [
-      "create-resource",
-      "Create resourceYAML draft in the dock",
-      FilePlus.iconName,
-    ],
-    [
-      "dock-terminal",
-      "Terminal sessionShell in the dock",
-      SquareTerminal.iconName,
-    ],
-  ]);
-  const rules = cssRules(CSS_FILES["/src/features/dock/Dock.module.css"]);
-  const decl = (selector: string, prop: string) =>
-    rules
-      .find((r) => r.selector === selector)
-      ?.decls.find(([p]) => p === prop)?.[1];
-  expect([
-    decl(".bar .create", "height"),
-    decl(".bar .create", "padding"),
-    decl('.createMenu[role="menu"]', "min-width"),
-    decl('.createMenu [role="menuitem"]', "height"),
-    decl(".tab", "max-width"),
-  ]).toEqual([
-    "26px",
-    "0 var(--space-6) 0 var(--space-5)",
-    "220px",
-    "32px",
-    "260px",
-  ]);
+    (screen.getByTestId("yaml-editor") as HTMLTextAreaElement).value,
+  ).toContain("type: NodePort");
+});
+
+test("templates of kinds the cluster does not serve are disabled", async () => {
+  render(
+    <MemoryRouter>
+      <Dock
+        clusterId="c1"
+        resources={[
+          {
+            resource: {
+              group: "",
+              version: "v1",
+              plural: "pods",
+              kind: "Pod",
+              namespaced: true,
+            },
+            verbs: [],
+            shortNames: [],
+            canList: true,
+            canWatch: true,
+            canCreate: true,
+            canUpdate: true,
+            canPatch: true,
+            canDelete: true,
+          },
+        ]}
+      />
+    </MemoryRouter>,
+  );
+  await act(flush);
+  fireEvent.click(screen.getByTestId("dock-new"));
+  expect(
+    screen.getByTestId("menu-item-gateway").getAttribute("aria-disabled"),
+  ).toBe("true");
+  expect(
+    screen.getByTestId("menu-item-pod").getAttribute("aria-disabled"),
+  ).toBeNull();
 });
 
 test("each Terminal Session is a new terminal, numbered after the first", async () => {
@@ -612,4 +646,31 @@ test("restored tabs: a hidden terminal starts when its tab is shown, a node shel
   await act(flush);
   expect(backend.callsTo("terminal_start")).toHaveLength(1);
   expect(backend.callsTo("node_shell_start")).toEqual([]);
+});
+
+test("Draft with AI opens a blank create tab with its AI bar open", async () => {
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  expect(screen.getByTestId("dock-ai-draft").textContent).toContain(
+    "Draft with AI",
+  );
+  fireEvent.click(screen.getByTestId("dock-ai-draft"));
+  await act(flush);
+  const [tab] = useDock.getState().tabs;
+  expect(tab).toMatchObject({
+    kind: "create",
+    clusterId: "c1",
+    title: "Create",
+  });
+  expect(screen.getByTestId("yaml-ai-bar")).toBeTruthy();
+  expect(
+    (screen.getByTestId("yaml-ai-input") as HTMLTextAreaElement).placeholder,
+  ).toBe("Describe the objects to create");
+});
+
+test("Draft with AI is not offered where agents are not supported", async () => {
+  setAgentsSupportedForTest(false);
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  expect(screen.queryByTestId("dock-ai-draft")).toBeNull();
 });

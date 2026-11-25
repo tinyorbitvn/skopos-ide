@@ -688,12 +688,17 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   [
     "chat_prompt",
     () => api.chatPrompt("a1b2c3d4", "Why is web restarting?", OBJECT),
-    { chatId: "a1b2c3d4", text: "Why is web restarting?", object: OBJECT },
+    {
+      chatId: "a1b2c3d4",
+      text: "Why is web restarting?",
+      object: OBJECT,
+      tab: null,
+    },
   ],
   [
     "chat_prompt",
     () => api.chatPrompt("a1b2c3d4", "And now?", null),
-    { chatId: "a1b2c3d4", text: "And now?", object: null },
+    { chatId: "a1b2c3d4", text: "And now?", object: null, tab: null },
   ],
   ["chat_stop", () => api.chatStop("a1b2c3d4"), { chatId: "a1b2c3d4" }],
   ["chat_close", () => api.chatClose("a1b2c3d4"), { chatId: "a1b2c3d4" }],

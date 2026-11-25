@@ -63,6 +63,7 @@ async fn open(core: &AppCore, scope: ToolScope) -> Chat {
         scope,
         cards: cards_tx,
         gate: Arc::new(NoChanges),
+        tabs: skopos_core::agents::tabs::EditorTabs::new(tokio::sync::mpsc::channel(1).0),
     });
     let (server_end, client_end) = tokio::io::duplex(1 << 20);
     let stream: Box<dyn AsyncStream> = Box::new(server_end);
@@ -355,8 +356,10 @@ async fn a_chat_across_clusters_adds_list_clusters_and_a_cluster_argument() {
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
     assert_eq!(names[0], "list_clusters");
     assert!(names[1..].starts_with(&READ_TOOLS), "{names:?}");
+    assert_eq!(names.last(), Some(&"propose_yaml"), "{names:?}");
     assert_eq!(tools[0].input_schema["properties"], json!({}));
-    for tool in &tools[1..] {
+    // propose_yaml works on the chat's tab, so it takes no cluster.
+    for tool in tools[1..].iter().filter(|tool| tool.name != "propose_yaml") {
         assert_eq!(
             tool.input_schema["properties"]["cluster"]["enum"],
             json!(["fake", "ghost"]),

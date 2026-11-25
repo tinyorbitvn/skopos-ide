@@ -2,10 +2,18 @@ import { act } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
 import type { AgentStatus } from "../ipc/generated/AgentStatus";
 import type { ChatEvent } from "../ipc/generated/ChatEvent";
+import type { EditorTab } from "../ipc/generated/EditorTab";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
-import { resetAgentChatForTest, useAgentChat } from "./agentChat";
+import { proposal } from "../test/proposals";
+import {
+  resetAgentChatForTest,
+  type TabAskResult,
+  useAgentChat,
+} from "./agentChat";
 import { resetAgentsForTest } from "./agents";
 import { resetCatalogForTest, useCatalog } from "./catalog";
+import { resetProposalsForTest, useProposals } from "./proposals";
+import { registerTabSource, resetTabSourcesForTest } from "./tabSources";
 
 type Channel = { onmessage(event: ChatEvent): void };
 
@@ -67,6 +75,8 @@ beforeEach(() => {
   resetAgentChatForTest();
   resetAgentsForTest();
   resetCatalogForTest();
+  resetProposalsForTest();
+  resetTabSourcesForTest();
 });
 
 test("opening on a cluster page starts a chat on that cluster and shows its items", async () => {
@@ -272,7 +282,7 @@ test("send clears the box and the object; a failed send puts them back", async (
   useAgentChat.getState().setDraft("  Why?  ");
   await act(() => useAgentChat.getState().send());
   expect(ipc.callsTo("chat_prompt")).toEqual([
-    { chatId: "c1", text: "Why?", object },
+    { chatId: "c1", text: "Why?", object, tab: null },
   ]);
   expect(useAgentChat.getState()).toMatchObject({
     draft: "",
@@ -368,4 +378,99 @@ test("a stored chat that can load continues; one that cannot shows the reopen ba
     start: { phase: "ended" },
     cannotReopen: "Claude",
   });
+});
+
+function createTab(yaml: string): EditorTab {
+  return {
+    tabId: "create-1",
+    title: "Create",
+    cluster: "a",
+    mode: "create",
+    yaml,
+    target: null,
+    defaultNamespace: "default",
+  };
+}
+
+test("asking from a tab starts a chat on its cluster and sends the tab with the text", async () => {
+  catalog({ a: "prod" });
+  const { ipc } = backend();
+  registerTabSource("create-1", async () => createTab("kind: Pod\n"));
+  let result: TabAskResult | undefined;
+  await act(async () => {
+    result = await useAgentChat
+      .getState()
+      .askFromTab("create-1", "add a container");
+    await flush();
+  });
+  expect(result).toBe("sent");
+  expect(useAgentChat.getState().open).toBe(true);
+  expect(ipc.callsTo("chat_start")[0]).toMatchObject({
+    scope: { clusters: ["a"], global: false },
+  });
+  expect(ipc.callsTo("chat_prompt")[0]).toMatchObject({
+    chatId: "c1",
+    text: "add a container",
+    object: null,
+    tab: createTab("kind: Pod\n"),
+  });
+  expect(useAgentChat.getState().tab).toEqual({
+    tabId: "create-1",
+    title: "Create",
+  });
+});
+
+test("while the tab is attached, the panel's messages carry its current text", async () => {
+  catalog({ a: "prod" });
+  const { ipc } = backend();
+  let yaml = "kind: Pod\n";
+  registerTabSource("create-1", async () => createTab(yaml));
+  await act(async () => {
+    await useAgentChat.getState().askFromTab("create-1", "first");
+  });
+  yaml = "kind: Pod\nmetadata: {}\n";
+  await act(async () => {
+    await useAgentChat.getState().send("second");
+  });
+  expect(ipc.callsTo("chat_prompt")[1]).toMatchObject({
+    text: "second",
+    tab: createTab(yaml),
+  });
+});
+
+test("a refused prompt gives the message and attaches nothing", async () => {
+  catalog({ a: "prod" });
+  backend({
+    chat_prompt: () => {
+      throw {
+        code: "InvalidInput",
+        message: "The agent may not read namespace payments on prod.",
+      };
+    },
+  });
+  registerTabSource("create-1", async () => createTab(""));
+  let result: TabAskResult | undefined;
+  await act(async () => {
+    result = await useAgentChat.getState().askFromTab("create-1", "go");
+  });
+  expect(result).toEqual({
+    failed: "The agent may not read namespace payments on prod.",
+  });
+  expect(useAgentChat.getState().tab).toBeNull();
+});
+
+test("a proposal item reaches the proposals store", async () => {
+  catalog({ a: "prod" });
+  const { channels } = backend();
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  act(() => {
+    channels[0]?.onmessage({
+      type: "item",
+      item: { id: "i1", body: { type: "proposal", card: proposal() } },
+    });
+  });
+  expect(useProposals.getState().byTab["create-1"]?.chatId).toBe("c1");
 });

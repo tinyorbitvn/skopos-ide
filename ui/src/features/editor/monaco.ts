@@ -7,7 +7,12 @@ import "monaco-editor/editor/contrib/wordOperations/browser/wordOperations";
 import "monaco-editor/editor/contrib/linesOperations/browser/linesOperations";
 import "monaco-editor/editor/contrib/comment/browser/comment";
 import "monaco-editor/editor/contrib/find/browser/findController";
+// Field hints (YAML authoring spec H8): hover, the suggest list and snippet insertion.
+import "monaco-editor/editor/contrib/hover/browser/hoverContribution";
+import "monaco-editor/editor/contrib/suggest/browser/suggestController";
+import "monaco-editor/editor/contrib/snippet/browser/snippetController2";
 import { PALETTE, type Palette } from "../../design/palette";
+import { installHintProviders } from "./hintProviders";
 
 // Everything here is bundled by Vite and loaded from the app itself, never a CDN.
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
@@ -49,6 +54,7 @@ function defineTheme(name: string, base: "vs-dark" | "vs", p: Palette): void {
 
 defineTheme(DARK, "vs-dark", PALETTE.dark);
 defineTheme(LIGHT, "vs", PALETTE.light);
+installHintProviders(monaco);
 
 /** The Monaco theme that goes with the app's `data-theme`. */
 export function currentTheme(): string {

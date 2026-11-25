@@ -135,3 +135,49 @@
 .apiDocsToggle {
   margin-left: auto;
 }
+
+/* Ask AI sits right before API docs, at the toolbar's right end (spec A1). */
+.aiToggle {
+  margin-left: auto;
+}
+
+.aiToggle + .apiDocsToggle {
+  margin-left: 0;
+}
+
+/* A pending AI proposal over the editor (spec A4). */
+.proposal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-accent-soft);
+}
+
+.proposalSummary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The editor, kept mounted under a proposal's diff so its undo history stays. */
+.stack {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.layer {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.layer[hidden] {
+  display: none;
+}

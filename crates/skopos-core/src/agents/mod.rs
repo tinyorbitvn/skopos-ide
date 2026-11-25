@@ -10,6 +10,7 @@ pub mod chat;
 pub mod chats;
 pub mod cli_login;
 pub mod diff;
+pub mod editor_tab;
 pub mod endpoint;
 pub mod events;
 pub mod known_folders;
@@ -21,6 +22,7 @@ pub mod proxy;
 pub mod registry;
 pub mod sandbox;
 pub mod settings;
+pub mod tabs;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

@@ -7,7 +7,9 @@ import {
 import {
   byTestId,
   clickWhenShown,
+  editorContaining,
   hotbarItem,
+  newInDock,
   openCluster,
   openResource,
   pointerClick,
@@ -155,6 +157,15 @@ async function runCommand(id: string): Promise<void> {
   await clickWhenShown(`palette-command-${id}`);
 }
 
+const PROPOSED = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-proposed
+  namespace: ${NS}
+data:
+  source: agent
+`;
+
 describe("agents", () => {
   before(async () => {
     await createTestNamespace(NS);
@@ -297,5 +308,28 @@ describe("agents", () => {
       async () => (await mode()) === "fast",
       "MODE never became fast",
     );
+  });
+
+  it("puts the agent's proposal into a create tab, which applies it", async () => {
+    writeFakeAgentScript([[tool("propose_yaml", { yaml: PROPOSED, summary: "Add the e2e ConfigMap" }), say("Proposed.")]]);
+    await openCluster(KIND);
+    // The agent reads its script when it starts: a new chat on this cluster plays this one.
+    await shown("agent-panel");
+    await newChat();
+    await shown("agent-new-chat-title", 60000);
+    await newInDock("create-resource");
+    await clickWhenShown("yaml-ai");
+    await (await shown("yaml-ai-input")).setValue("Create a ConfigMap");
+    await clickWhenShown("yaml-ai-send");
+    await shown("yaml-proposal-bar", 60000);
+    expect(await text("yaml-proposal-bar")).toContain("Add the e2e ConfigMap");
+    await clickWhenShown("yaml-proposal-accept");
+    await editorContaining("name: e2e-proposed");
+    await clickWhenShown("create-apply");
+    await until(
+      async () => (await (await byTestId("apply-result-0")).getAttribute("data-ok")) === "true",
+      "the proposal was never applied",
+    );
+    expect(await kubectl(["-n", NS, "get", "configmap", "e2e-proposed", "-o", "jsonpath={.data.source}"])).toBe("agent");
   });
 });

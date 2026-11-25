@@ -6,15 +6,24 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import { readDraft, resetDockForTest, useDock } from "../../stores/dock";
+import { resetProposalsForTest, useProposals } from "../../stores/proposals";
 import { CONFIG_MAP } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
+import { proposal } from "../../test/proposals";
+import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { EditResourceTab } from "./EditResourceTab";
 import { CHECK_AT_ONCE_CHARS } from "./useYamlCheck";
+
+vi.mock("./YamlDiff", () => ({
+  YamlDiff: (p: { modified: string }) => (
+    <pre data-testid="yaml-proposal-diff">{p.modified}</pre>
+  ),
+}));
 
 vi.mock("./YamlEditor", () => ({
   YamlEditor: (props: {
@@ -63,6 +72,7 @@ function backend(overrides: Record<string, (args: never) => unknown> = {}) {
   return mockBackend({
     resource_get_yaml: () => YAML,
     resource_replace: () => ({}),
+    chat_proposal_answer: () => null,
     ui_state_get: () => null,
     ui_state_set: () => null,
     api_schema: () => CONFIG_MAP,
@@ -72,7 +82,7 @@ function backend(overrides: Record<string, (args: never) => unknown> = {}) {
 
 async function show() {
   useDock.getState().open(TAB);
-  const view = render(<EditResourceTab tab={TAB} />);
+  const view = render(<EditResourceTab tab={TAB} resources={[]} />);
   await act(flush);
   return view;
 }
@@ -103,6 +113,11 @@ function longData(): string {
   }
   return `data:\n${lines.join("")}`;
 }
+
+beforeEach(() => {
+  resetProposalsForTest();
+  setAgentsSupportedForTest(true);
+});
 
 afterEach(() => {
   // Unmount before the resets, so no mounted panel asks for API docs again and fills
@@ -142,7 +157,7 @@ test("a cluster-scoped object is asked for without a namespace", async () => {
   const calls = backend();
   const tab = { ...TAB, namespace: undefined };
   useDock.getState().open(tab);
-  render(<EditResourceTab tab={tab} />);
+  render(<EditResourceTab tab={tab} resources={[]} />);
   await act(flush);
 
   expect(calls.callsTo("resource_get_yaml")[0].namespace).toBeNull();
@@ -438,7 +453,7 @@ test("unsaved edits survive the tab leaving the screen and coming back", async (
 
   edit(EDITED);
   view.unmount();
-  render(<EditResourceTab tab={TAB} />);
+  render(<EditResourceTab tab={TAB} resources={[]} />);
   await act(flush);
 
   expect(editor().value).toBe(EDITED);
@@ -460,7 +475,7 @@ test("a clean tab that comes back reads the object again", async () => {
   const view = await show();
 
   view.unmount();
-  render(<EditResourceTab tab={TAB} />);
+  render(<EditResourceTab tab={TAB} resources={[]} />);
   await act(flush);
 
   expect(calls.callsTo("resource_get_yaml")).toHaveLength(2);
@@ -515,4 +530,27 @@ test("a cluster with no API docs shows the error beside the editor, which keeps 
   );
   expect(document.activeElement).toBe(editor());
   expect(screen.getByTestId("yaml-save")).toBeTruthy();
+});
+
+test("Ask AI opens the bar with the edit placeholder", async () => {
+  backend();
+  await show();
+  fireEvent.click(screen.getByTestId("yaml-ai"));
+  expect(
+    screen.getByTestId<HTMLTextAreaElement>("yaml-ai-input").placeholder,
+  ).toBe("Describe the change to ConfigMap app");
+});
+
+test("a pending proposal disables Save", async () => {
+  backend();
+  await show();
+  edit(EDITED);
+  expect(save().disabled).toBe(false);
+  act(() =>
+    useProposals
+      .getState()
+      .receive("chat-1", proposal({ tabId: TAB.id, mode: "edit" })),
+  );
+  expect(screen.getByTestId("yaml-proposal-bar")).toBeTruthy();
+  expect(save().disabled).toBe(true);
 });

@@ -4,9 +4,15 @@ import type { ChangeCard } from "./ChangeCard";
 import type { ChatNotice } from "./ChatNotice";
 import type { ObjectRef } from "./ObjectRef";
 import type { PlanEntry } from "./PlanEntry";
+import type { ProposalCard } from "./ProposalCard";
+import type { TabChip } from "./TabChip";
 import type { ToolCard } from "./ToolCard";
 
 /**
  * What an item shows. The cards are boxed so the small items stay small.
  */
-export type ChatItemBody = { "type": "user", text: string, object: ObjectRef | null, } | { "type": "agent", text: string, } | { "type": "plan", entries: Array<PlanEntry>, } | { "type": "tool", card: ToolCard, } | { "type": "agentTool", title: string, status: AgentToolStatus, details: string, } | { "type": "change", card: ChangeCard, } | { "type": "notice", notice: ChatNotice, text: string, };
+export type ChatItemBody = { "type": "user", text: string, object: ObjectRef | null, 
+/**
+ * The YAML tab the message carried (YAML authoring spec A3).
+ */
+tab?: TabChip, } | { "type": "agent", text: string, } | { "type": "plan", entries: Array<PlanEntry>, } | { "type": "tool", card: ToolCard, } | { "type": "agentTool", title: string, status: AgentToolStatus, details: string, } | { "type": "change", card: ChangeCard, } | { "type": "proposal", card: ProposalCard, } | { "type": "notice", notice: ChatNotice, text: string, };

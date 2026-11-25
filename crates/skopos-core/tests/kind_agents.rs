@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::ConfigMap;
+use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::api::PostParams;
 use kube::{Api, Client};
 use rmcp::model::CallToolRequestParams;
@@ -19,8 +20,10 @@ use rmcp::{Peer, RoleClient, ServiceExt};
 use serde_json::{json, Value};
 use skopos_core::agents::approvals::{Approvals, ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::diff::DiffKind;
+use skopos_core::agents::editor_tab::{EditTarget, EditorTab, EditorTabMode};
 use skopos_core::agents::mcp::changes::ChatGate;
 use skopos_core::agents::mcp::{serve_mcp, ScopeCluster, ToolContext, ToolScope};
+use skopos_core::agents::tabs::{AttachedTab, EditorTabs, ProposalCard, ProposalState};
 use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::kubeconfig::ClusterId;
@@ -37,6 +40,8 @@ struct Chat {
     client: RunningService<RoleClient, ()>,
     cards: mpsc::Receiver<ChangeCard>,
     approvals: Arc<Approvals>,
+    tabs: Arc<EditorTabs>,
+    proposals: mpsc::Receiver<ProposalCard>,
 }
 
 impl Chat {
@@ -55,6 +60,8 @@ impl Chat {
             approvals: approvals.clone(),
             scope: scope.clone(),
         });
+        let (proposal_cards, proposals) = mpsc::channel(64);
+        let tabs = EditorTabs::new(proposal_cards);
         let (tool_cards, mut read_cards) = mpsc::channel(64);
         tokio::spawn(async move { while read_cards.recv().await.is_some() {} });
         let context = Arc::new(ToolContext {
@@ -62,6 +69,7 @@ impl Chat {
             scope,
             cards: tool_cards,
             gate,
+            tabs: tabs.clone(),
         });
         let (server_end, client_end) = tokio::io::duplex(1 << 20);
         tokio::spawn(serve_mcp(Box::new(server_end), context));
@@ -70,6 +78,8 @@ impl Chat {
             client,
             cards,
             approvals,
+            tabs,
+            proposals,
         }
     }
 
@@ -482,6 +492,130 @@ async fn a_one_shot_command_runs_to_its_end_or_to_its_time_limit() {
             error.message,
             "The command did not finish within 2 seconds."
         );
+    })
+    .await;
+}
+
+impl Chat {
+    async fn next_proposal(&mut self) -> ProposalCard {
+        tokio::time::timeout(WAIT, self.proposals.recv())
+            .await
+            .expect("no proposal came")
+            .expect("the proposal stream closed")
+    }
+
+    /// Attaches a YAML tab on the kind cluster, as a prompt from that tab does.
+    fn attach(&self, id: &ClusterId, tab_id: &str, namespace: &str, target: Option<EditTarget>) {
+        let mode = if target.is_some() {
+            EditorTabMode::Edit
+        } else {
+            EditorTabMode::Create
+        };
+        self.tabs.attach(AttachedTab {
+            tab: EditorTab {
+                tab_id: tab_id.to_owned(),
+                title: tab_id.to_owned(),
+                cluster: id.clone(),
+                mode,
+                yaml: String::new(),
+                target,
+                default_namespace: namespace.to_owned(),
+            },
+            cluster: ScopeCluster {
+                id: id.clone(),
+                name: CLUSTER.to_owned(),
+            },
+            hidden: Vec::new(),
+        });
+    }
+}
+
+fn configmaps() -> ResourceRef {
+    ResourceRef {
+        group: String::new(),
+        version: "v1".into(),
+        plural: "configmaps".into(),
+        kind: "ConfigMap".into(),
+        namespaced: true,
+    }
+}
+
+fn crd_and_widget(namespace: &str) -> String {
+    format!(
+        "apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.propose.skopos.dev
+spec:
+  group: propose.skopos.dev
+  names:
+    kind: Widget
+    plural: widgets
+    singular: widget
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+---
+apiVersion: propose.skopos.dev/v1
+kind: Widget
+metadata:
+  name: w
+  namespace: {namespace}
+"
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs the skopos-e2e kind cluster"]
+async fn propose_yaml_dry_runs_creates_edits_and_crds_and_writes_nothing() {
+    const NAMESPACE: &str = "skopos-test-propose";
+    let (core, id, client, _root) = kind_client().await;
+    in_namespace(&client, NAMESPACE, async {
+        let mut chat = Chat::start(&core, &id).await;
+        let config_maps: Api<ConfigMap> = Api::namespaced(client.clone(), NAMESPACE);
+
+        // A create proposal is only dry-run.
+        let created = format!("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: proposed\n  namespace: {NAMESPACE}\ndata:\n  a: b\n");
+        chat.attach(&id, "create-1", NAMESPACE, None);
+        let (failed, text) = chat.call("propose_yaml", json!({ "yaml": created, "summary": "Add proposed" })).await;
+        assert!(!failed, "{text}");
+        assert_eq!(chat.next_proposal().await.state, ProposalState::Waiting);
+        assert!(config_maps.get_opt("proposed").await.unwrap().is_none());
+
+        // An edit whose resourceVersion went stale still passes, and changes nothing.
+        let edited: ConfigMap =
+            serde_json::from_value(json!({ "metadata": { "name": "edited" }, "data": { "a": "before" } })).unwrap();
+        config_maps.create(&PostParams::default(), &edited).await.unwrap();
+        let target = EditTarget { resource: configmaps(), namespace: Some(NAMESPACE.to_owned()), name: "edited".to_owned() };
+        chat.attach(&id, "edit-1", NAMESPACE, Some(target));
+        let stale = format!("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: edited\n  namespace: {NAMESPACE}\n  resourceVersion: \"1\"\ndata:\n  a: after\n");
+        let (failed, text) = chat.call("propose_yaml", json!({ "yaml": stale, "summary": "Change a" })).await;
+        assert!(!failed, "{text}");
+        chat.next_proposal().await;
+        assert_eq!(config_maps.get("edited").await.unwrap().data.unwrap()["a"], "before");
+
+        // A CRD and an object of it in one text: the object's unknown kind does not block it.
+        chat.attach(&id, "create-2", NAMESPACE, None);
+        let (failed, text) = chat
+            .call("propose_yaml", json!({ "yaml": crd_and_widget(NAMESPACE), "summary": "Add widgets" }))
+            .await;
+        assert!(!failed, "{text}");
+        chat.next_proposal().await;
+        let crds: Api<CustomResourceDefinition> = Api::all(client.clone());
+        assert!(crds.get_opt("widgets.propose.skopos.dev").await.unwrap().is_none());
+
+        // The tab closes mid-turn: its waiting proposal turns tabClosed, and a later one has no tab.
+        chat.tabs.detach("create-2").await;
+        assert_eq!(chat.next_proposal().await.state, ProposalState::TabClosed);
+        let (failed, text) = chat.call("propose_yaml", json!({ "yaml": created, "summary": "Again" })).await;
+        assert!(failed);
+        assert!(text.starts_with("No YAML tab is attached to this chat"), "{text}");
     })
     .await;
 }

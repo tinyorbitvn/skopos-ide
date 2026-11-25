@@ -15,11 +15,12 @@ import {
   type KeyboardEvent,
   type PointerEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { Button, ConfirmDialog, IconButton, Menu } from "../../design";
+import { ConfirmDialog, IconButton, PickerMenu } from "../../design";
 import {
   ChevronDown,
   ChevronUp,
@@ -31,6 +32,7 @@ import {
   Plug,
   Plus,
   ScrollText,
+  Sparkles,
   SquareTerminal,
   Terminal,
   X,
@@ -46,14 +48,18 @@ import {
   tabsForCluster,
   useDock,
 } from "../../stores/dock";
+import { agentsSupported } from "../agents/supported";
 import { CreateResourceTab } from "../editor/CreateResourceTab";
 import { EditResourceTab } from "../editor/EditResourceTab";
+import { servedKinds } from "../editor/servedKinds";
+import { templateSections } from "../editor/templates/pickerSections";
 import { LogsTab } from "../logs/LogsTab";
 import { TerminalTab } from "../terminal/TerminalTab";
 import { isTerminalShortcut } from "../terminal/terminalKeys";
 import { DetailsTab } from "./DetailsTab";
 import styles from "./Dock.module.css";
 import { useOpenAsDrawer } from "./openAsDrawer";
+import { openAiDraft, openTemplate } from "./openTemplate";
 import { newTerminal, openTerminal } from "./openTerminal";
 import { shownDetailsEntry } from "./useDetailsHistory";
 
@@ -84,9 +90,9 @@ function TabBody({
 }) {
   switch (tab.kind) {
     case "edit":
-      return <EditResourceTab tab={tab} />;
+      return <EditResourceTab tab={tab} resources={resources} />;
     case "create":
-      return <CreateResourceTab tab={tab} />;
+      return <CreateResourceTab tab={tab} resources={resources} />;
     case "logs":
       return <LogsTab tab={tab} shown={shown} />;
     case "terminal":
@@ -243,6 +249,7 @@ export function Dock(props: {
 }) {
   const { clusterId } = props;
   const resources = props.resources ?? NO_RESOURCES;
+  const served = useMemo(() => servedKinds(resources), [resources]);
   const restored = useDock((s) => s.restored);
   const allTabs = useDock((s) => s.tabs);
   const activeId = useDock((s) => s.activeId);
@@ -337,43 +344,62 @@ export function Dock(props: {
             </div>
           </SortableContext>
         </DndContext>
-        {/* Right-aligned: the button ends the bar and the menu does not shift to fit. */}
-        <Menu
-          side="top"
-          align="end"
-          sideOffset={6}
-          avoidCollisions={false}
-          className={styles.createMenu}
-          trigger={
-            <Button
-              variant="ghost"
-              size="sm"
-              className={styles.create}
-              data-testid="dock-new"
-            >
-              <Plus size={14} aria-hidden="true" />
-              Create
-            </Button>
-          }
-          items={[
-            {
-              id: "create",
-              label: "Create resource",
-              icon: <FilePlus size={14} aria-hidden="true" />,
-              hint: "YAML draft in the dock",
-              testId: "create-resource",
-              onSelect: () => useDock.getState().open(newCreateTab(clusterId)),
-            },
-            {
-              id: "terminal",
-              label: "Terminal session",
-              icon: <SquareTerminal size={14} aria-hidden="true" />,
-              hint: "Shell in the dock",
-              testId: "dock-terminal",
-              onSelect: () => newTerminal(clusterId),
-            },
-          ]}
-        />
+        <div className={styles.newTab}>
+          <PickerMenu
+            label="New tab"
+            searchLabel="Search templates"
+            side="top"
+            align="start"
+            width={300}
+            testId="dock-new-picker"
+            empty={(query) => `No template matches "${query}".`}
+            sections={[
+              {
+                id: "start",
+                items: [
+                  {
+                    id: "blank",
+                    label: "Blank YAML",
+                    icon: <FilePlus size={14} aria-hidden="true" />,
+                    testId: "create-resource",
+                    onSelect: () =>
+                      useDock.getState().open(newCreateTab(clusterId)),
+                  },
+                  ...(agentsSupported()
+                    ? [
+                        {
+                          id: "ai-draft",
+                          label: "Draft with AI",
+                          icon: <Sparkles size={14} aria-hidden="true" />,
+                          testId: "dock-ai-draft",
+                          onSelect: () => openAiDraft(clusterId),
+                        },
+                      ]
+                    : []),
+                  {
+                    id: "terminal",
+                    label: "Terminal session",
+                    icon: <SquareTerminal size={14} aria-hidden="true" />,
+                    testId: "dock-terminal",
+                    onSelect: () => newTerminal(clusterId),
+                  },
+                ],
+              },
+              ...templateSections(served, (template) =>
+                openTemplate(clusterId, template),
+              ),
+            ]}
+            trigger={({ open, toggle }) => (
+              <IconButton
+                label="New tab"
+                icon={<Plus size={14} aria-hidden="true" />}
+                aria-expanded={open}
+                onClick={toggle}
+                data-testid="dock-new"
+              />
+            )}
+          />
+        </div>
         {tabs.length > 0 ? (
           <IconButton
             label={minimized ? "Restore dock" : "Minimize dock"}

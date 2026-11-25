@@ -11,6 +11,7 @@ import { ChangeCard } from "./ChangeCard";
 import styles from "./ChatStream.module.css";
 import { objectLabel } from "./chatModel";
 import { PlanCard } from "./PlanCard";
+import { ProposalCard } from "./ProposalCard";
 import { AgentToolCard, ToolCard } from "./ToolCard";
 
 const WEB_LINK = /^https?:\/\//i;
@@ -31,6 +32,8 @@ export interface ChatStreamProps {
   agentName: string;
   /** The chat runs: change cards take answers. */
   live: boolean;
+  /** The running chat: proposal cards answer it. */
+  chatId: string | null;
   /** Items read from a stored chat (no rollout line). */
   past: string[];
   undone: string[];
@@ -83,6 +86,11 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
               {objectLabel(body.object)}
             </span>
           ) : null}
+          {body.tab ? (
+            <span className={styles.userObject} data-testid="agent-user-tab">
+              YAML tab · {body.tab.title}
+            </span>
+          ) : null}
           <p className={styles.userText}>{body.text}</p>
         </div>
       );
@@ -113,6 +121,14 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
           undone={props.undone.includes(body.card.id)}
           onAnswer={(answer) => props.onAnswer(body.card.id, answer)}
           onUndo={() => props.onUndo(body.card)}
+        />
+      );
+    case "proposal":
+      return (
+        <ProposalCard
+          card={body.card}
+          chatId={props.chatId}
+          live={props.live}
         />
       );
     case "notice":

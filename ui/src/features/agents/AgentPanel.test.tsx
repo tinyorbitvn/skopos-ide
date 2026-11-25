@@ -154,7 +154,7 @@ test("Enter sends; Shift+Enter, composition and a blank box do not", async () =>
     await flush();
   });
   expect(ipc.callsTo("chat_prompt")).toEqual([
-    { chatId: "c1", text: "Why?", object: null },
+    { chatId: "c1", text: "Why?", object: null, tab: null },
   ]);
 });
 

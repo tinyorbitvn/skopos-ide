@@ -5,6 +5,7 @@
 use skopos_core::agents::approvals::ChangeAnswer;
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
 use skopos_core::agents::chats::{ChatSummary, StoredChat};
+use skopos_core::agents::editor_tab::EditorTab;
 use skopos_core::agents::events::{ChatEvent, ObjectRef};
 use skopos_core::agents::registry::AgentStatus;
 use skopos_core::agents::sandbox::SandboxStatus;
@@ -158,8 +159,9 @@ pub async fn chat_prompt(
     chat_id: String,
     text: String,
     object: Option<ObjectRef>,
+    tab: Option<EditorTab>,
 ) -> Result<(), IpcError> {
-    state.core.chat_prompt(&chat_id, text, object).await
+    state.core.chat_prompt(&chat_id, text, object, tab).await
 }
 
 #[tauri::command]
@@ -182,6 +184,29 @@ pub async fn chat_answer(
     answer: ChangeAnswer,
 ) -> Result<(), IpcError> {
     state.core.chat_answer(&chat_id, &card_id, answer)
+}
+
+#[tauri::command]
+pub async fn chat_proposal_answer(
+    state: State<'_, AppState>,
+    chat_id: String,
+    proposal_id: String,
+    accepted: bool,
+) -> Result<(), IpcError> {
+    state
+        .core
+        .chat_proposal_answer(&chat_id, &proposal_id, accepted)
+        .await
+}
+
+#[tauri::command]
+pub async fn chat_detach_tab(
+    state: State<'_, AppState>,
+    chat_id: String,
+    tab_id: String,
+) -> Result<(), IpcError> {
+    state.core.chat_detach_tab(&chat_id, &tab_id).await;
+    Ok(())
 }
 
 #[tauri::command]

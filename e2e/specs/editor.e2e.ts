@@ -8,6 +8,7 @@ import {
   clickWhenShown,
   closeDockTabs,
   dialogButton,
+  dockTabTitles,
   editorContaining,
   editorText,
   gone,
@@ -166,6 +167,36 @@ async function createFromTemplate(id: string, part: string): Promise<string> {
   await clickWhenShown(`menu-item-${id}`);
   await gone(`menu-item-${id}`);
   return editorContaining(part);
+}
+
+type HintEditor = {
+  getDomNode(): HTMLElement | null;
+  getValue(): string;
+  focus(): void;
+  setPosition(position: { lineNumber: number; column: number }): void;
+  trigger(source: string, action: string, payload: unknown): void;
+};
+
+/** Puts the caret of the editor on screen at `line`:`column` (1-based) and runs a Monaco action. */
+async function runAt(line: number, column: number, action: string): Promise<void> {
+  await browser.execute(
+    (l: number, c: number, a: string) => {
+      const { monaco } = window as unknown as { monaco?: { editor: { getEditors(): HintEditor[] } } };
+      const editor = monaco?.editor.getEditors().find((e) => e.getDomNode()?.offsetParent);
+      editor?.focus();
+      editor?.setPosition({ lineNumber: l, column: c });
+      editor?.trigger("e2e", a, {});
+    },
+    line,
+    column,
+    action,
+  );
+}
+
+async function textOf(selector: string): Promise<string> {
+  const found = await browser.$$(selector);
+  const texts = await Promise.all([...found].map((element) => element.getText()));
+  return texts.join("\n");
 }
 
 describe("YAML editor", () => {
@@ -398,5 +429,23 @@ describe("YAML editor", () => {
 
     await inDockPanel("api-docs-toggle").click();
     await expectApiDocs("ConfigMap", "v1");
+  });
+
+  it("opens a template from the + picker and hints the Deployment's fields", async () => {
+    await pointerClick(await shown("dock-new"));
+    await (await shown("dock-new-picker-search")).setValue("deploy");
+    await clickWhenShown("menu-item-deployment");
+    const text = await editorContaining("kind: Deployment");
+    expect(await dockTabTitles()).toContain("New Deployment");
+
+    const lines = text.split("\n");
+    const replicas = lines.findIndex((line) => line.startsWith("  replicas:")) + 1;
+    await runAt(replicas, 4, "editor.action.showHover");
+    await until(async () => (await textOf(".monaco-hover-content")).includes("replicas"), "no hover on replicas");
+    expect(await textOf(".monaco-hover-content")).toContain("Number of desired pods");
+
+    await setEditorText(text.replace(/^ {2}replicas: .*$/m, "  "));
+    await runAt(replicas, 3, "editor.action.triggerSuggest");
+    await until(async () => (await textOf(".suggest-widget .monaco-list-row")).includes("replicas"), "completion never offered replicas");
   });
 });

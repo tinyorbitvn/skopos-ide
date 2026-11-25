@@ -23,6 +23,7 @@ mod types;
 
 pub(crate) use actions::{restartable, scalable};
 pub use actions::{DataChange, SecretChange, SecretData, SecretValue};
+pub(crate) use apply::parse_documents;
 pub use apply::ApplyResult;
 pub use argocd::{
     ArgoRollbackOptions, ArgoSyncOptions, ArgoSyncResource, ArgoSyncStrategy,

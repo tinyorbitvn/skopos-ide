@@ -4,6 +4,7 @@
 pub mod cards;
 pub mod changes;
 pub mod kinds;
+mod propose;
 pub mod server;
 mod tools;
 pub mod trim;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::agents::tabs::EditorTabs;
 use crate::app_core::AppCore;
 use crate::kubeconfig::ClusterId;
 use crate::resources::PatchKind;
@@ -67,6 +69,8 @@ pub struct ToolContext {
     /// Each tool call's card, running and then done.
     pub cards: mpsc::Sender<ToolCard>,
     pub gate: Arc<dyn ChangeGate>,
+    /// The YAML tab the chat holds and its proposals.
+    pub tabs: Arc<EditorTabs>,
 }
 
 /// Decides and runs one change an agent asks for (spec §4.5).

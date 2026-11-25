@@ -12,6 +12,12 @@ export { Input } from "./Input";
 export { Markdown } from "./Markdown";
 export { CheckMenu, Menu, type MenuItem } from "./Menu";
 export { PaneHandle } from "./PaneHandle";
+export {
+  filterSections,
+  type PickerItem,
+  PickerMenu,
+  type PickerSection,
+} from "./PickerMenu";
 export { ProgressBar } from "./ProgressBar";
 export { RadioGroup, type RadioOption } from "./RadioGroup";
 export { Segmented } from "./Segmented";
