@@ -325,6 +325,36 @@ impl AppCore {
         yaml: &str,
         force: bool,
     ) -> CoreResult<Value> {
+        self.replace(id, r, namespace, name, yaml, force, false)
+            .await
+    }
+
+    /// A server dry run of saving `yaml` over the object, against its current
+    /// `resourceVersion`, so a version that went stale does not fail it (spec A10). Answers
+    /// with the object the server would store, Secret values blanked.
+    pub async fn resource_replace_dry_run(
+        &self,
+        id: &ClusterId,
+        r: &ResourceRef,
+        namespace: Option<&str>,
+        name: &str,
+        yaml: &str,
+    ) -> CoreResult<Value> {
+        self.replace(id, r, namespace, name, yaml, true, true).await
+    }
+
+    // private: the two public fns name each flag
+    #[allow(clippy::too_many_arguments)]
+    async fn replace(
+        &self,
+        id: &ClusterId,
+        r: &ResourceRef,
+        namespace: Option<&str>,
+        name: &str,
+        yaml: &str,
+        force: bool,
+        dry_run: bool,
+    ) -> CoreResult<Value> {
         let mut documents = parse_documents(yaml)?.into_iter();
         let (Some(mut document), None) = (documents.next(), documents.next()) else {
             return Err(invalid("expected exactly one YAML document"));
@@ -356,7 +386,11 @@ impl AppCore {
         }
         let body = serde_json::to_vec(&document)
             .map_err(|_| IpcError::new(ErrorCode::Internal, "the object could not be encoded"))?;
-        let stored = send(&client, request.replace(name, &PostParams::default(), body)).await?;
+        let params = PostParams {
+            dry_run,
+            ..PostParams::default()
+        };
+        let stored = send(&client, request.replace(name, &params, body)).await?;
         Ok(masked(stored, r))
     }
 

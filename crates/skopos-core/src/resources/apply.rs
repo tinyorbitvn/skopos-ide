@@ -177,6 +177,8 @@ struct ApplyRun<'a> {
     default_namespace: &'a str,
     discovery: Arc<Discovery>,
     created_crd: bool,
+    /// Ask the server to validate and store nothing.
+    dry_run: bool,
     /// The cluster serves something that the kept discovery does not know of.
     kept_discovery_stale: bool,
 }
@@ -259,7 +261,10 @@ impl ApplyRun<'_> {
         result.namespace.clone_from(&namespace);
 
         let request = Request::new(DynamicObject::url_path(&resource, namespace.as_deref()));
-        let params = PatchParams::apply(FIELD_MANAGER);
+        let params = PatchParams {
+            dry_run: self.dry_run,
+            ..PatchParams::apply(FIELD_MANAGER)
+        };
         send(
             &self.client,
             request.patch(&name, &params, &Patch::Apply(&*document)),
@@ -267,7 +272,7 @@ impl ApplyRun<'_> {
         .await
         .map_err(|e| e.message)?;
 
-        if resource.group == CRD_GROUP && resource.kind == CRD_KIND {
+        if !self.dry_run && resource.group == CRD_GROUP && resource.kind == CRD_KIND {
             self.created_crd = true;
             self.kept_discovery_stale = true;
         }
@@ -293,7 +298,12 @@ impl ApplyRun<'_> {
         match self.send_document(&mut document, &mut result).await {
             Ok(()) => {
                 result.ok = true;
-                "applied".clone_into(&mut result.message);
+                (if self.dry_run {
+                    "accepted in a dry run"
+                } else {
+                    "applied"
+                })
+                .clone_into(&mut result.message);
             }
             Err(message) => result.message = sanitize_text(&message),
         }
@@ -312,6 +322,27 @@ impl AppCore {
         yaml: &str,
         default_namespace: &str,
     ) -> CoreResult<Vec<ApplyResult>> {
+        self.apply_stream(id, yaml, default_namespace, false).await
+    }
+
+    /// The same as `resource_apply`, as a server dry run: each document gets its result and
+    /// nothing is stored (YAML authoring spec A10).
+    pub async fn resource_apply_dry_run(
+        &self,
+        id: &ClusterId,
+        yaml: &str,
+        default_namespace: &str,
+    ) -> CoreResult<Vec<ApplyResult>> {
+        self.apply_stream(id, yaml, default_namespace, true).await
+    }
+
+    async fn apply_stream(
+        &self,
+        id: &ClusterId,
+        yaml: &str,
+        default_namespace: &str,
+        dry_run: bool,
+    ) -> CoreResult<Vec<ApplyResult>> {
         let documents = parse_documents(yaml)?;
         let mut run = ApplyRun {
             core: self,
@@ -320,6 +351,7 @@ impl AppCore {
             default_namespace,
             discovery: self.cluster_discovery(id)?,
             created_crd: false,
+            dry_run,
             kept_discovery_stale: false,
         };
         let mut results = Vec::with_capacity(documents.len());
