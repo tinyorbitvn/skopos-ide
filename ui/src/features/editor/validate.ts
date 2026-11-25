@@ -63,7 +63,7 @@ export function yamlProblem(check: Extract<YamlCheck, { ok: false }>): string {
   return `Line ${check.line}, column ${check.column}: ${check.message}`;
 }
 
-const SERVER_METADATA = [
+export const SERVER_METADATA = [
   "creationTimestamp",
   "deletionGracePeriodSeconds",
   "deletionTimestamp",
