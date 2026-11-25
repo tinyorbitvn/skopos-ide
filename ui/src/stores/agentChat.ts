@@ -21,9 +21,13 @@ import type { ChatItem } from "../ipc/generated/ChatItem";
 import type { ChatScope } from "../ipc/generated/ChatScope";
 import type { ChatSummary } from "../ipc/generated/ChatSummary";
 import type { ClusterAgentSettings } from "../ipc/generated/ClusterAgentSettings";
+import type { EditorTab } from "../ipc/generated/EditorTab";
 import type { ObjectRef } from "../ipc/generated/ObjectRef";
+import type { TabChip } from "../ipc/generated/TabChip";
 import { useAgents } from "./agents";
 import { useCatalog } from "./catalog";
+import { useProposals } from "./proposals";
+import { tabSource } from "./tabSources";
 
 export type StartState =
   | { phase: "idle" }
@@ -63,6 +67,8 @@ export interface AgentChatState {
   clusterSettings: ClusterAgentSettings | null;
   /** The object the drawer shows, for the palette's ask command. */
   drawerObject: ObjectRef | null;
+  /** The YAML tab this chat holds; its messages carry it (YAML authoring spec A6). */
+  tab: TabChip | null;
   toggle(page: string | null): void;
   openPanel(page: string | null): void;
   closePanel(): void;
@@ -70,6 +76,7 @@ export interface AgentChatState {
   setScope(scope: ChatScope): Promise<void>;
   pickAgent(id: string): Promise<void>;
   askAbout(object: ObjectRef): Promise<void>;
+  askFromTab(tabId: string, text: string): Promise<TabAskResult>;
   retry(): Promise<void>;
   send(text?: string): Promise<void>;
   stop(): Promise<void>;
@@ -101,12 +108,17 @@ const INITIAL = {
   history: { loading: false, error: null, rows: null },
   clusterSettings: null,
   drawerObject: null,
+  tab: null,
 };
 
 /** Bumped by every start; work of an older start sees a newer number and stops (P7). */
 let generation = 0;
 
 const ignore = () => {};
+
+const STILL_ANSWERING = "The agent is still answering.";
+
+export type TabAskResult = "sent" | "notStarted" | { failed: string };
 
 export function runningChatId(state: { start: StartState }): string | null {
   return state.start.phase === "running" ? state.start.chatId : null;
@@ -121,6 +133,11 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
     if (gen !== generation) return;
     switch (event.type) {
       case "item":
+        if (event.item.body.type === "proposal") {
+          const chatId = runningChatId(get());
+          if (chatId)
+            useProposals.getState().receive(chatId, event.item.body.card);
+        }
         set((s) => ({ items: withItem(s.items, event.item) }));
         break;
       case "working":
@@ -185,6 +202,7 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
       busy: false,
       cannotReopen: null,
       undone: [],
+      tab: null,
       object: options.object ?? null,
       clusterSettings: null,
       agentId: null,
@@ -298,6 +316,44 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
       );
     },
 
+    async askFromTab(tabId, text) {
+      const source = tabSource(tabId);
+      const body = text.trim();
+      if (!source || body === "") return "notStarted";
+      const tab = await source();
+      set({ open: true });
+      const now = get();
+      const reaches =
+        runningChatId(now) !== null &&
+        (now.scope?.clusters.includes(tab.cluster) ?? false);
+      if (!reaches) {
+        await begin(
+          nextScope(
+            { clusters: [tab.cluster], global: false },
+            null,
+            catalogIds(),
+          ),
+          { agent: get().picked },
+        );
+      }
+      const s = get();
+      const chatId = runningChatId(s);
+      // Problems starting a chat show in the panel (spec A2).
+      if (chatId === null) return "notStarted";
+      if (s.busy) return { failed: STILL_ANSWERING };
+      const before = s.tab;
+      set({ tab: { tabId: tab.tabId, title: tab.title }, busy: true });
+      try {
+        await api.chatPrompt(chatId, body, null, tab);
+        return "sent";
+      } catch (error) {
+        if (runningChatId(get()) === chatId) set({ tab: before });
+        return { failed: failureMessage(error) };
+      } finally {
+        if (runningChatId(get()) === chatId) set({ busy: false });
+      }
+    },
+
     async retry() {
       const { start } = get();
       const agents = useAgents.getState();
@@ -318,13 +374,19 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
       const body = (text ?? s.draft).trim();
       if (body === "" || chatId === null || s.busy) return;
       const object = s.object;
+      let tab: EditorTab | null = null;
+      if (s.tab) {
+        const source = tabSource(s.tab.tabId);
+        if (source) tab = await source();
+        else set({ tab: null });
+      }
       set({
         draft: text === undefined ? "" : s.draft,
         object: null,
         busy: true,
       });
       try {
-        await api.chatPrompt(chatId, body, object);
+        await api.chatPrompt(chatId, body, object, tab);
       } catch (error) {
         if (runningChatId(get()) === chatId && get().draft === "") {
           set({ draft: body, object });

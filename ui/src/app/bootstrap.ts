@@ -1,4 +1,5 @@
 import { applyTheme, toast } from "../design";
+import { watchClosedTabs } from "../features/editor/aiTabs";
 import { events } from "../ipc/events";
 import { restoreDockLayout } from "../stores/dockLayout";
 import { usePortForwards } from "../stores/portForwards";
@@ -12,6 +13,7 @@ import { usePrefs } from "../stores/prefs";
 export async function bootstrap(): Promise<void> {
   applyTheme("system");
   const dock = restoreDockLayout();
+  watchClosedTabs();
   await events.onStoreWarning((warning) => {
     toast.error(`Problem with ${warning.file}`, warning.message);
   });

@@ -32,6 +32,7 @@ import type { CsrReview } from "./generated/CsrReview";
 import type { DataChange } from "./generated/DataChange";
 import type { DrainEvent } from "./generated/DrainEvent";
 import type { DrainOptions } from "./generated/DrainOptions";
+import type { EditorTab } from "./generated/EditorTab";
 import type { ExecRequest } from "./generated/ExecRequest";
 import type { ExecRequestDetails } from "./generated/ExecRequestDetails";
 import type { GraphEvent } from "./generated/GraphEvent";
@@ -878,8 +879,12 @@ export const api = {
       onEvent: new Channel<ChatEvent>(onEvent),
     }),
   /** Resolves when the turn ends; its items arrive on the chat's channel meanwhile. */
-  chatPrompt: (chatId: string, text: string, object: ObjectRef | null) =>
-    call<void>("chat_prompt", { chatId, text, object }),
+  chatPrompt: (
+    chatId: string,
+    text: string,
+    object: ObjectRef | null,
+    tab: EditorTab | null = null,
+  ) => call<void>("chat_prompt", { chatId, text, object, tab }),
   /** Cancels the turn and answers waiting changes as stopped. */
   chatStop: (chatId: string) => call<void>("chat_stop", { chatId }),
   /** Stops the chat, ends its agent and saves the chat. */
@@ -887,6 +892,12 @@ export const api = {
   /** NotFound when no change card waits under `cardId`. */
   chatAnswer: (chatId: string, cardId: string, answer: ChangeAnswer) =>
     call<void>("chat_answer", { chatId, cardId, answer }),
+  /** The person's answer to a YAML tab proposal. */
+  chatProposalAnswer: (chatId: string, proposalId: string, accepted: boolean) =>
+    call<void>("chat_proposal_answer", { chatId, proposalId, accepted }),
+  /** The YAML tab closed: the chat no longer holds it. */
+  chatDetachTab: (chatId: string, tabId: string) =>
+    call<void>("chat_detach_tab", { chatId, tabId }),
   /** Ends the chat's standing approval for the cluster. */
   chatUndoStanding: (chatId: string, clusterId: string) =>
     call<void>("chat_undo_standing", { chatId, clusterId }),
