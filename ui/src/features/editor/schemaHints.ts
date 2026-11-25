@@ -19,9 +19,18 @@ function escaped(text: string): string {
   return text.replace(/[\\`*_{}[\]()<>#|!~]/g, (c) => `\\${c}`);
 }
 
+/**
+ * A value from the schema as an inline code span. Backticks would end the span, and a blank line
+ * would end its paragraph, so both are taken out: the value's markdown is never read.
+ */
 function code(value: unknown): string {
   const text = typeof value === "string" ? value : JSON.stringify(value);
-  return `\`${text.replace(/`/g, "'")}\``;
+  return `\`${text.replace(/`/g, "'").replace(/\s+/g, " ")}\``;
+}
+
+/** A name from the schema inside a snippet: `$`, `}` and `\` stay literal (no variables or tab stops). */
+function snippetText(text: string): string {
+  return text.replace(/[\\$}]/g, "\\$&");
 }
 
 /** A key's hover: name, type, `required`, default, values and description (spec H3). */
@@ -39,16 +48,17 @@ export function hoverText(field: SchemaField): string {
 
 /** What picking a field inserts (spec H4). */
 function insertFor(field: SchemaField): string {
-  if (field.typeLabel.startsWith("[]")) return `${field.name}:\n  - $0`;
+  const name = snippetText(field.name);
+  if (field.typeLabel.startsWith("[]")) return `${name}:\n  - $0`;
   const scalar = ["string", "integer", "number", "boolean", "int-or-string"];
   const opaque =
     field.children.length === 0 &&
     !field.typeLabel.startsWith("map[") &&
     field.typeLabel !== "object";
   if (scalar.includes(field.typeLabel) || opaque) {
-    return `${field.name}: $0`;
+    return `${name}: $0`;
   }
-  return `${field.name}:\n  $0`;
+  return `${name}:\n  $0`;
 }
 
 function samePath(path: PathStep[], keys: string[]): boolean {

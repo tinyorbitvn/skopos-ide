@@ -146,3 +146,23 @@ test("with no kind: the top-level keys, then kinds and versions the cluster serv
     "v1",
   ]);
 });
+
+test("a field name from a CRD cannot inject snippet variables or tab stops", () => {
+  // The name is the text ${CLIPBOARD}$1}\x: a snippet variable, a tab stop, a brace and a backslash.
+  const name = `\${CLIPBOARD}$1}\\x`;
+  const [item] = fieldItems([field(name, "string")], [], [{ key: "spec" }]);
+  expect(item.snippet).toBe(true);
+  expect(item.label).toBe(name);
+  expect(item.insertText).toBe(String.raw`\${CLIPBOARD\}\$1\}\\x: $0`);
+});
+
+test("a default or enum value with blank lines stays inside its code span", () => {
+  const text = hoverText(
+    field("mode", "string", {
+      defaultValue: "a\n\n![x](http://evil/x.png)",
+      enumValues: ["b\r\n\r\n[link](http://evil)", "c`d"],
+    }),
+  );
+  expect(text).toContain("Default: `a ![x](http://evil/x.png)`");
+  expect(text).toContain("One of: `b [link](http://evil)`, `c'd`");
+});
