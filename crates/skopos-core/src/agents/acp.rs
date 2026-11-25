@@ -36,6 +36,8 @@ use ts_rs::TS;
 use crate::agents::permissions::{permission_card, Permissions};
 use crate::error::sanitize_text;
 use crate::process::configure_agent;
+#[cfg(windows)]
+use crate::process::JobGuard;
 use crate::process::{stop, KILL_GRACE};
 
 /// The client's name in `initialize`'s `clientInfo`.
@@ -281,6 +283,10 @@ struct Running {
     /// Dropped to end the connection.
     done: oneshot::Sender<()>,
     driver: JoinHandle<()>,
+    /// The job that holds the agent and what it starts; dropped with the session, it ends
+    /// them all (spec §4.2).
+    #[cfg(windows)]
+    _job: JobGuard,
 }
 
 impl Running {
@@ -299,6 +305,14 @@ impl Running {
         let mut child = command
             .spawn()
             .map_err(|error| StartError::Failed(format!("{program}: {error}")))?;
+        #[cfg(windows)]
+        let job = match JobGuard::contain(&child) {
+            Ok(job) => job,
+            Err(error) => {
+                stop(&mut child, KILL_GRACE).await;
+                return Err(StartError::Failed(format!("{program}: {error}")));
+            }
+        };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             stop(&mut child, KILL_GRACE).await;
             return Err(StartError::Failed(format!("{program}: no stdin or stdout")));
@@ -322,6 +336,8 @@ impl Running {
             process,
             done,
             driver,
+            #[cfg(windows)]
+            _job: job,
         })
     }
 

@@ -87,6 +87,7 @@ pub(crate) fn test_agent(program: &Path) -> AgentSpec {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::path::PathBuf;
 
     use super::*;

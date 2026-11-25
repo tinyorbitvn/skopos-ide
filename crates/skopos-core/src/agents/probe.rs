@@ -48,9 +48,8 @@ pub async fn probe_within(command: Command, cwd: &Path, name: &str, limit: Durat
 
 impl AppCore {
     /// Probes agent `id` and keeps its state for the app run (spec §4.2), then returns its
-    /// status. `Unsupported` on Windows.
+    /// status.
     pub async fn agent_probe(&self, id: &str) -> CoreResult<AgentStatus> {
-        super::supported()?;
         match self.agent_spec(id) {
             Ok(agent) => {
                 let state = self.probe_agent(&agent).await?;

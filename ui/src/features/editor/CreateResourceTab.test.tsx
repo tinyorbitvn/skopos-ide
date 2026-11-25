@@ -14,7 +14,6 @@ import { resetProposalsForTest, useProposals } from "../../stores/proposals";
 import { kindSchema } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
 import { proposal } from "../../test/proposals";
-import { setAgentsSupportedForTest } from "../agents/supported";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
@@ -124,7 +123,6 @@ function pickTemplate(id: string) {
 
 beforeEach(() => {
   resetProposalsForTest();
-  setAgentsSupportedForTest(true);
 });
 
 afterEach(() => {
@@ -469,14 +467,6 @@ test("text that does not parse keeps the kind shown last (spec L15)", async () =
 
   expect(screen.getByTestId("api-docs-kind").textContent).toBe("ConfigMap");
   expect(calls.callsTo("api_schema")).toHaveLength(1);
-});
-
-test("Ask AI is hidden where agents are not supported", async () => {
-  backend();
-  setAgentsSupportedForTest(false);
-  show();
-  expect(screen.queryByTestId("yaml-ai")).toBeNull();
-  setAgentsSupportedForTest(true);
 });
 
 test("Ask AI opens the bar with the create placeholder", async () => {

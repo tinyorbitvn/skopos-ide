@@ -1,6 +1,6 @@
-//! The agent and chat commands (agents spec §5.2). Each is a thin call into `AppCore`,
-//! which answers `Unsupported` on Windows. A chat belongs to the window that starts it,
-//! so the window's reload or close ends it with its other sessions (`sessions_stop_owned`).
+//! The agent and chat commands (agents spec §5.2). Each is a thin call into `AppCore`. A
+//! chat belongs to the window that starts it, so the window's reload or close ends it with
+//! its other sessions (`sessions_stop_owned`).
 
 use skopos_core::agents::approvals::ChangeAnswer;
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};

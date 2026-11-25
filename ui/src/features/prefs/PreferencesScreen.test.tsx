@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { Toaster } from "../../design";
 import type { Prefs } from "../../ipc/generated/Prefs";
 import { resetHelmForTest } from "../../stores/helm";
@@ -15,7 +15,6 @@ import { resetPrefsForTest, usePrefs } from "../../stores/prefs";
 import { toolStatus } from "../../test/helm";
 import { mockBackend } from "../../test/ipc";
 import { updateState } from "../../test/updates";
-import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetUpdatesForTest, useUpdates } from "../updates/updateStore";
 import { PreferencesScreen } from "./PreferencesScreen";
 
@@ -59,10 +58,6 @@ function show(
   );
   return ipc;
 }
-
-afterEach(() => {
-  setAgentsSupportedForTest(true);
-});
 
 beforeEach(() => {
   resetPrefsForTest();
@@ -388,23 +383,13 @@ test("Updates in a Microsoft Store copy: the Store's sentence, no switch and no 
   expect(screen.queryByTestId("prefs-check-now")).toBeNull();
 });
 
-test("the agent sections show when agents are supported", async () => {
-  setAgentsSupportedForTest(true);
+test("shows the agent sections", async () => {
   show();
   expect(await screen.findByTestId("pref-agents")).toBeTruthy();
   expect(await screen.findByTestId("pref-agent-changes")).toBeTruthy();
 });
 
-test("the agent sections are hidden when agents are not supported", async () => {
-  setAgentsSupportedForTest(false);
-  show();
-  await screen.findByText("Appearance");
-  expect(screen.queryByTestId("pref-agents")).toBeNull();
-  expect(screen.queryByTestId("pref-agent-changes")).toBeNull();
-});
-
 test("shows no Agent sandbox section and says agents run as the person", async () => {
-  setAgentsSupportedForTest(true);
   show();
   expect(await screen.findByTestId("pref-agents")).toBeTruthy();
   expect(screen.queryByTestId("pref-agent-sandbox")).toBeNull();

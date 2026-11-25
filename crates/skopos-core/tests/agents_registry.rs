@@ -2,13 +2,14 @@
 //! temp home's `bin/`, the only folder on the core's PATH, as `tests/helm.rs` fakes helm, or in
 //! the known install folders under that home.
 //! Each script leaves a mark when it runs, so the tests also show that finding agents runs
-//! none of them: probes come later.
-#![cfg(unix)]
+//! none of them: probes come later. The tests of execute bits, links, `~/…` detail lines and
+//! shell quoting run on Unix.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use skopos_core::agents::registry::{AgentState, AgentStatus};
+#[cfg(unix)]
+use skopos_core::agents::registry::AgentState;
+use skopos_core::agents::registry::AgentStatus;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::paths::AppPaths;
@@ -37,12 +38,17 @@ impl Fixture {
         self.home().join("bin")
     }
 
-    /// An executable script at `path` that leaves the mark `mark` when it runs.
+    /// An executable script at `path` that leaves the mark `mark` when it runs. Windows
+    /// runs any file, so there it is only a file.
     fn script(&self, path: &Path, mark: &str) -> PathBuf {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mark = self.root.path().join("marks").join(mark);
         std::fs::write(path, format!("#!/bin/sh\ntouch '{}'\n", mark.display())).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         path.to_path_buf()
     }
 
@@ -52,12 +58,14 @@ impl Fixture {
     }
 
     /// A fake `name` in `folder`, a folder under the home folder off PATH.
+    #[cfg(unix)]
     fn install_in(&self, folder: &str, name: &str) -> PathBuf {
         self.script(&self.home().join(folder).join(name), name)
     }
 
     /// A fake `name` as npm installs one: a script in its package, linked from the PATH
     /// folder. Gives the script's path.
+    #[cfg(unix)]
     fn install_linked(&self, name: &str) -> PathBuf {
         let package = self.root.path().join("lib/node_modules").join(name);
         let script = self.script(&package.join("dist/index.js"), name);
@@ -95,6 +103,7 @@ impl Fixture {
 }
 
 /// The path with its links resolved: what an agent runs from.
+#[cfg(unix)]
 fn real(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap()
 }
@@ -103,6 +112,7 @@ fn row<'a>(statuses: &'a [AgentStatus], id: &str) -> &'a AgentStatus {
     statuses.iter().find(|status| status.id == id).unwrap()
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none() {
     let fixture = Fixture::new();
@@ -164,6 +174,7 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
     core.shutdown().await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn agents_off_path_are_found_in_the_known_folders_and_a_cli_names_its_missing_adapter() {
     let fixture = Fixture::new();
@@ -222,6 +233,7 @@ async fn agents_off_path_are_found_in_the_known_folders_and_a_cli_names_its_miss
     core.shutdown().await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn an_agent_runs_from_its_real_path_with_its_cli_and_environment() {
     let fixture = Fixture::new();
@@ -255,6 +267,7 @@ async fn an_agent_runs_from_its_real_path_with_its_cli_and_environment() {
     core.shutdown().await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn an_agent_without_its_cli_gets_no_cli_variable() {
     let fixture = Fixture::new();
@@ -289,6 +302,7 @@ async fn an_agent_without_its_cli_gets_no_cli_variable() {
     core.shutdown().await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn opencode_and_gemini_run_their_own_acp_mode() {
     let fixture = Fixture::new();
@@ -313,6 +327,7 @@ async fn opencode_and_gemini_run_their_own_acp_mode() {
     core.shutdown().await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn an_unknown_or_missing_agent_has_no_spec() {
     let fixture = Fixture::new();
@@ -411,6 +426,7 @@ async fn adding_an_agent_checks_its_name_and_command() {
     core.shutdown().await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_custom_command_is_split_like_a_shell_and_found_on_path_or_under_home() {
     let fixture = Fixture::new();

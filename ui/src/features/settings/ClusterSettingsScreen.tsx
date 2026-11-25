@@ -33,7 +33,6 @@ import {
   forgetQueries,
   useMetrics,
 } from "../../stores/metrics";
-import { agentsSupported } from "../agents/supported";
 import { useFetch } from "../helm/useFetch";
 import { AgentCard } from "./AgentCard";
 import styles from "./ClusterSettingsScreen.module.css";
@@ -624,19 +623,17 @@ function SettingsForm(props: {
         ) : null}
       </section>
 
-      {agentsSupported() ? (
-        <AgentCard
-          clusterName={props.name}
-          draft={draft}
-          errors={errors}
-          update={update}
-          namespaces={
-            props.namespaces.length > 0
-              ? props.namespaces
-              : saved.accessibleNamespaces
-          }
-        />
-      ) : null}
+      <AgentCard
+        clusterName={props.name}
+        draft={draft}
+        errors={errors}
+        update={update}
+        namespaces={
+          props.namespaces.length > 0
+            ? props.namespaces
+            : saved.accessibleNamespaces
+        }
+      />
 
       <footer className={styles.footer}>
         <p

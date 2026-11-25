@@ -222,8 +222,8 @@ pub fn resolve(
 }
 
 /// Finds the program of an agent the person added: the first word of its command, split as
-/// a shell splits it, on `path_var` or else in `folders`. It gets no variables of its own
-/// (spec §4.6, §4.7).
+/// this OS splits command lines (`split_command`), on `path_var` or else in `folders`. It gets
+/// no variables of its own (spec §4.6, §4.7).
 pub fn resolve_custom(
     agent: &CustomAgent,
     path_var: Option<&OsStr>,
@@ -235,7 +235,7 @@ pub fn resolve_custom(
         detail: None,
     };
     // An unclosed quote: name the first word as typed.
-    let Ok(words) = shell_words::split(&agent.command) else {
+    let Some(words) = split_command(&agent.command) else {
         return not_found(agent.command.split_whitespace().next().unwrap_or_default());
     };
     let Some((first, args)) = words.split_first() else {
@@ -256,6 +256,61 @@ pub fn resolve_custom(
         path_dirs: dirs,
         custom: true,
     })
+}
+
+/// The words of a custom agent's command, as this OS's command lines split them; `None` for
+/// an unclosed quote. On Unix as a shell splits them.
+#[cfg(not(windows))]
+fn split_command(text: &str) -> Option<Vec<String>> {
+    shell_words::split(text).ok()
+}
+
+/// The words of a custom agent's command, as this OS's command lines split them; `None` for
+/// an unclosed quote. On Windows, where paths hold backslashes, see `split_windows`.
+#[cfg(windows)]
+fn split_command(text: &str) -> Option<Vec<String>> {
+    split_windows(text)
+}
+
+/// Words split on unquoted whitespace; `"` quotes a run, and backslashes are literal except
+/// `\"` inside quotes, which is a literal quote. `None` for an unclosed quote.
+#[cfg(any(windows, test))]
+fn split_windows(text: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    // A word has begun, so `""` gives an empty word.
+    let mut started = false;
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            '\\' if quoted && chars.peek() == Some(&'"') => {
+                chars.next();
+                word.push('"');
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if quoted {
+        return None;
+    }
+    if started {
+        words.push(word);
+    }
+    Some(words)
 }
 
 /// `~/x` is a path under the home folder; any other word is what `locate` takes.
@@ -881,5 +936,62 @@ mod tests {
                 detail: None,
             }
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_commands_keep_backslashes_and_quotes() {
+        assert_eq!(
+            split_command(r#""C:\Program Files\nodejs\claude-agent-acp.cmd" --flag"#).unwrap(),
+            [r"C:\Program Files\nodejs\claude-agent-acp.cmd", "--flag"]
+        );
+        assert_eq!(
+            split_command(r"D:\a\skopos\target\debug\skopos-fakeagent.exe --script D:\a\s.json")
+                .unwrap(),
+            [
+                r"D:\a\skopos\target\debug\skopos-fakeagent.exe",
+                "--script",
+                r"D:\a\s.json"
+            ]
+        );
+        assert!(split_command(r#""unterminated"#).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_commands_split_as_a_shell_splits_them() {
+        assert_eq!(
+            split_command("my-agent --acp 'a b'").unwrap(),
+            ["my-agent", "--acp", "a b"]
+        );
+    }
+
+    /// Windows' rules, on every OS.
+    #[test]
+    fn windows_words_split_on_unquoted_whitespace_and_keep_backslashes() {
+        assert_eq!(
+            split_windows(r#""C:\Program Files\nodejs\claude-agent-acp.cmd" --flag"#).unwrap(),
+            [r"C:\Program Files\nodejs\claude-agent-acp.cmd", "--flag"]
+        );
+        assert_eq!(
+            split_windows(r"D:\a\skopos\target\debug\skopos-fakeagent.exe --script D:\a\s.json")
+                .unwrap(),
+            [
+                r"D:\a\skopos\target\debug\skopos-fakeagent.exe",
+                "--script",
+                r"D:\a\s.json"
+            ]
+        );
+        assert_eq!(
+            split_windows("  agent\t--mode \"a b\"c  ''  ").unwrap(),
+            ["agent", "--mode", "a bc", "''"]
+        );
+        assert_eq!(
+            split_windows(r#"agent "say \"hi\"" "" C:\dir\"#).unwrap(),
+            ["agent", r#"say "hi""#, "", r"C:\dir\"]
+        );
+        assert_eq!(split_windows("").unwrap(), Vec::<String>::new());
+        assert!(split_windows(r#""unterminated"#).is_none());
+        assert!(split_windows(r#"agent "a \""#).is_none());
     }
 }

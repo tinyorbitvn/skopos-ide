@@ -27,7 +27,6 @@ import {
   Sun,
   X,
 } from "../design/icons";
-import { agentsSupported } from "../features/agents/supported";
 import { openTerminal } from "../features/dock/openTerminal";
 import { chartsPath } from "../features/helm/helmText";
 import { mapPath } from "../features/map/paths";
@@ -331,14 +330,14 @@ export const COMMANDS: readonly AppCommand[] = [
     label: () => "Open the agent",
     icon: Sparkles,
     shortcut: "agent",
-    available: () => agentsSupported(),
+    available: always,
     run: (ctx) => useAgentChat.getState().openPanel(ctx.cluster?.id ?? null),
   },
   {
     id: "agent-new-chat",
     label: () => "New agent chat",
     icon: MessageSquarePlus,
-    available: () => agentsSupported(),
+    available: always,
     run: (ctx) => {
       const page = ctx.cluster?.id ?? null;
       const chat = useAgentChat.getState();
@@ -353,8 +352,7 @@ export const COMMANDS: readonly AppCommand[] = [
     label: () =>
       `Ask the agent about this ${useAgentChat.getState().drawerObject?.kind ?? "object"}`,
     icon: Sparkles,
-    available: () =>
-      agentsSupported() && useAgentChat.getState().drawerObject !== null,
+    available: () => useAgentChat.getState().drawerObject !== null,
     run: () => {
       const object = useAgentChat.getState().drawerObject;
       if (object) void useAgentChat.getState().askAbout(object);

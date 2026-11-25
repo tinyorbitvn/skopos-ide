@@ -1,9 +1,7 @@
 //! The ACP client and the probes against the scripted fake agent (`skopos-fakeagent`),
-//! started natively. The fake names its script and log on its command line, so a test does
-//! not depend on the environment it runs in.
-#![cfg(unix)]
+//! started natively, on every OS. The fake names its script and log on its command line, so a
+//! test does not depend on the environment it runs in.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -65,9 +63,12 @@ impl Fake {
     /// The fake agent in its work folder, with a small environment of its own.
     fn command(&self) -> Command {
         let mut command = Command::new(FAKE_AGENT);
+        command.args(self.args()).env_clear();
+        // Windows starts no networking process without it.
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", root);
+        }
         command
-            .args(self.args())
-            .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", self.path("home"))
             .current_dir(self.work())
@@ -82,14 +83,38 @@ impl Fake {
     fn command_line(&self) -> String {
         let mut words = vec![FAKE_AGENT.to_owned()];
         words.extend(self.args());
-        shell_words::join(words)
+        command_line(&words)
     }
 
     /// A shell script in the fake's `bin/`.
+    #[cfg(unix)]
     fn executable(&self, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
         let path = self.path("bin").join(name);
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    /// A batch file `<name>.cmd` in the fake's `bin/` that does what the shell `body` does:
+    /// `echo <text> >&2` lines and an `exit <code>` line.
+    #[cfg(windows)]
+    fn executable(&self, name: &str, body: &str) -> PathBuf {
+        let path = self.path("bin").join(format!("{name}.cmd"));
+        let mut script = "@echo off\r\n".to_owned();
+        for line in body.lines() {
+            if let Some(text) = line
+                .strip_prefix("echo ")
+                .and_then(|l| l.strip_suffix(" >&2"))
+            {
+                script.push_str(&format!(">&2 echo {text}\r\n"));
+            } else if let Some(code) = line.strip_prefix("exit ") {
+                script.push_str(&format!("exit /b {code}\r\n"));
+            } else {
+                panic!("no batch line for {line:?}");
+            }
+        }
+        std::fs::write(&path, script).unwrap();
         path
     }
 
@@ -128,6 +153,21 @@ impl Fake {
     }
 }
 
+/// `words` as a custom agent's command: as a shell quotes them on Unix; on Windows each in
+/// double quotes, since backslashes there are literal.
+fn command_line<S: AsRef<str>>(words: &[S]) -> String {
+    if cfg!(windows) {
+        let quoted: Vec<String> = words
+            .iter()
+            .map(|word| format!("\"{}\"", word.as_ref()))
+            .collect();
+        quoted.join(" ")
+    } else {
+        shell_words::join(words.iter().map(AsRef::as_ref))
+    }
+}
+
+#[cfg(unix)]
 fn alive(pid: u64) -> bool {
     std::process::Command::new("/bin/sh")
         .arg("-c")
@@ -135,6 +175,17 @@ fn alive(pid: u64) -> bool {
         .status()
         .unwrap()
         .success()
+}
+
+#[cfg(windows)]
+fn alive(pid: u64) -> bool {
+    let filter = format!("PID eq {pid}");
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", filter.as_str(), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap();
+    // A row is `"name","<pid>",…`; without one tasklist prints an INFO line.
+    String::from_utf8_lossy(&out.stdout).contains(&format!(",\"{pid}\","))
 }
 
 /// A `skopos` entry like a chat's, aimed at a port where nothing listens.
@@ -625,7 +676,7 @@ async fn a_probe_of_an_agent_that_exits_reports_its_last_stderr_line() {
     );
     let (core, _root) = test_core().await;
     let added = core
-        .agent_custom_add("Broken", &program.display().to_string())
+        .agent_custom_add("Broken", &command_line(&[program.display().to_string()]))
         .unwrap();
     let probed = within(core.agent_probe(&added.id)).await.unwrap();
     assert_eq!(
@@ -637,8 +688,15 @@ async fn a_probe_of_an_agent_that_exits_reports_its_last_stderr_line() {
 #[tokio::test]
 async fn a_probe_with_no_answer_gives_up_after_the_limit() {
     let fake = Fake::new(json!({}));
-    let mut command = Command::new("/bin/sleep");
-    command.arg("30");
+    let command = if cfg!(windows) {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/C", "ping -n 30 127.0.0.1 > NUL"]);
+        command
+    } else {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30");
+        command
+    };
     let started = Instant::now();
     let state = probe_within(command, &fake.work(), "Sleepy", Duration::from_secs(2)).await;
     assert_eq!(
@@ -654,7 +712,7 @@ async fn probing_an_agent_whose_command_is_gone_needs_no_probe() {
     let program = fake.executable("gone-agent", "exit 0");
     let (core, root) = test_core().await;
     let added = core
-        .agent_custom_add("Gone", &program.display().to_string())
+        .agent_custom_add("Gone", &command_line(&[program.display().to_string()]))
         .unwrap();
     std::fs::remove_file(&program).unwrap();
     let probed = within(core.agent_probe(&added.id)).await.unwrap();

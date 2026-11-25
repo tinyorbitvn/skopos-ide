@@ -18,7 +18,6 @@ import {
   StartingState,
 } from "./PanelStates";
 import { ScopePopover } from "./ScopePopover";
-import { agentsSupported } from "./supported";
 
 function OpenPanel() {
   const page = useCurrentCluster();
@@ -138,10 +137,10 @@ function OpenPanel() {
 
 /**
  * The agent panel (spec §3.2): a column on the right of the shell's body. It starts closed
- * in each window and keeps its chat while closed. No agent UI exists on Windows.
+ * in each window and keeps its chat while closed.
  */
 export function AgentPanel() {
   const open = useAgentChat((s) => s.open);
-  if (!agentsSupported() || !open) return null;
+  if (!open) return null;
   return <OpenPanel />;
 }

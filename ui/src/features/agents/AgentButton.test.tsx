@@ -1,9 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import { resetAgentChatForTest, useAgentChat } from "../../stores/agentChat";
 import { AgentButton } from "./AgentButton";
-import { setAgentsSupportedForTest } from "./supported";
 
 const WAITING = {
   id: "k1",
@@ -26,7 +25,6 @@ const WAITING = {
 };
 
 beforeEach(() => resetAgentChatForTest());
-afterEach(() => setAgentsSupportedForTest(true));
 
 function show() {
   render(
@@ -65,14 +63,4 @@ test("pressing it opens the panel", () => {
   useAgentChat.setState({ start: { phase: "ended" } });
   fireEvent.click(show());
   expect(useAgentChat.getState().open).toBe(true);
-});
-
-test("on Windows there is no button", () => {
-  setAgentsSupportedForTest(false);
-  render(
-    <MemoryRouter>
-      <AgentButton />
-    </MemoryRouter>,
-  );
-  expect(screen.queryByTestId("agent-toggle")).toBeNull();
 });

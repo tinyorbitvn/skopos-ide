@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { toast } from "../design";
-import { agentsSupported } from "../features/agents/supported";
 import { api } from "../ipc/api";
 import { failureMessage } from "../ipc/client";
 import type { AgentPrefs } from "../ipc/generated/AgentPrefs";
@@ -55,7 +54,6 @@ export const useAgents = create<AgentsState>((set, get) => ({
   ...INITIAL,
 
   async load() {
-    if (!agentsSupported()) return null;
     try {
       const statuses = await api.agentsStatus();
       set({ statuses, error: null });
@@ -115,7 +113,6 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   async loadPrefs() {
-    if (!agentsSupported()) return;
     try {
       set({ prefs: await api.agentPrefs(), prefsError: null });
     } catch (error) {

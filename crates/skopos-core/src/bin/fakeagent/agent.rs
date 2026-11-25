@@ -39,6 +39,21 @@ enum Played {
     SignIn,
 }
 
+/// Writes `pid=<this process id>`, then one `NAME=value` line per environment variable, to
+/// `path`, so a test knows which process the core started and with what environment. A name
+/// or value that is not Unicode is written lossily.
+pub fn write_env_file(path: &Path) -> Result<(), String> {
+    let mut text = format!("pid={}\n", std::process::id());
+    for (name, value) in std::env::vars_os() {
+        text.push_str(&format!(
+            "{}={}\n",
+            name.to_string_lossy(),
+            value.to_string_lossy()
+        ));
+    }
+    std::fs::write(path, text).map_err(|error| format!("{}: {error}", path.display()))
+}
+
 pub struct Fake {
     script: Script,
     log: Option<Mutex<File>>,

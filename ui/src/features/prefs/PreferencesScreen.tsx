@@ -20,7 +20,6 @@ import { failureMessage } from "../../ipc/client";
 import type { SyncSource } from "../../ipc/generated/SyncSource";
 import type { Theme } from "../../ipc/generated/Theme";
 import { classifySourcePath, usePrefs } from "../../stores/prefs";
-import { agentsSupported } from "../agents/supported";
 import {
   checkForUpdates,
   useStoreManaged,
@@ -213,12 +212,8 @@ export function PreferencesScreen() {
     <div className={styles.screen}>
       <Sources sources={prefs.syncSources} />
       <ToolsSection />
-      {agentsSupported() ? (
-        <>
-          <AgentsSection />
-          <AgentChangesSection />
-        </>
-      ) : null}
+      <AgentsSection />
+      <AgentChangesSection />
       <HelmReposSection />
       <section className={styles.section}>
         <h3 className={styles.heading}>Appearance</h3>

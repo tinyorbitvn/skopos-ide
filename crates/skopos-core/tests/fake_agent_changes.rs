@@ -1,8 +1,6 @@
 //! The agents' change tools and their gate against the fake API server (spec §4.4, §4.5, §6.3,
 //! §6.4): the one-object writes they use, then the tools through an in-process MCP client.
-//! Agent settings are refused on Windows, so this file runs on Unix. Every kubeconfig lives in
-//! a temp `<home>/.kube`; `KUBECONFIG` is never read.
-#![cfg(unix)]
+//! Every kubeconfig lives in a temp `<home>/.kube`; `KUBECONFIG` is never read.
 
 mod support;
 

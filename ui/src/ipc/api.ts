@@ -831,10 +831,10 @@ export const api = {
   updateSkip: (version: string) => call<void>("update_skip", { version }),
   /**
    * The built-in agents, then the custom ones, each with its state: `unknown` until a
-   * probe ran. Every agent and chat call rejects with Unsupported on Windows.
+   * probe ran.
    */
   agentsStatus: () => call<AgentStatus[]>("agents_status"),
-  /** Starts the agent in the sandbox once to learn its state, then ends it. */
+  /** Starts the agent once to learn its state, then ends it. */
   agentProbe: (id: string) => call<AgentStatus>("agent_probe", { id }),
   /** Rejects with InvalidInput when the name is taken or the command is not found. */
   agentCustomAdd: (name: string, command: string) =>

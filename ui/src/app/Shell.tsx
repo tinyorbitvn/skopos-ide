@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, EmptyState, Spinner } from "../design";
 import { AboutDialog } from "../features/about/AboutDialog";
 import { AgentPanel } from "../features/agents/AgentPanel";
-import { agentsSupported } from "../features/agents/supported";
 import { ExecConsentDialog } from "../features/cluster/ExecConsentDialog";
 import { Dock } from "../features/dock/Dock";
 import { CommandPalette } from "../features/palette/CommandPalette";
@@ -106,13 +105,10 @@ function ShellEffects() {
           shortcuts: () => useShell.getState().open("shortcuts"),
           preferences: () => runCommand("preferences", contextRef.current),
           sidebar: toggleSidebar,
-          agent: () => {
-            if (agentsSupported()) {
-              useAgentChat
-                .getState()
-                .toggle(contextRef.current.cluster?.id ?? null);
-            }
-          },
+          agent: () =>
+            useAgentChat
+              .getState()
+              .toggle(contextRef.current.cluster?.id ?? null),
         },
         IS_MAC,
       ),

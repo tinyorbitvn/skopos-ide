@@ -58,11 +58,7 @@ export function ShortcutsBody(props: { platform: Platform; onClose(): void }) {
   const groups = SHORTCUT_GROUPS.map((group) => ({
     group,
     rows: SHORTCUTS.filter(
-      (row) =>
-        row.group === group &&
-        // No agents on Windows (agents spec §2).
-        (row.id !== "agent" || props.platform !== "windows") &&
-        matches(row, needle, mac),
+      (row) => row.group === group && matches(row, needle, mac),
     ),
   })).filter((g) => g.rows.length > 0);
 

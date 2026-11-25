@@ -1,7 +1,6 @@
 //! Chats end to end (agents spec §4.1, §4.3, §4.8, §6): fakekube, and the fake agent as a
-//! custom agent behind a shell that notes its process id and environment. Agents run natively
-//! (native agents spec §4.2).
-#![cfg(unix)]
+//! custom agent that notes its process id and environment in a file. Agents run natively, on
+//! every OS (native agents spec §4.2).
 
 mod support;
 
@@ -33,8 +32,8 @@ const SCRIPT: &str = "script.json";
 const LOG: &str = "agent.log";
 const SCALE_PATH: &str = "/apis/apps/v1/namespaces/default/deployments/api/scale";
 const CANNOT_REOPEN: &str = "Fake can't reopen old chats. Start a new chat to continue.";
-/// Notes the shell's process id, which `exec` keeps for the agent, and the agent's environment.
-const WRAPPER: &str = "echo $$ > agent.pid; env > agent.env; exec \"$@\"";
+/// Where the fake agent notes its process id and its environment when it starts.
+const ENV_FILE: &str = "agent.env";
 const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}"#;
 
 struct Bench {
@@ -88,15 +87,27 @@ impl Bench {
             .collect()
     }
 
-    /// The process id of the agent started last.
-    fn agent_pid(&self) -> u32 {
-        let text = std::fs::read_to_string(self.agent_dir().join("agent.pid")).unwrap();
-        text.trim().parse().unwrap()
+    /// What the agent started last noted: `pid=<id>`, then one `NAME=value` line per variable.
+    fn env_file(&self) -> String {
+        std::fs::read_to_string(self.agent_dir().join(ENV_FILE)).unwrap()
     }
 
-    /// The environment of the agent started last, as `env` prints it.
+    /// The process id of the agent started last.
+    fn agent_pid(&self) -> u32 {
+        let text = self.env_file();
+        let pid = text
+            .lines()
+            .next()
+            .and_then(|line| line.strip_prefix("pid="));
+        pid.expect("a pid line").parse().unwrap()
+    }
+
+    /// The environment of the agent started last, one `NAME=value` line per variable.
     fn agent_env(&self) -> String {
-        std::fs::read_to_string(self.agent_dir().join("agent.env")).unwrap()
+        let text = self.env_file();
+        text.split_once('\n')
+            .map(|(_, env)| env.to_owned())
+            .unwrap_or_default()
     }
 
     /// The catalog name of the chat's cluster.
@@ -246,20 +257,17 @@ impl Events {
     }
 }
 
-/// The fake agent's script and log are relative to its working directory, the agent's folder.
-/// They go as arguments, so the script and log do not depend on the agent's environment.
+/// The fake agent's script, log and env file are relative to its working directory, the
+/// agent's folder. They go as arguments, so they do not depend on the agent's environment.
 fn fake_agent_command() -> String {
-    shell_words::join([
-        "sh",
-        "-c",
-        WRAPPER,
-        "sh",
-        env!("CARGO_BIN_EXE_skopos-fakeagent"),
-        "--script",
-        SCRIPT,
-        "--log",
-        LOG,
-    ])
+    let program = env!("CARGO_BIN_EXE_skopos-fakeagent");
+    let args = format!("--script {SCRIPT} --env-file {ENV_FILE} --log {LOG}");
+    // Windows splits a custom command on unquoted whitespace and keeps backslashes.
+    if cfg!(windows) {
+        format!("\"{program}\" {args}")
+    } else {
+        format!("{} {args}", shell_words::quote(program))
+    }
 }
 
 fn script(turns: Vec<Value>) -> Value {
@@ -427,6 +435,7 @@ async fn mcp_answer(address: &str, first_line: &str) -> Option<String> {
 }
 
 /// Whether `pid` runs; a zombie has ended.
+#[cfg(unix)]
 fn is_running(pid: u32) -> bool {
     let out = std::process::Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -435,6 +444,18 @@ fn is_running(pid: u32) -> bool {
     let stat = String::from_utf8_lossy(&out.stdout);
     let stat = stat.trim();
     !stat.is_empty() && !stat.starts_with('Z')
+}
+
+/// Whether `pid` runs.
+#[cfg(windows)]
+fn is_running(pid: u32) -> bool {
+    let filter = format!("PID eq {pid}");
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", filter.as_str(), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap();
+    // A row is `"name","<pid>",…`; without one tasklist prints an INFO line.
+    String::from_utf8_lossy(&out.stdout).contains(&format!(",\"{pid}\","))
 }
 
 async fn wait_gone(pid: u32) {
@@ -1144,9 +1165,11 @@ async fn a_chat_s_agent_runs_natively_with_the_app_s_environment() {
     bench.ask(&info.chat_id, "Hello").await;
     let env = bench.agent_env();
     assert!(env.contains("SKOPOS_NATIVE_MARKER_7F3A=seen"), "{env}");
-    let home = std::env::var("HOME").unwrap();
+    // The home folder, under the name this OS gives it.
+    let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var(home_var).unwrap();
     assert!(
-        env.lines().any(|line| line == format!("HOME={home}")),
+        env.lines().any(|line| line == format!("{home_var}={home}")),
         "{env}"
     );
     assert!(

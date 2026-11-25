@@ -16,7 +16,6 @@ import {
 } from "../../stores/dock";
 import { useProposals } from "../../stores/proposals";
 import { registerTabSource } from "../../stores/tabSources";
-import { agentsSupported } from "../agents/supported";
 import { AiBar } from "./AiBar";
 import { editTarget } from "./apiDocsKind";
 import type { CreateDraft } from "./CreateResourceTab";
@@ -261,22 +260,20 @@ export function EditResourceTab(props: {
           <span className={styles.hint}>
             {dirty ? "Unsaved changes" : "No changes"}
           </span>
-          {agentsSupported() ? (
-            <Button
-              size="sm"
-              className={styles.aiToggle}
-              aria-pressed={aiOpen}
-              onClick={() => setAiOpen((open) => !open)}
-              data-testid="yaml-ai"
-            >
-              <Sparkles size={14} aria-hidden="true" />
-              Ask AI
-            </Button>
-          ) : null}
+          <Button
+            size="sm"
+            className={styles.aiToggle}
+            aria-pressed={aiOpen}
+            onClick={() => setAiOpen((open) => !open)}
+            data-testid="yaml-ai"
+          >
+            <Sparkles size={14} aria-hidden="true" />
+            Ask AI
+          </Button>
           <ApiDocsButton />
         </div>
       )}
-      {!gone && aiOpen && agentsSupported() ? (
+      {!gone && aiOpen ? (
         <AiBar
           tabId={id}
           placeholder={`Describe the change to ${resource.kind} ${name}`}

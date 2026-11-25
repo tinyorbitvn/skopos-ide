@@ -1,7 +1,6 @@
 //! The agent settings (agents spec §3.5, §3.6, §4.8) against real files in temp dirs:
 //! Preferences' agent settings, each cluster's agent settings, and files saved before
-//! agents existed. Windows refuses every agent call, which `agents::tests` checks.
-#![cfg(not(windows))]
+//! agents existed.
 
 use std::path::PathBuf;
 

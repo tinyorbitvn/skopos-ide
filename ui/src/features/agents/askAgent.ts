@@ -3,7 +3,6 @@ import { Sparkles } from "../../design/icons";
 import type { ObjectRef } from "../../ipc/generated/ObjectRef";
 import { useAgentChat } from "../../stores/agentChat";
 import type { ObjectActionItem } from "../resources/objectActions";
-import { agentsSupported } from "./supported";
 
 /**
  * The drawer's `Ask the agent about this <Kind>` (spec §3.1). While the drawer shows the
@@ -15,7 +14,7 @@ export function useAskAgentItem(
   const key = object ? JSON.stringify(object) : null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for `object`.
   useEffect(() => {
-    if (object === null || !agentsSupported()) return;
+    if (object === null) return;
     useAgentChat.getState().setDrawerObject(object);
     return () => {
       const shown = useAgentChat.getState().drawerObject;
@@ -24,7 +23,7 @@ export function useAskAgentItem(
       }
     };
   }, [key]);
-  if (object === null || !agentsSupported()) return null;
+  if (object === null) return null;
   return {
     id: "agent-ask",
     label: `Ask the agent about this ${object.kind}`,

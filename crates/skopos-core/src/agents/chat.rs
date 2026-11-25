@@ -1,6 +1,5 @@
 //! A chat with an agent (agents spec §4.1, §4.3): its scope, how it starts, and the calls the
-//! panel makes. Chats run on Linux and macOS only; on Windows every call answers
-//! `Unsupported` and nothing spawns.
+//! panel makes.
 
 use std::path::PathBuf;
 
@@ -16,7 +15,6 @@ use crate::app_core::AppCore;
 use crate::error::CoreResult;
 use crate::kubeconfig::ClusterId;
 
-#[cfg(unix)]
 pub(crate) use running::Chats;
 
 /// The history key of a global chat.
@@ -72,15 +70,7 @@ impl AppCore {
         events: mpsc::Sender<ChatEvent>,
         owner: &str,
     ) -> CoreResult<ChatInfo> {
-        #[cfg(unix)]
-        {
-            running::start(self, start, events, owner).await
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (start, events, owner);
-            Err(unsupported())
-        }
+        running::start(self, start, events, owner).await
     }
 
     /// Runs one turn: the person's item, then the agent's prompt (spec §4.3). It returns when
@@ -92,33 +82,19 @@ impl AppCore {
         object: Option<ObjectRef>,
         tab: Option<EditorTab>,
     ) -> CoreResult<()> {
-        #[cfg(unix)]
-        {
-            running::prompt(self, chat_id, text, object, tab).await
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (chat_id, text, object, tab);
-            Err(unsupported())
-        }
+        running::prompt(self, chat_id, text, object, tab).await
     }
 
     /// `Stop`: cancels the turn and answers waiting changes as stopped. An id that is not
     /// running is ignored.
     pub fn chat_stop(&self, chat_id: &str) {
-        #[cfg(unix)]
         running::stop(self, chat_id);
-        #[cfg(not(unix))]
-        let _ = chat_id;
     }
 
-    /// Ends the chat: stops it, ends the agent's process group, removes its run folder and
+    /// Ends the chat: stops it, ends the agent and what it started, removes its run folder and
     /// saves it. An id that is not running is ignored.
     pub async fn chat_close(&self, chat_id: &str) {
-        #[cfg(unix)]
         running::close(self, chat_id).await;
-        #[cfg(not(unix))]
-        let _ = chat_id;
     }
 
     /// The person's answer to a waiting change card.
@@ -128,28 +104,12 @@ impl AppCore {
         card_id: &str,
         answer: ChangeAnswer,
     ) -> CoreResult<()> {
-        #[cfg(unix)]
-        {
-            running::answer(self, chat_id, card_id, answer)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (chat_id, card_id, answer);
-            Err(unsupported())
-        }
+        running::answer(self, chat_id, card_id, answer)
     }
 
     /// The person's choice on a waiting permission card (native agents spec §4.2).
     pub fn chat_permission(&self, chat_id: &str, card_id: &str, option_id: &str) -> CoreResult<()> {
-        #[cfg(unix)]
-        {
-            running::permission(self, chat_id, card_id, option_id)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (chat_id, card_id, option_id);
-            Err(unsupported())
-        }
+        running::permission(self, chat_id, card_id, option_id)
     }
 
     /// The person's answer to a YAML tab proposal (YAML authoring spec A4, A11).
@@ -159,83 +119,38 @@ impl AppCore {
         proposal_id: &str,
         accepted: bool,
     ) -> CoreResult<()> {
-        #[cfg(unix)]
-        {
-            running::proposal_answer(self, chat_id, proposal_id, accepted).await
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (chat_id, proposal_id, accepted);
-            Err(unsupported())
-        }
+        running::proposal_answer(self, chat_id, proposal_id, accepted).await
     }
 
     /// The tab closed (spec A6): it is no longer attached and its waiting proposal is marked.
     /// A chat that is not running has nothing attached.
     pub async fn chat_detach_tab(&self, chat_id: &str, tab_id: &str) {
-        #[cfg(unix)]
         running::detach_tab(self, chat_id, tab_id).await;
-        #[cfg(not(unix))]
-        let _ = (chat_id, tab_id);
     }
 
     /// `Undo` on a card approved for the chat: the cluster's changes ask again.
     pub fn chat_undo_standing(&self, chat_id: &str, cluster: &ClusterId) -> CoreResult<()> {
-        #[cfg(unix)]
-        {
-            running::undo_standing(self, chat_id, cluster)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (chat_id, cluster);
-            Err(unsupported())
-        }
+        running::undo_standing(self, chat_id, cluster)
     }
 
     /// The scope's history, newest first (spec §3.4).
     pub fn chat_list(&self, scope: &ChatScope) -> CoreResult<Vec<ChatSummary>> {
-        #[cfg(unix)]
-        {
-            Ok(running::list(self, scope))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = scope;
-            Err(unsupported())
-        }
+        Ok(running::list(self, scope))
     }
 
     /// A chat: the running one as it stands, else the stored one.
     pub fn chat_get(&self, id: &str) -> CoreResult<StoredChat> {
-        #[cfg(unix)]
-        {
-            running::get(self, id)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            Err(unsupported())
-        }
+        running::get(self, id)
     }
 
     /// The program the agent launches as its `skopos` MCP server, in place of the app's own
     /// binary. Tests pass `skopos-agent-host` (R1).
     pub fn set_agent_app_binary_for_test(&self, path: PathBuf) {
-        #[cfg(unix)]
         self.chats().set_app_binary(path);
-        #[cfg(not(unix))]
-        let _ = path;
     }
 }
 
-/// What every chat call answers on Windows.
-#[cfg(not(unix))]
-fn unsupported() -> crate::error::IpcError {
-    crate::error::IpcError::new(crate::error::ErrorCode::Unsupported, super::UNSUPPORTED)
-}
-
-/// The running chats, on Linux and macOS.
-#[cfg(unix)]
+/// The running chats.
 mod running {
     use std::collections::HashMap;
     use std::io::ErrorKind;

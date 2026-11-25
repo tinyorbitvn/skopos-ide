@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import type { AgentStatus } from "../../ipc/generated/AgentStatus";
 import type { ChatEvent } from "../../ipc/generated/ChatEvent";
 import { resetAgentChatForTest, useAgentChat } from "../../stores/agentChat";
@@ -15,7 +15,6 @@ import { resetAgentsForTest } from "../../stores/agents";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { AgentPanel } from "./AgentPanel";
-import { setAgentsSupportedForTest } from "./supported";
 
 type Channel = { onmessage(event: ChatEvent): void };
 
@@ -89,8 +88,6 @@ beforeEach(() => {
     ],
   });
 });
-
-afterEach(() => setAgentsSupportedForTest(true));
 
 test("a new chat on a cluster page focuses the box and offers the cluster suggestions", async () => {
   backend();
@@ -307,16 +304,4 @@ test("Escape closes a popover but not the panel", async () => {
   expect(screen.queryByRole("dialog", { name: "Scope" })).toBeNull();
   expect(screen.getByTestId("agent-panel")).toBeTruthy();
   expect(document.activeElement).toBe(within(panel).getByTestId("agent-scope"));
-});
-
-test("on Windows the panel renders nothing", async () => {
-  setAgentsSupportedForTest(false);
-  backend();
-  render(
-    <MemoryRouter>
-      <AgentPanel />
-    </MemoryRouter>,
-  );
-  act(() => useAgentChat.setState({ open: true }));
-  expect(screen.queryByTestId("agent-panel")).toBeNull();
 });
