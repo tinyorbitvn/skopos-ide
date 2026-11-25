@@ -678,6 +678,11 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
   ["chat_stop", () => api.chatStop("a1b2c3d4"), { chatId: "a1b2c3d4" }],
   ["chat_close", () => api.chatClose("a1b2c3d4"), { chatId: "a1b2c3d4" }],
   [
+    "chat_permission",
+    () => api.chatPermission("a1b2c3d4", "p1", "allow_once"),
+    { chatId: "a1b2c3d4", cardId: "p1", optionId: "allow_once" },
+  ],
+  [
     "chat_answer",
     () => api.chatAnswer("a1b2c3d4", "change-1", "approveForChat"),
     { chatId: "a1b2c3d4", cardId: "change-1", answer: "approveForChat" },

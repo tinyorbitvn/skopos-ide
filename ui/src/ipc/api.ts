@@ -878,6 +878,9 @@ export const api = {
   /** NotFound when no change card waits under `cardId`. */
   chatAnswer: (chatId: string, cardId: string, answer: ChangeAnswer) =>
     call<void>("chat_answer", { chatId, cardId, answer }),
+  /** The person's choice on one of the agent's permission requests. */
+  chatPermission: (chatId: string, cardId: string, optionId: string) =>
+    call<void>("chat_permission", { chatId, cardId, optionId }),
   /** The person's answer to a YAML tab proposal. */
   chatProposalAnswer: (chatId: string, proposalId: string, accepted: boolean) =>
     call<void>("chat_proposal_answer", { chatId, proposalId, accepted }),

@@ -78,6 +78,7 @@ export interface AgentChatState {
   send(text?: string): Promise<void>;
   stop(): Promise<void>;
   answer(cardId: string, answer: ChangeAnswer): Promise<void>;
+  choose(cardId: string, optionId: string): Promise<void>;
   undo(card: ChangeCard): Promise<void>;
   showHistory(on: boolean): void;
   loadHistory(): Promise<void>;
@@ -406,6 +407,16 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
         await api.chatAnswer(chatId, cardId, answer);
       } catch (error) {
         toast.error("Could not answer the change", failureMessage(error));
+      }
+    },
+
+    async choose(cardId, optionId) {
+      const chatId = runningChatId(get());
+      if (chatId === null) return;
+      try {
+        await api.chatPermission(chatId, cardId, optionId);
+      } catch (error) {
+        toast.error("Could not answer the request", failureMessage(error));
       }
     },
 

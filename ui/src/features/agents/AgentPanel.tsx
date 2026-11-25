@@ -78,6 +78,7 @@ function OpenPanel() {
         past={past}
         undone={undone}
         onAnswer={(cardId, answer) => chat.answer(cardId, answer)}
+        onChoose={(cardId, optionId) => chat.choose(cardId, optionId)}
         onUndo={(card) => void chat.undo(card)}
         onNewChat={() => void chat.newChat(pageId)}
       />

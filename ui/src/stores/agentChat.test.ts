@@ -1,5 +1,6 @@
 import { act } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
+import { toast } from "../design";
 import type { AgentStatus } from "../ipc/generated/AgentStatus";
 import type { ChatEvent } from "../ipc/generated/ChatEvent";
 import type { EditorTab } from "../ipc/generated/EditorTab";
@@ -449,4 +450,34 @@ test("a proposal item reaches the proposals store", async () => {
     });
   });
   expect(useProposals.getState().byTab["create-1"]?.chatId).toBe("c1");
+});
+
+test("choose sends the option for the running chat and toasts a failure", async () => {
+  catalog({ a: "prod" });
+  let fail = false;
+  const { ipc } = backend({
+    chat_permission: () => {
+      if (fail)
+        throw {
+          code: "Conflict",
+          message: "This request was already answered.",
+        };
+      return null;
+    },
+  });
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  await act(() => useAgentChat.getState().choose("p1", "allow_once"));
+  expect(ipc.callsTo("chat_permission")).toEqual([
+    { chatId: "c1", cardId: "p1", optionId: "allow_once" },
+  ]);
+  const error = vi.spyOn(toast, "error");
+  fail = true;
+  await act(() => useAgentChat.getState().choose("p1", "allow_once"));
+  expect(error).toHaveBeenCalledWith(
+    "Could not answer the request",
+    "This request was already answered.",
+  );
 });
