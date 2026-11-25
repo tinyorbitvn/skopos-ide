@@ -6,6 +6,11 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **More YAML templates:** creating a resource starts from 36 templates in six groups, including a Deployment with probes and resources, NodePort, LoadBalancer and headless Services, a default-deny NetworkPolicy, TLS and registry Secrets, and RBAC, quota and storage kinds. Kinds the cluster does not serve are dimmed.
+- **New tab button on the dock:** a `+` after the last dock tab opens a searchable list: a blank YAML tab, every template by group, a terminal session, and Draft with AI.
+- **Field hints in the YAML editor:** hovering a key shows its type, default, values and description from the cluster's API docs, and completion lists the fields that fit where the caret is, their values, and the kinds and versions the cluster serves.
+- **AI in YAML tabs:** Ask AI in a create or edit tab sends the tab's text to the agent, which proposes new text. The tab shows the proposal as a diff to accept or reject, and Secret values stay hidden from the agent when the cluster hides them.
+
 ## [0.14.1] - 2026-11-25
 
 - **The map rings the object you select:** on the resource map, the object you click, reach with the arrow keys or pick in the details panel gets a soft accent halo around its ring or box. The halo grows out of it and blinks three times, then stays while the object is selected, and clicking the object again plays it again. A selected box's line is also thicker. With reduced motion turned on, the halo shows at once and does not blink.
