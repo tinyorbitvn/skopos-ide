@@ -79,7 +79,7 @@ export const SPINE: ReadonlySet<string> = new Set([
 
 /**
  * Owners the Grouped layout draws as boxes around what they own; an ApplicationSet holds
- * its Applications (spec §3.3).
+ * its Applications (spec §3.3), and an Application what it manages.
  */
 export const BOX: ReadonlySet<string> = new Set([
   "Deployment",
@@ -89,6 +89,13 @@ export const BOX: ReadonlySet<string> = new Set([
   "Job",
   "ReplicaSet",
   "ApplicationSet",
+  "Application",
+]);
+
+/** The Argo CD boxes, which sit at the root rather than in their namespace's box. */
+export const ARGO_BOX: ReadonlySet<string> = new Set([
+  "ApplicationSet",
+  "Application",
 ]);
 
 /** Relations drawn in the dashed "uses" style; `project` is an Application's AppProject. */

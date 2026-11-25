@@ -50,12 +50,16 @@ const CSS = `
 }
 `;
 
-/** A canvas as MapCanvas draws it: an edge, and a node dimmed by the search. */
+/**
+ * A canvas as MapCanvas draws it at zoom 0.5: an edge with its via mark, and a node dimmed
+ * by the search, in a drawing that spans (-50, -20) to (950, 580).
+ */
 const MARKUP = `
 <div class="canvas" data-testid="map-canvas">
-  <svg class="svg" aria-hidden="true">
+  <svg class="svg" aria-hidden="true" data-extent="-50 -20 950 580">
     <g transform="translate(10 20) scale(0.5)">
       <g class="edge use"><path class="line" d="M0 0L10 10"/></g>
+      <g><circle data-testid="map-via-mark" cx="5" cy="5" r="8" stroke-width="3"/></g>
       <g class="node dim" data-id="Pod/shop/web">
         <circle r="5"/><text class="label">web</text>
       </g>
@@ -129,7 +133,7 @@ describe("mapSvgForExport", () => {
   it("writes each element's computed paint and type into its style and drops its class", () => {
     const canvas = canvasOf(1000, 600);
     const page = canvas.querySelector("svg") as SVGSVGElement;
-    const { svg } = mapSvgForExport(canvas, "");
+    const { svg } = mapSvgForExport(canvas, "", "view");
     const originals = [page, ...page.querySelectorAll<SVGElement>("*")];
     const copies = [
       svg,
@@ -171,14 +175,14 @@ describe("mapSvgForExport", () => {
   it("leaves the canvas on the page as it was", () => {
     const canvas = canvasOf(1000, 600);
     const before = canvas.innerHTML;
-    mapSvgForExport(canvas, "");
+    mapSvgForExport(canvas, "", "view");
     expect(canvas.innerHTML).toBe(before);
   });
 
   it("puts a rect in the canvas's background colour first, then the fonts", () => {
     const canvas = canvasOf(1000, 600);
     const faces = '@font-face { font-family: "Manrope"; }';
-    const { svg } = mapSvgForExport(canvas, faces);
+    const { svg } = mapSvgForExport(canvas, faces, "view");
     const [background, fonts, drawing] = [...svg.children];
     expect(background.tagName).toBe("rect");
     expect(background.getAttribute("fill")).toBe("rgb(240, 241, 243)");
@@ -193,7 +197,7 @@ describe("mapSvgForExport", () => {
 
   it("sizes the SVG as the image and views the canvas's CSS box", () => {
     const canvas = canvasOf(1000, 600);
-    const result = mapSvgForExport(canvas, "");
+    const result = mapSvgForExport(canvas, "", "view");
     expect(result.scale).toBe(2);
     expect(result.image).toEqual({ width: 2000, height: 1200 });
     expect(result.svg.getAttribute("width")).toBe("2000");
@@ -203,7 +207,7 @@ describe("mapSvgForExport", () => {
   });
 
   it("serialises to a standalone SVG document", () => {
-    const { svg } = mapSvgForExport(canvasOf(1000, 600), "");
+    const { svg } = mapSvgForExport(canvasOf(1000, 600), "", "view");
     const text = new XMLSerializer().serializeToString(svg);
     expect(text.match(/xmlns="[^"]*"/g)).toEqual([
       'xmlns="http://www.w3.org/2000/svg"',
@@ -216,10 +220,40 @@ describe("mapSvgForExport", () => {
     expect(parsed.querySelector("text")?.textContent).toBe("web");
   });
 
+  it("frames the whole drawing at 100% with the fit's room around it", () => {
+    const canvas = canvasOf(400, 300);
+    const result = mapSvgForExport(canvas, "", "whole");
+    const [background, , drawing] = [...result.svg.children];
+    // 1000 × 600 drawn, and 24 on each side.
+    expect(result.svg.getAttribute("viewBox")).toBe("0 0 1048 648");
+    expect(background.getAttribute("width")).toBe("1048");
+    expect(background.getAttribute("height")).toBe("648");
+    expect(drawing.getAttribute("transform")).toBe("translate(74 44)");
+    expect(result.scale).toBe(2);
+    expect(result.image).toEqual({ width: 2096, height: 1296 });
+    const mark = result.svg.querySelector<SVGElement>(
+      '[data-testid="map-via-mark"]',
+    );
+    expect(mark?.getAttribute("r")).toBe("4");
+    expect(mark?.style.getPropertyValue("stroke-width")).toBe("1.5");
+    // The page keeps its zoom.
+    expect(canvas.querySelector("svg > g")?.getAttribute("transform")).toBe(
+      "translate(10 20) scale(0.5)",
+    );
+  });
+
+  it("refuses a whole map whose extent is not written", () => {
+    const canvas = canvasOf(400, 300);
+    canvas.querySelector("svg")?.removeAttribute("data-extent");
+    expect(() => mapSvgForExport(canvas, "", "whole")).toThrow(
+      "The map is not drawn",
+    );
+  });
+
   it("refuses a canvas with no drawing", () => {
     document.body.innerHTML = '<div class="canvas"></div>';
     const canvas = document.querySelector<HTMLElement>(".canvas");
-    expect(() => mapSvgForExport(canvas as HTMLElement, "")).toThrow(
+    expect(() => mapSvgForExport(canvas as HTMLElement, "", "view")).toThrow(
       "The map is not drawn",
     );
   });
@@ -299,7 +333,7 @@ describe("renderMapPng", () => {
   });
 
   it("draws the map at twice its size and returns base64 without a data: prefix", async () => {
-    const result = await renderMapPng(canvasOf(1000, 600));
+    const result = await renderMapPng(canvasOf(1000, 600), "view");
     expect(result).toEqual({ png: "iVBORw0KGgo=", scale: 2 });
     expect(canvases).toEqual([[2000, 1200]]);
     expect(draws).toHaveLength(1);
@@ -308,7 +342,7 @@ describe("renderMapPng", () => {
   });
 
   it("loads the SVG from a data URL, which the app's CSP allows", async () => {
-    await renderMapPng(canvasOf(1000, 600));
+    await renderMapPng(canvasOf(1000, 600), "view");
     const prefix = "data:image/svg+xml;charset=utf-8,";
     expect(sources).toHaveLength(1);
     expect(sources[0].startsWith(prefix)).toBe(true);
@@ -320,14 +354,14 @@ describe("renderMapPng", () => {
   });
 
   it("draws a 5000 × 5000 map at 4096 × 4096", async () => {
-    const result = await renderMapPng(canvasOf(5000, 5000));
+    const result = await renderMapPng(canvasOf(5000, 5000), "view");
     expect(result.scale).toBeCloseTo(0.8192, 10);
     expect(canvases).toEqual([[4096, 4096]]);
   });
 
   it("fails when the webview cannot load the image", async () => {
     imageFails = true;
-    await expect(renderMapPng(canvasOf(1000, 600))).rejects.toThrow(
+    await expect(renderMapPng(canvasOf(1000, 600), "view")).rejects.toThrow(
       "The webview could not draw the map as an image",
     );
     expect(draws).toEqual([]);

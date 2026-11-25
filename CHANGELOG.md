@@ -7,6 +7,8 @@ release notes (see `docs/releasing.md`).
 ## [Unreleased]
 
 - **New home for the project:** SkoposIDE moved to https://github.com/tinyorbitvn/skopos-ide and its site to https://tinyorbitvn.github.io/skopos-ide/. The app checks for updates and links to release notes there; the old addresses on GitHub redirect to the new ones.
+- **Argo CD Applications hold what they manage on the map:** the Grouped layout draws each Argo CD Application as the outermost box, around the objects it manages and what those own, down to their Pods. Its head names the namespace those objects are in, and an Application whose objects are in several namespaces holds a box for each. An ApplicationSet's box holds its Applications, and an Application that manages other Applications holds their boxes. Objects the Application does not manage stay in their namespace's box.
+- **Export the whole map or the current view:** the map's Export menu first asks for Whole map or Current view, then for PNG image or PDF document. Whole map saves the whole drawing at 100% with the filters and selection you see, wherever you have panned or zoomed; Current view saves the canvas as it is on screen, as Export did before.
 
 ## [0.13.3] - 2026-11-25
 

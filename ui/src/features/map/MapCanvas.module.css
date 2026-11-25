@@ -124,6 +124,14 @@
   stroke-dasharray: 2 3;
 }
 
+/* Argo CD boxes hold namespaces' objects: page fill as a namespace, with a solid line. */
+.boxApplication rect,
+.boxApplicationSet rect {
+  fill: var(--surface-page);
+  stroke: var(--border-strong-color);
+  stroke-width: 1.5;
+}
+
 .boxReplicaSet rect {
   fill: var(--surface-sunken);
   stroke-dasharray: 4 3;

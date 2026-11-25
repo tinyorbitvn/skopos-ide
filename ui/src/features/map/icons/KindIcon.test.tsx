@@ -234,7 +234,7 @@ describe("KindIcon", () => {
     vi.spyOn(outer, "getBoundingClientRect").mockReturnValue(
       new DOMRect(0, 0, 100, 100),
     );
-    const { svg } = mapSvgForExport(container, "");
+    const { svg } = mapSvgForExport(container, "", "view");
     const display = (variant: string) =>
       (svg.querySelector(`[data-variant="${variant}"]`) as SVGElement).style
         .display;

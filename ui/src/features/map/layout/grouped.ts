@@ -2,6 +2,7 @@ import type { GraphRel } from "../../../ipc/generated/GraphRel";
 import { type MapModel, nodeOf } from "../model";
 import {
   ACCESS,
+  ARGO_BOX,
   BOX,
   FLOW,
   GAP,
@@ -35,6 +36,8 @@ export interface Group {
   name: string;
   namespace: string;
   kids: string[];
+  /** An Application box's one namespace, when what it holds there is all in one. */
+  place?: string;
 }
 
 export interface GroupTree {
@@ -55,6 +58,10 @@ export const EXTERNAL = "ext";
 export const ACCESS_BOX = "access";
 const namespaceKey = (namespace: string) => `ns:${namespace}`;
 
+/** The key of the box of one namespace inside an Application's box. */
+export const appNamespaceKey = (app: string, namespace: string) =>
+  `${app}#ns:${namespace}`;
+
 /** The cluster-scoped kinds the Cluster-wide access box holds. */
 const CLUSTER_ACCESS: ReadonlySet<string> = new Set([
   "ClusterRoleBinding",
@@ -66,12 +73,18 @@ function ownerOf(model: MapModel, id: string): string | null {
 }
 
 /**
- * Containment for the Grouped layout: a node sits in its nearest drawn owner's box,
- * else in its namespace's box; load balancers sit in the outside box, ClusterRoleBindings
- * and ClusterRoles in the Cluster-wide access box, other cluster-scoped nodes at the root;
- * those three boxes exist only when they hold a node. Kubernetes does not forbid owner
- * references that form a cycle: every walk stops at the first repeat, and a node whose box
- * would hold it back sits in its namespace's box instead, so the tree never has a cycle.
+ * Containment for the Grouped layout: a node sits in its nearest drawn owner's box, else
+ * in the box of the drawn Application that manages it or one of its hidden owners, else in
+ * its namespace's box; load balancers sit in the outside box, ClusterRoleBindings and
+ * ClusterRoles in the Cluster-wide access box, other cluster-scoped nodes at the root;
+ * those three boxes exist only when they hold a node. Applications and ApplicationSets
+ * without a box to sit in are at the root, outside every namespace. An object several
+ * Applications manage sits in the first by id (Argo CD warns of such a shared resource).
+ * An Application whose objects are in several namespaces holds a box for each; its
+ * cluster-scoped objects and the Applications it manages sit beside those boxes.
+ * Kubernetes does not forbid owner references that form a cycle, and an Application may
+ * manage itself: every walk stops at the first repeat, and a node whose box would hold it
+ * back sits in its outer box instead, so the tree never has a cycle.
  */
 export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
   const groups: Record<string, Group> = {
@@ -98,6 +111,19 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
     }
     return key;
   };
+  // The first drawn Application by id that manages `id`, other than itself.
+  const managerOf = (id: string): string | null => {
+    const apps = (model.incoming.get(id) ?? [])
+      .filter(
+        (e) =>
+          e.rel === "manages" &&
+          e.from !== id &&
+          groups[e.from]?.kind === "Application",
+      )
+      .map((e) => e.from)
+      .sort();
+    return apps[0] ?? null;
+  };
   const holder = (id: string): string => {
     const node = nodeOf(model, id);
     if (node.kind === "LoadBalancer") {
@@ -112,11 +138,18 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
       if (groups[a]) return a;
       visited.add(a);
     }
+    // The node, then its hidden owners up the chain.
+    for (const a of visited) {
+      const app = managerOf(a);
+      if (app !== null) return app;
+    }
     return outerBox(id);
   };
-  // The namespace's box; for a cluster-scoped node, the Cluster-wide access box or the root.
+  // The namespace's box; for a cluster-scoped node, the Cluster-wide access box or the root;
+  // for an Argo CD box, the root.
   const outerBox = (id: string): string => {
     const node = nodeOf(model, id);
+    if (ARGO_BOX.has(node.kind)) return ROOT;
     if (node.namespace === "") {
       return CLUSTER_ACCESS.has(node.kind)
         ? topBox(ACCESS_BOX, "Access", "Cluster-wide access", "")
@@ -156,6 +189,40 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
       path.push(p);
     }
   }
+  // An Application's namespaced objects, by namespace; the Argo CD boxes it manages are
+  // not split by their own namespace.
+  const spread = new Map<string, Map<string, string[]>>();
+  for (const k of Object.keys(parentOf)) {
+    const app = parentOf[k];
+    if (groups[app]?.kind !== "Application" || !model.byId.has(k)) continue;
+    const node = nodeOf(model, k);
+    if (node.namespace === "" || ARGO_BOX.has(node.kind)) continue;
+    const byNamespace = spread.get(app) ?? new Map<string, string[]>();
+    byNamespace.set(node.namespace, [
+      ...(byNamespace.get(node.namespace) ?? []),
+      k,
+    ]);
+    spread.set(app, byNamespace);
+  }
+  for (const [app, byNamespace] of spread) {
+    if (byNamespace.size === 1) {
+      groups[app].place = [...byNamespace.keys()][0];
+      continue;
+    }
+    for (const [namespace, kids] of byNamespace) {
+      const key = appNamespaceKey(app, namespace);
+      groups[key] = {
+        key,
+        id: "",
+        kind: "Namespace",
+        name: namespace,
+        namespace,
+        kids: [],
+      };
+      parentOf[key] = app;
+      for (const k of kids) parentOf[k] = key;
+    }
+  }
 
   const index = new Map(model.nodes.map((n, i) => [n.id, i]));
   const namespaces = [
@@ -191,6 +258,20 @@ export function groupTree(model: MapModel, ids: readonly string[]): GroupTree {
   return { groups, parentOf, leaves, depth };
 }
 
+/** Whether box `box` holds `k` at any depth. */
+export function holds(tree: GroupTree, box: string, k: string): boolean {
+  const seen = new Set<string>();
+  for (
+    let p = tree.parentOf[k];
+    p !== undefined && p !== ROOT && !seen.has(p);
+    p = tree.parentOf[p]
+  ) {
+    if (p === box) return true;
+    seen.add(p);
+  }
+  return false;
+}
+
 /**
  * Where a link to `pod` attaches, given every Pod on that side of the link: the Pod's
  * own box when all its Pods share the link, else the Pod itself.
@@ -208,6 +289,7 @@ export function podEnd(
     !group ||
     group.kind === "Namespace" ||
     group.kind === "Root" ||
+    group.kind === "Application" ||
     (other !== null && tree.leaves[box].includes(other))
   ) {
     return pod;
@@ -551,10 +633,17 @@ export function layoutGrouped(
       put(pts, main, 0, e.h + 72);
       return { w: Math.max(e.w, main.w), h: e.h + 72 + main.h, pts };
     }
+    // An Application lays out what it holds as a namespace does, or shelves its
+    // namespaces' boxes; an ApplicationSet shelves its Applications.
     const content =
-      g.kind === "Root"
+      g.kind === "Root" ||
+      g.kind === "ApplicationSet" ||
+      (g.kind === "Application" &&
+        g.kids.some((c) => tree.groups[c]?.kind === "Namespace"))
         ? shelf(kidBlocks())
-        : g.kind === "Namespace" || g.kind === "Access"
+        : g.kind === "Namespace" ||
+            g.kind === "Access" ||
+            g.kind === "Application"
           ? namespace(g.kids)
           : g.kind === "Deployment" ||
               g.kind === "CronJob" ||
@@ -748,9 +837,9 @@ export function poly(pts: [number, number][]): {
  * The Grouped edges between the drawn nodes (spec E §8.1, H64): a real `owns` is the box
  * nesting and is not drawn, a bridged one is a branch in its owner's box; a link to every
  * Pod of a box becomes one arrow to the box. An Application's `manages` is drawn like
- * ownership and may end at an owner box (spec §3.3). Each other edge runs orthogonally
- * between the edges of its ends, and between two namespace boxes through the gap between
- * them.
+ * ownership and may end at an owner box (spec §3.3), unless the Application's box holds
+ * what it manages. Each other edge runs orthogonally between the edges of its ends, and
+ * between two namespace boxes through the gap between them.
  */
 export function groupedEdges(
   model: MapModel,
@@ -760,8 +849,12 @@ export function groupedEdges(
   focusId: string,
 ): GroupedEdge[] {
   const { boxes } = boxRects(model, tree, pos, focusId);
+  // The drawn icons, and the Argo CD boxes, whose links (an Application's AppProject) are
+  // drawn from the box.
   const shown = new Set(
-    Object.keys(tree.parentOf).filter((k) => !tree.groups[k]),
+    Object.keys(tree.parentOf).filter(
+      (k) => !tree.groups[k] || ARGO_BOX.has(tree.groups[k].kind),
+    ),
   );
   const all = model.edges.filter((e) => shown.has(e.from) && shown.has(e.to));
   const drawn: Omit<GroupedEdge, "d" | "head" | "mid">[] = [];
@@ -823,12 +916,17 @@ export function groupedEdges(
     true,
   );
   // An Application manages Deployments and other owners, which are boxes, so these links
-  // may end at a box.
+  // may end at a box. Its own box shows what it holds, so only the links to objects that
+  // sit elsewhere are drawn.
   const inTree = new Set(Object.keys(tree.parentOf));
   fan(
     "own",
     model.edges.filter(
-      (e) => e.rel === "manages" && inTree.has(e.from) && inTree.has(e.to),
+      (e) =>
+        e.rel === "manages" &&
+        inTree.has(e.from) &&
+        inTree.has(e.to) &&
+        !holds(tree, e.from, e.to),
     ),
     (e) => e.from,
     (e) => e.to,

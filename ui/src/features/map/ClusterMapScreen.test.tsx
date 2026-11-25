@@ -25,7 +25,7 @@ import { clusterEntry, flush } from "../../test/ipc";
 import { exportButton, MAP_IMAGE, pickExport } from "../../test/mapExport";
 import { mockElementSize } from "../../test/size";
 import { ClusterMapScreen, FORCE_HINT } from "./ClusterMapScreen";
-import { renderMapPng } from "./exportMap";
+import { type MapScope, renderMapPng } from "./exportMap";
 import { resetMovedForTest } from "./MapCanvas";
 
 vi.mock("./exportMap", () => ({ renderMapPng: vi.fn() }));
@@ -482,7 +482,7 @@ describe("ClusterMapScreen Export", () => {
   it("sits before Reset layout, disabled while the map loads and on error", async () => {
     await show();
     const button = exportButton();
-    expect(button.title).toBe("Save the map as you see it");
+    expect(button.title).toBe("Save the whole map or the current view");
     expect(button.textContent).toBe("Export");
     expect(button.nextElementSibling?.getAttribute("data-testid")).toBe(
       "map-reset",
@@ -502,28 +502,31 @@ describe("ClusterMapScreen Export", () => {
     expect(exportButton().disabled).toBe(true);
   });
 
-  it.each<[MapFormat, string, string]>([
+  it.each<[MapFormat, MapScope, string, string]>([
     [
       "png",
+      "whole",
       "Map exported as PNG",
       "arn-aws-eks-eu-west-1-1-cluster-prod-map.png",
     ],
     [
       "pdf",
+      "view",
       "Map exported as PDF",
       "arn-aws-eks-eu-west-1-1-cluster-prod-map.pdf",
     ],
   ])(
-    "%s suggests the cluster name, writes the drawn canvas and toasts the path written",
-    async (format, done, name) => {
+    "%s of the %s suggests the cluster name, writes the drawn canvas and toasts the path written",
+    async (format, scope, done, name) => {
       const success = vi.spyOn(toast, "success");
       await show({}, null, {
         map_export: () => `/home/me/maps/prod.${format}`,
       });
       await load(demoSnapshot());
-      await pickExport(format);
+      await pickExport(format, scope);
       expect(renderMapPng).toHaveBeenCalledWith(
         screen.getByTestId("map-canvas"),
+        scope,
       );
       expect(g.backend.callsTo("map_export")).toEqual([
         { suggestedName: name, format, png: MAP_IMAGE.png, scale: 2 },
@@ -540,7 +543,7 @@ describe("ClusterMapScreen Export", () => {
     const error = vi.spyOn(toast, "error");
     await show({}, null, { map_export: () => null });
     await load(demoSnapshot());
-    await pickExport("png");
+    await pickExport("png", "view");
     expect(g.backend.callsTo("map_export")).toHaveLength(1);
     expect(success).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
@@ -556,9 +559,9 @@ describe("ClusterMapScreen Export", () => {
         }),
     });
     await load(demoSnapshot());
-    await pickExport("png");
+    await pickExport("png", "view");
     expect(exportButton().disabled).toBe(true);
-    await pickExport("pdf");
+    await pickExport("pdf", "whole");
     expect(g.backend.callsTo("map_export")).toHaveLength(1);
     await act(async () => {
       finish("/home/me/prod.png");
@@ -575,7 +578,7 @@ describe("ClusterMapScreen Export", () => {
       },
     });
     await load(demoSnapshot());
-    await pickExport("png");
+    await pickExport("png", "view");
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",
       "Permission denied (os error 13)",

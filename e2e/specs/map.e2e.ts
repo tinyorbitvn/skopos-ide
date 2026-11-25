@@ -300,14 +300,89 @@ async function inAccessBox(ids: string[]): Promise<boolean[]> {
   }, ids);
 }
 
-/** Picks an item of the toolbar's Export menu and waits for its toast. */
-async function exportAs(format: "png" | "pdf", toast: string): Promise<void> {
+/**
+ * Picks a scope of the toolbar's Export menu, then a format in its submenu, and waits for
+ * its toast.
+ */
+async function exportAs(
+  scope: "whole" | "view",
+  format: "png" | "pdf",
+  toast: string,
+): Promise<void> {
+  // Each export saves under the same name, and an earlier toast may still show: the file
+  // of an earlier export goes first, so only this one's can appear.
+  const dir = process.env.SKOPOS_E2E_SAVE_DIR ?? "";
+  const files = () => fs.readdirSync(dir).filter((name) => name.endsWith(`.${format}`));
+  for (const name of files()) fs.rmSync(path.join(dir, name));
   const button = await shown("map-export");
   await button.waitForEnabled({ timeout: 15000 });
   await pointerClick(button);
-  await clickWhenShown(`map-export-${format}`);
-  await gone(`map-export-${format}`);
+  await clickWhenShown(`map-export-${scope}`);
+  await clickWhenShown(`map-export-${scope}-${format}`);
+  await gone(`map-export-${scope}-${format}`);
   await expectToast(toast);
+  await until(async () => files().length === 1, `the ${format} export never saved its file`);
+}
+
+/** A PNG's width and height, from its IHDR chunk. */
+function pngSize(png: Buffer): [number, number] {
+  return [png.readUInt32BE(16), png.readUInt32BE(20)];
+}
+
+/**
+ * The pixels an export of `width` × `height` CSS pixels holds: twice the size, or less to
+ * stay within 16,777,216 pixels, as `exportMap.ts` scales it.
+ */
+function imagePixels(width: number, height: number): [number, number] {
+  const scale = Math.min(2, Math.sqrt(16_777_216 / (width * height)));
+  return [Math.round(width * scale), Math.round(height * scale)];
+}
+
+/** Whether two sizes differ by at most a pixel each way, which rounding allows. */
+const near = (a: [number, number], b: [number, number]) =>
+  Math.abs(a[0] - b[0]) <= 1 && Math.abs(a[1] - b[1]) <= 1;
+
+/** What the canvas draws: its drawing's extent, and its CSS size. */
+async function drawnSize(): Promise<{
+  extent: number[];
+  view: [number, number];
+}> {
+  return browser.execute(() => {
+    const svg = document.querySelector('[data-testid="map-canvas"] > svg');
+    const box = svg?.getBoundingClientRect();
+    return {
+      extent: (svg?.getAttribute("data-extent") ?? "").split(" ").map(Number),
+      view: [box?.width ?? 0, box?.height ?? 0] as [number, number],
+    };
+  });
+}
+
+/**
+ * Whether the centre of each node lies inside the box of `box`: a ring for an icon, the
+ * frame for a box. One call reads them all, so a refit cannot move the drawing between
+ * two of them.
+ */
+async function inBox(box: string, ids: string[]): Promise<boolean[]> {
+  return browser.execute(
+    (outer: string, wanted: string[]) => {
+      const frame = document
+        .querySelector(`[data-box="${outer}"] > rect`)
+        ?.getBoundingClientRect();
+      return wanted.map((selector) => {
+        const el = document.querySelector(selector);
+        const shape = el?.querySelector(":scope > rect, :scope > circle");
+        const r = shape?.getBoundingClientRect();
+        if (!frame || !r) return false;
+        const x = r.x + r.width / 2;
+        const y = r.y + r.height / 2;
+        return (
+          x > frame.left && x < frame.right && y > frame.top && y < frame.bottom
+        );
+      });
+    },
+    box,
+    ids.map((id) => `[data-testid="map-node"]${idMatch("data-id", id)}`),
+  );
 }
 
 describe("resource map", () => {
@@ -654,12 +729,28 @@ describe("resource map", () => {
     );
   });
 
-  it("exports the map as a PNG image and a PDF document", async () => {
+  it("exports the whole map or the current view, as a PNG image or a PDF document", async () => {
     await chooseLayout("grouped");
     await shown("map-access", 15000);
-    await exportAs("png", "Map exported as PNG");
-    expect(saved("png").subarray(0, 4).toString("latin1")).toBe("\x89PNG");
-    await exportAs("pdf", "Map exported as PDF");
+    // The whole map: the drawing's extent with the fit's 24 px around it.
+    await exportAs("whole", "png", "Map exported as PNG");
+    const whole = saved("png");
+    expect(whole.subarray(0, 4).toString("latin1")).toBe("\x89PNG");
+    const [x0, y0, x1, y1] = (await drawnSize()).extent;
+    const wholeSize = imagePixels(x1 - x0 + 48, y1 - y0 + 48);
+    expect([pngSize(whole), wholeSize, near(pngSize(whole), wholeSize)]).toEqual(
+      [pngSize(whole), wholeSize, true],
+    );
+    // The current view: the canvas as it is on screen.
+    await exportAs("view", "png", "Map exported as PNG");
+    const view = saved("png");
+    const viewSize = imagePixels(...(await drawnSize()).view);
+    expect([pngSize(view), viewSize, near(pngSize(view), viewSize)]).toEqual([
+      pngSize(view),
+      viewSize,
+      true,
+    ]);
+    await exportAs("view", "pdf", "Map exported as PDF");
     expect(saved("pdf").subarray(0, 5).toString("latin1")).toBe("%PDF-");
   });
 
@@ -798,6 +889,27 @@ describe("resource map", () => {
     expect(await fact("Source")).toBe("Cilium");
     expect(await fact("Types")).toBe("Ingress");
     await clickWhenShown("map-details-close");
+  });
+
+  it("draws the Argo CD Application as the outer box of what it manages", async () => {
+    await chooseLayout("grouped");
+    // The Deployment and its Pods and the Service are in the Application's box; the
+    // ConfigMap, which it does not manage, stays in the namespace's box.
+    await until(
+      async () =>
+        JSON.stringify(await inBox(APP, [DEPLOYMENT, POD, SERVICE, CONFIG])) ===
+        JSON.stringify([true, true, true, false]),
+      "the Application's box never held just what it manages",
+    );
+    const head = await browser.execute(
+      (app: string) =>
+        document.querySelector(`[data-box="${app}"]`)?.textContent ?? "",
+      APP,
+    );
+    expect(head).toContain(`Application · ${NS} · Healthy · Synced`);
+    // The box shows what the Application manages, so no manages link is drawn.
+    expect(await edge(APP, "manages", DEPLOYMENT).isExisting()).toBe(false);
+    expect(await edge(APP, "project", PROJECT).isExisting()).toBe(true);
   });
 
   it("joins the Argo CD Application to what it manages and to its project", async () => {

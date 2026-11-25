@@ -269,9 +269,10 @@ describe("ObjectMapScreen Export", () => {
         },
       );
       await g.send(demoSnapshot());
-      await pickExport(format);
+      await pickExport(format, "whole");
       expect(renderMapPng).toHaveBeenCalledWith(
         screen.getByTestId("map-canvas"),
+        "whole",
       );
       expect(g.backend.callsTo("map_export")).toEqual([
         {
@@ -294,7 +295,7 @@ describe("ObjectMapScreen Export", () => {
       { map_export: () => null },
     );
     await g.send(demoSnapshot());
-    await pickExport("pdf");
+    await pickExport("pdf", "whole");
     expect(g.backend.callsTo("map_export")).toHaveLength(1);
     expect(success).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
@@ -313,9 +314,9 @@ describe("ObjectMapScreen Export", () => {
       },
     );
     await g.send(demoSnapshot());
-    await pickExport("pdf");
+    await pickExport("pdf", "whole");
     expect(exportButton().disabled).toBe(true);
-    await pickExport("png");
+    await pickExport("png", "view");
     expect(g.backend.callsTo("map_export")).toHaveLength(1);
     await act(async () => {
       finish("/home/me/web.pdf");
@@ -336,7 +337,7 @@ describe("ObjectMapScreen Export", () => {
       },
     );
     await g.send(demoSnapshot());
-    await pickExport("png");
+    await pickExport("png", "view");
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",
       "The map image is not valid",

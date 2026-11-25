@@ -28,6 +28,8 @@ export interface BoxRef {
   /** The owner's node id; empty for the other boxes. */
   id: string;
   name: string;
+  /** The one namespace of what an Application's box holds, shown in its head. */
+  place?: string;
 }
 
 export function boxText(model: MapModel, box: BoxRef): BoxText {
@@ -42,7 +44,8 @@ export function boxText(model: MapModel, box: BoxRef): BoxText {
     };
   }
   const node = nodeOf(model, box.id);
-  return { title: node.name, sub: `${node.kind} · ${statusLine(node)}` };
+  const parts = [node.kind, box.place, statusLine(node)];
+  return { title: node.name, sub: parts.filter(Boolean).join(" · ") };
 }
 
 /** The width a box's head needs for its icon, title and subtitle. */

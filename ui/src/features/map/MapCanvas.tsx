@@ -19,10 +19,12 @@ import { levelSort, type MapModel, nodeOf, statusLine } from "./model";
 import {
   arrange,
   buildScene,
+  FIT_PAD,
   type LayoutName,
   type SceneBox,
   type SceneEdge,
   type SceneIcon,
+  viaMark,
 } from "./scene";
 
 /** Positions moved by hand, per cluster, page and layout, for the session (spec E §8.2). */
@@ -35,7 +37,6 @@ export function resetMovedForTest(): void {
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
 const STEP = 1.25;
-const FIT_PAD = 24;
 /** A pointer that moves less than this is a click, not a drag. */
 const DRAG_SLOP = 3;
 
@@ -234,8 +235,7 @@ function ViaMarks(props: {
   k: number;
   dim(e: SceneEdge): boolean;
 }) {
-  const r = Math.min(4 / props.k, 8);
-  const width = Math.min(1.5 / props.k, 3);
+  const { r, width } = viaMark(props.k);
   return (
     <g>
       {props.edges.map((e) =>
@@ -793,6 +793,8 @@ export function MapCanvas({
         <svg
           className={compact ? styles.compactSvg : styles.svg}
           aria-hidden="true"
+          // A whole-map export frames the drawing by its extent (spec O §6).
+          data-extent={`${extent.x0} ${extent.y0} ${extent.x1} ${extent.y1}`}
           height={
             compact
               ? Math.ceil((extent.y1 - extent.y0) * view.k + 2 * FIT_PAD)
