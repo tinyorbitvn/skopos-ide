@@ -1413,3 +1413,64 @@ async fn the_agent_gets_the_chat_s_kubeconfig_which_goes_with_the_chat() {
     bench.core.chat_close(&info.chat_id).await;
     assert!(!path.exists(), "{path:?}");
 }
+
+#[tokio::test]
+async fn a_global_chat_starts_while_one_of_its_clusters_is_not_connected() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let kube_dir = bench.root.path().join("home/.kube");
+    bench
+        .fake
+        .write_kubeconfig(&kube_dir.join("offline.yaml"), "offline")
+        .unwrap();
+    let started = Instant::now();
+    let offline = loop {
+        let found = bench
+            .core
+            .catalog_list()
+            .into_iter()
+            .find(|entry| entry.context_name == "offline");
+        if let Some(entry) = found {
+            break entry.id;
+        }
+        assert!(started.elapsed() < WAIT, "no catalog entry");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    let (sender, _events) = Events::new();
+    let start = ChatStart {
+        scope: ChatScope {
+            clusters: vec![bench.cluster.clone(), offline],
+            global: true,
+        },
+        agent: Some(bench.agent.clone()),
+        continue_chat: None,
+    };
+    let info = bench.core.chat_start(start, sender, MAIN).await.unwrap();
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    let path = env
+        .lines()
+        .find_map(|line| line.strip_prefix("KUBECONFIG="))
+        .map(PathBuf::from)
+        .expect("KUBECONFIG");
+    let doc: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(doc["contexts"].as_sequence().unwrap().len(), 2);
+    let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(leftovers.len(), 1, "{leftovers:?}");
+}
+
+#[tokio::test]
+async fn starting_the_app_removes_the_run_folders_a_crash_left() {
+    let root = tempfile::tempdir().unwrap();
+    let stale = root.path().join("app/data/agents/run/old-chat");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("kubeconfig"), "token: secret").unwrap();
+    let paths =
+        skopos_core::paths::AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+    let _core = AppCore::start(paths).await.unwrap();
+    assert!(!stale.exists());
+    assert!(root.path().join("app/data/agents/run").is_dir());
+}

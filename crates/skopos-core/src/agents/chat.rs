@@ -227,6 +227,8 @@ mod running {
     impl Chats {
         pub(crate) fn new(data: &Path) -> Chats {
             let dir = data.join("agents");
+            // Spec §4.3: a crash leaves run folders with chat kubeconfigs, which hold credentials.
+            reset_run_dir(&dir.join(RUN));
             Chats {
                 store: Arc::new(ChatStore::new(dir.join("chats"))),
                 dir,
@@ -304,22 +306,15 @@ mod running {
         let wiring = wire(core, &clusters, scope.global).await?;
         let app_binary = chats.app_binary()?;
         // Native agents spec §4.2: the person's own process, with the app's environment.
-        let parts = clusters
-            .iter()
-            .map(|cluster| {
-                Ok((
-                    cluster.name.clone(),
-                    core.cluster_kubeconfig_path(&cluster.id)?,
-                ))
-            })
-            .collect::<CoreResult<Vec<_>>>()?;
         let kubeconfig = run_folder.path.join(kubeconfig::CHAT_KUBECONFIG);
-        kubeconfig::write_chat_kubeconfig(&parts, &kubeconfig).map_err(|error| {
-            IpcError::new(
-                error.code,
-                format!("Could not write the chat's kubeconfig: {}", error.message),
-            )
-        })?;
+        write_chat_kubeconfig_for(core, &clusters, &run_folder.path, &kubeconfig).map_err(
+            |error| {
+                IpcError::new(
+                    error.code,
+                    format!("Could not write the chat's kubeconfig: {}", error.message),
+                )
+            },
+        )?;
         let extra = [
             (TOKEN_VAR.to_owned(), wiring.token.clone()),
             (
@@ -1066,6 +1061,29 @@ mod running {
     }
 
     /// The clusters of a scope by their catalog names, each once.
+    /// Builds the chat's kubeconfig from each cluster's catalog source, so no cluster has to be
+    /// connected. The per-cluster copies are removed once merged.
+    fn write_chat_kubeconfig_for(
+        core: &AppCore,
+        clusters: &[ScopeCluster],
+        folder: &Path,
+        dest: &Path,
+    ) -> CoreResult<()> {
+        let mut parts = Vec::new();
+        let mut files = Vec::new();
+        for (index, cluster) in clusters.iter().enumerate() {
+            let part = folder.join(format!("part-{index}.yaml"));
+            files.push(part.clone());
+            core.cluster_extract_kubeconfig(&cluster.id, &part)?;
+            parts.push((cluster.name.clone(), part));
+        }
+        let written = kubeconfig::write_chat_kubeconfig(&parts, dest);
+        for part in files {
+            let _ = std::fs::remove_file(part);
+        }
+        written
+    }
+
     fn scope_clusters(core: &AppCore, scope: &ChatScope) -> CoreResult<Vec<ScopeCluster>> {
         let catalog = core.catalog_list();
         let mut entries: Vec<(ClusterId, String)> = Vec::new();
@@ -1248,6 +1266,14 @@ mod running {
         }
         if let Err(error) = serve_mcp(stream, context).await {
             tracing::debug!("agent tools: a connection ended: {}", error.message);
+        }
+    }
+
+    /// Empties `<data>/agents/run` and recreates it `0700`. A failure must not stop the app.
+    fn reset_run_dir(dir: &Path) {
+        remove_folder(dir);
+        if let Err(error) = create_private_dir(dir) {
+            tracing::warn!("cannot create {}: {error}", dir.display());
         }
     }
 

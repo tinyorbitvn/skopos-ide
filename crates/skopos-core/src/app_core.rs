@@ -654,6 +654,21 @@ impl AppCore {
         self.inner.connections.kubeconfig_path(id)
     }
 
+    /// Writes a single-context kubeconfig for a catalog cluster from its source file. It needs
+    /// no connection, so a chat can start while the cluster is offline.
+    pub(crate) fn cluster_extract_kubeconfig(&self, id: &ClusterId, dest: &Path) -> CoreResult<()> {
+        let entry = self
+            .inner
+            .snapshots
+            .borrow()
+            .entries
+            .iter()
+            .find(|entry| entry.id == *id)
+            .cloned()
+            .ok_or_else(|| IpcError::new(ErrorCode::NotFound, format!("no cluster {id}")))?;
+        crate::kubeconfig::extract_context(Path::new(&entry.source_path), &entry.context_name, dest)
+    }
+
     pub fn cluster_cancel_token(&self, id: &ClusterId) -> CoreResult<CancellationToken> {
         self.inner.connections.cancel_token(id)
     }
