@@ -6,6 +6,9 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Agents run natively, on Windows too:** agents now run as you, with your own setup, on Linux, macOS and Windows. Each chat gives its agent a kubeconfig with only the chat's clusters.
+- **The agent asks in the chat:** before the agent runs a command or edits a file, the chat shows its request with its own Allow and Reject choices.
+
 ## [0.15.0] - 2026-11-25
 
 - **More YAML templates:** creating a resource starts from 36 templates in six groups, including a Deployment with probes and resources, NodePort, LoadBalancer and headless Services, a default-deny NetworkPolicy, TLS and registry Secrets, and RBAC, quota and storage kinds. Kinds the cluster does not serve are dimmed.
