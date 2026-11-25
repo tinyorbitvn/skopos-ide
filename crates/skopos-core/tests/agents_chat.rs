@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use skopos_core::agents::approvals::{ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
 use skopos_core::agents::cli_login::{now_ms, KeychainLogin, KeychainSource};
+use skopos_core::agents::editor_tab::{EditorTab, EditorTabMode};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
 use skopos_core::agents::registry::AgentState;
 use skopos_core::app_core::AppCore;
@@ -152,7 +153,7 @@ impl Bench {
 
     async fn ask(&self, chat: &str, text: &str) {
         self.core
-            .chat_prompt(chat, text.to_owned(), None)
+            .chat_prompt(chat, text.to_owned(), None, None)
             .await
             .unwrap();
     }
@@ -162,7 +163,7 @@ impl Bench {
         let core = self.core.clone();
         let chat = chat.to_owned();
         let text = text.to_owned();
-        tokio::spawn(async move { core.chat_prompt(&chat, text, None).await })
+        tokio::spawn(async move { core.chat_prompt(&chat, text, None, None).await })
     }
 }
 
@@ -515,7 +516,7 @@ async fn a_turn_streams_its_plan_and_one_growing_agent_message() {
     assert_eq!(info.agent, bench.agent);
     let empty = bench
         .core
-        .chat_prompt(&info.chat_id, "  ".to_owned(), None)
+        .chat_prompt(&info.chat_id, "  ".to_owned(), None, None)
         .await
         .unwrap_err();
     assert_eq!(empty.code, ErrorCode::InvalidInput);
@@ -635,6 +636,7 @@ async fn the_hidden_block_and_the_object_line_reach_the_agent_first() {
             &info.chat_id,
             "Why is it slow?".to_owned(),
             Some(object.clone()),
+            None,
         )
         .await
         .unwrap();
@@ -679,7 +681,7 @@ async fn a_change_waits_for_the_person_and_runs_once_approved() {
     assert!(scales(&bench.fake).is_empty());
     let busy = bench
         .core
-        .chat_prompt(&info.chat_id, "Hurry up.".to_owned(), None)
+        .chat_prompt(&info.chat_id, "Hurry up.".to_owned(), None, None)
         .await
         .unwrap_err();
     assert_eq!(busy.code, ErrorCode::Conflict);
@@ -769,7 +771,7 @@ async fn an_agent_that_exits_mid_turn_leaves_a_notice_and_closes_the_chat() {
     }
     let after = bench
         .core
-        .chat_prompt(&info.chat_id, "Hello?".to_owned(), None)
+        .chat_prompt(&info.chat_id, "Hello?".to_owned(), None, None)
         .await
         .unwrap_err();
     assert_eq!(after.code, ErrorCode::NotFound);
@@ -1032,7 +1034,7 @@ async fn a_second_chat_of_the_same_window_closes_the_first() {
     assert!(is_running(other_pid));
     let closed = bench
         .core
-        .chat_prompt(&first.chat_id, "Hi".to_owned(), None)
+        .chat_prompt(&first.chat_id, "Hi".to_owned(), None, None)
         .await
         .unwrap_err();
     assert_eq!(closed.code, ErrorCode::NotFound);
@@ -1153,7 +1155,7 @@ async fn calls_on_a_chat_that_is_not_running_say_not_found() {
     let missing = "0badc0de";
     let prompt = bench
         .core
-        .chat_prompt(missing, "Hi".to_owned(), None)
+        .chat_prompt(missing, "Hi".to_owned(), None, None)
         .await
         .unwrap_err();
     assert_eq!(prompt.code, ErrorCode::NotFound);
@@ -1208,4 +1210,81 @@ async fn a_sandboxed_chat_reaches_the_tools_through_the_bridge() {
     );
     bench.core.chat_close(&info.chat_id).await;
     assert_eq!(bench.run_folders(), 0);
+}
+
+fn create_tab(cluster: &ClusterId, yaml: &str) -> EditorTab {
+    EditorTab {
+        tab_id: "create-1".into(),
+        title: "Create".into(),
+        cluster: cluster.clone(),
+        mode: EditorTabMode::Create,
+        yaml: yaml.into(),
+        target: None,
+        default_namespace: "default".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_prompt_with_a_tab_sends_its_text_and_shows_the_chip() {
+    let bench = Bench::new(script(vec![turn(vec![say("ok")])])).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let tab = create_tab(
+        &bench.cluster,
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n",
+    );
+    bench
+        .core
+        .chat_prompt(&info.chat_id, "add a key".into(), None, Some(tab))
+        .await
+        .unwrap();
+    let user = events.items().into_iter().find_map(|item| match item.body {
+        ChatItemBody::User { tab, .. } => tab,
+        _ => None,
+    });
+    assert_eq!(user.map(|chip| chip.title), Some("Create".to_owned()));
+    let prompt = prompts(&bench.log()).remove(0).join("\n");
+    assert!(
+        prompt.contains("```yaml\napiVersion: v1\nkind: ConfigMap"),
+        "{prompt}"
+    );
+    assert!(prompt.ends_with("add a key"), "{prompt}");
+}
+
+#[tokio::test]
+async fn a_tab_outside_the_namespace_limit_or_too_large_is_refused() {
+    let bench = Bench::new(script(vec![turn(vec![say("ok")])])).await;
+    let (info, _events) = bench.start(MAIN).await;
+    let mut settings = bench.core.cluster_settings_get(&bench.cluster);
+    settings.agent.namespaces = Some(vec!["default".into()]);
+    bench
+        .core
+        .cluster_settings_set(&bench.cluster, settings)
+        .unwrap();
+    let outside = create_tab(
+        &bench.cluster,
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n  namespace: payments\n",
+    );
+    let error = bench
+        .core
+        .chat_prompt(&info.chat_id, "hi".into(), None, Some(outside))
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .message
+            .starts_with("The agent may not read namespace payments on "),
+        "{}",
+        error.message
+    );
+    let large = create_tab(&bench.cluster, &"a: b\n".repeat(20_000));
+    let error = bench
+        .core
+        .chat_prompt(&info.chat_id, "hi".into(), None, Some(large))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "The tab's text is over 64 KiB, so it was not sent."
+    );
+    assert!(prompts(&bench.log()).is_empty());
 }

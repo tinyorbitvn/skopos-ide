@@ -10,6 +10,7 @@ use ts_rs::TS;
 
 use super::approvals::ChangeAnswer;
 use super::chats::{ChatSummary, StoredChat};
+use super::editor_tab::EditorTab;
 use super::events::{ChatEvent, ObjectRef};
 use crate::app_core::AppCore;
 use crate::error::CoreResult;
@@ -89,14 +90,15 @@ impl AppCore {
         chat_id: &str,
         text: String,
         object: Option<ObjectRef>,
+        tab: Option<EditorTab>,
     ) -> CoreResult<()> {
         #[cfg(unix)]
         {
-            running::prompt(self, chat_id, text, object).await
+            running::prompt(self, chat_id, text, object, tab).await
         }
         #[cfg(not(unix))]
         {
-            let _ = (chat_id, text, object);
+            let _ = (chat_id, text, object, tab);
             Err(unsupported())
         }
     }
@@ -256,12 +258,16 @@ mod running {
     use crate::agents::approvals::{Approvals, ChangeAnswer, ChangeCard};
     use crate::agents::chats::{ChatStore, ChatSummary, StoredChat};
     use crate::agents::cli_login::{self, AccessToken, KeychainSource};
+    use crate::agents::editor_tab::{
+        hide_values, tab_namespaces, EditorTab, TabChip, TAB_TEXT_CAP,
+    };
     use crate::agents::endpoint::{new_token, read_token_line, AsyncStream, Endpoint, Listen};
     use crate::agents::events::{ChatEvent, ChatItem, ChatItemBody, ChatNotice, ObjectRef};
     use crate::agents::mcp::cards::ToolCard;
     use crate::agents::mcp::changes::ChatGate;
+    use crate::agents::mcp::trim::namespace_allowed;
     use crate::agents::mcp::{scope_names, serve_mcp, ScopeCluster, ToolContext, ToolScope};
-    use crate::agents::prompt::{hidden_block, object_line, PromptContext};
+    use crate::agents::prompt::{hidden_block, object_line, tab_block, PromptContext, TabView};
     use crate::agents::proxy::{self, ProxyConfig, Resolver};
     use crate::agents::registry::{default_agent, sign_in_hint, AgentSpec, AgentState};
     use crate::agents::sandbox::env::{agent_env, path_of, proxy_url};
@@ -271,7 +277,7 @@ mod running {
         build_spec, direct_command, sandbox_command, ChatPorts, SandboxStatus, SpecInput, AGENT_MCP,
     };
     use crate::agents::settings::expand_home;
-    use crate::agents::tabs::{EditorTabs, ProposalCard};
+    use crate::agents::tabs::{AttachedTab, EditorTabs, ProposalCard};
     use crate::app_core::AppCore;
     use crate::catalog::ClusterSource;
     use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -292,6 +298,8 @@ mod running {
     const EMPTY_MESSAGE: &str = "Write a message first.";
     const STILL_ANSWERING: &str = "The agent is still answering.";
     const OTHER_CLUSTER: &str = "That object is on a cluster this chat does not reach.";
+    const OTHER_TAB_CLUSTER: &str = "That tab is on a cluster this chat does not reach.";
+    const TAB_TOO_LARGE: &str = "The tab's text is over 64 KiB, so it was not sent.";
     const UPDATE_BACKLOG: usize = 256;
     const CARD_BACKLOG: usize = 64;
     const FEED_BACKLOG: usize = 16;
@@ -600,6 +608,7 @@ mod running {
         chat_id: &str,
         text: String,
         object: Option<ObjectRef>,
+        tab: Option<EditorTab>,
     ) -> CoreResult<()> {
         if text.trim().is_empty() {
             return Err(invalid(EMPTY_MESSAGE));
@@ -607,6 +616,10 @@ mod running {
         let chat = renewed(core, running_chat(core.chats(), chat_id)?).await?;
         let line = match &object {
             Some(object) => Some(chat.line_for(object)?),
+            None => None,
+        };
+        let prepared = match tab {
+            Some(tab) => Some(chat.prepare_tab(core, tab)?),
             None => None,
         };
         if chat.renewing.load(Ordering::SeqCst)
@@ -617,6 +630,10 @@ mod running {
         {
             return Err(IpcError::new(ErrorCode::Conflict, STILL_ANSWERING));
         }
+        let chip = prepared.as_ref().map(|(attached, _)| TabChip {
+            tab_id: attached.tab.tab_id.clone(),
+            title: attached.tab.title.clone(),
+        });
         chat.turn_open.store(true, Ordering::SeqCst);
         chat.stop_requested.store(false, Ordering::SeqCst);
         // Spec §4.3, §6.8: the hidden block first in a chat's first turn, then the object
@@ -626,11 +643,20 @@ mod running {
             blocks.push(hidden_block(&chat.prompt_context(core)));
         }
         blocks.extend(line);
+        if let Some((attached, block)) = prepared {
+            chat.tabs.attach(attached);
+            blocks.push(block);
+        }
         blocks.push(text.clone());
         let (ack, acked) = oneshot::channel();
         let fed = chat
             .feed
-            .send(Feed::User { text, object, ack })
+            .send(Feed::User {
+                text,
+                object,
+                tab: chip,
+                ack,
+            })
             .await
             .is_ok()
             && acked.await.is_ok();
@@ -831,6 +857,7 @@ mod running {
         User {
             text: String,
             object: Option<ObjectRef>,
+            tab: Option<TabChip>,
             ack: oneshot::Sender<()>,
         },
         TurnEnded {
@@ -876,8 +903,13 @@ mod running {
         /// Returns `false` on `Shutdown`.
         async fn on_feed(&self, feed: Feed) -> bool {
             match feed {
-                Feed::User { text, object, ack } => {
-                    let item = self.apply(|transcript| transcript.user(text, object));
+                Feed::User {
+                    text,
+                    object,
+                    tab,
+                    ack,
+                } => {
+                    let item = self.apply(|transcript| transcript.user(text, object, tab));
                     self.deliver(ChatEvent::Item { item }).await;
                     self.deliver(ChatEvent::Working { working: true }).await;
                     let _ = ack.send(());
@@ -1012,6 +1044,42 @@ mod running {
                 object.namespace.as_deref(),
                 &object.name,
                 &cluster.name,
+            ))
+        }
+
+        /// A7, A8: the checks before a tab is sent, then what the agent sees of it.
+        fn prepare_tab(&self, core: &AppCore, tab: EditorTab) -> CoreResult<(AttachedTab, String)> {
+            let Some(cluster) = self.clusters.iter().find(|c| c.id == tab.cluster).cloned() else {
+                return Err(invalid(OTHER_TAB_CLUSTER));
+            };
+            if tab.yaml.len() > TAB_TEXT_CAP {
+                return Err(invalid(TAB_TOO_LARGE));
+            }
+            let settings = core.cluster_agent_settings(&cluster.id);
+            for namespace in tab_namespaces(core, &tab) {
+                if !namespace_allowed(&settings, &namespace) {
+                    return Err(invalid(format!(
+                        "The agent may not read namespace {namespace} on {}.",
+                        cluster.name
+                    )));
+                }
+            }
+            let shown = hide_values(&tab.yaml, !settings.secret_values).map_err(invalid)?;
+            let block = tab_block(&TabView {
+                mode: tab.mode,
+                title: &tab.title,
+                cluster: &cluster.name,
+                target: tab.target.as_ref(),
+                text: &shown.text,
+                hidden: !shown.values.is_empty(),
+            });
+            Ok((
+                AttachedTab {
+                    tab,
+                    cluster,
+                    hidden: shown.values,
+                },
+                block,
             ))
         }
 
@@ -1575,16 +1643,17 @@ mod running {
             item
         }
 
-        fn user(&mut self, text: String, object: Option<ObjectRef>) -> ChatItem {
+        fn user(
+            &mut self,
+            text: String,
+            object: Option<ObjectRef>,
+            tab: Option<TabChip>,
+        ) -> ChatItem {
             if self.chat.title.is_empty() {
                 self.chat.title = title_of(&text);
             }
             self.plan = None;
-            self.push(ChatItemBody::User {
-                text,
-                object,
-                tab: None,
-            })
+            self.push(ChatItemBody::User { text, object, tab })
         }
 
         fn update(&mut self, update: AcpUpdate) -> Option<ChatItem> {
@@ -1768,7 +1837,7 @@ mod running {
         #[test]
         fn a_message_s_chunks_grow_one_item_until_another_item_comes() {
             let mut transcript = Transcript::new(empty_chat());
-            transcript.user("Why?".to_owned(), None);
+            transcript.user("Why?".to_owned(), None, None);
             let first = transcript.update(text("The api ")).unwrap();
             let grown = transcript.update(text("is fine.")).unwrap();
             assert_eq!(grown.id, first.id);
@@ -1826,7 +1895,7 @@ mod running {
         #[test]
         fn a_new_turn_starts_a_new_plan() {
             let mut transcript = Transcript::new(empty_chat());
-            transcript.user("One".to_owned(), None);
+            transcript.user("One".to_owned(), None, None);
             let first = transcript
                 .update(AcpUpdate::Plan(vec![entry("a")]))
                 .unwrap();
@@ -1834,7 +1903,7 @@ mod running {
                 .update(AcpUpdate::Plan(vec![entry("a"), entry("b")]))
                 .unwrap();
             assert_eq!(replaced.id, first.id);
-            transcript.user("Two".to_owned(), None);
+            transcript.user("Two".to_owned(), None, None);
             let second = transcript
                 .update(AcpUpdate::Plan(vec![entry("c")]))
                 .unwrap();
@@ -1873,7 +1942,7 @@ mod running {
                 },
             ];
             let mut transcript = Transcript::new(chat);
-            assert_eq!(transcript.user("Again".to_owned(), None).id, "item-8");
+            assert_eq!(transcript.user("Again".to_owned(), None, None).id, "item-8");
         }
 
         #[test]
@@ -1882,12 +1951,13 @@ mod running {
             transcript.user(
                 "\n  Why does api restart?  \nIt began at noon.".to_owned(),
                 None,
+                None,
             );
             assert_eq!(transcript.chat.title, "Why does api restart?");
-            transcript.user("Second".to_owned(), None);
+            transcript.user("Second".to_owned(), None, None);
             assert_eq!(transcript.chat.title, "Why does api restart?");
             let mut long = Transcript::new(empty_chat());
-            long.user("é".repeat(300), None);
+            long.user("é".repeat(300), None, None);
             assert_eq!(long.chat.title.chars().count(), TITLE_MAX);
         }
 
@@ -1895,7 +1965,7 @@ mod running {
         fn a_chat_is_saved_only_when_it_changed() {
             let mut transcript = Transcript::new(empty_chat());
             assert!(transcript.take_save().is_none());
-            transcript.user("Hi".to_owned(), None);
+            transcript.user("Hi".to_owned(), None, None);
             let saved = transcript.take_save().unwrap();
             assert_eq!(saved.items.len(), 1);
             assert_ne!(saved.updated, "2026-11-22T10:00:00Z");

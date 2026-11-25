@@ -5,6 +5,7 @@
 use skopos_core::agents::approvals::ChangeAnswer;
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
 use skopos_core::agents::chats::{ChatSummary, StoredChat};
+use skopos_core::agents::editor_tab::EditorTab;
 use skopos_core::agents::events::{ChatEvent, ObjectRef};
 use skopos_core::agents::registry::AgentStatus;
 use skopos_core::agents::sandbox::SandboxStatus;
@@ -158,8 +159,9 @@ pub async fn chat_prompt(
     chat_id: String,
     text: String,
     object: Option<ObjectRef>,
+    tab: Option<EditorTab>,
 ) -> Result<(), IpcError> {
-    state.core.chat_prompt(&chat_id, text, object).await
+    state.core.chat_prompt(&chat_id, text, object, tab).await
 }
 
 #[tauri::command]

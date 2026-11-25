@@ -1,6 +1,7 @@
 //! The text block that starts a chat's first prompt, which the stream does not show, and the
 //! line an attached object adds (spec §4.3).
 
+use crate::agents::editor_tab::{EditTarget, EditorTabMode};
 use crate::prefs::ClusterAgentSettings;
 
 /// The intro, around what the chat reaches: one cluster's name, or `these clusters: <a, b>`.
@@ -65,9 +66,100 @@ pub fn object_line(kind: &str, namespace: Option<&str>, name: &str, cluster: &st
     }
 }
 
+/// What the agent is told about the tab a prompt carries (YAML authoring spec A9).
+pub struct TabView<'a> {
+    pub mode: EditorTabMode,
+    pub title: &'a str,
+    /// The cluster's name in the chat.
+    pub cluster: &'a str,
+    pub target: Option<&'a EditTarget>,
+    /// The text as the agent may see it.
+    pub text: &'a str,
+    /// Some values show as `(hidden)`.
+    pub hidden: bool,
+}
+
+/// The tab's block: what it is, its text fenced, and how to change it.
+pub fn tab_block(view: &TabView) -> String {
+    let mode = match view.mode {
+        EditorTabMode::Create => "create",
+        EditorTabMode::Edit => "edit",
+    };
+    let editing = match view.target {
+        Some(target) => match &target.namespace {
+            Some(namespace) => format!(
+                ", editing {} {namespace}/{}",
+                target.resource.kind, target.name
+            ),
+            None => format!(", editing {} {}", target.resource.kind, target.name),
+        },
+        None => String::new(),
+    };
+    // A fence longer than any run of backticks in the text.
+    let longest = view
+        .text
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest.max(2) + 1);
+    let text = view.text.strip_suffix('\n').unwrap_or(view.text);
+    let mut block = format!(
+        "The person is working in a YAML {mode} tab, \"{}\", on {}{editing}. Its text now:\n{fence}yaml\n{text}\n{fence}\nTo change the tab, call propose_yaml with the whole new text and a one-line summary; the person accepts or rejects it in the tab. Do not apply it with apply_object unless the person asks.",
+        view.title, view.cluster,
+    );
+    if view.hidden {
+        block.push_str(" Values shown as (hidden) are kept from the tab as they are; leave them as (hidden) to keep them.");
+    }
+    block
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::editor_tab::{EditTarget, EditorTabMode};
+    use crate::resources::ResourceRef;
+
+    #[test]
+    fn a_create_tab_block_fences_the_text_and_asks_for_propose_yaml() {
+        let block = tab_block(&TabView {
+            mode: EditorTabMode::Create,
+            title: "New Service · NodePort",
+            cluster: "kind",
+            target: None,
+            text: "kind: Service\n",
+            hidden: false,
+        });
+        assert_eq!(
+            block,
+            "The person is working in a YAML create tab, \"New Service · NodePort\", on kind. Its text now:\n```yaml\nkind: Service\n```\nTo change the tab, call propose_yaml with the whole new text and a one-line summary; the person accepts or rejects it in the tab. Do not apply it with apply_object unless the person asks."
+        );
+    }
+
+    #[test]
+    fn an_edit_tab_block_names_the_object_and_the_hidden_values() {
+        let target = EditTarget {
+            resource: ResourceRef {
+                group: String::new(),
+                version: "v1".into(),
+                plural: "secrets".into(),
+                kind: "Secret".into(),
+                namespaced: true,
+            },
+            namespace: Some("shop".into()),
+            name: "db".into(),
+        };
+        let block = tab_block(&TabView {
+            mode: EditorTabMode::Edit,
+            title: "Secret shop/db",
+            cluster: "kind",
+            target: Some(&target),
+            text: "data:\n  a: (hidden)\n```\n",
+            hidden: true,
+        });
+        assert!(block.starts_with("The person is working in a YAML edit tab, \"Secret shop/db\", on kind, editing Secret shop/db. Its text now:\n````yaml\n"));
+        assert!(block.ends_with(" Values shown as (hidden) are kept from the tab as they are; leave them as (hidden) to keep them."));
+    }
 
     /// The intro typed out from spec §4.3, with `reach` filled in.
     fn intro(reach: &str) -> String {
