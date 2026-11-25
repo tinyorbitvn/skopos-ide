@@ -1462,6 +1462,97 @@ async fn a_global_chat_starts_while_one_of_its_clusters_is_not_connected() {
     assert_eq!(leftovers.len(), 1, "{leftovers:?}");
 }
 
+/// Writes a kubeconfig whose user runs `skopos-test-credentials` for its token, and waits for
+/// its catalog entry.
+async fn exec_cluster(bench: &Bench, context: &str) -> (ClusterId, String) {
+    let path = bench.root.path().join(format!("home/.kube/{context}.yaml"));
+    let text = format!(
+        "apiVersion: v1\nkind: Config\nclusters:\n- name: {context}\n  cluster:\n    server: https://127.0.0.1:1\nusers:\n- name: {context}\n  user:\n    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: skopos-test-credentials\n      args: [token]\n      interactiveMode: Never\ncontexts:\n- name: {context}\n  context:\n    cluster: {context}\n    user: {context}\ncurrent-context: {context}\n"
+    );
+    std::fs::write(&path, text).unwrap();
+    let started = Instant::now();
+    loop {
+        let found = bench
+            .core
+            .catalog_list()
+            .into_iter()
+            .find(|entry| entry.context_name == context);
+        if let Some(entry) = found {
+            return (entry.id, entry.name);
+        }
+        assert!(started.elapsed() < WAIT, "no catalog entry");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Starts a global chat over the bench's cluster and `other`, asks once, and returns the
+/// chat's kubeconfig text and the first prompt's blocks joined.
+async fn global_chat_with(bench: &Bench, other: ClusterId) -> (String, String) {
+    let (sender, _events) = Events::new();
+    let start = ChatStart {
+        scope: ChatScope {
+            clusters: vec![bench.cluster.clone(), other],
+            global: true,
+        },
+        agent: Some(bench.agent.clone()),
+        continue_chat: None,
+    };
+    let info = bench.core.chat_start(start, sender, MAIN).await.unwrap();
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    let path = env
+        .lines()
+        .find_map(|line| line.strip_prefix("KUBECONFIG="))
+        .map(PathBuf::from)
+        .expect("KUBECONFIG");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let first = prompts(&bench.log()).into_iter().next().unwrap_or_default();
+    (text, first.join("\n"))
+}
+
+fn context_names(text: &str) -> Vec<String> {
+    let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(text).unwrap();
+    doc["contexts"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|context| context["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_cluster_whose_exec_command_is_not_allowed_stays_out_of_the_chat_kubeconfig() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (eks, eks_name) = exec_cluster(&bench, "eks").await;
+    let (text, prompt) = global_chat_with(&bench, eks).await;
+    assert_eq!(context_names(&text), [bench.scope_cluster_name()]);
+    assert!(!text.contains("skopos-test-credentials"), "{text}");
+    assert!(
+        prompt.contains(&format!("Reach {eks_name} only through the skopos tools.")),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn an_allowed_exec_command_puts_its_cluster_in_the_chat_kubeconfig() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (eks, eks_name) = exec_cluster(&bench, "eks").await;
+    // A connect holds the command for the consent dialog; allowing it stores its fingerprint.
+    bench.core.cluster_connect(&eks).await.unwrap();
+    let request = bench.core.cluster_exec_request(&eks).unwrap();
+    bench
+        .core
+        .cluster_exec_allow(&eks, request.request_id)
+        .unwrap();
+    let (text, prompt) = global_chat_with(&bench, eks).await;
+    assert_eq!(context_names(&text), [bench.scope_cluster_name(), eks_name]);
+    assert!(text.contains("skopos-test-credentials"), "{text}");
+    assert!(
+        !prompt.contains("only through the skopos tools"),
+        "{prompt}"
+    );
+}
+
 #[tokio::test]
 async fn starting_the_app_removes_the_run_folders_a_crash_left() {
     let root = tempfile::tempdir().unwrap();

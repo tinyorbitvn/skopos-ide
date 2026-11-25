@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use dashmap::DashMap;
+use kube::config::Kubeconfig;
 use serde::Serialize;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -18,8 +19,8 @@ use crate::agents::registry::AgentProbes;
 use crate::catalog::folders::CatalogFolders;
 use crate::catalog::{build_entries, ClusterEntry, PastedConfigs};
 use crate::cluster::{
-    ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState, ExecConsent, ExecRequest,
-    ExecRequestDetails, HeldExec,
+    exec_command, ClusterManager, ConnectTimeouts, ConnectionLogEntry, ConnectionState,
+    ExecConsent, ExecRequest, ExecRequestDetails, HeldExec,
 };
 use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::graph::GraphHub;
@@ -654,9 +655,12 @@ impl AppCore {
         self.inner.connections.kubeconfig_path(id)
     }
 
-    /// Writes a single-context kubeconfig for a catalog cluster from its source file. It needs
-    /// no connection, so a chat can start while the cluster is offline.
-    pub(crate) fn cluster_extract_kubeconfig(&self, id: &ClusterId, dest: &Path) -> CoreResult<()> {
+    /// Writes a single-context kubeconfig for a catalog cluster from its source file, for a
+    /// chat's kubeconfig. It needs no connection, so a chat can start while the cluster is
+    /// offline. A kubeconfig that runs a command for its credentials is kept only when the
+    /// person allowed exactly that command, as a connect requires; otherwise the file is removed
+    /// and the answer is `false`.
+    pub(crate) fn cluster_chat_kubeconfig(&self, id: &ClusterId, dest: &Path) -> CoreResult<bool> {
         let entry = self
             .inner
             .snapshots
@@ -666,7 +670,32 @@ impl AppCore {
             .find(|entry| entry.id == *id)
             .cloned()
             .ok_or_else(|| IpcError::new(ErrorCode::NotFound, format!("no cluster {id}")))?;
-        crate::kubeconfig::extract_context(Path::new(&entry.source_path), &entry.context_name, dest)
+        crate::kubeconfig::extract_context(
+            Path::new(&entry.source_path),
+            &entry.context_name,
+            dest,
+        )?;
+        let Ok(kubeconfig) = Kubeconfig::read_from(dest) else {
+            let _ = std::fs::remove_file(dest);
+            // The parser's message can quote the file, so it is not passed on.
+            return Err(IpcError::new(
+                ErrorCode::InvalidInput,
+                format!("cannot read the kubeconfig of {}", entry.context_name),
+            ));
+        };
+        let Some(command) = exec_command(&kubeconfig) else {
+            return Ok(true);
+        };
+        let allowed = self
+            .inner
+            .exec_consents
+            .get()
+            .get(id)
+            .is_some_and(|consent| consent.fingerprint == command.fingerprint);
+        if !allowed {
+            let _ = std::fs::remove_file(dest);
+        }
+        Ok(allowed)
     }
 
     pub fn cluster_cancel_token(&self, id: &ClusterId) -> CoreResult<CancellationToken> {

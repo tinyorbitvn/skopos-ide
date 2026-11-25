@@ -307,14 +307,13 @@ mod running {
         let app_binary = chats.app_binary()?;
         // Native agents spec §4.2: the person's own process, with the app's environment.
         let kubeconfig = run_folder.path.join(kubeconfig::CHAT_KUBECONFIG);
-        write_chat_kubeconfig_for(core, &clusters, &run_folder.path, &kubeconfig).map_err(
-            |error| {
+        let outside = write_chat_kubeconfig_for(core, &clusters, &run_folder.path, &kubeconfig)
+            .map_err(|error| {
                 IpcError::new(
                     error.code,
                     format!("Could not write the chat's kubeconfig: {}", error.message),
                 )
-            },
-        )?;
+            })?;
         let extra = [
             (TOKEN_VAR.to_owned(), wiring.token.clone()),
             (
@@ -429,6 +428,7 @@ mod running {
             sign_in_hint: sign_in_hint(&agent),
             clusters,
             kubeconfig,
+            outside,
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
             approvals,
@@ -627,6 +627,8 @@ mod running {
         clusters: Vec<ScopeCluster>,
         /// The chat's own kubeconfig in its run folder.
         kubeconfig: PathBuf,
+        /// The chat's clusters left out of that kubeconfig: their exec command is not allowed.
+        outside: Vec<String>,
         global: bool,
         /// `None` once the chat closes.
         session: Mutex<Option<Arc<AcpSession>>>,
@@ -913,6 +915,7 @@ mod running {
                     .collect(),
                 global: self.global,
                 kubeconfig: self.kubeconfig.clone(),
+                outside: self.outside.clone(),
             }
         }
     }
@@ -1060,30 +1063,36 @@ mod running {
             })?
     }
 
-    /// The clusters of a scope by their catalog names, each once.
     /// Builds the chat's kubeconfig from each cluster's catalog source, so no cluster has to be
-    /// connected. The per-cluster copies are removed once merged.
+    /// connected. The per-cluster copies are removed once merged. A cluster whose kubeconfig runs
+    /// a command the person has not allowed is left out, so the agent's shell never runs it
+    /// (spec §9); the answer names those clusters.
     fn write_chat_kubeconfig_for(
         core: &AppCore,
         clusters: &[ScopeCluster],
         folder: &Path,
         dest: &Path,
-    ) -> CoreResult<()> {
+    ) -> CoreResult<Vec<String>> {
         let mut parts = Vec::new();
         let mut files = Vec::new();
+        let mut outside = Vec::new();
         for (index, cluster) in clusters.iter().enumerate() {
             let part = folder.join(format!("part-{index}.yaml"));
             files.push(part.clone());
-            core.cluster_extract_kubeconfig(&cluster.id, &part)?;
-            parts.push((cluster.name.clone(), part));
+            if core.cluster_chat_kubeconfig(&cluster.id, &part)? {
+                parts.push((cluster.name.clone(), part));
+            } else {
+                outside.push(cluster.name.clone());
+            }
         }
         let written = kubeconfig::write_chat_kubeconfig(&parts, dest);
         for part in files {
             let _ = std::fs::remove_file(part);
         }
-        written
+        written.map(|()| outside)
     }
 
+    /// The clusters of a scope by their catalog names, each once.
     fn scope_clusters(core: &AppCore, scope: &ChatScope) -> CoreResult<Vec<ScopeCluster>> {
         let catalog = core.catalog_list();
         let mut entries: Vec<(ClusterId, String)> = Vec::new();
