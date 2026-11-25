@@ -14,12 +14,11 @@ pub fn expand_home(path: &str, home: &Path) -> PathBuf {
     }
 }
 
-#[cfg(test)]
+/// Unix paths: on Windows `/home/me` is not absolute.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    /// Unix paths: on Windows `/home/me` is not absolute.
-    #[cfg(unix)]
     #[test]
     fn a_tilde_path_expands_under_the_home_folder() {
         let home = Path::new("/home/me");
