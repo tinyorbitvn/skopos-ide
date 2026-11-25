@@ -185,20 +185,104 @@ pub fn is_executable(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| is_executable_file(&metadata))
 }
 
-/// Where `name` runs from. A `name` with a `/` is a path, found when it is absolute and
-/// executable; any other name is the first executable `name` in the absolute folders of
-/// `path_var`. A relative path or entry would depend on the app's working directory.
-pub(crate) fn find_on_path(name: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
-    if name.contains('/') {
-        let path = PathBuf::from(name);
-        return (path.is_absolute() && is_executable(&path)).then_some(path);
+/// The extensions Windows tries on a program name, from `PATHEXT` (spec §4.2).
+const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+
+/// How this OS finds a program: on Windows a word with `\` or a drive prefix is a path too,
+/// and a name runs only with one of the `PATHEXT` extensions, so npm's extensionless `sh`
+/// shim beside `<name>.cmd` is never picked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Lookup {
+    /// `Some` on Windows: the lower-case `PATHEXT` extensions, each with its dot.
+    extensions: Option<Vec<String>>,
+}
+
+impl Lookup {
+    /// This OS's rules, with `PATHEXT` read now.
+    pub(crate) fn native() -> Lookup {
+        if cfg!(windows) {
+            Lookup::windows(std::env::var_os("PATHEXT").as_deref())
+        } else {
+            Lookup { extensions: None }
+        }
     }
-    path_var
-        .into_iter()
-        .flat_map(std::env::split_paths)
-        .filter(|folder| folder.is_absolute())
-        .map(|folder| folder.join(name))
-        .find(|candidate| is_executable(candidate))
+
+    /// Windows' rules with `pathext`; an unset or empty one is `DEFAULT_PATHEXT`.
+    pub(crate) fn windows(pathext: Option<&OsStr>) -> Lookup {
+        let pathext = pathext
+            .map(|value| value.to_string_lossy().into_owned())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_PATHEXT.to_owned());
+        let extensions = pathext
+            .split(';')
+            .map(|extension| extension.trim().to_ascii_lowercase())
+            .filter(|extension| extension.len() > 1 && extension.starts_with('.'))
+            .collect();
+        Lookup {
+            extensions: Some(extensions),
+        }
+    }
+
+    /// Whether `word` names a file rather than a program on `PATH`: it has a `/`, or on
+    /// Windows a `\` or a drive prefix such as `C:`.
+    pub(crate) fn is_path(&self, word: &str) -> bool {
+        if word.contains('/') {
+            return true;
+        }
+        if self.extensions.is_none() {
+            return false;
+        }
+        let bytes = word.as_bytes();
+        word.contains('\\')
+            || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+    }
+
+    /// The file this OS would run for `path`: on Unix `path` with an execute bit; on Windows
+    /// `path` when it ends in a `PATHEXT` extension, else the first `path` + extension that
+    /// is a file.
+    pub(crate) fn runnable(&self, path: &Path) -> Option<PathBuf> {
+        let Some(extensions) = &self.extensions else {
+            return is_executable(path).then(|| path.to_path_buf());
+        };
+        let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+        if extensions
+            .iter()
+            .any(|extension| name.ends_with(extension.as_str()))
+        {
+            return is_executable(path).then(|| path.to_path_buf());
+        }
+        extensions
+            .iter()
+            .map(|extension| {
+                let mut candidate = path.as_os_str().to_owned();
+                candidate.push(extension);
+                PathBuf::from(candidate)
+            })
+            .find(|candidate| is_executable(candidate))
+    }
+
+    /// Where `name` runs from. A path (`is_path`) is found when it is absolute and runnable;
+    /// any other name is the first runnable `name` in the absolute folders of `path_var`. A
+    /// relative path or entry would depend on the app's working directory.
+    pub(crate) fn find_on_path(&self, name: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
+        if self.is_path(name) {
+            let path = PathBuf::from(name);
+            if !path.is_absolute() {
+                return None;
+            }
+            return self.runnable(&path);
+        }
+        path_var
+            .into_iter()
+            .flat_map(std::env::split_paths)
+            .filter(|folder| folder.is_absolute())
+            .find_map(|folder| self.runnable(&folder.join(name)))
+    }
+}
+
+/// `Lookup::native().find_on_path(name, path_var)`.
+pub(crate) fn find_on_path(name: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
+    Lookup::native().find_on_path(name, path_var)
 }
 
 /// `current` with `extra` added at the end, leaving out folders it already has, so the
@@ -891,8 +975,10 @@ mod tests {
         let first = dir.path().join("first");
         let second = dir.path().join("second");
         std::fs::create_dir_all(&empty).unwrap();
-        let found = program(&first, "agent");
-        program(&second, "agent");
+        // Windows runs a name only with a `PATHEXT` extension.
+        let file = if cfg!(windows) { "agent.exe" } else { "agent" };
+        let found = program(&first, file);
+        program(&second, file);
         // A folder of that name is not a program.
         std::fs::create_dir_all(empty.join("folder")).unwrap();
         let path_var = std::env::join_paths([&empty, &first, &second]).unwrap();
@@ -922,6 +1008,96 @@ mod tests {
         assert_eq!(find_on_path(plain.to_str().unwrap(), path_var), None);
         assert_eq!(find_on_path("./agent", path_var), None);
         assert_eq!(find_on_path(dir.path().to_str().unwrap(), path_var), None);
+    }
+
+    fn windows_rules() -> Lookup {
+        Lookup::windows(None)
+    }
+
+    #[test]
+    fn windows_rules_run_a_pathext_file_and_never_npm_s_extensionless_shim() {
+        let dir = tempfile::tempdir().unwrap();
+        let shims = dir.path().join("shims");
+        let exes = dir.path().join("exes");
+        // npm's cmd-shim writes a `sh` script beside the `.cmd` one.
+        program(&shims, "claude-agent-acp");
+        let cmd = program(&shims, "claude-agent-acp.cmd");
+        program(&shims, "only-sh");
+        let exe = program(&exes, "only-sh.exe");
+        let path_var = std::env::join_paths([&shims, &exes]).unwrap();
+        let path_var = Some(path_var.as_os_str());
+        let rules = windows_rules();
+
+        assert_eq!(
+            rules.find_on_path("claude-agent-acp", path_var),
+            Some(cmd.clone())
+        );
+        assert_eq!(rules.find_on_path("only-sh", path_var), Some(exe));
+        // A name with its extension is taken as it is.
+        assert_eq!(
+            rules.find_on_path("claude-agent-acp.cmd", path_var),
+            Some(cmd.clone())
+        );
+        assert_eq!(rules.find_on_path("claude-agent-acp.js", path_var), None);
+        // An absolute path gets the extensions too.
+        let bare = shims.join("claude-agent-acp");
+        assert_eq!(rules.find_on_path(bare.to_str().unwrap(), None), Some(cmd));
+    }
+
+    #[test]
+    fn pathext_sets_the_extensions_and_their_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = program(dir.path(), "agent.exe");
+        let cmd = program(dir.path(), "agent.cmd");
+        let path_var = Some(dir.path().as_os_str());
+
+        let exe_first = Lookup::windows(Some(OsStr::new(".EXE;.CMD")));
+        assert_eq!(exe_first.find_on_path("agent", path_var), Some(exe));
+        let cmd_first = Lookup::windows(Some(OsStr::new(" .Cmd ;;.EXE")));
+        assert_eq!(cmd_first.find_on_path("agent", path_var), Some(cmd));
+        assert_eq!(Lookup::windows(Some(OsStr::new(""))), windows_rules());
+        assert_eq!(
+            windows_rules().extensions,
+            Some(vec![
+                ".com".into(),
+                ".exe".into(),
+                ".bat".into(),
+                ".cmd".into()
+            ])
+        );
+    }
+
+    #[test]
+    fn windows_rules_take_a_backslash_or_a_drive_as_a_path() {
+        let rules = windows_rules();
+        for word in [
+            r"C:\tools\claude.exe",
+            "c:claude",
+            r"bin\claude",
+            "~/bin/claude",
+        ] {
+            assert!(rules.is_path(word), "{word}");
+        }
+        assert!(!rules.is_path("claude-agent-acp"));
+        let unix = Lookup { extensions: None };
+        assert!(unix.is_path("bin/claude"));
+        assert!(!unix.is_path(r"C:\tools\claude"));
+        assert!(!unix.is_path(r"bin\claude"));
+    }
+
+    /// A `\` is a file name character only on Unix.
+    #[cfg(unix)]
+    #[test]
+    fn under_windows_rules_a_relative_backslash_path_is_not_searched_on_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let found = program(dir.path(), r"bin\claude.cmd");
+        let path_var = Some(dir.path().as_os_str());
+
+        assert_eq!(windows_rules().find_on_path(r"bin\claude", path_var), None);
+        assert_eq!(
+            Lookup { extensions: None }.find_on_path(r"bin\claude.cmd", path_var),
+            Some(found)
+        );
     }
 
     #[test]

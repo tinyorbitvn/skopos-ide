@@ -52,9 +52,15 @@ impl Fixture {
         path.to_path_buf()
     }
 
-    /// A fake `name` in the PATH folder.
+    /// A fake `name` in the PATH folder: `<name>.cmd` on Windows, which runs a name only
+    /// with a `PATHEXT` extension.
     fn install(&self, name: &str) -> PathBuf {
-        self.script(&self.bin().join(name), name)
+        let file = if cfg!(windows) {
+            format!("{name}.cmd")
+        } else {
+            name.to_owned()
+        };
+        self.script(&self.bin().join(file), name)
     }
 
     /// A fake `name` in `folder`, a folder under the home folder off PATH.

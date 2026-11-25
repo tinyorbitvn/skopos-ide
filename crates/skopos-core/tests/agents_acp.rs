@@ -212,6 +212,7 @@ async fn start(fake: &Fake) -> (AcpSession, mpsc::Receiver<AcpUpdate>) {
     let (updates, received) = mpsc::channel(64);
     let started = within(AcpSession::start(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,
@@ -226,7 +227,16 @@ async fn start(fake: &Fake) -> (AcpSession, mpsc::Receiver<AcpUpdate>) {
 
 async fn start_error(command: Command, cwd: &Path) -> StartError {
     let (updates, _received) = mpsc::channel(64);
-    match within(AcpSession::start(command, cwd, mcp_entry(), updates, None)).await {
+    match within(AcpSession::start(
+        command,
+        "Fake",
+        cwd,
+        mcp_entry(),
+        updates,
+        None,
+    ))
+    .await
+    {
         Ok(session) => {
             session.close().await;
             panic!("the agent started")
@@ -339,6 +349,7 @@ async fn a_permission_request_waits_for_the_answer_given_through_permissions() {
     let (updates, mut received) = mpsc::channel(64);
     let started = within(AcpSession::start(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,
@@ -559,6 +570,7 @@ async fn a_chat_reopens_with_session_load_when_the_agent_can_load() {
     let (updates, mut received) = mpsc::channel(64);
     let loaded = within(AcpSession::load(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,
@@ -597,6 +609,7 @@ async fn load_is_refused_when_the_agent_cannot_load() {
     let (updates, _received) = mpsc::channel(64);
     let loaded = within(AcpSession::load(
         fake.command(),
+        "Fake",
         &fake.work(),
         mcp_entry(),
         updates,

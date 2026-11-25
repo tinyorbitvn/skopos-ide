@@ -347,6 +347,7 @@ mod running {
                 let session_id = stored.session_id.clone().unwrap_or_default();
                 AcpSession::load(
                     command,
+                    &agent.name,
                     &agent_dir,
                     mcp,
                     update_sender,
@@ -358,6 +359,7 @@ mod running {
             None => {
                 AcpSession::start(
                     command,
+                    &agent.name,
                     &agent_dir,
                     mcp,
                     update_sender,

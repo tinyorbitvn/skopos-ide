@@ -29,7 +29,7 @@ pub async fn probe_within(command: Command, cwd: &Path, name: &str, limit: Durat
     let (updates, _) = mpsc::channel(1);
     match tokio::time::timeout(
         limit,
-        AcpSession::open(command, cwd, None, None, updates, None),
+        AcpSession::open(command, name, cwd, None, None, updates, None),
     )
     .await
     {

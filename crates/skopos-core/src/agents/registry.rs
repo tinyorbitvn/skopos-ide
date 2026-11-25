@@ -11,7 +11,7 @@ use ts_rs::TS;
 
 use crate::agents::settings::expand_home;
 use crate::prefs::{AgentPrefs, CustomAgent};
-use crate::tools::{find_on_path, is_executable};
+use crate::tools::Lookup;
 
 /// A built-in agent: what runs, its variables, and its hints (spec §3.5, §4.6, §4.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,25 +122,29 @@ struct Located {
     known_folder: Option<PathBuf>,
 }
 
-/// `name` on `path_var`, else in the first of `folders` that has it (`find_on_path` for a
-/// name with a `/`).
-fn locate(name: &str, path_var: Option<&OsStr>, folders: &[PathBuf]) -> Option<Located> {
-    if let Some(path) = find_on_path(name, path_var) {
+/// `name` on `path_var`, else in the first of `folders` that has it, by `lookup`'s rules
+/// (`find_on_path` alone for a path).
+fn locate(
+    lookup: &Lookup,
+    name: &str,
+    path_var: Option<&OsStr>,
+    folders: &[PathBuf],
+) -> Option<Located> {
+    if let Some(path) = lookup.find_on_path(name, path_var) {
         return Some(Located {
             path,
             known_folder: None,
         });
     }
-    if name.contains('/') {
+    if lookup.is_path(name) {
         return None;
     }
-    folders
-        .iter()
-        .find(|folder| is_executable(&folder.join(name)))
-        .map(|folder| Located {
-            path: folder.join(name),
+    folders.iter().find_map(|folder| {
+        lookup.runnable(&folder.join(name)).map(|path| Located {
+            path,
             known_folder: Some(folder.clone()),
         })
+    })
 }
 
 /// The known folders the programs were found in, each once, in the programs' order.
@@ -177,8 +181,11 @@ pub fn resolve(
     folders: &[PathBuf],
     home: &Path,
 ) -> Resolved {
-    let cli = def.cli.and_then(|cli| locate(cli, path_var, folders));
-    let Some(program) = locate(def.program, path_var, folders) else {
+    let lookup = Lookup::native();
+    let cli = def
+        .cli
+        .and_then(|cli| locate(&lookup, cli, path_var, folders));
+    let Some(program) = locate(&lookup, def.program, path_var, folders) else {
         let detail = match (&cli, def.adapter) {
             (Some(cli), Some(adapter)) => Some(format!(
                 "{} · ACP adapter {adapter} missing",
@@ -241,7 +248,7 @@ pub fn resolve_custom(
     let Some((first, args)) = words.split_first() else {
         return not_found("");
     };
-    let Some(located) = locate_word(first, path_var, folders, home) else {
+    let Some(located) = locate_word(&Lookup::native(), first, path_var, folders, home) else {
         return not_found(first);
     };
     let dirs = path_dirs([&located]);
@@ -315,19 +322,21 @@ fn split_windows(text: &str) -> Option<Vec<String>> {
 
 /// `~/x` is a path under the home folder; any other word is what `locate` takes.
 fn locate_word(
+    lookup: &Lookup,
     word: &str,
     path_var: Option<&OsStr>,
     folders: &[PathBuf],
     home: &Path,
 ) -> Option<Located> {
     if word.starts_with("~/") {
-        let path = expand_home(word, home);
-        return is_executable(&path).then_some(Located {
-            path,
-            known_folder: None,
-        });
+        return lookup
+            .runnable(&expand_home(word, home))
+            .map(|path| Located {
+                path,
+                known_folder: None,
+            });
     }
-    locate(word, path_var, folders)
+    locate(lookup, word, path_var, folders)
 }
 
 /// `path` with its links resolved; `path` itself when that fails.
@@ -339,7 +348,8 @@ fn real_path(path: &Path) -> PathBuf {
 fn shown(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
         Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-        Ok(rest) => format!("~/{}", rest.display()),
+        // `~` joined, so the rest keeps this OS's separator: `~\bin\claude` on Windows.
+        Ok(rest) => Path::new("~").join(rest).display().to_string(),
         Err(_) => path.display().to_string(),
     }
 }
@@ -563,6 +573,55 @@ mod tests {
                 def.id
             );
         }
+    }
+
+    /// An empty file in `folder` that the lookup takes for a program.
+    fn program_file(folder: &Path, name: &str) -> PathBuf {
+        std::fs::create_dir_all(folder).unwrap();
+        let path = folder.join(name);
+        std::fs::write(&path, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn under_windows_rules_a_known_folder_and_a_home_path_give_the_cmd_shim() {
+        let home = tempfile::tempdir().unwrap();
+        let npm = home.path().join("npm");
+        // npm's cmd-shim writes a `sh` script beside the `.cmd` one.
+        program_file(&npm, "claude-agent-acp");
+        let cmd = program_file(&npm, "claude-agent-acp.cmd");
+        let rules = Lookup::windows(None);
+
+        let found = locate(&rules, "claude-agent-acp", None, std::slice::from_ref(&npm)).unwrap();
+        assert_eq!(found.path, cmd);
+        assert_eq!(found.known_folder, Some(npm.clone()));
+        let found = locate_word(&rules, "~/npm/claude-agent-acp", None, &[], home.path()).unwrap();
+        assert_eq!(found.path, cmd);
+        assert_eq!(found.known_folder, None);
+        // A path is not looked for in the known folders.
+        assert!(locate(
+            &rules,
+            r"npm\claude-agent-acp",
+            None,
+            &[home.path().to_path_buf()]
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_home_folder_is_shown_with_this_os_s_separator() {
+        let home = std::env::temp_dir();
+        let path = home.join("bin").join("claude");
+        let separator = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            shown(&path, &home),
+            format!("~{separator}bin{separator}claude")
+        );
     }
 
     /// Unix paths: on Windows `/home/me` is not absolute.

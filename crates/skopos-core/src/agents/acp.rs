@@ -157,6 +157,12 @@ pub enum StartError {
     Failed(String),
 }
 
+/// The start failure when the agent `name` could not be put in its job (spec §4.2).
+#[cfg(any(windows, test))]
+fn not_contained(name: &str, error: &std::io::Error) -> StartError {
+    StartError::Failed(format!("{name} could not start: {error}"))
+}
+
 /// Why a request got no answer.
 enum Failure {
     Exited(String),
@@ -171,24 +177,27 @@ pub struct AcpSession {
 }
 
 impl AcpSession {
-    /// Starts `command` (stdin, stdout and stderr are piped, it is killed when dropped and
-    /// gets its own process group), then `initialize` and `session/new` with `cwd` and the
-    /// `skopos` entry. Updates go to `updates`, which must be read while a turn runs. The
-    /// agent's permission requests wait on `permissions`; without it they are cancelled.
+    /// Starts `command`, the agent `name` (stdin, stdout and stderr are piped, it is killed
+    /// when dropped and gets its own process group), then `initialize` and `session/new` with
+    /// `cwd` and the `skopos` entry. Updates go to `updates`, which must be read while a turn
+    /// runs. The agent's permission requests wait on `permissions`; without it they are
+    /// cancelled.
     pub async fn start(
         command: Command,
+        name: &str,
         cwd: &Path,
         mcp: McpEntry,
         updates: mpsc::Sender<AcpUpdate>,
         permissions: Option<Arc<Permissions>>,
     ) -> Result<AcpSession, StartError> {
-        Self::open(command, cwd, Some(mcp), None, updates, permissions).await
+        Self::open(command, name, cwd, Some(mcp), None, updates, permissions).await
     }
 
     /// As `start`, but continues the chat `session_id` with `session/load`. The agent's
     /// replay is dropped: the chat keeps its stored transcript.
     pub async fn load(
         command: Command,
+        name: &str,
         cwd: &Path,
         mcp: McpEntry,
         updates: mpsc::Sender<AcpUpdate>,
@@ -197,6 +206,7 @@ impl AcpSession {
     ) -> Result<AcpSession, StartError> {
         Self::open(
             command,
+            name,
             cwd,
             Some(mcp),
             Some(session_id),
@@ -209,6 +219,7 @@ impl AcpSession {
     /// `start` or `load`; a probe passes no MCP entry.
     pub(crate) async fn open(
         command: Command,
+        name: &str,
         cwd: &Path,
         mcp: Option<McpEntry>,
         load: Option<&str>,
@@ -216,7 +227,8 @@ impl AcpSession {
         permissions: Option<Arc<Permissions>>,
     ) -> Result<AcpSession, StartError> {
         let live = Arc::new(AtomicBool::new(false));
-        let running = Running::spawn(command, updates, permissions, Arc::clone(&live)).await?;
+        let running =
+            Running::spawn(command, name, updates, permissions, Arc::clone(&live)).await?;
         match handshake(&running, cwd, mcp, load).await {
             Ok((session_id, can_load)) => {
                 live.store(true, Ordering::SeqCst);
@@ -292,10 +304,14 @@ struct Running {
 impl Running {
     async fn spawn(
         mut command: Command,
+        name: &str,
         updates: mpsc::Sender<AcpUpdate>,
         permissions: Option<Arc<Permissions>>,
         live: Arc<AtomicBool>,
     ) -> Result<Running, StartError> {
+        // Only the job's failure names the agent.
+        #[cfg(not(windows))]
+        let _ = name;
         configure_agent(&mut command);
         let program = command
             .as_std()
@@ -310,7 +326,7 @@ impl Running {
             Ok(job) => job,
             Err(error) => {
                 stop(&mut child, KILL_GRACE).await;
-                return Err(StartError::Failed(format!("{program}: {error}")));
+                return Err(not_contained(name, &error));
             }
         };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
@@ -1140,6 +1156,15 @@ mod tests {
         let mut error = AcpError::internal_error();
         error.message = "Overloaded.".to_owned();
         assert_eq!(turn_error(&error), TurnEnd::Error("Overloaded".to_owned()));
+    }
+
+    #[test]
+    fn an_agent_outside_its_job_could_not_start() {
+        let error = std::io::Error::from_raw_os_error(5);
+        assert_eq!(
+            not_contained("Claude Code", &error),
+            StartError::Failed(format!("Claude Code could not start: {error}"))
+        );
     }
 
     #[test]
