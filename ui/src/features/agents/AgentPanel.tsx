@@ -9,7 +9,7 @@ import { AgentPopover } from "./AgentPopover";
 import { ChatHistory } from "./ChatHistory";
 import { ChatStream } from "./ChatStream";
 import { Composer } from "./Composer";
-import { PanelHeader, type PopoverName, SandboxLine } from "./PanelHeader";
+import { PanelHeader, type PopoverName } from "./PanelHeader";
 import {
   ConnectBanner,
   FailureState,
@@ -102,7 +102,6 @@ function OpenPanel() {
         scopeRef={scopeButton}
         agentRef={agentButton}
       />
-      <SandboxLine />
       <div className={styles.body}>{body}</div>
       {inChat && cannotReopen !== null ? (
         <ReopenBar

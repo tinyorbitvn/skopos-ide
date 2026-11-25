@@ -45,7 +45,6 @@ function show(
     ],
     helm_chart_search: () => ({ charts: [], repoProblems: [] }),
     agents_status: () => [],
-    agent_sandbox_status: () => ({ status: "unsupported" }),
     agent_prefs: () => ({
       defaultAgent: null,
       custom: [],
@@ -295,7 +294,6 @@ test("Tools, Agents and Helm repositories sit between Kubeconfig sources and App
     "Kubeconfig sources",
     "Tools",
     "Agents",
-    "Agent sandbox",
     "Agent changes",
     "No clusters yet",
     "Helm repositories",
@@ -396,7 +394,6 @@ test("the agent sections show when agents are supported", async () => {
   setAgentsSupportedForTest(true);
   show();
   expect(await screen.findByTestId("pref-agents")).toBeTruthy();
-  expect(await screen.findByTestId("pref-agent-sandbox")).toBeTruthy();
   expect(await screen.findByTestId("pref-agent-changes")).toBeTruthy();
 });
 
@@ -405,6 +402,18 @@ test("the agent sections are hidden when agents are not supported", async () => 
   show();
   await screen.findByText("Appearance");
   expect(screen.queryByTestId("pref-agents")).toBeNull();
-  expect(screen.queryByTestId("pref-agent-sandbox")).toBeNull();
   expect(screen.queryByTestId("pref-agent-changes")).toBeNull();
+});
+
+test("shows no Agent sandbox section and says agents run as the person", async () => {
+  setAgentsSupportedForTest(true);
+  show();
+  expect(await screen.findByTestId("pref-agents")).toBeTruthy();
+  expect(screen.queryByTestId("pref-agent-sandbox")).toBeNull();
+  expect(screen.queryByText("Agent sandbox")).toBeNull();
+  expect(
+    screen.getByText(
+      /SkoposIDE runs them as you, over the Agent Client Protocol/,
+    ),
+  ).toBeTruthy();
 });

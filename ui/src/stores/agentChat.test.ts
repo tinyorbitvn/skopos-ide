@@ -177,29 +177,6 @@ test("unknown agents are probed before a start that names none", async () => {
   expect(order).toEqual(["agent_probe", "chat_start"]);
 });
 
-test("a sandbox refusal shows the sandbox state with the reason", async () => {
-  catalog({ a: "prod" });
-  backend({
-    chat_start: () => {
-      throw { code: "Unavailable", message: "The agent sandbox isn't ready." };
-    },
-    agent_sandbox_status: () => ({ status: "notInstalled" }),
-  });
-  await act(async () => {
-    useAgentChat.getState().openPanel(null);
-    await flush();
-    await flush();
-  });
-  expect(useAgentChat.getState().start).toEqual({
-    phase: "failed",
-    failure: {
-      kind: "sandbox",
-      reason:
-        "bubblewrap is not installed. Install the bwrap command, then check again.",
-    },
-  });
-});
-
 test("No agent is ready with an agent that needs sign-in shows Sign in", async () => {
   catalog({ a: "prod" });
   backend({

@@ -69,7 +69,6 @@ import type { Prefs } from "./generated/Prefs";
 import type { Propagation } from "./generated/Propagation";
 import type { ReachEvent } from "./generated/ReachEvent";
 import type { ResourceRef } from "./generated/ResourceRef";
-import type { SandboxStatus } from "./generated/SandboxStatus";
 import type { SavedKubeconfig } from "./generated/SavedKubeconfig";
 import type { SecretChange } from "./generated/SecretChange";
 import type { SecretValue } from "./generated/SecretValue";
@@ -843,19 +842,6 @@ export const api = {
   agentCustomRemove: (id: string) => call<void>("agent_custom_remove", { id }),
   agentDefaultSet: (id: string) => call<void>("agent_default_set", { id }),
   agentPrefs: () => call<AgentPrefs>("agent_prefs"),
-  /** Gives the prefs as saved; rejects with InvalidInput for a domain it refuses. */
-  agentDomainAdd: (domain: string) =>
-    call<AgentPrefs>("agent_domain_add", { domain }),
-  agentDomainRemove: (domain: string) =>
-    call<AgentPrefs>("agent_domain_remove", { domain }),
-  /** `~/x` or `/x`; rejects with InvalidInput for a folder that does not exist. */
-  agentFolderAdd: (folder: string) =>
-    call<AgentPrefs>("agent_folder_add", { folder }),
-  agentFolderRemove: (folder: string) =>
-    call<AgentPrefs>("agent_folder_remove", { folder }),
-  /** Kept for the app run; `refresh` checks again. */
-  agentSandboxStatus: (refresh: boolean) =>
-    call<SandboxStatus>("agent_sandbox_status", { refresh }),
   /** Saves only this setting of the cluster, without the side effects of a full save. */
   clusterAgentChangesSet: (id: string, changes: AgentChanges) =>
     call<void>("cluster_agent_changes_set", { id, changes }),

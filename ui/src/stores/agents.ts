@@ -5,10 +5,9 @@ import { api } from "../ipc/api";
 import { failureMessage } from "../ipc/client";
 import type { AgentPrefs } from "../ipc/generated/AgentPrefs";
 import type { AgentStatus } from "../ipc/generated/AgentStatus";
-import type { SandboxStatus } from "../ipc/generated/SandboxStatus";
 
 /**
- * The agent CLIs and the sandbox (agents spec §3.5, §4.2), shared by Preferences, the
+ * The agent CLIs (agents spec §3.5, §4.2), shared by Preferences, the
  * panel's agent popover and the cluster Settings page. The core keeps probe results for
  * the app run, so a row stays `unknown` only until its first probe.
  */
@@ -17,9 +16,6 @@ interface AgentsState {
   error: string | null;
   /** The agents whose probe runs now. */
   probing: Record<string, true>;
-  sandbox: SandboxStatus | null;
-  sandboxError: string | null;
-  sandboxChecking: boolean;
   prefs: AgentPrefs | null;
   prefsError: string | null;
   /** Reads the rows; null when the read failed (the message is in `error`). */
@@ -32,21 +28,13 @@ interface AgentsState {
   add(name: string, command: string): Promise<void>;
   remove(id: string): Promise<void>;
   makeDefault(id: string): Promise<void>;
-  loadSandbox(refresh: boolean): Promise<SandboxStatus | null>;
   loadPrefs(): Promise<void>;
-  addDomain(domain: string): Promise<void>;
-  removeDomain(domain: string): Promise<void>;
-  addFolder(folder: string): Promise<void>;
-  removeFolder(folder: string): Promise<void>;
 }
 
 const INITIAL = {
   statuses: null,
   error: null,
   probing: {},
-  sandbox: null,
-  sandboxError: null,
-  sandboxChecking: false,
   prefs: null,
   prefsError: null,
 };
@@ -126,21 +114,6 @@ export const useAgents = create<AgentsState>((set, get) => ({
     await get().load();
   },
 
-  async loadSandbox(refresh) {
-    if (!agentsSupported()) return null;
-    set({ sandboxChecking: true });
-    try {
-      const sandbox = await api.agentSandboxStatus(refresh);
-      set({ sandbox, sandboxError: null });
-      return sandbox;
-    } catch (error) {
-      set({ sandboxError: failureMessage(error) });
-      return null;
-    } finally {
-      set({ sandboxChecking: false });
-    }
-  },
-
   async loadPrefs() {
     if (!agentsSupported()) return;
     try {
@@ -148,19 +121,6 @@ export const useAgents = create<AgentsState>((set, get) => ({
     } catch (error) {
       set({ prefsError: failureMessage(error) });
     }
-  },
-
-  async addDomain(domain) {
-    set({ prefs: await api.agentDomainAdd(domain) });
-  },
-  async removeDomain(domain) {
-    set({ prefs: await api.agentDomainRemove(domain) });
-  },
-  async addFolder(folder) {
-    set({ prefs: await api.agentFolderAdd(folder) });
-  },
-  async removeFolder(folder) {
-    set({ prefs: await api.agentFolderRemove(folder) });
   },
 }));
 

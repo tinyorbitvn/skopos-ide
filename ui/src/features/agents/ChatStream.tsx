@@ -1,4 +1,3 @@
-import { openPath } from "../../app/tabs/navigation";
 import { Button, Markdown, Spinner, toast } from "../../design";
 import { api } from "../../ipc/api";
 import { failureMessage } from "../../ipc/client";
@@ -6,7 +5,6 @@ import type { ChangeAnswer } from "../../ipc/generated/ChangeAnswer";
 import type { ChangeCard as Card } from "../../ipc/generated/ChangeCard";
 import type { ChatItem } from "../../ipc/generated/ChatItem";
 import type { ChatNotice } from "../../ipc/generated/ChatNotice";
-import { prefsPath } from "../prefs/paths";
 import { ChangeCard } from "./ChangeCard";
 import styles from "./ChatStream.module.css";
 import { objectLabel } from "./chatModel";
@@ -56,15 +54,6 @@ function NoticeLine(props: {
       data-testid="agent-notice"
     >
       <span>{props.text}</span>
-      {kind === "blockedHost" ? (
-        <button
-          type="button"
-          className={styles.link}
-          onClick={() => openPath(prefsPath("agent-sandbox"), "current")}
-        >
-          Agent sandbox
-        </button>
-      ) : null}
       {kind === "exited" ? (
         <Button size="sm" onClick={props.onNewChat}>
           New chat

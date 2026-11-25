@@ -28,14 +28,13 @@ import {
 } from "../updates/updateStore";
 import { lastCheckedText, STORE_MANAGED_TEXT } from "../updates/updateText";
 import { AgentChangesSection } from "./AgentChangesSection";
-import { AgentSandboxSection } from "./AgentSandboxSection";
 import { AgentsSection } from "./AgentsSection";
 import { HelmReposSection } from "./HelmReposSection";
 import styles from "./PreferencesScreen.module.css";
 import { type PrefsSection, prefsSectionId } from "./paths";
 import { ToolsSection } from "./ToolsSection";
 
-const SECTIONS: PrefsSection[] = ["agents", "agent-sandbox", "agent-changes"];
+const SECTIONS: PrefsSection[] = ["agents", "agent-changes"];
 
 function sectionOf(value: string | null): PrefsSection | null {
   return SECTIONS.find((s) => s === value) ?? null;
@@ -217,7 +216,6 @@ export function PreferencesScreen() {
       {agentsSupported() ? (
         <>
           <AgentsSection />
-          <AgentSandboxSection />
           <AgentChangesSection />
         </>
       ) : null}

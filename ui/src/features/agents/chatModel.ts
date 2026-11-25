@@ -11,14 +11,12 @@ import { countText } from "./agentText";
 export type StartFailure =
   | { kind: "noClusters" }
   | { kind: "noAgent" }
-  | { kind: "sandbox"; reason: string }
   | { kind: "signIn"; agentId: string; agent: string; hint: string | null }
   | { kind: "notInstalled"; agentId: string; agent: string }
   | { kind: "doesNotStart"; agentId: string; agent: string; reason: string }
   | { kind: "other"; message: string };
 
 /** The core's messages that `chat_start` rejects with (`agents/chat.rs`). */
-export const SANDBOX_NOT_READY = "The agent sandbox isn't ready.";
 export const NO_AGENT = "No agent is ready to chat.";
 export const CANNOT_REOPEN_SUFFIX =
   "can't reopen old chats. Start a new chat to continue.";

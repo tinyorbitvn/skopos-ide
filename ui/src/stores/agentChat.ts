@@ -1,14 +1,11 @@
 import { create } from "zustand";
-import { IS_MAC } from "../app/shortcuts";
 import { toast } from "../design";
-import { sandboxReason } from "../features/agents/agentText";
 import {
   CANNOT_REOPEN_SUFFIX,
   clusterIdsByName,
   failureFromRow,
   NO_AGENT,
   nextScope,
-  SANDBOX_NOT_READY,
   type StartFailure,
   withItem,
 } from "../features/agents/chatModel";
@@ -155,11 +152,6 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
     expected: string | null,
   ): Promise<StartFailure> {
     const agents = useAgents.getState();
-    if (message === SANDBOX_NOT_READY) {
-      const status = await agents.loadSandbox(false);
-      const reason = status ? sandboxReason(status, IS_MAC) : null;
-      return { kind: "sandbox", reason: reason ?? message };
-    }
     const rows = (await agents.load()) ?? [];
     if (message === NO_AGENT) {
       const row =

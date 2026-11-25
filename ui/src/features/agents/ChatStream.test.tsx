@@ -152,7 +152,7 @@ test("the agent's own tool shows its status and content", () => {
   expect(screen.getByText("denied")).toBeTruthy();
 });
 
-test("notices offer the sandbox section and a new chat", () => {
+test("a stored blocked-host notice shows its text, and an exited notice offers a new chat", () => {
   const props = show([
     {
       id: "n1",
@@ -172,7 +172,7 @@ test("notices offer the sandbox section and a new chat", () => {
     },
   ]);
   expect(screen.getByText("The sandbox blocked x.io.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Agent sandbox" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Agent sandbox" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   expect(props.onNewChat).toHaveBeenCalled();
 });

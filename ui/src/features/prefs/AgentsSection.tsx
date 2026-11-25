@@ -138,8 +138,11 @@ export function AgentsSection() {
     >
       <h3 className={styles.heading}>Agents</h3>
       <p className={styles.muted}>
-        Agent CLIs found on this computer. SkoposIDE runs them over the Agent
-        Client Protocol, inside the sandbox below.
+        Agent CLIs found on this computer. SkoposIDE runs them as you, over the
+        Agent Client Protocol: they can read and change your files, use your
+        network and run commands. Each chat gives its agent a kubeconfig with
+        only the chat's clusters. The Changes setting of each cluster applies to
+        SkoposIDE's own tools, not to commands the agent runs itself.
       </p>
       {body}
       <div>
