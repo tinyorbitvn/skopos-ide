@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // The agent sandbox runs this binary as an agent's MCP bridge (`--agent-mcp`) and, on
-    // Linux, as its port bridge (`--agent-init`). Those modes start no runtime and no window.
+    // An agent runs this binary as its MCP bridge (`--agent-mcp`). That mode starts no runtime
+    // and no window.
     if let Some(code) = skopos_core::agents::modes::run(std::env::args_os()) {
         std::process::exit(code);
     }

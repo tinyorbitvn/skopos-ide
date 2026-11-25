@@ -52,8 +52,6 @@ export function fakeAgentPrefs(): Record<string, unknown> {
           command: `${BINARY} --script ${SCRIPT} --log ${LOG}`,
         },
       ],
-      domains: [],
-      folders: [],
     },
   };
 }

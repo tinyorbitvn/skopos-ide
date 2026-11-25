@@ -205,28 +205,13 @@ impl AppCore {
         }
     }
 
-    /// Chats see the sandbox as not ready, whatever the machine has. Tests only.
-    pub fn agent_sandbox_unready_for_test(&self) {
-        #[cfg(unix)]
-        self.chats().set_sandbox_unready();
-    }
-
-    /// The program the agent launches as its `skopos` MCP server and the sandbox shows, in
-    /// place of the app's own binary. Tests pass `skopos-agent-host` (R1).
+    /// The program the agent launches as its `skopos` MCP server, in place of the app's own
+    /// binary. Tests pass `skopos-agent-host` (R1).
     pub fn set_agent_app_binary_for_test(&self, path: PathBuf) {
         #[cfg(unix)]
         self.chats().set_app_binary(path);
         #[cfg(not(unix))]
         let _ = path;
-    }
-
-    /// Chats read their agent's sign-in from `source`, whatever the agent and the machine.
-    /// Tests only.
-    pub fn set_agent_keychain_for_test(&self, source: crate::agents::cli_login::KeychainSource) {
-        #[cfg(unix)]
-        self.chats().set_keychain(source);
-        #[cfg(not(unix))]
-        let _ = source;
     }
 }
 
@@ -239,7 +224,7 @@ fn unsupported() -> crate::error::IpcError {
 /// The running chats, on Linux and macOS.
 #[cfg(unix)]
 mod running {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -248,7 +233,6 @@ mod running {
 
     use dashmap::DashMap;
     use k8s_openapi::jiff::Timestamp;
-    use tokio::process::Command;
     use tokio::sync::{mpsc, oneshot};
     use tokio::task::{JoinHandle, JoinSet};
     use tokio_util::sync::{CancellationToken, DropGuard};
@@ -257,7 +241,6 @@ mod running {
     use crate::agents::acp::{AcpSession, AcpUpdate, McpEntry, PlanEntry, StartError, TurnEnd};
     use crate::agents::approvals::{Approvals, ChangeAnswer, ChangeCard};
     use crate::agents::chats::{ChatStore, ChatSummary, StoredChat};
-    use crate::agents::cli_login::{self, AccessToken, KeychainSource};
     use crate::agents::editor_tab::{
         hide_values, tab_namespaces, EditorTab, TabChip, TAB_TEXT_CAP,
     };
@@ -267,31 +250,20 @@ mod running {
     use crate::agents::mcp::changes::ChatGate;
     use crate::agents::mcp::trim::namespace_allowed;
     use crate::agents::mcp::{scope_names, serve_mcp, ScopeCluster, ToolContext, ToolScope};
+    use crate::agents::modes::AGENT_MCP;
     use crate::agents::prompt::{hidden_block, object_line, tab_block, PromptContext, TabView};
-    use crate::agents::proxy::{self, ProxyConfig, Resolver};
     use crate::agents::registry::{default_agent, sign_in_hint, AgentSpec, AgentState};
-    use crate::agents::sandbox::env::{agent_env, path_of, proxy_url};
-    use crate::agents::sandbox::paths::kubeconfig_files;
-    use crate::agents::sandbox::spec::{MCP_SOCKET, PROXY_SOCKET};
-    use crate::agents::sandbox::{
-        build_spec, direct_command, sandbox_command, ChatPorts, SandboxStatus, SpecInput, AGENT_MCP,
-    };
-    use crate::agents::settings::expand_home;
+    use crate::agents::spawn::{self, TOKEN_VAR};
     use crate::agents::tabs::{AttachedTab, EditorTabs, ProposalCard};
     use crate::app_core::AppCore;
-    use crate::catalog::ClusterSource;
     use crate::error::{CoreResult, ErrorCode, IpcError};
     use crate::kubeconfig::ClusterId;
     use crate::paths::create_private_dir;
     use crate::resources::invalid;
     use crate::sessions::{random_hex, SessionGuard};
 
-    /// Gives `--agent-mcp` the chat's token (spec §4.3).
-    const TOKEN_VAR: &str = "SKOPOS_AGENT_TOKEN";
     const WORK: &str = "work";
     const RUN: &str = "run";
-    const TMP: &str = "tmp";
-    const SANDBOX_NOT_READY: &str = "The agent sandbox isn't ready.";
     const NO_AGENT: &str = "No agent is ready to chat.";
     const NO_CLUSTER: &str = "A chat needs at least one cluster.";
     const ONE_CLUSTER: &str = "A chat on one cluster names exactly one cluster.";
@@ -303,7 +275,6 @@ mod running {
     const UPDATE_BACKLOG: usize = 256;
     const CARD_BACKLOG: usize = 64;
     const FEED_BACKLOG: usize = 16;
-    const BLOCKED_BACKLOG: usize = 16;
     /// The longest title the history shows, in characters.
     const TITLE_MAX: usize = 200;
     /// How long a closing chat waits for its cancelled turn to end.
@@ -320,10 +291,7 @@ mod running {
         running: DashMap<String, Arc<Chat>>,
         /// One start at a time per window, so a window never runs two chats.
         owners: DashMap<String, Arc<tokio::sync::Mutex<()>>>,
-        sandbox_unready: AtomicBool,
         app_binary: Mutex<Option<PathBuf>>,
-        /// Where every chat reads its agent's sign-in, in tests.
-        keychain: Mutex<Option<KeychainSource>>,
     }
 
     impl Chats {
@@ -334,35 +302,12 @@ mod running {
                 dir,
                 running: DashMap::new(),
                 owners: DashMap::new(),
-                sandbox_unready: AtomicBool::new(false),
                 app_binary: Mutex::new(None),
-                keychain: Mutex::new(None),
             }
-        }
-
-        pub(crate) fn set_sandbox_unready(&self) {
-            self.sandbox_unready.store(true, Ordering::SeqCst);
         }
 
         pub(crate) fn set_app_binary(&self, path: PathBuf) {
             *lock(&self.app_binary) = Some(path);
-        }
-
-        pub(crate) fn set_keychain(&self, source: KeychainSource) {
-            *lock(&self.keychain) = Some(source);
-        }
-
-        /// Where `agent` takes its CLI's sign-in from: the macOS sandbox hides the keychains,
-        /// where Claude Code keeps it, so the app reads it and hands the agent its access token.
-        fn keychain_source(&self, agent: &AgentSpec, sandboxed: bool) -> Option<KeychainSource> {
-            let kept = lock(&self.keychain).clone();
-            if kept.is_some() {
-                return kept;
-            }
-            if !(sandboxed && cfg!(target_os = "macos")) {
-                return None;
-            }
-            KeychainSource::for_agent(agent, &|name: &str| std::env::var(name).ok())
         }
 
         /// The app's own binary, which the agent launches with `--agent-mcp`.
@@ -419,12 +364,6 @@ mod running {
             global: scope.global,
         };
         let agent = core.agent_spec(&pick_agent(core, given, &scope)?)?;
-        // Spec §6.1: no agent runs outside the sandbox. R2's switch is Task 10's, which probes
-        // read too.
-        let sandboxed = !core.agent_sandbox_off();
-        if sandboxed {
-            sandbox_ready(core).await?;
-        }
         let id = match &stored {
             Some(stored) => stored.id.clone(),
             None => new_chat_id(chats),
@@ -432,47 +371,20 @@ mod running {
         let agent_dir = chats.dir.join(WORK).join(&agent.id);
         create_private_dir(&agent_dir)?;
         let run_folder = RunFolder::create(chats.dir.join(RUN).join(&id))?;
-        let unix_sockets = sandboxed && cfg!(target_os = "linux");
-        let wiring = wire(
-            core,
-            &agent,
-            &clusters,
-            scope.global,
-            &run_folder.path,
-            unix_sockets,
-        )
-        .await?;
+        let wiring = wire(core, &clusters, scope.global).await?;
         let app_binary = chats.app_binary()?;
-        let keychain = chats.keychain_source(&agent, sandboxed);
-        let handed = match &keychain {
-            Some(source) => source.token(cli_login::now_ms()).await,
-            None => None,
-        };
-        if keychain.is_some() && handed.is_none() {
-            tracing::info!(
-                "chat {id}: the keychain has no current sign-in for {}",
-                agent.name
-            );
-        }
-        let login = keychain
-            .as_ref()
-            .zip(handed.as_ref())
-            .map(|(source, token)| (source.login.var.to_owned(), token.value.clone()));
-        let command = agent_command(
-            core,
+        // Native agents spec §4.2: the person's own process, with the app's environment.
+        let env = spawn::agent_env(
+            spawn::app_env(),
             &agent,
-            &agent_dir,
-            &run_folder.path,
-            &wiring,
-            &app_binary,
-            sandboxed,
-            login,
-        )?;
+            &[(TOKEN_VAR.to_owned(), wiring.token.clone())],
+        );
+        let command = spawn::agent_command(&agent, &agent_dir, env);
         let mcp = McpEntry {
             command: app_binary,
             args: vec![
                 AGENT_MCP.to_owned(),
-                format!("127.0.0.1:{}", wiring.ports.mcp),
+                format!("127.0.0.1:{}", wiring.mcp_port),
             ],
             env: vec![(TOKEN_VAR.to_owned(), wiring.token.clone())],
         };
@@ -538,7 +450,6 @@ mod running {
             approvals,
             cards,
             changes,
-            blocked,
             tabs,
             proposals,
             cancel,
@@ -550,16 +461,7 @@ mod running {
             id: id.clone(),
             owner: owner.to_owned(),
             agent_name: agent.name.clone(),
-            sign_in_hint: keychain
-                .as_ref()
-                .map(|source| source.login.hint)
-                .or_else(|| sign_in_hint(&agent)),
-            renewal: keychain.map(|source| Renewal {
-                source,
-                handed,
-                refused: AtomicBool::new(false),
-            }),
-            renewing: AtomicBool::new(false),
+            sign_in_hint: sign_in_hint(&agent),
             clusters,
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
@@ -589,7 +491,6 @@ mod running {
             cards,
             changes,
             proposals,
-            blocked,
             feed: feed_receiver,
         };
         *lock(&chat.pump) = Some(tokio::spawn(pump(chat.clone(), inputs)));
@@ -613,7 +514,7 @@ mod running {
         if text.trim().is_empty() {
             return Err(invalid(EMPTY_MESSAGE));
         }
-        let chat = renewed(core, running_chat(core.chats(), chat_id)?).await?;
+        let chat = running_chat(core.chats(), chat_id)?;
         let line = match &object {
             Some(object) => Some(chat.line_for(object)?),
             None => None,
@@ -622,11 +523,10 @@ mod running {
             Some(tab) => Some(chat.prepare_tab(core, tab)?),
             None => None,
         };
-        if chat.renewing.load(Ordering::SeqCst)
-            || chat
-                .working
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_err()
+        if chat
+            .working
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
         {
             return Err(IpcError::new(ErrorCode::Conflict, STILL_ANSWERING));
         }
@@ -671,61 +571,6 @@ mod running {
         // A turn cut short by a close drops `done`; the turn has ended either way.
         let _ = finished.await;
         Ok(())
-    }
-
-    /// The chat to prompt: `chat`, or `chat` reopened with its agent's new sign-in when the
-    /// token it was handed has run out or the agent refused it, and the keychain holds another,
-    /// current one. The reopened chat keeps the id and the events channel, so its window sees
-    /// one chat throughout.
-    async fn renewed(core: &AppCore, chat: Arc<Chat>) -> CoreResult<Arc<Chat>> {
-        let Some(renewal) = &chat.renewal else {
-            return Ok(chat);
-        };
-        let now = cli_login::now_ms();
-        let wanted = cli_login::needs_renewal(renewal.handed.as_ref(), now)
-            || renewal.refused.load(Ordering::SeqCst);
-        if !wanted || chat.working.load(Ordering::SeqCst) {
-            return Ok(chat);
-        }
-        let (scope, can_load) = chat.apply(|transcript| {
-            let stored = &transcript.chat;
-            (
-                stored.scope.clone(),
-                stored.can_load && stored.session_id.is_some(),
-            )
-        });
-        if !can_load {
-            return Ok(chat);
-        }
-        let Some(current) = renewal.source.token(now).await else {
-            return Ok(chat);
-        };
-        if renewal.handed.as_ref() == Some(&current) {
-            return Ok(chat);
-        }
-        if chat.renewing.swap(true, Ordering::SeqCst) {
-            return Err(IpcError::new(ErrorCode::Conflict, STILL_ANSWERING));
-        }
-        tracing::info!(
-            "chat {}: {} reopens with a new sign-in from the keychain",
-            chat.id,
-            chat.agent_name
-        );
-        let reopen = ChatStart {
-            scope,
-            agent: None,
-            continue_chat: Some(chat.id.clone()),
-        };
-        match start(core, reopen, chat.events.clone(), &chat.owner).await {
-            Ok(_) => running_chat(core.chats(), &chat.id),
-            Err(error) => {
-                let closed = ChatEvent::Closed {
-                    reason: Some(error.message.clone()),
-                };
-                let _ = tokio::time::timeout(CLOSING_SEND, chat.events.send(closed)).await;
-                Err(error)
-            }
-        }
     }
 
     pub(super) fn stop(core: &AppCore, chat_id: &str) {
@@ -800,10 +645,6 @@ mod running {
         agent_name: String,
         /// How to sign in to the agent, for a notice when a turn needs it.
         sign_in_hint: Option<&'static str>,
-        /// For an agent that has its CLI's sign-in from the keychain.
-        renewal: Option<Renewal>,
-        /// Set while the chat closes to reopen with a new sign-in.
-        renewing: AtomicBool,
         clusters: Vec<ScopeCluster>,
         global: bool,
         /// `None` once the chat closes.
@@ -817,7 +658,7 @@ mod running {
         events: mpsc::Sender<ChatEvent>,
         /// Cancelled when the chat is to end; the supervisor then closes it.
         life: CancellationToken,
-        /// Ends the proxy and the MCP endpoint.
+        /// Ends the MCP endpoint.
         services: CancellationToken,
         service_tasks: Mutex<Vec<JoinHandle<()>>>,
         /// Cancelled once the chat has closed.
@@ -834,16 +675,6 @@ mod running {
         turn_open: AtomicBool,
         stop_requested: AtomicBool,
         hidden_sent: AtomicBool,
-    }
-
-    /// Where a chat reads its agent's sign-in again, and the token the agent was handed
-    /// (`None`: none).
-    struct Renewal {
-        source: KeychainSource,
-        handed: Option<AccessToken>,
-        /// Set once the agent asked for a sign-in: the person may have signed in again, which
-        /// ends that token before its time.
-        refused: AtomicBool,
     }
 
     #[derive(Default)]
@@ -872,7 +703,6 @@ mod running {
         cards: mpsc::Receiver<ToolCard>,
         changes: mpsc::Receiver<ChangeCard>,
         proposals: mpsc::Receiver<ProposalCard>,
-        blocked: mpsc::Receiver<String>,
         feed: mpsc::Receiver<Feed>,
     }
 
@@ -969,7 +799,7 @@ mod running {
             }
         }
 
-        /// Ends the turn, the agent's process group, the proxy, the MCP endpoint and the
+        /// Ends the turn, the agent's process group, the MCP endpoint and the
         /// pump, in that order, then saves the chat and removes its run folder.
         async fn close(&self) {
             self.stop();
@@ -1013,11 +843,8 @@ mod running {
         async fn finish(&self) {
             drop(lock(&self.guard).take());
             let reason = lock(&self.close_reason).take();
-            // A chat that reopens with a new sign-in stays open for its window.
-            if !self.renewing.load(Ordering::SeqCst) {
-                let closed = ChatEvent::Closed { reason };
-                let _ = tokio::time::timeout(CLOSING_SEND, self.events.send(closed)).await;
-            }
+            let closed = ChatEvent::Closed { reason };
+            let _ = tokio::time::timeout(CLOSING_SEND, self.events.send(closed)).await;
             self.done.cancel();
         }
 
@@ -1111,9 +938,6 @@ mod running {
         // The close takes the session back whole once the turn is over.
         drop(session);
         let exited = matches!(end, TurnEnd::Exited(_));
-        if let (TurnEnd::SignInNeeded, Some(renewal)) = (&end, &chat.renewal) {
-            renewal.refused.store(true, Ordering::SeqCst);
-        }
         let notice = turn_notice(
             &end,
             chat.stop_requested.load(Ordering::SeqCst),
@@ -1186,11 +1010,6 @@ mod running {
                 Some(card) = inputs.proposals.recv() => {
                     let item = chat.apply(|transcript| transcript.proposal_card(card));
                     chat.deliver(ChatEvent::Item { item }).await;
-                }
-                Some(host) = inputs.blocked.recv() => {
-                    if let Some(item) = chat.apply(|transcript| transcript.blocked(host)) {
-                        chat.deliver(ChatEvent::Item { item }).await;
-                    }
                 }
                 feed = inputs.feed.recv() => {
                     let more = match feed {
@@ -1291,19 +1110,6 @@ mod running {
         default_agent(&core.agent_prefs(), &statuses).ok_or_else(|| invalid(NO_AGENT))
     }
 
-    async fn sandbox_ready(core: &AppCore) -> CoreResult<()> {
-        let unready = core.chats().sandbox_unready.load(Ordering::SeqCst);
-        if !unready
-            && matches!(
-                core.agent_sandbox_status(false).await,
-                SandboxStatus::Ready { .. }
-            )
-        {
-            return Ok(());
-        }
-        Err(invalid(SANDBOX_NOT_READY))
-    }
-
     /// Spec §3.3: `<Agent> needs you to sign in.` and the agent's sign-in hint.
     fn sign_in_needed(core: &AppCore, agent: &AgentSpec) -> String {
         let hint = core
@@ -1341,64 +1147,29 @@ mod running {
         }
     }
 
-    /// What the agent talks to: the chat's proxy and its tools, each on a listener of its own.
+    /// What the agent talks to: the chat's tools, on a listener of their own.
     struct Wiring {
         token: String,
-        ports: ChatPorts,
+        /// The MCP endpoint's port on `127.0.0.1`.
+        mcp_port: u16,
         approvals: Arc<Approvals>,
         cards: mpsc::Receiver<ToolCard>,
         changes: mpsc::Receiver<ChangeCard>,
         tabs: Arc<EditorTabs>,
         proposals: mpsc::Receiver<ProposalCard>,
-        blocked: mpsc::Receiver<String>,
         cancel: CancellationToken,
-        /// Ends both services when the chat does not start.
+        /// Ends the MCP endpoint when the chat does not start.
         guard: DropGuard,
         tasks: Vec<JoinHandle<()>>,
     }
 
-    /// Spec §4.1: on Linux in the sandbox, Unix sockets in the run folder, which the agent
-    /// reaches on 127.0.0.1:3128 and :3129 (R3); elsewhere, ephemeral 127.0.0.1 ports.
-    async fn wire(
-        core: &AppCore,
-        agent: &AgentSpec,
-        clusters: &[ScopeCluster],
-        global: bool,
-        run: &Path,
-        unix_sockets: bool,
-    ) -> CoreResult<Wiring> {
-        let (proxy_listen, tools_listen) = if unix_sockets {
-            (
-                Listen::Unix(run.join(PROXY_SOCKET)),
-                Listen::Unix(run.join(MCP_SOCKET)),
-            )
-        } else {
-            (Listen::Tcp, Listen::Tcp)
-        };
-        let proxy_endpoint = Endpoint::bind(proxy_listen).await?;
-        let tools_endpoint = Endpoint::bind(tools_listen).await?;
-        let ports = match (proxy_endpoint.port(), tools_endpoint.port()) {
-            (Some(proxy), Some(mcp)) => ChatPorts { proxy, mcp },
-            _ => ChatPorts::LINUX_SANDBOX,
-        };
+    /// Native agents spec §4.2: the MCP endpoint listens on an ephemeral `127.0.0.1` port.
+    async fn wire(core: &AppCore, clusters: &[ScopeCluster], global: bool) -> CoreResult<Wiring> {
+        let tools_endpoint = Endpoint::bind(Listen::Tcp).await?;
+        let mcp_port = tools_endpoint.port();
         let token = new_token();
         let cancel = CancellationToken::new();
         let guard = cancel.clone().drop_guard();
-        // Spec §4.7: the agent's provider hosts and the person's domains.
-        let mut hosts = agent.hosts.clone();
-        hosts.extend(core.agent_prefs().domains);
-        let config = ProxyConfig {
-            token: token.clone(),
-            hosts,
-            resolve: Resolver::System,
-        };
-        let (blocked_sender, blocked) = mpsc::channel(BLOCKED_BACKLOG);
-        let proxy_task = tokio::spawn(proxy::serve(
-            proxy_endpoint,
-            config,
-            blocked_sender,
-            cancel.clone(),
-        ));
         let (change_sender, changes) = mpsc::channel(CARD_BACKLOG);
         let approvals = Approvals::new(change_sender);
         let scope = ToolScope {
@@ -1428,72 +1199,16 @@ mod running {
         ));
         Ok(Wiring {
             token,
-            ports,
+            mcp_port,
             approvals,
             cards,
             changes,
             tabs,
             proposals,
-            blocked,
             cancel,
             guard,
-            tasks: vec![proxy_task, tools_task],
+            tasks: vec![tools_task],
         })
-    }
-
-    /// The agent's command: inside the sandbox, or directly while it is off for tests (R2).
-    /// Either way the agent gets only spec §4.6's environment, and `login`, its CLI's sign-in.
-    #[allow(clippy::too_many_arguments)]
-    fn agent_command(
-        core: &AppCore,
-        agent: &AgentSpec,
-        agent_dir: &Path,
-        run: &Path,
-        wiring: &Wiring,
-        app_binary: &Path,
-        sandboxed: bool,
-        login: Option<(String, String)>,
-    ) -> CoreResult<Command> {
-        let home = core.home_dir().to_path_buf();
-        let prefs = core.prefs_get();
-        let proxy = proxy_url(&wiring.token, wiring.ports.proxy);
-        let get = |name: &str| std::env::var(name).ok();
-        let mut env = agent_env(&get, agent, &proxy, &run.join(TMP), &home);
-        if let Some((var, token)) = login {
-            env.retain(|(name, _)| *name != var);
-            env.push((var, token));
-        }
-        let catalog: Vec<PathBuf> = core
-            .catalog_list()
-            .into_iter()
-            .map(|entry| match entry.source {
-                ClusterSource::Synced { path } | ClusterSource::Pasted { path } => {
-                    PathBuf::from(path)
-                }
-            })
-            .collect();
-        let kubeconfig_env = std::env::var_os("KUBECONFIG");
-        let spec = build_spec(SpecInput {
-            agent,
-            agent_dir: agent_dir.to_path_buf(),
-            run_dir: run.to_path_buf(),
-            home: &home,
-            folders: prefs
-                .agents
-                .folders
-                .iter()
-                .map(|folder| expand_home(folder, &home))
-                .collect(),
-            kubeconfigs: kubeconfig_files(&prefs.sync_sources, &catalog, kubeconfig_env.as_deref()),
-            app_binary: app_binary.to_path_buf(),
-            path_var: path_of(&env),
-            env,
-        });
-        if sandboxed {
-            sandbox_command(&spec, wiring.ports)
-        } else {
-            Ok(direct_command(&spec))
-        }
     }
 
     /// The chat's MCP endpoint (spec §4.1, §6.7): a connection speaks MCP after its first
@@ -1536,7 +1251,7 @@ mod running {
         }
     }
 
-    /// `<data>/agents/run/<chat id>/` (`0700`) with its `tmp/`, removed when dropped.
+    /// `<data>/agents/run/<chat id>/` (`0700`), removed when dropped.
     struct RunFolder {
         path: PathBuf,
     }
@@ -1545,9 +1260,7 @@ mod running {
         fn create(path: PathBuf) -> CoreResult<RunFolder> {
             remove_folder(&path);
             create_private_dir(&path)?;
-            let folder = RunFolder { path };
-            create_private_dir(&folder.path.join(TMP))?;
-            Ok(folder)
+            Ok(RunFolder { path })
         }
     }
 
@@ -1577,7 +1290,6 @@ mod running {
         message: Option<String>,
         /// This turn's plan.
         plan: Option<String>,
-        blocked: HashSet<String>,
         changed: bool,
     }
 
@@ -1602,7 +1314,6 @@ mod running {
                 keyed: HashMap::new(),
                 message: None,
                 plan: None,
-                blocked: HashSet::new(),
                 changed: false,
             }
         }
@@ -1740,14 +1451,6 @@ mod running {
 
         fn notice(&mut self, notice: ChatNotice) -> ChatItem {
             self.push(ChatItemBody::notice(notice))
-        }
-
-        /// Spec §3.3: once per host per chat.
-        fn blocked(&mut self, host: String) -> Option<ChatItem> {
-            if !self.blocked.insert(host.clone()) {
-                return None;
-            }
-            Some(self.notice(ChatNotice::BlockedHost { host }))
         }
 
         /// The chat to save, when something changed since the last save. A chat with no
@@ -1908,18 +1611,6 @@ mod running {
                 .update(AcpUpdate::Plan(vec![entry("c")]))
                 .unwrap();
             assert_ne!(second.id, first.id);
-        }
-
-        #[test]
-        fn a_blocked_host_is_noted_once_per_chat() {
-            let mut transcript = Transcript::new(empty_chat());
-            let first = transcript.blocked("evil.example".to_owned()).unwrap();
-            assert!(
-                matches!(&first.body, ChatItemBody::Notice { text, .. } if text == "The sandbox blocked evil.example."),
-                "{first:?}"
-            );
-            assert!(transcript.blocked("evil.example".to_owned()).is_none());
-            assert!(transcript.blocked("other.example".to_owned()).is_some());
         }
 
         #[test]

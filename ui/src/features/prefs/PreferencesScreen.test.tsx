@@ -26,7 +26,7 @@ const saved: Prefs = {
     { kind: "file", path: "/etc/k/one.yaml" },
   ],
   updateCheck: true,
-  agents: { defaultAgent: null, custom: [], domains: [], folders: [] },
+  agents: { defaultAgent: null, custom: [] },
 };
 
 function show(
@@ -48,8 +48,6 @@ function show(
     agent_prefs: () => ({
       defaultAgent: null,
       custom: [],
-      domains: [],
-      folders: [],
     }),
     ...over,
   });

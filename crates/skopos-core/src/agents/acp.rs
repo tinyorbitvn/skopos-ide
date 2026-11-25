@@ -34,8 +34,8 @@ use tokio::task::JoinHandle;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use ts_rs::TS;
 
-use crate::agents::sandbox::configure;
 use crate::error::sanitize_text;
+use crate::process::configure_agent;
 use crate::process::{stop, KILL_GRACE};
 
 /// The client's name in `initialize`'s `clientInfo`.
@@ -277,7 +277,7 @@ impl Running {
         updates: mpsc::Sender<AcpUpdate>,
         live: Arc<AtomicBool>,
     ) -> Result<Running, StartError> {
-        configure(&mut command);
+        configure_agent(&mut command);
         let program = command
             .as_std()
             .get_program()

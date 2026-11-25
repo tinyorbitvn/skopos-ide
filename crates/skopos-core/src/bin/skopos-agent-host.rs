@@ -1,4 +1,4 @@
-//! Stands in for the app binary in the sandbox tests (R1): it runs the hidden agent modes. The app
+//! Stands in for the app binary in the agent tests: it runs the hidden `--agent-mcp` mode. The app
 //! bundles only `skopos-app`'s binary, so this one never ships.
 
 fn main() {

@@ -54,7 +54,7 @@ pub enum ChatItemBody {
     Plan { entries: Vec<PlanEntry> },
     /// A call to SkoposIDE's tools, drawn from the MCP server's own record (spec §4.4).
     Tool { card: Box<ToolCard> },
-    /// A tool of the agent's own, bounded by the sandbox.
+    /// A tool of the agent's own.
     AgentTool {
         title: String,
         status: ToolStatus,
@@ -82,9 +82,6 @@ impl ChatItemBody {
 #[ts(export)]
 pub enum ChatNotice {
     Stopped,
-    BlockedHost {
-        host: String,
-    },
     Exited {
         agent: String,
         reason: String,
@@ -107,6 +104,10 @@ pub enum ChatNotice {
     Declined {
         agent: String,
     },
+    /// A notice kind this version no longer makes, read back from a stored chat. Its item's
+    /// `text` says what it was.
+    #[serde(other)]
+    Unknown,
 }
 
 impl ChatNotice {
@@ -114,7 +115,6 @@ impl ChatNotice {
     pub fn text(&self) -> String {
         match self {
             ChatNotice::Stopped => "Stopped.".to_owned(),
-            ChatNotice::BlockedHost { host } => format!("The sandbox blocked {host}."),
             ChatNotice::Exited { agent, reason } => {
                 format!("{agent} stopped unexpectedly: {}.", sentence(reason))
             }
@@ -130,6 +130,8 @@ impl ChatNotice {
             }
             ChatNotice::TooManySteps { agent } => format!("{agent} stopped after too many steps."),
             ChatNotice::Declined { agent } => format!("{agent} declined to continue."),
+            // Never made: a stored one keeps the text it was saved with.
+            ChatNotice::Unknown => String::new(),
         }
     }
 }
@@ -165,10 +167,6 @@ mod tests {
     #[test]
     fn notices_read_as_the_spec_writes_them() {
         assert_eq!(ChatNotice::Stopped.text(), "Stopped.");
-        let blocked = ChatNotice::BlockedHost {
-            host: "evil.example".to_owned(),
-        };
-        assert_eq!(blocked.text(), "The sandbox blocked evil.example.");
         let exited = ChatNotice::Exited {
             agent: claude(),
             reason: "out of memory".to_owned(),
@@ -257,15 +255,13 @@ mod tests {
             serde_json::to_value(ChatEvent::Closed { reason: None }).unwrap(),
             json!({ "type": "closed", "reason": null })
         );
-        let notice = ChatItemBody::notice(ChatNotice::BlockedHost {
-            host: "evil.example".to_owned(),
-        });
+        let notice = ChatItemBody::notice(ChatNotice::Declined { agent: claude() });
         assert_eq!(
             serde_json::to_value(notice).unwrap(),
             json!({
                 "type": "notice",
-                "notice": { "kind": "blockedHost", "host": "evil.example" },
-                "text": "The sandbox blocked evil.example.",
+                "notice": { "kind": "declined", "agent": "Claude" },
+                "text": "Claude declined to continue.",
             })
         );
         let tool = ChatItemBody::AgentTool {
@@ -327,5 +323,18 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(stored, ChatItemBody::User { tab: None, .. }));
+    }
+
+    #[test]
+    fn a_stored_blocked_host_notice_reads_back_as_unknown() {
+        let text = r#"{"id":"n1","body":{"type":"notice","notice":{"kind":"blockedHost","host":"x.example"},"text":"The sandbox blocked x.example."}}"#;
+        let item: ChatItem = serde_json::from_str(text).unwrap();
+        match item.body {
+            ChatItemBody::Notice { notice, text } => {
+                assert_eq!(notice, ChatNotice::Unknown);
+                assert_eq!(text, "The sandbox blocked x.example.");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

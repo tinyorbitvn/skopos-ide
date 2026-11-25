@@ -1,14 +1,13 @@
-//! AI agents (agents spec 2026-11-22): the agent CLIs the person installed, run in a
-//! sandbox, reaching clusters only through SkoposIDE's tools. Agents run on Linux and macOS
-//! only: on Windows every agent call refuses with `Unsupported` and the readers give the
-//! defaults (spec §2, §11).
+//! AI agents (agents spec 2026-11-22): the agent CLIs the person installed, run natively as the
+//! person's own processes (native agents spec §4.2), reaching clusters only through SkoposIDE's
+//! tools. Agents run on Linux and macOS only for now: on Windows every agent call refuses with
+//! `Unsupported` and the readers give the defaults (spec §2, §11).
 
 pub mod acp;
 pub mod approvals;
 pub mod bridge;
 pub mod chat;
 pub mod chats;
-pub mod cli_login;
 pub mod diff;
 pub mod editor_tab;
 pub mod endpoint;
@@ -18,10 +17,9 @@ pub mod mcp;
 pub mod modes;
 pub mod probe;
 pub mod prompt;
-pub mod proxy;
 pub mod registry;
-pub mod sandbox;
 pub mod settings;
+pub mod spawn;
 pub mod tabs;
 
 use std::ffi::OsString;
@@ -36,23 +34,20 @@ use known_folders::known_folders;
 use registry::{
     default_agent, listed, resolve_custom, status_of, AgentSpec, AgentStatus, Listed, Resolved,
 };
-use settings::{expand_home, normalize_domain, normalize_folder};
 
 /// What every agent call answers on Windows.
 pub const UNSUPPORTED: &str = "Agents are not available on Windows.";
-const DOMAIN_TAKEN: &str = "That domain is already in the list";
-const FOLDER_TAKEN: &str = "That folder is already in the list";
 const NAME_AND_COMMAND: &str = "Enter a name and a command.";
 /// An id no listed agent has, or a built-in agent's id given to a call for the person's.
 const UNKNOWN_AGENT: &str = "That agent is no longer in the list.";
 
-/// Agents never run outside a sandbox, and Windows has none yet (spec §2).
+/// Windows does not run agents yet (spec §2).
 #[cfg(windows)]
 pub(crate) fn supported() -> CoreResult<()> {
     Err(IpcError::new(ErrorCode::Unsupported, UNSUPPORTED))
 }
 
-/// Linux runs agents in bubblewrap, macOS in Seatbelt.
+/// Linux and macOS run agents natively.
 #[cfg(not(windows))]
 pub(crate) fn supported() -> CoreResult<()> {
     Ok(())
@@ -65,61 +60,6 @@ impl AppCore {
             Ok(()) => self.prefs_get().agents,
             Err(_) => AgentPrefs::default(),
         }
-    }
-
-    /// Lets every agent reach `domain` and its subdomains (spec §3.5).
-    pub fn agent_domain_add(&self, domain: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let domain = normalize_domain(domain)?;
-        self.prefs_try_update(|prefs| {
-            let agents = &mut prefs.agents;
-            if agents.domains.contains(&domain) {
-                return Err(IpcError::new(ErrorCode::InvalidInput, DOMAIN_TAKEN));
-            }
-            agents.domains.push(domain);
-            Ok(agents.clone())
-        })
-    }
-
-    /// Removes `domain`; one that is not in the list changes nothing.
-    pub fn agent_domain_remove(&self, domain: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let domain = domain.trim().to_ascii_lowercase();
-        self.prefs_try_update(|prefs| {
-            prefs.agents.domains.retain(|kept| *kept != domain);
-            Ok(prefs.agents.clone())
-        })
-    }
-
-    /// Lets every agent read `folder` (spec §3.5), kept as typed. The same folder typed
-    /// another way (`~/x` and `/home/me/x`) is already in the list.
-    pub fn agent_folder_add(&self, folder: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let home = self.home_dir();
-        let folder = normalize_folder(folder, home)?;
-        let path = expand_home(&folder, home);
-        self.prefs_try_update(|prefs| {
-            let agents = &mut prefs.agents;
-            if agents
-                .folders
-                .iter()
-                .any(|kept| expand_home(kept, home) == path)
-            {
-                return Err(IpcError::new(ErrorCode::InvalidInput, FOLDER_TAKEN));
-            }
-            agents.folders.push(folder);
-            Ok(agents.clone())
-        })
-    }
-
-    /// Removes `folder` as the list holds it; one that is not there changes nothing.
-    pub fn agent_folder_remove(&self, folder: &str) -> CoreResult<AgentPrefs> {
-        supported()?;
-        let folder = folder.trim();
-        self.prefs_try_update(|prefs| {
-            prefs.agents.folders.retain(|kept| kept != folder);
-            Ok(prefs.agents.clone())
-        })
     }
 
     /// Sets only what agents may change in `id` (Preferences → Agent changes, spec §4.8):
@@ -298,10 +238,6 @@ mod tests {
             .unwrap();
         let id = "c".repeat(32);
         let calls = [
-            core.agent_domain_add("example.com").map(drop),
-            core.agent_domain_remove("example.com").map(drop),
-            core.agent_folder_add("/srv").map(drop),
-            core.agent_folder_remove("/srv").map(drop),
             core.cluster_agent_changes_set(&id, AgentChanges::ReadOnly),
             core.agents_status().map(drop),
             core.agent_custom_add("Mine", "my-agent --acp").map(drop),

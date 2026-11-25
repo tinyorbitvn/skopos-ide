@@ -1,10 +1,11 @@
 //! The ACP client and the probes against the scripted fake agent (`skopos-fakeagent`),
-//! started without the sandbox (R2). The fake names its script and log on its command line,
-//! because an agent gets only the environment of spec §4.6.
+//! started natively. The fake names its script and log on its command line, so a test does
+//! not depend on the environment it runs in.
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,6 @@ use skopos_core::agents::acp::{
 use skopos_core::agents::probe::probe_within;
 use skopos_core::agents::prompt::{hidden_block, object_line, PromptContext};
 use skopos_core::agents::registry::AgentStatus;
-use skopos_core::agents::sandbox::{direct_command, SandboxSpec};
 use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::paths::AppPaths;
@@ -38,7 +38,7 @@ impl Fake {
     fn new(script: Value) -> Fake {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("script.json"), script.to_string()).unwrap();
-        for dir in ["work", "run/tmp", "home", "bin"] {
+        for dir in ["work", "home", "bin"] {
             std::fs::create_dir_all(root.path().join(dir)).unwrap();
         }
         Fake { root }
@@ -61,25 +61,20 @@ impl Fake {
         ]
     }
 
-    /// The fake agent as a chat starts it with the sandbox off.
+    /// The fake agent in its work folder, with a small environment of its own.
     fn command(&self) -> Command {
-        direct_command(&SandboxSpec {
-            agent_dir: self.work(),
-            run_dir: self.path("run"),
-            tmp_dir: self.path("run/tmp"),
-            home: self.path("home"),
-            read_write: Vec::new(),
-            read_only: Vec::new(),
-            linked: Vec::new(),
-            hidden_files: Vec::new(),
-            env: vec![
-                ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
-                ("HOME".to_owned(), self.path("home").display().to_string()),
-            ],
-            app_binary: PathBuf::from(AGENT_HOST),
-            program: PathBuf::from(FAKE_AGENT),
-            args: self.args(),
-        })
+        let mut command = Command::new(FAKE_AGENT);
+        command
+            .args(self.args())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", self.path("home"))
+            .current_dir(self.work())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        command
     }
 
     /// The command line of a custom agent that runs this fake.
@@ -204,13 +199,12 @@ fn own_tool(status: ToolStatus, details: &str) -> AcpUpdate {
     }
 }
 
-async fn core_without_sandbox() -> (AppCore, TempDir) {
+async fn test_core() -> (AppCore, TempDir) {
     let root = tempfile::tempdir().unwrap();
     let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
     let core = AppCore::start_with_kubeconfig_env(paths, None)
         .await
         .unwrap();
-    core.agent_sandbox_off_for_test();
     (core, root)
 }
 
@@ -539,7 +533,7 @@ async fn closing_a_session_ends_the_agent_and_its_updates() {
 #[tokio::test]
 async fn a_probe_marks_an_agent_that_answers_ready() {
     let fake = Fake::new(json!({}));
-    let (core, root) = core_without_sandbox().await;
+    let (core, root) = test_core().await;
     let added = core.agent_custom_add("Fake", &fake.command_line()).unwrap();
     assert_eq!(state(&added), json!({ "state": "unknown" }));
 
@@ -569,7 +563,7 @@ async fn a_probe_marks_an_agent_that_answers_ready() {
 #[tokio::test]
 async fn a_probe_reports_sign_in_needed() {
     let fake = Fake::new(json!({ "auth": "required" }));
-    let (core, _root) = core_without_sandbox().await;
+    let (core, _root) = test_core().await;
     let added = core.agent_custom_add("Fake", &fake.command_line()).unwrap();
     let probed = within(core.agent_probe(&added.id)).await.unwrap();
     assert_eq!(state(&probed), json!({ "state": "signInNeeded" }));
@@ -582,7 +576,7 @@ async fn a_probe_of_an_agent_that_exits_reports_its_last_stderr_line() {
         "broken-agent",
         "echo starting >&2\necho broken setup. >&2\nexit 1",
     );
-    let (core, _root) = core_without_sandbox().await;
+    let (core, _root) = test_core().await;
     let added = core
         .agent_custom_add("Broken", &program.display().to_string())
         .unwrap();
@@ -611,7 +605,7 @@ async fn a_probe_with_no_answer_gives_up_after_the_limit() {
 async fn probing_an_agent_whose_command_is_gone_needs_no_probe() {
     let fake = Fake::new(json!({}));
     let program = fake.executable("gone-agent", "exit 0");
-    let (core, root) = core_without_sandbox().await;
+    let (core, root) = test_core().await;
     let added = core
         .agent_custom_add("Gone", &program.display().to_string())
         .unwrap();
@@ -624,7 +618,7 @@ async fn probing_an_agent_whose_command_is_gone_needs_no_probe() {
 
 #[tokio::test]
 async fn probing_an_unknown_agent_is_not_found() {
-    let (core, _root) = core_without_sandbox().await;
+    let (core, _root) = test_core().await;
     match core.agent_probe("nobody").await {
         Ok(status) => panic!("probed {}", status.id),
         Err(error) => assert_eq!(error.code, ErrorCode::NotFound),

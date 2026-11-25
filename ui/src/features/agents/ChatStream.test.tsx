@@ -152,13 +152,13 @@ test("the agent's own tool shows its status and content", () => {
   expect(screen.getByText("denied")).toBeTruthy();
 });
 
-test("a stored blocked-host notice shows its text, and an exited notice offers a new chat", () => {
+test("a stored notice of a kind no longer made shows its text, and an exited notice offers a new chat", () => {
   const props = show([
     {
       id: "n1",
       body: {
         type: "notice",
-        notice: { kind: "blockedHost", host: "x.io" },
+        notice: { kind: "unknown" },
         text: "The sandbox blocked x.io.",
       },
     },

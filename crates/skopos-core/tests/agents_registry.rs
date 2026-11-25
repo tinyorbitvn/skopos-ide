@@ -15,14 +15,6 @@ use skopos_core::paths::AppPaths;
 use skopos_core::tools::ToolsConfig;
 use tempfile::TempDir;
 
-const CLAUDE_HOSTS: [&str; 4] = [
-    "api.anthropic.com",
-    "claude.ai",
-    "platform.claude.com",
-    "claude.com",
-];
-const CODEX_HOSTS: [&str; 3] = ["api.openai.com", "chatgpt.com", "auth.openai.com"];
-
 /// A temp root with a home folder whose `bin/` is the core's PATH, and `marks/`, where
 /// each fake agent leaves a file named after it when it runs.
 struct Fixture {
@@ -137,7 +129,6 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
         Some("~/bin/claude · ACP adapter claude-agent-acp")
     );
     assert_eq!(claude.hint, None);
-    assert_eq!(claude.hosts, CLAUDE_HOSTS);
     assert!(!claude.custom);
     let codex = row(&statuses, "codex");
     assert_eq!(codex.state, AgentState::NotInstalled);
@@ -148,7 +139,6 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
             "Install codex-acp (npm install -g @agentclientprotocol/codex-acp), then check again."
         )
     );
-    assert_eq!(codex.hosts, CODEX_HOSTS);
     let opencode = row(&statuses, "opencode");
     assert_eq!(opencode.state, AgentState::Unknown);
     assert_eq!(
@@ -168,7 +158,6 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
     assert_eq!(mine.detail.as_deref(), Some("my-agent --acp"));
     assert_eq!(mine.hint, None);
     assert!(mine.custom);
-    assert!(mine.hosts.is_empty());
     // No agent is Ready before a probe and none was chosen, so none is the default yet.
     assert!(statuses.iter().all(|status| !status.is_default));
     assert!(fixture.nothing_ran());
@@ -234,12 +223,11 @@ async fn agents_off_path_are_found_in_the_known_folders_and_a_cli_names_its_miss
 }
 
 #[tokio::test]
-async fn an_agent_runs_from_its_real_path_with_its_cli_settings_and_environment() {
+async fn an_agent_runs_from_its_real_path_with_its_cli_and_environment() {
     let fixture = Fixture::new();
     let adapter = fixture.install_linked("claude-agent-acp");
     let cli = fixture.install_linked("claude");
     let core = fixture.core().await;
-    let home = fixture.home();
 
     let spec = core.agent_spec("claude").unwrap();
 
@@ -262,20 +250,6 @@ async fn an_agent_runs_from_its_real_path_with_its_cli_settings_and_environment(
     );
     // The detail line names the CLI where PATH has it.
     assert_eq!(spec.detail, "~/bin/claude · ACP adapter claude-agent-acp");
-    assert_eq!(
-        spec.settings,
-        [
-            home.join(".claude"),
-            home.join(".claude.json"),
-            home.join(".config/anthropic"),
-        ]
-    );
-    assert_eq!(spec.hosts, CLAUDE_HOSTS);
-    assert_eq!(
-        spec.key_vars,
-        ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]
-    );
-    assert_eq!(spec.install_paths, [real(&adapter), real(&cli)]);
     assert!(!spec.custom);
     assert!(fixture.nothing_ran());
     core.shutdown().await;
@@ -297,7 +271,7 @@ async fn an_agent_without_its_cli_gets_no_cli_variable() {
             "1".to_owned()
         )]
     );
-    assert_eq!(claude.install_paths, [real(&claude_adapter)]);
+    assert_eq!(claude.program, real(&claude_adapter));
     // Without `claude`, the detail line names the adapter.
     assert_eq!(
         claude.detail,
@@ -310,11 +284,7 @@ async fn an_agent_without_its_cli_gets_no_cli_variable() {
         spec.env,
         [("CODEX_PATH".to_owned(), real(&codex).display().to_string())]
     );
-    assert_eq!(spec.install_paths, [real(&codex_adapter), real(&codex)]);
     assert_eq!(spec.detail, "~/bin/codex · ACP adapter codex-acp");
-    assert_eq!(spec.settings, [fixture.home().join(".codex")]);
-    assert_eq!(spec.key_vars, ["OPENAI_API_KEY", "CODEX_API_KEY"]);
-    assert_eq!(spec.hosts, CODEX_HOSTS);
     assert!(fixture.nothing_ran());
     core.shutdown().await;
 }
@@ -325,7 +295,6 @@ async fn opencode_and_gemini_run_their_own_acp_mode() {
     let opencode = fixture.install("opencode");
     let gemini = fixture.install("gemini");
     let core = fixture.core().await;
-    let home = fixture.home();
 
     let spec = core.agent_spec("opencode").unwrap();
     assert_eq!(spec.name, "OpenCode");
@@ -333,17 +302,6 @@ async fn opencode_and_gemini_run_their_own_acp_mode() {
     assert_eq!(spec.args, ["acp"]);
     assert!(spec.env.is_empty());
     assert_eq!(spec.detail, "~/bin/opencode · built-in ACP");
-    assert_eq!(
-        spec.settings,
-        [
-            home.join(".config/opencode"),
-            home.join(".local/share/opencode"),
-            home.join(".cache/opencode"),
-        ]
-    );
-    assert_eq!(spec.hosts, ["opencode.ai"]);
-    assert!(spec.key_vars.is_empty());
-    assert_eq!(spec.install_paths, [real(&opencode)]);
 
     let spec = core.agent_spec("gemini").unwrap();
     assert_eq!(spec.name, "Gemini CLI");
@@ -351,16 +309,6 @@ async fn opencode_and_gemini_run_their_own_acp_mode() {
     assert_eq!(spec.args, ["--acp"]);
     assert!(spec.env.is_empty());
     assert_eq!(spec.detail, "~/bin/gemini · built-in ACP");
-    assert_eq!(spec.settings, [home.join(".gemini")]);
-    assert_eq!(
-        spec.hosts,
-        [
-            "generativelanguage.googleapis.com",
-            "cloudcode-pa.googleapis.com",
-            "oauth2.googleapis.com",
-        ]
-    );
-    assert_eq!(spec.key_vars, ["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
     assert!(fixture.nothing_ran());
     core.shutdown().await;
 }
@@ -491,11 +439,6 @@ async fn a_custom_command_is_split_like_a_shell_and_found_on_path_or_under_home(
         assert_eq!(spec.args, args, "{command}");
         assert_eq!(spec.detail, command);
         assert!(spec.env.is_empty(), "{command}");
-        // The sandbox gives the person's agents no settings and no provider host.
-        assert!(spec.settings.is_empty(), "{command}");
-        assert!(spec.hosts.is_empty(), "{command}");
-        assert!(spec.key_vars.is_empty(), "{command}");
-        assert_eq!(spec.install_paths, [program], "{command}");
         assert!(spec.custom);
     }
     assert!(fixture.nothing_ran());

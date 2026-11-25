@@ -1,6 +1,6 @@
 //! Chats end to end (agents spec §4.1, §4.3, §4.8, §6): fakekube, and the fake agent as a
-//! custom agent behind a shell that notes its process id and environment. The sandbox is off
-//! (R2) except in the last test, which runs only with `SKOPOS_SANDBOX_TEST=1`.
+//! custom agent behind a shell that notes its process id and environment. Agents run natively
+//! (native agents spec §4.2).
 #![cfg(unix)]
 
 mod support;
@@ -8,12 +8,9 @@ mod support;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use serde_json::{json, Value};
 use skopos_core::agents::approvals::{ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
-use skopos_core::agents::cli_login::{now_ms, KeychainLogin, KeychainSource};
 use skopos_core::agents::editor_tab::{EditorTab, EditorTabMode};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
 use skopos_core::agents::registry::AgentState;
@@ -39,16 +36,6 @@ const CANNOT_REOPEN: &str = "Fake can't reopen old chats. Start a new chat to co
 const WRAPPER: &str = "echo $$ > agent.pid; env > agent.env; exec \"$@\"";
 const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}"#;
 
-/// How a test starts the agent.
-enum Sandbox {
-    /// R2: directly, with the same environment, proxy and MCP endpoint.
-    Off,
-    /// Inside the machine's sandbox.
-    On,
-    /// The sandbox reads as not ready.
-    Unready,
-}
-
 struct Bench {
     core: AppCore,
     fake: FakeKube,
@@ -60,16 +47,7 @@ struct Bench {
 
 impl Bench {
     async fn new(script: Value) -> Bench {
-        Bench::with(script, Sandbox::Off).await
-    }
-
-    async fn with(script: Value, sandbox: Sandbox) -> Bench {
         let (core, fake, cluster, root) = connected_fake(FakeKubeConfig::default()).await;
-        match sandbox {
-            Sandbox::Off => core.agent_sandbox_off_for_test(),
-            Sandbox::On => {}
-            Sandbox::Unready => core.agent_sandbox_unready_for_test(),
-        }
         core.set_agent_app_binary_for_test(PathBuf::from(env!("CARGO_BIN_EXE_skopos-agent-host")));
         let agent = core
             .agent_custom_add("Fake", &fake_agent_command())
@@ -258,7 +236,7 @@ impl Events {
 }
 
 /// The fake agent's script and log are relative to its working directory, the agent's folder.
-/// They go as arguments: the agent's environment holds only spec §4.6's variables.
+/// They go as arguments, so the script and log do not depend on the agent's environment.
 fn fake_agent_command() -> String {
     shell_words::join([
         "sh",
@@ -334,19 +312,6 @@ fn change_of(event: &ChatEvent) -> Option<&ChangeCard> {
 
 fn is_waiting(event: &ChatEvent) -> bool {
     change_of(event).is_some_and(|card| card.state == ChangeState::Waiting)
-}
-
-fn notice_of(event: &ChatEvent) -> Option<&str> {
-    match event {
-        ChatEvent::Item {
-            item:
-                ChatItem {
-                    body: ChatItemBody::Notice { text, .. },
-                    ..
-                },
-        } => Some(text.as_str()),
-        _ => None,
-    }
 }
 
 fn agent_texts(items: &[ChatItem]) -> Vec<String> {
@@ -448,42 +413,6 @@ async fn mcp_answer(address: &str, first_line: &str) -> Option<String> {
         Ok(Err(_)) => None,
         Err(_) => panic!("the MCP endpoint neither answered nor closed within {WAIT:?}"),
     }
-}
-
-/// The proxy's port and token from the agent's `HTTPS_PROXY`.
-fn proxy_of(env: &str) -> (u16, String) {
-    let url = env
-        .lines()
-        .find_map(|line| line.strip_prefix("HTTPS_PROXY="))
-        .unwrap();
-    let (token, address) = url
-        .strip_prefix("http://skopos:")
-        .unwrap()
-        .split_once('@')
-        .unwrap();
-    let port = address
-        .strip_prefix("127.0.0.1:")
-        .unwrap()
-        .trim_end_matches('/')
-        .parse()
-        .unwrap();
-    (port, token.to_owned())
-}
-
-/// The first line of the proxy's answer to a `CONNECT <host>:443` with the chat's token.
-async fn connect_through(port: u16, token: &str, host: &str) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let credentials = STANDARD.encode(format!("skopos:{token}"));
-    let head = format!(
-        "CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\nProxy-Authorization: Basic {credentials}\r\n\r\n"
-    );
-    stream.write_all(head.as_bytes()).await.unwrap();
-    let mut lines = BufReader::new(stream).lines();
-    tokio::time::timeout(WAIT, lines.next_line())
-        .await
-        .expect("the proxy answers")
-        .unwrap()
-        .unwrap_or_default()
 }
 
 /// Whether `pid` runs; a zombie has ended.
@@ -850,134 +779,6 @@ async fn a_stored_chat_continues_through_session_load() {
     assert_eq!(bench.core.chat_list(&bench.scope()).unwrap().len(), 1);
 }
 
-/// The fake agent's sign-in, as a keychain item that `security` in `dir` prints.
-const FAKE_LOGIN: KeychainLogin = KeychainLogin {
-    service: "Fake-credentials",
-    var: "FAKE_OAUTH_TOKEN",
-    hint: "Run fake login, then send your message again.",
-};
-const HOUR_MS: i64 = 3_600_000;
-
-/// Has the chats read the fake agent's sign-in from a `security` in `dir`, which prints the
-/// item that `write_item` last wrote.
-fn fake_keychain(core: &AppCore, dir: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let security = dir.join("security");
-    let script = format!(
-        "#!/bin/sh\n[ \"$*\" = 'find-generic-password -s Fake-credentials -w' ] || exit 44\n\
-         cat '{}'\n",
-        dir.join("item").display()
-    );
-    std::fs::write(&security, script).unwrap();
-    std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o755)).unwrap();
-    core.set_agent_keychain_for_test(KeychainSource {
-        security,
-        login: FAKE_LOGIN,
-    });
-}
-
-fn write_item(dir: &std::path::Path, token: &str, ends_ms: i64) {
-    let item = json!({
-        "claudeAiOauth": { "accessToken": token, "refreshToken": "refresh", "expiresAt": ends_ms }
-    });
-    std::fs::write(dir.join("item"), item.to_string()).unwrap();
-}
-
-#[tokio::test]
-async fn a_chat_whose_sign_in_ran_out_reopens_with_the_keychain_s_new_one() {
-    let bench = Bench::new(script(vec![turn(vec![json!("signIn")])])).await;
-    let keychain = bench.root.path().join("keychain");
-    std::fs::create_dir_all(&keychain).unwrap();
-    fake_keychain(&bench.core, &keychain);
-    write_item(&keychain, "old-token", now_ms() - HOUR_MS);
-    let (info, mut events) = bench.start(MAIN).await;
-    assert!(!bench.agent_env().contains("FAKE_OAUTH_TOKEN"));
-    let first_agent = bench.agent_pid();
-    // Nothing newer in the keychain: the same agent answers, and the chat says how to renew.
-    bench.ask(&info.chat_id, "First question").await;
-    assert_eq!(
-        events.notices(),
-        ["Fake needs you to sign in. Run fake login, then send your message again."]
-    );
-    assert!(requests(&bench.log(), "session/load").is_empty());
-    assert_eq!(bench.agent_pid(), first_agent);
-    // The CLI renewed its sign-in: the next message reopens the agent with it, in this chat.
-    write_item(&keychain, "new-token", now_ms() + 8 * HOUR_MS);
-    bench.write_script(&script(vec![turn(vec![say("An answer.")])]));
-    bench.ask(&info.chat_id, "Second question").await;
-    let loads = requests(&bench.log(), "session/load");
-    assert_eq!(loads.len(), 1);
-    assert_eq!(
-        loads[0]["sessionId"],
-        bench
-            .core
-            .chat_get(&info.chat_id)
-            .unwrap()
-            .session_id
-            .unwrap()
-            .as_str()
-    );
-    assert!(bench
-        .agent_env()
-        .lines()
-        .any(|line| line == "FAKE_OAUTH_TOKEN=new-token"));
-    assert_ne!(bench.agent_pid(), first_agent);
-    wait_gone(first_agent).await;
-    assert_eq!(agent_texts(&events.items()), ["An answer."]);
-    assert_eq!(prompts(&bench.log()).last().unwrap(), &["Second question"]);
-    // The window saw one chat throughout.
-    events.drain();
-    assert!(!events
-        .seen
-        .iter()
-        .any(|event| matches!(event, ChatEvent::Closed { .. })));
-    // A token with time left is kept.
-    bench.ask(&info.chat_id, "Third question").await;
-    assert_eq!(requests(&bench.log(), "session/load").len(), 1);
-    let users = bench
-        .core
-        .chat_get(&info.chat_id)
-        .unwrap()
-        .items
-        .into_iter()
-        .filter(|item| matches!(item.body, ChatItemBody::User { .. }))
-        .count();
-    assert_eq!(users, 3);
-}
-
-#[tokio::test]
-async fn a_chat_whose_agent_refused_its_sign_in_reopens_with_another_one() {
-    let bench = Bench::new(script(vec![turn(vec![json!("signIn")])])).await;
-    let keychain = bench.root.path().join("keychain");
-    std::fs::create_dir_all(&keychain).unwrap();
-    fake_keychain(&bench.core, &keychain);
-    write_item(&keychain, "first-token", now_ms() + 8 * HOUR_MS);
-    let (info, mut events) = bench.start(MAIN).await;
-    assert!(bench
-        .agent_env()
-        .lines()
-        .any(|line| line == "FAKE_OAUTH_TOKEN=first-token"));
-    // Signed out elsewhere, say: the agent refuses a token that has time left.
-    bench.ask(&info.chat_id, "First question").await;
-    assert_eq!(
-        events.notices(),
-        ["Fake needs you to sign in. Run fake login, then send your message again."]
-    );
-    // The keychain still holds that token: the same agent gets the next message.
-    bench.ask(&info.chat_id, "Second question").await;
-    assert!(requests(&bench.log(), "session/load").is_empty());
-    // Signed in again: another token, and the chat reopens with it.
-    write_item(&keychain, "second-token", now_ms() + 8 * HOUR_MS);
-    bench.write_script(&script(vec![turn(vec![say("An answer.")])]));
-    bench.ask(&info.chat_id, "Third question").await;
-    assert_eq!(requests(&bench.log(), "session/load").len(), 1);
-    assert!(bench
-        .agent_env()
-        .lines()
-        .any(|line| line == "FAKE_OAUTH_TOKEN=second-token"));
-    assert_eq!(agent_texts(&events.items()), ["An answer."]);
-}
-
 #[tokio::test]
 async fn an_agent_that_cannot_reopen_chats_is_not_continued() {
     let no_load = json!({ "auth": "ok", "loadSession": false, "turns": [turn(vec![say("Hi.")])] });
@@ -1083,54 +884,6 @@ async fn the_mcp_endpoint_refuses_a_wrong_token() {
 }
 
 #[tokio::test]
-async fn a_blocked_host_reaches_the_stream_as_one_notice() {
-    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
-    let (info, mut events) = bench.start(MAIN).await;
-    let env = bench.agent_env();
-    let (port, token) = proxy_of(&env);
-    let refused = connect_through(port, &token, "blocked.example").await;
-    assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
-    events
-        .until("the blocked-host notice", |event| {
-            notice_of(event) == Some("The sandbox blocked blocked.example.")
-        })
-        .await;
-    let again = connect_through(port, &token, "blocked.example").await;
-    assert!(again.starts_with("HTTP/1.1 403"), "{again}");
-    bench.ask(&info.chat_id, "Hello").await;
-    assert_eq!(events.notices(), ["The sandbox blocked blocked.example."]);
-    // Spec §6.2: what the agent's environment holds.
-    let home = format!("HOME={}", bench.root.path().join("home").display());
-    let lines: Vec<&str> = env.lines().collect();
-    assert!(lines.contains(&"TERM=dumb"), "{env}");
-    assert!(lines.contains(&"NO_PROXY=localhost,127.0.0.1,::1"), "{env}");
-    assert!(lines.contains(&home.as_str()), "{env}");
-    assert!(
-        !lines
-            .iter()
-            .any(|line| line.starts_with("KUBECONFIG=") || line.starts_with("SKOPOS_AGENT_TOKEN=")),
-        "{env}"
-    );
-}
-
-#[tokio::test]
-async fn a_chat_does_not_start_without_a_ready_sandbox() {
-    let bench = Bench::with(script(Vec::new()), Sandbox::Unready).await;
-    let (sender, _events) = Events::new();
-    let error = bench
-        .core
-        .chat_start(bench.start_of(None), sender, MAIN)
-        .await
-        .unwrap_err();
-    assert_eq!(error.code, ErrorCode::InvalidInput);
-    assert_eq!(error.message, "The agent sandbox isn't ready.");
-    assert!(bench.log().is_empty());
-    assert!(!bench.agent_dir().join("agent.pid").exists());
-    assert_eq!(bench.run_folders(), 0);
-    assert_eq!(bench.core.session_count(), 0);
-}
-
-#[tokio::test]
 async fn a_chat_without_an_agent_starts_the_cluster_s_default() {
     let bench = Bench::new(script(Vec::new())).await;
     let mut settings = bench.core.cluster_settings_get(&bench.cluster);
@@ -1184,33 +937,28 @@ async fn calls_on_a_chat_that_is_not_running_say_not_found() {
 }
 
 #[tokio::test]
-async fn a_sandboxed_chat_reaches_the_tools_through_the_bridge() {
-    if std::env::var("SKOPOS_SANDBOX_TEST").as_deref() != Ok("1") {
-        eprintln!("skipped: set SKOPOS_SANDBOX_TEST=1");
-        return;
-    }
-    let bench = Bench::with(script(vec![turn(vec![list_pods()])]), Sandbox::On).await;
-    bench.fake.add_pod("default", "api-1");
-    let (info, mut events) = bench.start(MAIN).await;
-    let (address, _) = mcp_entry(&bench.log());
-    if cfg!(target_os = "linux") {
-        // R3: the agent dials the bridge's fixed port inside its own network namespace.
-        assert_eq!(address, "127.0.0.1:3129");
-    }
-    bench.ask(&info.chat_id, "Which Pods run?").await;
-    let items = events.items();
-    assert_eq!(
-        tool_results(&items),
-        [("List Pods · default".to_owned(), "1 Pod".to_owned())]
+async fn a_chat_s_agent_runs_natively_with_the_app_s_environment() {
+    // A variable only this test sets, so parallel tests do not see it.
+    std::env::set_var("SKOPOS_NATIVE_MARKER_7F3A", "seen");
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (info, _events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    assert!(env.contains("SKOPOS_NATIVE_MARKER_7F3A=seen"), "{env}");
+    let home = std::env::var("HOME").unwrap();
+    assert!(
+        env.lines().any(|line| line == format!("HOME={home}")),
+        "{env}"
     );
     assert!(
-        agent_texts(&items)
-            .iter()
-            .any(|text| text.starts_with("tool:list_objects:")),
-        "{items:#?}"
+        !env.lines().any(|line| line.starts_with("HTTPS_PROXY=")),
+        "{env}"
     );
-    bench.core.chat_close(&info.chat_id).await;
-    assert_eq!(bench.run_folders(), 0);
+    assert!(
+        env.lines()
+            .any(|line| line.starts_with("SKOPOS_AGENT_TOKEN=")),
+        "{env}"
+    );
 }
 
 fn create_tab(cluster: &ClusterId, yaml: &str) -> EditorTab {

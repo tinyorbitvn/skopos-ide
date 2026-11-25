@@ -395,6 +395,17 @@ async fn terminate_group(_child: &mut Child, _grace: Duration) -> bool {
     false
 }
 
+/// Pipes stdin, stdout and stderr, ends the child when its handle drops, and applies the
+/// platform's spawn settings: a new process group on Unix, no console window on Windows.
+pub(crate) fn configure_agent(command: &mut Command) {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    configure_platform(command);
+}
+
 #[cfg(unix)]
 fn configure_platform(command: &mut Command) {
     // Its own process group, which a stop then signals as a whole.

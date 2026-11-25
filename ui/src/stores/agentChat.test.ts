@@ -35,7 +35,6 @@ function row(partial: Partial<AgentStatus>): AgentStatus {
     hint: null,
     isDefault: true,
     custom: false,
-    hosts: [],
     ...partial,
   };
 }

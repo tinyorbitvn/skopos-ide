@@ -8,7 +8,6 @@ use skopos_core::agents::chats::{ChatSummary, StoredChat};
 use skopos_core::agents::editor_tab::EditorTab;
 use skopos_core::agents::events::{ChatEvent, ObjectRef};
 use skopos_core::agents::registry::AgentStatus;
-use skopos_core::agents::sandbox::SandboxStatus;
 use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
@@ -58,50 +57,6 @@ pub async fn agent_default_set(state: State<'_, AppState>, id: String) -> Result
 #[tauri::command]
 pub async fn agent_prefs(state: State<'_, AppState>) -> Result<AgentPrefs, IpcError> {
     Ok(state.core.agent_prefs())
-}
-
-#[tauri::command]
-pub async fn agent_domain_add(
-    state: State<'_, AppState>,
-    domain: String,
-) -> Result<AgentPrefs, IpcError> {
-    let core = state.core.clone();
-    blocking(move || core.agent_domain_add(&domain)).await
-}
-
-#[tauri::command]
-pub async fn agent_domain_remove(
-    state: State<'_, AppState>,
-    domain: String,
-) -> Result<AgentPrefs, IpcError> {
-    let core = state.core.clone();
-    blocking(move || core.agent_domain_remove(&domain)).await
-}
-
-#[tauri::command]
-pub async fn agent_folder_add(
-    state: State<'_, AppState>,
-    folder: String,
-) -> Result<AgentPrefs, IpcError> {
-    let core = state.core.clone();
-    blocking(move || core.agent_folder_add(&folder)).await
-}
-
-#[tauri::command]
-pub async fn agent_folder_remove(
-    state: State<'_, AppState>,
-    folder: String,
-) -> Result<AgentPrefs, IpcError> {
-    let core = state.core.clone();
-    blocking(move || core.agent_folder_remove(&folder)).await
-}
-
-#[tauri::command]
-pub async fn agent_sandbox_status(
-    state: State<'_, AppState>,
-    refresh: bool,
-) -> Result<SandboxStatus, IpcError> {
-    Ok(state.core.agent_sandbox_status(refresh).await)
 }
 
 #[tauri::command]

@@ -17,8 +17,4 @@ hint: string | null,
 /**
  * The agent new chats start with (spec §3.5).
  */
-isDefault: boolean, custom: boolean, 
-/**
- * Its provider's hosts, for the sandbox's Network rows. None for the person's agents.
- */
-hosts: Array<string>, };
+isDefault: boolean, custom: boolean, };

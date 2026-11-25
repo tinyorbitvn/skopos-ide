@@ -108,7 +108,8 @@ pub struct CustomAgent {
     pub command: String,
 }
 
-/// Preferences → Agents and Agent sandbox (agents spec §3.5, §4.8).
+/// Preferences → Agents (agents spec §3.5, §4.8). Files saved with the sandbox's `domains`
+/// and `folders` still read: serde ignores fields it does not know.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
@@ -117,11 +118,6 @@ pub struct AgentPrefs {
     pub default_agent: Option<String>,
     /// The agents the person added, in the order added.
     pub custom: Vec<CustomAgent>,
-    /// Domains every agent may reach besides its provider's, in lower case. Each one
-    /// allows its subdomains.
-    pub domains: Vec<String>,
-    /// Folders agents may read, as typed: `/x` or `~/x`.
-    pub folders: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, TS, PartialEq)]
@@ -154,7 +150,7 @@ pub struct Prefs {
     pub http_proxy: Option<String>,
     /// Look for a new release on launch and every 6 hours (in-app update spec D2).
     pub update_check: bool,
-    /// Preferences → Agents and Agent sandbox (agents spec §4.8). `prefs_set` keeps the
+    /// Preferences → Agents (agents spec §4.8). `prefs_set` keeps the
     /// saved value: only the agent calls change it.
     pub agents: AgentPrefs,
 }
@@ -299,15 +295,11 @@ mod tests {
                 name: "Mine".into(),
                 command: "my-agent --acp".into(),
             }],
-            domains: vec!["example.com".into()],
-            folders: vec!["~/code".into()],
         };
         let v = serde_json::to_value(&prefs).unwrap();
         assert_eq!(v["defaultAgent"], "codex");
         assert_eq!(v["custom"][0]["id"], "custom-0a1b2c3d");
         assert_eq!(v["custom"][0]["command"], "my-agent --acp");
-        assert_eq!(v["domains"][0], "example.com");
-        assert_eq!(v["folders"][0], "~/code");
 
         let settings = ClusterAgentSettings {
             changes: AgentChanges::ReadOnly,
@@ -401,5 +393,18 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidInput);
         assert_eq!(error.message, "Notes can have at most 4,000 characters.");
+    }
+
+    #[test]
+    fn old_agent_prefs_with_domains_and_folders_still_read() {
+        let text = r#"{"agents":{"defaultAgent":"claude","custom":[{"id":"custom-0000e2e0","name":"Fake","command":"fake --acp"}],"domains":["example.com"],"folders":["~/src"]}}"#;
+        let prefs: Prefs = serde_json::from_str(text).unwrap();
+        assert_eq!(prefs.agents.default_agent.as_deref(), Some("claude"));
+        assert_eq!(prefs.agents.custom.len(), 1);
+        let saved = serde_json::to_string(&prefs).unwrap();
+        assert!(
+            !saved.contains("domains") && !saved.contains("folders"),
+            "{saved}"
+        );
     }
 }

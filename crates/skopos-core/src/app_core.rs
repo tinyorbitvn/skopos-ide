@@ -131,8 +131,6 @@ struct Inner {
     home: PathBuf,
     /// The app's data folder; agents keep their folders and run folders under it.
     data: PathBuf,
-    /// R2: chats and probes start agents without the sandbox. Tests only.
-    agent_sandbox_off: std::sync::atomic::AtomicBool,
     portforwards: Arc<PortForwards>,
     tools: Tools,
     helm: Helm,
@@ -335,7 +333,6 @@ impl AppCore {
                 chats: crate::agents::chat::Chats::new(&paths.data),
                 home: paths.home.clone(),
                 data: paths.data.clone(),
-                agent_sandbox_off: std::sync::atomic::AtomicBool::new(false),
                 portforwards: Arc::new(PortForwards::new(portforward_definitions, events.clone())),
                 tools: Tools::new(&paths.data),
                 helm,
@@ -716,18 +713,6 @@ impl AppCore {
     /// The app's data folder.
     pub(crate) fn data_dir(&self) -> &Path {
         &self.inner.data
-    }
-
-    /// R2: chats and probes that start after this call run their agent directly, without the
-    /// sandbox, with the same environment, proxy and MCP endpoint. Tests only, like
-    /// `set_log_stream_cap_for_test`.
-    pub fn agent_sandbox_off_for_test(&self) {
-        self.inner.agent_sandbox_off.store(true, Ordering::Relaxed);
-    }
-
-    /// Whether `agent_sandbox_off_for_test` was called.
-    pub(crate) fn agent_sandbox_off(&self) -> bool {
-        self.inner.agent_sandbox_off.load(Ordering::Relaxed)
     }
 
     pub(crate) fn tools(&self) -> &Tools {

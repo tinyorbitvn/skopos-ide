@@ -36,7 +36,6 @@ const CLAUDE: AgentStatus = {
   hint: null,
   isDefault: true,
   custom: false,
-  hosts: [],
 };
 
 let channel: Channel | null = null;

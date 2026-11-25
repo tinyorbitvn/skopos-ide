@@ -166,18 +166,12 @@ async function startHelmFixture() {
   };
 }
 
-/**
- * The kind cluster and the scripted agent as the default agent, run without the sandbox:
- * the app inherits the switch from the launcher's environment.
- */
+/** The kind cluster and the scripted agent as the default agent, which runs natively. */
 async function startAgentsFixture() {
-  process.env.SKOPOS_E2E_AGENT_SANDBOX_OFF = "1";
   return {
     kubeconfigs: { kind: fs.readFileSync(KIND_KUBECONFIG, "utf8") },
     prefs: fakeAgentPrefs(),
-    async stop() {
-      delete process.env.SKOPOS_E2E_AGENT_SANDBOX_OFF;
-    },
+    async stop() {},
   };
 }
 

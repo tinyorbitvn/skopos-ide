@@ -25,7 +25,7 @@ httpProxy?: string | null,
  */
 updateCheck: boolean, 
 /**
- * Preferences → Agents and Agent sandbox (agents spec §4.8). `prefs_set` keeps the
+ * Preferences → Agents (agents spec §4.8). `prefs_set` keeps the
  * saved value: only the agent calls change it.
  */
 agents: AgentPrefs, };
