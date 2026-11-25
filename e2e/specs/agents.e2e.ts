@@ -1,4 +1,4 @@
-import { say, tool, writeFakeAgentScript } from "../helpers/fakeagent";
+import { permission, say, tool, writeFakeAgentScript } from "../helpers/fakeagent";
 import {
   createTestNamespace,
   deleteTestNamespace,
@@ -331,5 +331,37 @@ describe("agents", () => {
       "the proposal was never applied",
     );
     expect(await kubectl(["-n", NS, "get", "configmap", "e2e-proposed", "-o", "jsonpath={.data.source}"])).toBe("agent");
+  });
+
+  it("asks before the agent runs its own command and tells it the answer", async () => {
+    writeFakeAgentScript([
+      [permission("Run kubectl get pods", "kubectl get pods"), say("Allowed.")],
+      [permission("Delete the folder", "rm -rf build"), say("Rejected.")],
+    ]);
+    await openCluster(KIND);
+    await shown("agent-panel");
+    await newChat();
+    await send("List the pods.");
+    await shown("agent-permission");
+    await until(
+      async () => (await text("agent-permission")).includes("kubectl get pods"),
+      "the card did not show the command",
+    );
+    await until(
+      async () => (await text("agent-working")).includes("Waiting for you"),
+      "the agent did not say it waits",
+    );
+    await clickWhenShown("agent-permission-allow_once");
+    await until(
+      async () => (await text("agent-stream")).includes("Allowed."),
+      "no answer after Allow",
+    );
+    expect(await text("agent-permission")).toContain("Allowed once");
+    await send("Clean up.");
+    await clickWhenShown("agent-permission-reject_once");
+    await until(
+      async () => (await text("agent-stream")).includes("Rejected once"),
+      "the card never said Rejected once",
+    );
   });
 });

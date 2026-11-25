@@ -175,6 +175,12 @@ async function startAgentsFixture() {
   };
 }
 
+/** The smoke fixture's fake cluster and the scripted agent as the default agent. */
+async function startSmokeAgentFixture() {
+  const smoke = await startSmokeFixture();
+  return { ...smoke, prefs: fakeAgentPrefs() };
+}
+
 const MAP_NAMESPACE = "skopos-e2e-map";
 // The map's Argo CD objects, in a namespace of their own as Argo CD's are.
 const MAP_ARGO_NAMESPACE = "skopos-e2e-map-argocd";
@@ -504,6 +510,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   screens: { kubeconfigs: {}, start: startKindFixture },
   helm: { kubeconfigs: {}, start: startHelmFixture },
   agents: { kubeconfigs: {}, start: startAgentsFixture },
+  agent: { kubeconfigs: {}, start: startSmokeAgentFixture },
   // e2e/helpers/metrics.ts installs the providers in the spec, which needs a longer timeout.
   metrics: { kubeconfigs: {}, start: startKindFixture },
   map: { kubeconfigs: {}, start: startMapFixture },

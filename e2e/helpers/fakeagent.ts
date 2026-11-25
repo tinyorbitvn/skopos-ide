@@ -3,7 +3,12 @@ import path from "node:path";
 
 const REPO = path.resolve(__dirname, "..", "..");
 const DIR = path.join(REPO, "e2e", ".tmp", "fakeagent");
-const BINARY = path.join(REPO, "target", "debug", "skopos-fakeagent");
+const BINARY = path.join(
+  REPO,
+  "target",
+  "debug",
+  process.platform === "win32" ? "skopos-fakeagent.exe" : "skopos-fakeagent",
+);
 
 /** A custom agent's id: `custom-` and eight hex digits, as the core makes them. */
 export const FAKE_AGENT_ID = "custom-0000e2e0";
@@ -15,11 +20,17 @@ export const LOG = path.join(DIR, "agent.log");
 export type Step =
   | { say: string }
   | { tool: { name: string; args: Record<string, unknown> } }
-  | { sleep: number };
+  | { sleep: number }
+  | { permission: { title: string; kind?: string; command?: string } };
 
 export const say = (text: string): Step => ({ say: text });
 export const tool = (name: string, args: Record<string, unknown>): Step => ({
   tool: { name, args },
+});
+
+/** The agent asks to run `command`, waits for the answer, then plays the next step. */
+export const permission = (title: string, command: string): Step => ({
+  permission: { title, kind: "execute", command },
 });
 
 /**
@@ -49,7 +60,7 @@ export function fakeAgentPrefs(): Record<string, unknown> {
         {
           id: FAKE_AGENT_ID,
           name: FAKE_AGENT_NAME,
-          command: `${BINARY} --script ${SCRIPT} --log ${LOG}`,
+          command: `"${BINARY}" --script "${SCRIPT}" --log "${LOG}"`,
         },
       ],
     },

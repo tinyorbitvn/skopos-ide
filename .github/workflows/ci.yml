@@ -31,19 +31,12 @@ jobs:
     env:
       # The keychain test needs a keychain: macOS and Windows have one, Linux CI has no Secret Service.
       SKOPOS_KEYCHAIN_TEST: ${{ matrix.os != 'ubuntu-24.04' && '1' || '' }}
-      # The agent sandbox tests need bubblewrap (Linux) or Seatbelt (macOS); Windows runs no agents.
-      SKOPOS_SANDBOX_TEST: ${{ matrix.os != 'windows-2022' && '1' || '' }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      # Ubuntu 24.04's AppArmor keeps unprivileged users from creating user namespaces, which
-      # bubblewrap needs for the agent sandbox.
-      - name: Allow user namespaces
-        if: runner.os == 'Linux'
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Check
         run: make check
 
@@ -56,9 +49,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      # As in check: bubblewrap needs user namespaces for the agent sandbox.
-      - name: Allow user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: helm/kind-action@v1
         with:
           install_only: true
