@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Project site:** the landing page, the Metrics setup page and the Privacy page now draw the app's own icons, theSVG UI's filled drawings, in place of the thinner outline icons. Each feature card shows the icon the app shows for its subject, such as the dashboard of the Overview tab, the pen of an edit tab and the list of a resource tab.
+
 ## [0.14.1] - 2026-11-25
 
 - **The map rings the object you select:** on the resource map, the object you click, reach with the arrow keys or pick in the details panel gets a soft accent halo around its ring or box. The halo grows out of it and blinks three times, then stays while the object is selected, and clicking the object again plays it again. A selected box's line is also thicker. With reduced motion turned on, the halo shows at once and does not blink.

@@ -9,13 +9,13 @@ import {
   assertSafeOut,
   build,
   cli,
+  fillDrawing,
   formatDate,
   formatSize,
-  lucideNodes,
+  inlineIcons,
   parseRelease,
   pngSize,
   render,
-  sprite,
 } from "./build-site.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -175,8 +175,8 @@ describe("render", () => {
     const html = render(
       "{{release.version}}|{{release.tag}}|{{release.date}}|{{release.isoDate}}|{{release.url}}|" +
         "{{asset:x64-setup.exe:name}}|{{asset:x64-setup.exe:url}}|{{asset:x64-setup.exe:size}}|" +
-        "<img {{image:shot.png}}>|{{sprite}}",
-      { release, images, sprite: "<svg></svg>" },
+        "<img {{image:shot.png}}>",
+      { release, images },
     );
     assert.equal(
       html,
@@ -190,7 +190,6 @@ describe("render", () => {
         `${REPO_URL}/releases/download/v0.6.1/SkoposIDE_0.6.1_x64-setup.exe`,
         "9.8 MB",
         '<img src="images/shot.png" width="1440" height="900">',
-        "<svg></svg>",
       ].join("|"),
     );
   });
@@ -199,19 +198,18 @@ describe("render", () => {
     const html = render("<img {{image:shot.png}}>", {
       release,
       images: { "shot.png": { width: 800, height: 600 } },
-      sprite: "",
     });
     assert.equal(html, '<img src="images/shot.png" width="800" height="600">');
   });
 
   test("leads image paths back to the root from a page in a folder", () => {
-    const html = render("<img {{image:shot.png}}>", { release, images, sprite: "", base: "../" });
+    const html = render("<img {{image:shot.png}}>", { release, images, base: "../" });
     assert.equal(html, '<img src="../images/shot.png" width="1440" height="900">');
   });
 
   test("names the page in its errors", () => {
     assert.throws(
-      () => render("{{nope}}", { release, images, sprite: "", page: "docs/metrics.html" }),
+      () => render("{{nope}}", { release, images, page: "docs/metrics.html" }),
       /site\/docs\/metrics\.html: unknown placeholder \{\{nope\}\}/,
     );
   });
@@ -220,7 +218,6 @@ describe("render", () => {
     const html = render("{{release.date}}", {
       release: { ...release, date: `<b>&"'` },
       images,
-      sprite: "",
     });
     assert.equal(html, "&lt;b&gt;&amp;&quot;&#39;");
   });
@@ -238,7 +235,7 @@ describe("render", () => {
     ];
     for (const key of keys) {
       assert.throws(
-        () => render(`<p>{{${key}}}</p>`, { release, images, sprite: "" }),
+        () => render(`<p>{{${key}}}</p>`, { release, images }),
         (err) => err.message.includes(key),
         key,
       );
@@ -247,7 +244,7 @@ describe("render", () => {
 
   test("stops on a placeholder left open", () => {
     assert.throws(
-      () => render("<p>{{release.version</p>", { release, images, sprite: "" }),
+      () => render("<p>{{release.version</p>", { release, images }),
       /\{\{/,
     );
   });
@@ -273,7 +270,7 @@ describe("pngSize", () => {
     assert.throws(() => pngSize(Buffer.alloc(10)), /PNG/);
   });
 });
-const LUCIDE_ICONS = path.join(ROOT, "ui", "node_modules", "lucide-react", "dist", "esm", "icons");
+const THESVG_ICONS = path.join(ROOT, "ui", "node_modules", "@thesvg", "ui-react", "dist");
 const FONT_FILES = [
   "jetbrains-mono-latin-400-normal.woff2",
   "jetbrains-mono-latin-500-normal.woff2",
@@ -290,44 +287,79 @@ function tempOut() {
   return fs.mkdtempSync(path.join(base, "site-test-"));
 }
 
-function readLucide(name) {
-  const file = path.join(LUCIDE_ICONS, `${name}.mjs`);
+function readIcon(name) {
+  const file = path.join(THESVG_ICONS, `${name}.js`);
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
 }
 
+// The ids an HTML text defines, and the ids its url(#…) references name.
+function idsOf(html) {
+  return {
+    defined: [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]),
+    referenced: [...html.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]),
+  };
+}
+
 describe("icons", () => {
-  test("lucideNodes reads a Lucide icon's elements, without React keys", () => {
-    const nodes = lucideNodes(fs.readFileSync(path.join(LUCIDE_ICONS, "network.mjs"), "utf8"));
-    assert.deepEqual(
-      nodes.map((node) => node.tag),
-      ["rect", "rect", "rect", "path", "path"],
-    );
-    assert.deepEqual(nodes[0].attrs, [
-      ["x", "16"],
-      ["y", "16"],
-      ["width", "6"],
-      ["height", "6"],
-      ["rx", "1"],
-    ]);
-    for (const node of nodes) assert.ok(node.attrs.every(([name]) => name !== "key"));
-    assert.throws(() => lucideNodes("export default {};"), /no SVG elements/);
+  test("fillDrawing reads the fill look of a theSVG UI icon and the ids of its masks", () => {
+    const { html, ids } = fillDrawing(readIcon("download"));
+    assert.deepEqual(ids, ["download-fill-h0", "download-fill-h1", "download-fill-h2"]);
+    assert.deepEqual(idsOf(html).defined, ids);
+    assert.match(html, /^<defs><mask id="download-fill-h0"/);
+    assert.ok(!html.includes("download-outline"), "not the outline look");
   });
 
-  test("sprite strokes each Lucide icon and draws each name once", () => {
-    const svg = sprite(["download", "terminal", "download"], { readLucide });
-    assert.equal(svg.match(/<symbol /g).length, 2);
-    for (const name of ["download", "terminal"]) {
-      assert.match(
-        svg,
-        new RegExp(
-          `<symbol id="i-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">(<path d="[^"]+"/>)+</symbol>`,
+  test("fillDrawing refuses a module with no fill look, and markup other than shapes", () => {
+    const module = (markup) =>
+      `export const XFillIcon = /* @__PURE__ */ make(${JSON.stringify(markup)}, "XFillIcon", []);`;
+    assert.deepEqual(fillDrawing(module('<path d="M0 0L24 24"/>')), {
+      html: '<path d="M0 0L24 24"/>',
+      ids: [],
+    });
+    assert.throws(() => fillDrawing("export {};"), /no fill drawing/);
+    assert.throws(() => fillDrawing(module("<script>alert(1)</script>")), /<script> is not allowed/);
+    assert.throws(() => fillDrawing(module('<path d="M0 0" onclick="x()"/>')), /onclick is not allowed/);
+    assert.throws(() => fillDrawing(module('<image href="https://example.com/x.png"/>')), /<image> is not allowed/);
+  });
+
+  test("inlineIcons draws each icon in place, each copy with mask ids of its own", () => {
+    const html = inlineIcons(
+      '<a><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg></a>' +
+        '<svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>' +
+        '<svg class="icon icon--md" aria-hidden="true"><use href="#i-chevron-right"/></svg>',
+      { readIcon },
+    );
+    assert.ok(!html.includes("<use"));
+    assert.deepEqual(
+      [
+        ...html.matchAll(
+          /<svg class="([^"]+)" viewBox="0 0 24 24" overflow="visible" aria-hidden="true" data-icon="([a-z-]+)">/g,
         ),
-      );
-    }
-    assert.match(svg, /^<!-- [^>]*Lucide[^>]*ISC[^>]*-->\n<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">/);
+      ].map((m) => [m[1], m[2]]),
+      [
+        ["icon icon--sm", "download"],
+        ["icon", "download"],
+        ["icon icon--md", "chevron-right"],
+      ],
+    );
+    const { defined, referenced } = idsOf(html);
+    assert.equal(new Set(defined).size, defined.length, "ids are unique");
+    assert.ok(referenced.length > 0);
+    for (const id of referenced) assert.ok(defined.includes(id), id);
+  });
+
+  test("inlineIcons names the page and the icon it cannot draw", () => {
     assert.throws(
-      () => sprite(["no-such-icon"], { readLucide }),
-      /no-such-icon/,
+      () =>
+        inlineIcons('<svg class="icon" aria-hidden="true"><use href="#i-no-such-icon"/></svg>', {
+          readIcon,
+          page: "docs/metrics.html",
+        }),
+      /site\/docs\/metrics\.html: icon "no-such-icon" is not a theSVG UI icon/,
+    );
+    assert.throws(
+      () => inlineIcons('<svg class="icon"><use href="#i-download"/></svg>', { readIcon }),
+      /site\/index\.html: <use href="#i-download"\/> is not in the form/,
     );
   });
 });
@@ -423,10 +455,20 @@ describe("build", () => {
     }
   });
 
-  test("every icon the page uses has its symbol", () => {
-    const used = new Set([...html.matchAll(/href="#(i-[a-z0-9-]+)"/g)].map((m) => m[1]));
-    assert.ok(used.size > 0);
-    for (const id of used) assert.ok(html.includes(`<symbol id="${id}"`), id);
+  test("draws every icon inline as theSVG's fill drawing, with ids unique on its page", () => {
+    for (const page of ["index.html", "docs/metrics.html", "docs/privacy.html"]) {
+      const text = fs.readFileSync(path.join(out, ...page.split("/")), "utf8");
+      assert.ok(!text.includes("#i-"), page);
+      assert.ok(text.includes(' data-icon="'), page);
+      assert.match(
+        text,
+        /<!-- Icons: theSVG UI icons [^>]*\(MIT License, Copyright \(c\) 2025 thesvg\.org\)[^>]*-->/,
+        page,
+      );
+      const { defined, referenced } = idsOf(text);
+      assert.equal(new Set(defined).size, defined.length, `${page}: ids are unique`);
+      for (const id of referenced) assert.ok(defined.includes(id), `${page}: ${id}`);
+    }
   });
 
   test("copies the tokens, the five fonts, the icon and the two scripts, and writes no links", () => {
@@ -563,6 +605,30 @@ describe("page", () => {
       ],
     );
     assert.ok(html.includes('<script src="ribbon.js" defer></script>'));
+  });
+
+  test("gives each feature card the icon the app shows for its subject", () => {
+    const cards = [
+      ...template.matchAll(
+        /<article class="card [^"]+">[\s\S]*?<use href="#i-([a-z0-9-]+)"\/>[\s\S]*?<h3 class="card__title">([^<]+)<\/h3>/g,
+      ),
+    ];
+    assert.deepEqual(Object.fromEntries(cards.map((m) => [m[2], m[1]])), {
+      "Every kubeconfig, one catalog": "layout-grid", // the Catalog's hotbar button and tab
+      "YAML beside the API docs": "pen", // the dock's edit tab
+      "Tabs, splits and windows": "columns-2", // Split right
+      "A cluster at a glance": "layout-dashboard", // the Overview tab
+      "Node topology": "layout-grid", // the Node topology tab
+      "Logs, shell and port forward": "scroll-text", // the dock's logs tab
+      "Resource map": "network", // the Resource map command
+      "Metrics where you look": "activity", // the drawer's Summary
+      "Helm and Argo CD": "package", // the Helm section
+      "Live resource tables": "list", // a resource list's tab
+      "Filter by any column": "search", // the filter box above a list
+      "Keyboard first": "command", // the Command palette
+      "AI agents that ask first": "sparkles", // the agent panel
+      "Tauri 2 and a Rust core": "cpu",
+    });
   });
 
   test("lays the features out as fourteen cards, each with its canvas picture", () => {
@@ -703,7 +769,11 @@ describe("page", () => {
     assert.doesNotMatch(dialog[0], /\sopen[\s>]/);
     assert.match(dialog[1], /<button class="lightbox__close" type="button" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"\/><\/svg><\/button>/);
     assert.match(dialog[1], /<figcaption class="lightbox__caption" aria-hidden="true"><\/figcaption>/);
-    assert.ok(html.includes('<symbol id="i-x"'), "the close icon is in the sprite");
+    assert.match(
+      html,
+      /<button class="lightbox__close" type="button" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" overflow="visible" aria-hidden="true" data-icon="x">/,
+      "the close icon is drawn inline",
+    );
   });
 
   test("links the metrics docs from the menu, the metrics card and the footer", () => {
