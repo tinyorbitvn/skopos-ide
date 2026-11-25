@@ -262,6 +262,11 @@ fn cut_details(body: &mut ChatItemBody) {
             }
         },
         ChatItemBody::AgentTool { details, .. } => cut_text(details),
+        // A proposal's text can hold Secret values; only its card is saved (spec A12).
+        ChatItemBody::Proposal { card } => {
+            card.yaml.clear();
+            card.diff.clear();
+        }
         _ => {}
     }
 }
@@ -283,8 +288,10 @@ mod tests {
     use crate::agents::acp::ToolStatus;
     use crate::agents::approvals::{ChangeCard, ChangeState};
     use crate::agents::diff::{DiffKind, DiffLine};
+    use crate::agents::editor_tab::EditorTabMode;
     use crate::agents::events::ChatNotice;
     use crate::agents::mcp::cards::{CardTone, ToolCard};
+    use crate::agents::tabs::{ProposalCard, ProposalState};
 
     fn store() -> (tempfile::TempDir, ChatStore) {
         let dir = tempfile::tempdir().unwrap();
@@ -332,6 +339,7 @@ mod tests {
                 body: ChatItemBody::User {
                     text: format!("Chat {n}"),
                     object: None,
+                    tab: None,
                 },
             }],
         }
@@ -540,5 +548,50 @@ mod tests {
             serde_json::to_value(&read).unwrap(),
             serde_json::to_value(&saved).unwrap()
         );
+    }
+
+    #[test]
+    fn a_saved_proposal_keeps_its_card_but_not_its_text_or_diff() {
+        let (dir, store) = store();
+        let mut whole = chat(1, scope(&["c1"], false));
+        whole.items = vec![ChatItem {
+            id: "proposal:p1".to_owned(),
+            body: ChatItemBody::Proposal {
+                card: Box::new(ProposalCard {
+                    id: "p1".to_owned(),
+                    tab_id: "create-1".to_owned(),
+                    tab_title: "Create".to_owned(),
+                    cluster: "kind".to_owned(),
+                    cluster_id: "c1".to_owned(),
+                    mode: EditorTabMode::Create,
+                    target: None,
+                    summary: "Add a Secret".to_owned(),
+                    added: 1,
+                    removed: 0,
+                    state: ProposalState::Accepted,
+                    yaml: "stringData:\n  password: hunter2\n".to_owned(),
+                    diff: vec![DiffLine {
+                        kind: DiffKind::Added,
+                        text: "  password: hunter2".to_owned(),
+                    }],
+                }),
+            },
+        }];
+        store.save(&whole).unwrap();
+        let read = store.get(&id(1)).unwrap();
+        match &read.items[0].body {
+            ChatItemBody::Proposal { card } => {
+                assert_eq!(
+                    (card.summary.as_str(), card.state, card.added),
+                    ("Add a Secret", ProposalState::Accepted, 1)
+                );
+                assert!(card.yaml.is_empty() && card.diff.is_empty());
+            }
+            other => panic!("not a proposal: {other:?}"),
+        }
+        let file =
+            std::fs::read_to_string(dir.path().join("chats").join(format!("{}.json", id(1))))
+                .unwrap();
+        assert!(!file.contains("hunter2"));
     }
 }

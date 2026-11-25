@@ -63,6 +63,7 @@ async fn open(core: &AppCore, scope: ToolScope) -> Chat {
         scope,
         cards: cards_tx,
         gate: Arc::new(NoChanges),
+        tabs: skopos_core::agents::tabs::EditorTabs::new(tokio::sync::mpsc::channel(1).0),
     });
     let (server_end, client_end) = tokio::io::duplex(1 << 20);
     let stream: Box<dyn AsyncStream> = Box::new(server_end);

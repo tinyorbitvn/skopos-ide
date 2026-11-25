@@ -137,6 +137,33 @@ impl AppCore {
         }
     }
 
+    /// The person's answer to a YAML tab proposal (YAML authoring spec A4, A11).
+    pub async fn chat_proposal_answer(
+        &self,
+        chat_id: &str,
+        proposal_id: &str,
+        accepted: bool,
+    ) -> CoreResult<()> {
+        #[cfg(unix)]
+        {
+            running::proposal_answer(self, chat_id, proposal_id, accepted).await
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (chat_id, proposal_id, accepted);
+            Err(unsupported())
+        }
+    }
+
+    /// The tab closed (spec A6): it is no longer attached and its waiting proposal is marked.
+    /// A chat that is not running has nothing attached.
+    pub async fn chat_detach_tab(&self, chat_id: &str, tab_id: &str) {
+        #[cfg(unix)]
+        running::detach_tab(self, chat_id, tab_id).await;
+        #[cfg(not(unix))]
+        let _ = (chat_id, tab_id);
+    }
+
     /// `Undo` on a card approved for the chat: the cluster's changes ask again.
     pub fn chat_undo_standing(&self, chat_id: &str, cluster: &ClusterId) -> CoreResult<()> {
         #[cfg(unix)]
@@ -244,6 +271,7 @@ mod running {
         build_spec, direct_command, sandbox_command, ChatPorts, SandboxStatus, SpecInput, AGENT_MCP,
     };
     use crate::agents::settings::expand_home;
+    use crate::agents::tabs::{EditorTabs, ProposalCard};
     use crate::app_core::AppCore;
     use crate::catalog::ClusterSource;
     use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -503,6 +531,8 @@ mod running {
             cards,
             changes,
             blocked,
+            tabs,
+            proposals,
             cancel,
             guard: services_guard,
             tasks,
@@ -526,6 +556,7 @@ mod running {
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
             approvals,
+            tabs,
             feed,
             transcript: Mutex::new(Transcript::new(record)),
             store: chats.store.clone(),
@@ -549,6 +580,7 @@ mod running {
             updates,
             cards,
             changes,
+            proposals,
             blocked,
             feed: feed_receiver,
         };
@@ -691,6 +723,22 @@ mod running {
             .answer(card_id, answer)
     }
 
+    pub(super) async fn proposal_answer(
+        core: &AppCore,
+        chat_id: &str,
+        proposal_id: &str,
+        accepted: bool,
+    ) -> CoreResult<()> {
+        let chat = running_chat(core.chats(), chat_id)?;
+        chat.tabs.answer(proposal_id, accepted).await
+    }
+
+    pub(super) async fn detach_tab(core: &AppCore, chat_id: &str, tab_id: &str) {
+        if let Some(chat) = find(core.chats(), chat_id) {
+            chat.tabs.detach(tab_id).await;
+        }
+    }
+
     pub(super) fn undo_standing(
         core: &AppCore,
         chat_id: &str,
@@ -735,6 +783,8 @@ mod running {
         /// `None` once the chat closes.
         session: Mutex<Option<Arc<AcpSession>>>,
         approvals: Arc<Approvals>,
+        /// The YAML tab of this chat and its proposals.
+        tabs: Arc<EditorTabs>,
         feed: mpsc::Sender<Feed>,
         transcript: Mutex<Transcript>,
         store: Arc<ChatStore>,
@@ -794,6 +844,7 @@ mod running {
         updates: mpsc::Receiver<AcpUpdate>,
         cards: mpsc::Receiver<ToolCard>,
         changes: mpsc::Receiver<ChangeCard>,
+        proposals: mpsc::Receiver<ProposalCard>,
         blocked: mpsc::Receiver<String>,
         feed: mpsc::Receiver<Feed>,
     }
@@ -1064,6 +1115,10 @@ mod running {
                     let item = chat.apply(|transcript| transcript.change_card(card));
                     chat.deliver(ChatEvent::Item { item }).await;
                 }
+                Some(card) = inputs.proposals.recv() => {
+                    let item = chat.apply(|transcript| transcript.proposal_card(card));
+                    chat.deliver(ChatEvent::Item { item }).await;
+                }
                 Some(host) = inputs.blocked.recv() => {
                     if let Some(item) = chat.apply(|transcript| transcript.blocked(host)) {
                         chat.deliver(ChatEvent::Item { item }).await;
@@ -1225,6 +1280,8 @@ mod running {
         approvals: Arc<Approvals>,
         cards: mpsc::Receiver<ToolCard>,
         changes: mpsc::Receiver<ChangeCard>,
+        tabs: Arc<EditorTabs>,
+        proposals: mpsc::Receiver<ProposalCard>,
         blocked: mpsc::Receiver<String>,
         cancel: CancellationToken,
         /// Ends both services when the chat does not start.
@@ -1286,11 +1343,14 @@ mod running {
             scope: scope.clone(),
         });
         let (card_sender, cards) = mpsc::channel(CARD_BACKLOG);
+        let (proposal_sender, proposals) = mpsc::channel(CARD_BACKLOG);
+        let tabs = EditorTabs::new(proposal_sender);
         let context = Arc::new(ToolContext {
             core: core.clone(),
             scope,
             cards: card_sender,
             gate,
+            tabs: tabs.clone(),
         });
         let tools_task = tokio::spawn(serve_tools(
             tools_endpoint,
@@ -1304,6 +1364,8 @@ mod running {
             approvals,
             cards,
             changes,
+            tabs,
+            proposals,
             blocked,
             cancel,
             guard,
@@ -1518,7 +1580,11 @@ mod running {
                 self.chat.title = title_of(&text);
             }
             self.plan = None;
-            self.push(ChatItemBody::User { text, object })
+            self.push(ChatItemBody::User {
+                text,
+                object,
+                tab: None,
+            })
         }
 
         fn update(&mut self, update: AcpUpdate) -> Option<ChatItem> {
@@ -1589,6 +1655,15 @@ mod running {
             self.keyed(
                 format!("change:{}", card.id),
                 ChatItemBody::Change {
+                    card: Box::new(card),
+                },
+            )
+        }
+
+        fn proposal_card(&mut self, card: ProposalCard) -> ChatItem {
+            self.keyed(
+                format!("proposal:{}", card.id),
+                ChatItemBody::Proposal {
                     card: Box::new(card),
                 },
             )
@@ -1787,6 +1862,7 @@ mod running {
                     body: ChatItemBody::User {
                         text: "Hi".to_owned(),
                         object: None,
+                        tab: None,
                     },
                 },
                 ChatItem {

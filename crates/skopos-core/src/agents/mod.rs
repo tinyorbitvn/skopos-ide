@@ -22,6 +22,7 @@ pub mod proxy;
 pub mod registry;
 pub mod sandbox;
 pub mod settings;
+pub mod tabs;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

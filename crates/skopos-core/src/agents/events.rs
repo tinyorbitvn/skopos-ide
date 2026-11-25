@@ -6,7 +6,9 @@ use ts_rs::TS;
 
 use super::acp::{PlanEntry, ToolStatus};
 use super::approvals::ChangeCard;
+use super::editor_tab::TabChip;
 use super::mcp::cards::ToolCard;
+use super::tabs::ProposalCard;
 use crate::kubeconfig::ClusterId;
 
 /// One message on a chat's channel.
@@ -41,6 +43,10 @@ pub enum ChatItemBody {
     User {
         text: String,
         object: Option<ObjectRef>,
+        /// The YAML tab the message carried (YAML authoring spec A3).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        tab: Option<TabChip>,
     },
     /// The agent's message, whole as far as it has come.
     Agent { text: String },
@@ -56,6 +62,8 @@ pub enum ChatItemBody {
     },
     /// A change the agent asked for (spec §4.5).
     Change { card: Box<ChangeCard> },
+    /// A YAML tab proposal (YAML authoring spec A11).
+    Proposal { card: Box<ProposalCard> },
     /// One of the app's lines, with its text.
     Notice { notice: ChatNotice, text: String },
 }
@@ -224,6 +232,7 @@ mod tests {
                     namespace: Some("default".to_owned()),
                     name: "api".to_owned(),
                 }),
+                tab: None,
             },
         };
         assert_eq!(
@@ -294,5 +303,29 @@ mod tests {
         assert_eq!(written["body"]["type"], "tool");
         let back: ChatItem = serde_json::from_value(written.clone()).unwrap();
         assert_eq!(serde_json::to_value(&back).unwrap(), written);
+    }
+
+    #[test]
+    fn a_proposal_and_a_message_with_a_tab_serialize_with_their_tags() {
+        let user = ChatItemBody::User {
+            text: "add a probe".into(),
+            object: None,
+            tab: Some(TabChip {
+                tab_id: "t1".into(),
+                title: "Create".into(),
+            }),
+        };
+        assert_eq!(serde_json::to_value(&user).unwrap()["tab"]["tabId"], "t1");
+        let plain = ChatItemBody::User {
+            text: "hi".into(),
+            object: None,
+            tab: None,
+        };
+        assert!(serde_json::to_value(&plain).unwrap().get("tab").is_none());
+        let stored: ChatItemBody = serde_json::from_value(
+            serde_json::json!({ "type": "user", "text": "old", "object": null }),
+        )
+        .unwrap();
+        assert!(matches!(stored, ChatItemBody::User { tab: None, .. }));
     }
 }

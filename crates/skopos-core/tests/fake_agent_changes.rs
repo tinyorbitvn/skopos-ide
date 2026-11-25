@@ -250,6 +250,7 @@ impl Chat {
             scope,
             cards: tool_cards,
             gate,
+            tabs: skopos_core::agents::tabs::EditorTabs::new(tokio::sync::mpsc::channel(1).0),
         });
         let (server_end, client_end) = tokio::io::duplex(1 << 20);
         tokio::spawn(serve_mcp(Box::new(server_end), context));

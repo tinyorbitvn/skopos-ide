@@ -115,6 +115,8 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
           onUndo={() => props.onUndo(body.card)}
         />
       );
+    case "proposal":
+      return null;
     case "notice":
       return (
         <NoticeLine

@@ -522,7 +522,7 @@ async fn a_turn_streams_its_plan_and_one_growing_agent_message() {
     bench.ask(&info.chat_id, "How is api?").await;
     let items = events.items();
     assert!(
-        matches!(&items[0].body, ChatItemBody::User { text, object: None } if text == "How is api?"),
+        matches!(&items[0].body, ChatItemBody::User { text, object: None, .. } if text == "How is api?"),
         "{items:#?}"
     );
     let plans: Vec<Vec<String>> = items
@@ -661,7 +661,7 @@ async fn the_hidden_block_and_the_object_line_reach_the_agent_first() {
     assert_eq!(prompts[1], ["And now?"]);
     let items = events.items();
     assert!(
-        matches!(&items[0].body, ChatItemBody::User { text, object: Some(attached) }
+        matches!(&items[0].body, ChatItemBody::User { text, object: Some(attached), .. }
             if text == "Why is it slow?" && *attached == object),
         "{items:#?}"
     );
