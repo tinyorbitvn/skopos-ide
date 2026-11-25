@@ -109,6 +109,14 @@ export interface Scene {
   tree: GroupTree | null;
 }
 
+/** The room the view leaves around the drawing when it fits, and a whole-map export too. */
+export const FIT_PAD = 24;
+
+/** A bridge's via mark at zoom `k`: it keeps its size on screen, up to twice its own. */
+export function viaMark(k: number): { r: number; width: number } {
+  return { r: Math.min(4 / k, 8), width: Math.min(1.5 / k, 3) };
+}
+
 /**
  * An edge's style (spec E §8.1, O §5.1). An Application's `manages` is drawn like
  * ownership (spec §3.3).

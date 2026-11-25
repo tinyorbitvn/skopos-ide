@@ -1,9 +1,15 @@
-import { act, renderHook } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "../../design/Toast";
 import type { MapFormat } from "../../ipc/generated/MapFormat";
 import { flush, mockBackend } from "../../test/ipc";
-import { exportFileName, useMapExport } from "./ExportMenu";
+import { ExportMenu, exportFileName, useMapExport } from "./ExportMenu";
 import { renderMapPng } from "./exportMap";
 
 vi.mock("./exportMap", () => ({ renderMapPng: vi.fn() }));
@@ -47,8 +53,8 @@ describe("useMapExport", () => {
     const { result } = renderHook(() => useMapExport(canvas, "prod"));
 
     await act(async () => {
-      void result.current.exportAs("png");
-      void result.current.exportAs("pdf");
+      void result.current.exportAs("png", "view");
+      void result.current.exportAs("pdf", "whole");
       await flush();
     });
     expect(result.current.running).toBe(true);
@@ -56,20 +62,21 @@ describe("useMapExport", () => {
     expect(renderMapPng).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      void result.current.exportAs("pdf");
+      void result.current.exportAs("pdf", "whole");
       await flush();
     });
     expect(b.callsTo("map_export")).toHaveLength(1);
   });
 
-  it("gives the command the suggested name, format, image and scale, and no path", async () => {
+  it("draws the scope asked for and gives the command the suggested name, format, image and scale, and no path", async () => {
     const success = vi.spyOn(toast, "success");
     const b = mockBackend({
       map_export: () => "/home/me/chosen.pdf",
     });
     const { result } = renderHook(() => useMapExport(canvas, "prod"));
 
-    await act(() => result.current.exportAs("pdf"));
+    await act(() => result.current.exportAs("pdf", "whole"));
+    expect(renderMapPng).toHaveBeenCalledWith(canvas.current, "whole");
     const [call] = b.callsTo("map_export");
     expect(call).toEqual({
       suggestedName: "prod-map.pdf",
@@ -89,7 +96,7 @@ describe("useMapExport", () => {
     mockBackend({ map_export: () => null });
     const { result } = renderHook(() => useMapExport(canvas, "prod"));
 
-    await act(() => result.current.exportAs("png"));
+    await act(() => result.current.exportAs("png", "view"));
     expect(error).not.toHaveBeenCalled();
     expect(success).not.toHaveBeenCalled();
     expect(result.current.running).toBe(false);
@@ -106,7 +113,7 @@ describe("useMapExport", () => {
     );
     const { result } = renderHook(() => useMapExport(canvas, "prod"));
 
-    await act(() => result.current.exportAs("pdf"));
+    await act(() => result.current.exportAs("pdf", "view"));
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",
       "The webview could not draw the map as an image",
@@ -114,7 +121,7 @@ describe("useMapExport", () => {
     expect(b.callsTo("map_export")).toEqual([]);
     expect(result.current.running).toBe(false);
 
-    await act(() => result.current.exportAs("pdf"));
+    await act(() => result.current.exportAs("pdf", "view"));
     expect(success).toHaveBeenCalledWith(
       "Map exported as PDF",
       "/home/me/prod-map.pdf",
@@ -128,7 +135,7 @@ describe("useMapExport", () => {
       useMapExport({ current: null }, "prod"),
     );
 
-    await act(() => result.current.exportAs("png"));
+    await act(() => result.current.exportAs("png", "view"));
     expect(renderMapPng).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",
@@ -146,10 +153,50 @@ describe("useMapExport", () => {
     });
     const { result } = renderHook(() => useMapExport(canvas, "prod"));
 
-    await act(() => result.current.exportAs("png"));
+    await act(() => result.current.exportAs("png", "view"));
     expect(error).toHaveBeenCalledWith(
       "Could not export the map",
       "dialog unavailable",
     );
+  });
+});
+
+describe("ExportMenu", () => {
+  const canvas = { current: document.createElement("div") };
+  const labels = (testIds: string[]) =>
+    testIds.map((id) => screen.getByTestId(id).textContent);
+
+  it("asks for the whole map or the current view, then the format", async () => {
+    const b = mockBackend({ map_export: () => "/home/me/prod-map.png" });
+    render(<ExportMenu canvas={canvas} stem="prod" disabled={false} />);
+    const button = screen.getByTestId("map-export");
+    expect(button.getAttribute("title")).toBe(
+      "Save the whole map or the current view",
+    );
+    fireEvent.keyDown(button, { key: "Enter" });
+    expect(labels(["map-export-whole", "map-export-view"])).toEqual([
+      "Whole map",
+      "Current view",
+    ]);
+    expect(screen.queryByTestId("map-export-whole-png")).toBeNull();
+    fireEvent.keyDown(screen.getByTestId("map-export-view"), {
+      key: "ArrowRight",
+    });
+    await screen.findByTestId("map-export-view-png");
+    expect(labels(["map-export-view-png", "map-export-view-pdf"])).toEqual([
+      "PNG image",
+      "PDF document",
+    ]);
+    fireEvent.click(screen.getByTestId("map-export-view-png"));
+    await act(flush);
+    expect(renderMapPng).toHaveBeenCalledWith(canvas.current, "view");
+    expect(b.callsTo("map_export")).toEqual([
+      {
+        suggestedName: "prod-map.png",
+        format: "png",
+        png: IMAGE.png,
+        scale: IMAGE.scale,
+      },
+    ]);
   });
 });

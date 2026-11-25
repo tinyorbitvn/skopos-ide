@@ -1,6 +1,13 @@
 import manrope400 from "@fontsource/manrope/files/manrope-latin-400-normal.woff2?url";
 import manrope500 from "@fontsource/manrope/files/manrope-latin-500-normal.woff2?url";
 import manrope600 from "@fontsource/manrope/files/manrope-latin-600-normal.woff2?url";
+import { FIT_PAD, viaMark } from "./scene";
+
+/**
+ * What an export draws: `whole` is the whole drawing at 100% with the fit's room around
+ * it, wherever the view is; `view` is the canvas as the user sees it.
+ */
+export type MapScope = "whole" | "view";
 
 /** The most pixels an exported image holds; skopos-core's `write_map` checks the same (O22). */
 export const MAX_PIXELS = 16_777_216;
@@ -114,20 +121,39 @@ export interface ExportSvg {
   image: Size;
 }
 
+/** The drawing's extent, as MapCanvas writes it on its SVG: `x0 y0 x1 y1`. */
+function extentOf(svg: SVGSVGElement): [number, number, number, number] {
+  const values = (svg.getAttribute("data-extent") ?? "").split(" ").map(Number);
+  if (values.length !== 4 || !values.every(Number.isFinite)) {
+    throw new Error("The map is not drawn");
+  }
+  const [x0, y0, x1, y1] = values;
+  return [x0, y0, x1, y1];
+}
+
 /**
  * The canvas's SVG as a document of its own (spec O §6.3 steps 1–4): every element
  * carries its computed paint and type in `style` and no `class`; a rect in the canvas's
  * background colour comes first, then `fontFaces` in a `style`. The view box is the
  * CSS size and the width and height are the image's, so the webview draws the vectors
- * at the image's resolution rather than scaling a smaller bitmap.
+ * at the image's resolution rather than scaling a smaller bitmap. For the whole map, the
+ * CSS size is the drawing's extent with the fit's room around it, the drawing is moved
+ * there at zoom 1, and the via marks take their size at zoom 1.
  */
 export function mapSvgForExport(
   canvas: HTMLElement,
   fontFaces: string,
+  scope: MapScope,
 ): ExportSvg {
   const svg = canvas.querySelector<SVGSVGElement>(":scope > svg");
   if (!svg) throw new Error("The map is not drawn");
-  const { width, height } = svg.getBoundingClientRect();
+  const extent = scope === "whole" ? extentOf(svg) : null;
+  const { width, height } = extent
+    ? {
+        width: extent[2] - extent[0] + 2 * FIT_PAD,
+        height: extent[3] - extent[1] + 2 * FIT_PAD,
+      }
+    : svg.getBoundingClientRect();
   const scale = exportScale(width, height);
   const image = imageSize(width, height, scale);
 
@@ -142,6 +168,21 @@ export function mapSvgForExport(
     }
     target.removeAttribute("class");
   });
+  if (extent) {
+    copy
+      .querySelector(":scope > g")
+      ?.setAttribute(
+        "transform",
+        `translate(${FIT_PAD - extent[0]} ${FIT_PAD - extent[1]})`,
+      );
+    const { r, width: stroke } = viaMark(1);
+    for (const mark of copy.querySelectorAll<SVGElement>(
+      '[data-testid="map-via-mark"]',
+    )) {
+      mark.setAttribute("r", String(r));
+      mark.style.setProperty("stroke-width", String(stroke));
+    }
+  }
 
   copy.setAttributeNS(XMLNS_NS, "xmlns", SVG_NS);
   copy.setAttribute("width", String(image.width));
@@ -187,15 +228,18 @@ async function drawPng(svg: string, size: Size): Promise<string> {
 }
 
 /**
- * The map canvas as the user sees it, as a PNG (spec O §6.3, O21, O22): `png` is base64
- * without a `data:` prefix, and `scale` is the image's pixels per CSS pixel.
+ * The whole map, or the canvas as the user sees it, as a PNG (spec O §6.3, O21, O22):
+ * `png` is base64 without a `data:` prefix, and `scale` is the image's pixels per CSS
+ * pixel.
  */
 export async function renderMapPng(
   canvas: HTMLElement,
+  scope: MapScope,
 ): Promise<{ png: string; scale: number }> {
   const { svg, scale, image } = mapSvgForExport(
     canvas,
     await manropeFontFaces(),
+    scope,
   );
   const url = await drawPng(new XMLSerializer().serializeToString(svg), image);
   return { png: url.slice(url.indexOf(",") + 1), scale };
