@@ -72,7 +72,7 @@ function backend(overrides: Record<string, (args: never) => unknown> = {}) {
 
 async function show() {
   useDock.getState().open(TAB);
-  const view = render(<EditResourceTab tab={TAB} />);
+  const view = render(<EditResourceTab tab={TAB} resources={[]} />);
   await act(flush);
   return view;
 }
@@ -142,7 +142,7 @@ test("a cluster-scoped object is asked for without a namespace", async () => {
   const calls = backend();
   const tab = { ...TAB, namespace: undefined };
   useDock.getState().open(tab);
-  render(<EditResourceTab tab={tab} />);
+  render(<EditResourceTab tab={tab} resources={[]} />);
   await act(flush);
 
   expect(calls.callsTo("resource_get_yaml")[0].namespace).toBeNull();
@@ -438,7 +438,7 @@ test("unsaved edits survive the tab leaving the screen and coming back", async (
 
   edit(EDITED);
   view.unmount();
-  render(<EditResourceTab tab={TAB} />);
+  render(<EditResourceTab tab={TAB} resources={[]} />);
   await act(flush);
 
   expect(editor().value).toBe(EDITED);
@@ -460,7 +460,7 @@ test("a clean tab that comes back reads the object again", async () => {
   const view = await show();
 
   view.unmount();
-  render(<EditResourceTab tab={TAB} />);
+  render(<EditResourceTab tab={TAB} resources={[]} />);
   await act(flush);
 
   expect(calls.callsTo("resource_get_yaml")).toHaveLength(2);

@@ -3,6 +3,7 @@ import { stringify } from "yaml";
 import { Button, Dialog, ErrorNotice, Spinner } from "../../design";
 import { api } from "../../ipc/api";
 import { failureMessage, IpcFailure } from "../../ipc/client";
+import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ResourceRef } from "../../ipc/generated/ResourceRef";
 import {
   clearDraft,
@@ -51,6 +52,8 @@ function skeleton(
 /** Edits one object's YAML: PUT with its `resourceVersion`, and a dialog on a 409. */
 export function EditResourceTab(props: {
   tab: Extract<DockTab, { kind: "edit" }>;
+  /** The cluster's served resources. */
+  resources: ApiResourceInfo[];
 }) {
   const { id, clusterId, resource, namespace, name, title } = props.tab;
   const [restored] = useState(() => readDraft<EditDraft>(id));

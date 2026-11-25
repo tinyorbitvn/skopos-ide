@@ -67,7 +67,7 @@ function backend(
 
 function show() {
   useDock.getState().open(TAB);
-  return render(<CreateResourceTab tab={TAB} />);
+  return render(<CreateResourceTab tab={TAB} resources={[]} />);
 }
 
 function editor() {
@@ -98,7 +98,7 @@ function longData(): string {
 }
 
 function pickTemplate(id: string) {
-  fireEvent.keyDown(screen.getByTestId("create-template"), { key: "Enter" });
+  fireEvent.click(screen.getByTestId("create-template"));
   fireEvent.click(screen.getByTestId(`menu-item-${id}`));
 }
 
@@ -349,7 +349,7 @@ test("starts from a draft, unsaved, when another tab handed one over", () => {
   useDock.getState().open(TAB);
   writeDraft(TAB.id, { text: DOCUMENT, baseline: "", results: [] });
 
-  render(<CreateResourceTab tab={TAB} />);
+  render(<CreateResourceTab tab={TAB} resources={[]} />);
 
   expect(editor().value).toBe(DOCUMENT);
   expect(dirty()).toBe(true);
@@ -372,7 +372,7 @@ test("text and results survive the tab leaving the screen and coming back", asyn
   await act(flush);
 
   view.unmount();
-  render(<CreateResourceTab tab={TAB} />);
+  render(<CreateResourceTab tab={TAB} resources={[]} />);
 
   expect(editor().value).toBe(DOCUMENT);
   expect(screen.getByTestId("apply-result-0").textContent).toContain("denied");

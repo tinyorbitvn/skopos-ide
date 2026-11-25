@@ -606,13 +606,13 @@ export function detailsTab(
 }
 
 /** A new tab for creating resources. */
-export function newCreateTab(clusterId: string): DockTab {
+export function newCreateTab(clusterId: string, title = "Create"): DockTab {
   createTabs += 1;
   return {
     id: `create-${createTabs}`,
     kind: "create",
     clusterId,
-    title: "Create",
+    title,
     dirty: false,
   };
 }

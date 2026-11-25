@@ -1,8 +1,15 @@
-import { useEffect, useState } from "react";
-import { Badge, Button, ConfirmDialog, ErrorNotice, Menu } from "../../design";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  ErrorNotice,
+  PickerMenu,
+} from "../../design";
 import { ChevronDown } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage, IpcFailure } from "../../ipc/client";
+import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
 import type { ApplyResult } from "../../ipc/generated/ApplyResult";
 import {
   type DockTab,
@@ -13,7 +20,9 @@ import {
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { useCreateTarget } from "./apiDocsKind";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
-import { TEMPLATES } from "./templates/catalog";
+import { servedKinds } from "./servedKinds";
+import type { Template } from "./templates/catalog";
+import { templateSections } from "./templates/pickerSections";
 import { useYamlCheck } from "./useYamlCheck";
 import { yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
@@ -50,6 +59,7 @@ function resultLabel(result: ApplyResult): string {
 /** Applies multi-document YAML and reports each document on its own. */
 export function CreateResourceTab(props: {
   tab: Extract<DockTab, { kind: "create" }>;
+  resources: ApiResourceInfo[];
 }) {
   const { id, clusterId } = props.tab;
   const [restored] = useState(() => readDraft<CreateDraft>(id));
@@ -58,9 +68,8 @@ export function CreateResourceTab(props: {
   const [results, setResults] = useState(restored?.results ?? []);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
-  const [replacing, setReplacing] = useState<(typeof TEMPLATES)[number] | null>(
-    null,
-  );
+  const [replacing, setReplacing] = useState<Template | null>(null);
+  const served = useMemo(() => servedKinds(props.resources), [props.resources]);
   const [caret, setCaret] = useState(0);
   const target = useCreateTarget(text, caret);
 
@@ -76,7 +85,7 @@ export function CreateResourceTab(props: {
     writeDraft(id, { text, baseline, results } satisfies CreateDraft);
   }, [id, text, baseline, results]);
 
-  function fill(template: (typeof TEMPLATES)[number]): void {
+  function fill(template: Template): void {
     setText(template.yaml);
     setBaseline(template.yaml);
     setResults([]);
@@ -102,18 +111,26 @@ export function CreateResourceTab(props: {
   return (
     <div className={styles.tab}>
       <div className={styles.toolbar}>
-        <Menu
-          trigger={
-            <Button size="sm" data-testid="create-template">
+        <PickerMenu
+          label="Templates"
+          searchLabel="Search templates"
+          width={300}
+          testId="create-template-picker"
+          empty={(query) => `No template matches "${query}".`}
+          sections={templateSections(served, (template) =>
+            dirty ? setReplacing(template) : fill(template),
+          )}
+          trigger={({ open, toggle }) => (
+            <Button
+              size="sm"
+              aria-expanded={open}
+              onClick={toggle}
+              data-testid="create-template"
+            >
               Template
               <ChevronDown size={14} aria-hidden="true" />
             </Button>
-          }
-          items={TEMPLATES.map((template) => ({
-            id: template.id,
-            label: template.label,
-            onSelect: () => (dirty ? setReplacing(template) : fill(template)),
-          }))}
+          )}
         />
         <Button
           variant="primary"
