@@ -27,10 +27,13 @@
     isolation: isolate;
   }
 
+  /* Centered on the card's height: a GitHub topic page shows the repository's social preview
+     cropped to its middle 275 px band, about 88 to 541 px of this card. */
   .card__copy {
     position: absolute;
     z-index: 1;
-    top: 64px;
+    top: 50%;
+    transform: translateY(-50%);
     left: 72px;
     width: 520px;
     display: flex;
