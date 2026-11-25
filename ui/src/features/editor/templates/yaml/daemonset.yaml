@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: example
+spec:
+  selector:
+    matchLabels:
+      app: example
+  template:
+    metadata:
+      labels:
+        app: example
+    spec:
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10

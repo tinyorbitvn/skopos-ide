@@ -1,0 +1,12 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: example
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: main
+          image: registry.k8s.io/pause:3.10

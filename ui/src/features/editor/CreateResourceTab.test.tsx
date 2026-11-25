@@ -16,7 +16,7 @@ import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
 import { CreateResourceTab } from "./CreateResourceTab";
-import { TEMPLATES } from "./templates";
+import { TEMPLATES } from "./templates/catalog";
 import { CHECK_AT_ONCE_CHARS } from "./useYamlCheck";
 
 vi.mock("./YamlEditor", () => ({

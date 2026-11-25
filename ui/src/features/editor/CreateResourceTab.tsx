@@ -13,7 +13,7 @@ import {
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { useCreateTarget } from "./apiDocsKind";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
-import { TEMPLATES } from "./templates";
+import { TEMPLATES } from "./templates/catalog";
 import { useYamlCheck } from "./useYamlCheck";
 import { yamlProblem } from "./validate";
 import { YamlEditor } from "./YamlEditor";
