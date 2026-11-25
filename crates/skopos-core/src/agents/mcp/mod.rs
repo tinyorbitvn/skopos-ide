@@ -4,6 +4,7 @@
 pub mod cards;
 pub mod changes;
 pub mod kinds;
+mod propose;
 pub mod server;
 mod tools;
 pub mod trim;

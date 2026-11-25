@@ -86,7 +86,7 @@ fn exec_off_text(cluster: &str) -> String {
     format!("{cluster} doesn't let agents run commands in containers.")
 }
 
-fn not_connected_text(cluster: &str) -> String {
+pub(super) fn not_connected_text(cluster: &str) -> String {
     format!("{cluster} is not connected. Ask the person to connect it.")
 }
 
@@ -988,7 +988,7 @@ fn object_path(namespace: Option<&str>, name: &str) -> String {
 }
 
 /// The first line of the agent's summary, at most `SUMMARY_LIMIT` characters.
-fn one_line(summary: &str) -> String {
+pub(super) fn one_line(summary: &str) -> String {
     summary
         .lines()
         .next()

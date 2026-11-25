@@ -17,6 +17,7 @@ use skopos_core::agents::cli_login::{now_ms, KeychainLogin, KeychainSource};
 use skopos_core::agents::editor_tab::{EditorTab, EditorTabMode};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
 use skopos_core::agents::registry::AgentState;
+use skopos_core::agents::tabs::ProposalState;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::{CoreResult, ErrorCode};
 use skopos_core::kubeconfig::ClusterId;
@@ -1287,4 +1288,82 @@ async fn a_tab_outside_the_namespace_limit_or_too_large_is_refused() {
         "The tab's text is over 64 KiB, so it was not sent."
     );
     assert!(prompts(&bench.log()).is_empty());
+}
+
+#[tokio::test]
+async fn propose_yaml_shows_a_proposal_for_the_attached_tab() {
+    let proposal = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  a: b\n";
+    let bench = Bench::new(script(vec![
+        turn(vec![tool(
+            "propose_yaml",
+            json!({ "yaml": "kind: ConfigMap", "summary": "x" }),
+        )]),
+        turn(vec![tool(
+            "propose_yaml",
+            json!({ "yaml": proposal, "summary": "Add key a\nmore" }),
+        )]),
+    ]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "no tab").await;
+    let tab = create_tab(
+        &bench.cluster,
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n",
+    );
+    bench
+        .core
+        .chat_prompt(&info.chat_id, "add a key".into(), None, Some(tab))
+        .await
+        .unwrap();
+    let items = events.items();
+    let texts = agent_texts(&items);
+    assert!(
+        texts[0].starts_with("tool:propose_yaml:error: No YAML tab is attached to this chat"),
+        "{texts:?}"
+    );
+    assert_eq!(texts[1], "tool:propose_yaml:Shown to the person as a proposal for \"Create\"; they accept or reject it.");
+    let card = items
+        .iter()
+        .find_map(|item| match &item.body {
+            ChatItemBody::Proposal { card } => Some(card.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        (
+            card.summary.as_str(),
+            card.added,
+            card.removed,
+            card.yaml.as_str()
+        ),
+        ("Add key a", 2, 0, proposal)
+    );
+    assert_eq!(card.state, ProposalState::Waiting);
+    bench
+        .core
+        .chat_proposal_answer(&info.chat_id, &card.id, true)
+        .await
+        .unwrap();
+    events.until("accepted", |event| matches!(event, ChatEvent::Item { item } if matches!(&item.body, ChatItemBody::Proposal { card } if card.state == ProposalState::Accepted))).await;
+}
+
+#[tokio::test]
+async fn a_proposal_the_server_refuses_returns_its_message() {
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "propose_yaml",
+        json!({ "yaml": "apiVersion: e2e.invalid/v1\nkind: Nothing\nmetadata:\n  name: x\n", "summary": "x" }),
+    )])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let tab = create_tab(&bench.cluster, "");
+    bench
+        .core
+        .chat_prompt(&info.chat_id, "go".into(), None, Some(tab))
+        .await
+        .unwrap();
+    let texts = agent_texts(&events.items());
+    assert!(
+        texts[0].starts_with("tool:propose_yaml:error: Document 1 (Nothing x): "),
+        "{texts:?}"
+    );
 }

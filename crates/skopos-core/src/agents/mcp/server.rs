@@ -28,6 +28,7 @@ struct SkoposServer {
 fn tool_list(ctx: &ToolContext) -> Vec<Tool> {
     let mut tools = read_tool_list(ctx);
     tools.extend(super::changes::change_tools(ctx));
+    tools.push(super::propose::propose_tool());
     tools
 }
 
@@ -38,6 +39,9 @@ fn read_tool_list(ctx: &ToolContext) -> Vec<Tool> {
 /// Runs one tool call. A change tool goes to the gate whether or not this chat lists it, so a
 /// call to one that a setting took away is refused there with that setting's text (spec §4.5).
 async fn dispatch(ctx: &ToolContext, name: &str, args: JsonObject) -> CallToolResult {
+    if name == super::propose::PROPOSE_YAML {
+        return super::propose::call_propose(ctx, args).await;
+    }
     if super::changes::is_change_tool(name) {
         return super::changes::call_change_tool(ctx, name, args).await;
     }
