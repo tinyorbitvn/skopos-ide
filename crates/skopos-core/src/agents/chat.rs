@@ -190,6 +190,15 @@ impl AppCore {
         #[cfg(not(unix))]
         let _ = path;
     }
+
+    /// Chats read their agent's sign-in from `source`, whatever the agent and the machine.
+    /// Tests only.
+    pub fn set_agent_keychain_for_test(&self, source: crate::agents::cli_login::KeychainSource) {
+        #[cfg(unix)]
+        self.chats().set_keychain(source);
+        #[cfg(not(unix))]
+        let _ = source;
+    }
 }
 
 /// What every chat call answers on Windows.
@@ -219,7 +228,7 @@ mod running {
     use crate::agents::acp::{AcpSession, AcpUpdate, McpEntry, PlanEntry, StartError, TurnEnd};
     use crate::agents::approvals::{Approvals, ChangeAnswer, ChangeCard};
     use crate::agents::chats::{ChatStore, ChatSummary, StoredChat};
-    use crate::agents::cli_login;
+    use crate::agents::cli_login::{self, AccessToken, KeychainSource};
     use crate::agents::endpoint::{new_token, read_token_line, AsyncStream, Endpoint, Listen};
     use crate::agents::events::{ChatEvent, ChatItem, ChatItemBody, ChatNotice, ObjectRef};
     use crate::agents::mcp::cards::ToolCard;
@@ -277,6 +286,8 @@ mod running {
         owners: DashMap<String, Arc<tokio::sync::Mutex<()>>>,
         sandbox_unready: AtomicBool,
         app_binary: Mutex<Option<PathBuf>>,
+        /// Where every chat reads its agent's sign-in, in tests.
+        keychain: Mutex<Option<KeychainSource>>,
     }
 
     impl Chats {
@@ -289,6 +300,7 @@ mod running {
                 owners: DashMap::new(),
                 sandbox_unready: AtomicBool::new(false),
                 app_binary: Mutex::new(None),
+                keychain: Mutex::new(None),
             }
         }
 
@@ -298,6 +310,23 @@ mod running {
 
         pub(crate) fn set_app_binary(&self, path: PathBuf) {
             *lock(&self.app_binary) = Some(path);
+        }
+
+        pub(crate) fn set_keychain(&self, source: KeychainSource) {
+            *lock(&self.keychain) = Some(source);
+        }
+
+        /// Where `agent` takes its CLI's sign-in from: the macOS sandbox hides the keychains,
+        /// where Claude Code keeps it, so the app reads it and hands the agent its access token.
+        fn keychain_source(&self, agent: &AgentSpec, sandboxed: bool) -> Option<KeychainSource> {
+            let kept = lock(&self.keychain).clone();
+            if kept.is_some() {
+                return kept;
+            }
+            if !(sandboxed && cfg!(target_os = "macos")) {
+                return None;
+            }
+            KeychainSource::for_agent(agent, &|name: &str| std::env::var(name).ok())
         }
 
         /// The app's own binary, which the agent launches with `--agent-mcp`.
@@ -378,19 +407,21 @@ mod running {
         )
         .await?;
         let app_binary = chats.app_binary()?;
-        // The macOS sandbox hides the keychains, where Claude Code keeps its sign-in: the app
-        // reads it and hands the agent only its access token.
-        let login = if sandboxed && cfg!(target_os = "macos") {
-            cli_login::agent_login(
-                &agent,
-                &|name: &str| std::env::var(name).ok(),
-                Path::new(cli_login::SECURITY),
-                cli_login::now_ms(),
-            )
-            .await
-        } else {
-            None
+        let keychain = chats.keychain_source(&agent, sandboxed);
+        let handed = match &keychain {
+            Some(source) => source.token(cli_login::now_ms()).await,
+            None => None,
         };
+        if keychain.is_some() && handed.is_none() {
+            tracing::info!(
+                "chat {id}: the keychain has no current sign-in for {}",
+                agent.name
+            );
+        }
+        let login = keychain
+            .as_ref()
+            .zip(handed.as_ref())
+            .map(|(source, token)| (source.login.var.to_owned(), token.value.clone()));
         let command = agent_command(
             core,
             &agent,
@@ -481,7 +512,16 @@ mod running {
             id: id.clone(),
             owner: owner.to_owned(),
             agent_name: agent.name.clone(),
-            sign_in_hint: sign_in_hint(&agent),
+            sign_in_hint: keychain
+                .as_ref()
+                .map(|source| source.login.hint)
+                .or_else(|| sign_in_hint(&agent)),
+            renewal: keychain.map(|source| Renewal {
+                source,
+                handed,
+                refused: AtomicBool::new(false),
+            }),
+            renewing: AtomicBool::new(false),
             clusters,
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
@@ -532,15 +572,16 @@ mod running {
         if text.trim().is_empty() {
             return Err(invalid(EMPTY_MESSAGE));
         }
-        let chat = running_chat(core.chats(), chat_id)?;
+        let chat = renewed(core, running_chat(core.chats(), chat_id)?).await?;
         let line = match &object {
             Some(object) => Some(chat.line_for(object)?),
             None => None,
         };
-        if chat
-            .working
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
+        if chat.renewing.load(Ordering::SeqCst)
+            || chat
+                .working
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
         {
             return Err(IpcError::new(ErrorCode::Conflict, STILL_ANSWERING));
         }
@@ -572,6 +613,61 @@ mod running {
         // A turn cut short by a close drops `done`; the turn has ended either way.
         let _ = finished.await;
         Ok(())
+    }
+
+    /// The chat to prompt: `chat`, or `chat` reopened with its agent's new sign-in when the
+    /// token it was handed has run out or the agent refused it, and the keychain holds another,
+    /// current one. The reopened chat keeps the id and the events channel, so its window sees
+    /// one chat throughout.
+    async fn renewed(core: &AppCore, chat: Arc<Chat>) -> CoreResult<Arc<Chat>> {
+        let Some(renewal) = &chat.renewal else {
+            return Ok(chat);
+        };
+        let now = cli_login::now_ms();
+        let wanted = cli_login::needs_renewal(renewal.handed.as_ref(), now)
+            || renewal.refused.load(Ordering::SeqCst);
+        if !wanted || chat.working.load(Ordering::SeqCst) {
+            return Ok(chat);
+        }
+        let (scope, can_load) = chat.apply(|transcript| {
+            let stored = &transcript.chat;
+            (
+                stored.scope.clone(),
+                stored.can_load && stored.session_id.is_some(),
+            )
+        });
+        if !can_load {
+            return Ok(chat);
+        }
+        let Some(current) = renewal.source.token(now).await else {
+            return Ok(chat);
+        };
+        if renewal.handed.as_ref() == Some(&current) {
+            return Ok(chat);
+        }
+        if chat.renewing.swap(true, Ordering::SeqCst) {
+            return Err(IpcError::new(ErrorCode::Conflict, STILL_ANSWERING));
+        }
+        tracing::info!(
+            "chat {}: {} reopens with a new sign-in from the keychain",
+            chat.id,
+            chat.agent_name
+        );
+        let reopen = ChatStart {
+            scope,
+            agent: None,
+            continue_chat: Some(chat.id.clone()),
+        };
+        match start(core, reopen, chat.events.clone(), &chat.owner).await {
+            Ok(_) => running_chat(core.chats(), &chat.id),
+            Err(error) => {
+                let closed = ChatEvent::Closed {
+                    reason: Some(error.message.clone()),
+                };
+                let _ = tokio::time::timeout(CLOSING_SEND, chat.events.send(closed)).await;
+                Err(error)
+            }
+        }
     }
 
     pub(super) fn stop(core: &AppCore, chat_id: &str) {
@@ -630,6 +726,10 @@ mod running {
         agent_name: String,
         /// How to sign in to the agent, for a notice when a turn needs it.
         sign_in_hint: Option<&'static str>,
+        /// For an agent that has its CLI's sign-in from the keychain.
+        renewal: Option<Renewal>,
+        /// Set while the chat closes to reopen with a new sign-in.
+        renewing: AtomicBool,
         clusters: Vec<ScopeCluster>,
         global: bool,
         /// `None` once the chat closes.
@@ -658,6 +758,16 @@ mod running {
         turn_open: AtomicBool,
         stop_requested: AtomicBool,
         hidden_sent: AtomicBool,
+    }
+
+    /// Where a chat reads its agent's sign-in again, and the token the agent was handed
+    /// (`None`: none).
+    struct Renewal {
+        source: KeychainSource,
+        handed: Option<AccessToken>,
+        /// Set once the agent asked for a sign-in: the person may have signed in again, which
+        /// ends that token before its time.
+        refused: AtomicBool,
     }
 
     #[derive(Default)]
@@ -820,8 +930,11 @@ mod running {
         async fn finish(&self) {
             drop(lock(&self.guard).take());
             let reason = lock(&self.close_reason).take();
-            let closed = ChatEvent::Closed { reason };
-            let _ = tokio::time::timeout(CLOSING_SEND, self.events.send(closed)).await;
+            // A chat that reopens with a new sign-in stays open for its window.
+            if !self.renewing.load(Ordering::SeqCst) {
+                let closed = ChatEvent::Closed { reason };
+                let _ = tokio::time::timeout(CLOSING_SEND, self.events.send(closed)).await;
+            }
             self.done.cancel();
         }
 
@@ -879,6 +992,9 @@ mod running {
         // The close takes the session back whole once the turn is over.
         drop(session);
         let exited = matches!(end, TurnEnd::Exited(_));
+        if let (TurnEnd::SignInNeeded, Some(renewal)) = (&end, &chat.renewal) {
+            renewal.refused.store(true, Ordering::SeqCst);
+        }
         let notice = turn_notice(
             &end,
             chat.stop_requested.load(Ordering::SeqCst),
@@ -1196,8 +1312,7 @@ mod running {
     }
 
     /// The agent's command: inside the sandbox, or directly while it is off for tests (R2).
-    /// Either way the agent gets only spec §4.6's environment, with `login`, its CLI's
-    /// sign-in, as one of its provider keys.
+    /// Either way the agent gets only spec §4.6's environment, and `login`, its CLI's sign-in.
     #[allow(clippy::too_many_arguments)]
     fn agent_command(
         core: &AppCore,
@@ -1212,15 +1327,12 @@ mod running {
         let home = core.home_dir().to_path_buf();
         let prefs = core.prefs_get();
         let proxy = proxy_url(&wiring.token, wiring.ports.proxy);
-        let get = |name: &str| {
-            std::env::var(name).ok().or_else(|| {
-                login
-                    .as_ref()
-                    .filter(|(var, _)| var == name)
-                    .map(|(_, token)| token.clone())
-            })
-        };
-        let env = agent_env(&get, agent, &proxy, &run.join(TMP), &home);
+        let get = |name: &str| std::env::var(name).ok();
+        let mut env = agent_env(&get, agent, &proxy, &run.join(TMP), &home);
+        if let Some((var, token)) = login {
+            env.retain(|(name, _)| *name != var);
+            env.push((var, token));
+        }
         let catalog: Vec<PathBuf> = core
             .catalog_list()
             .into_iter()

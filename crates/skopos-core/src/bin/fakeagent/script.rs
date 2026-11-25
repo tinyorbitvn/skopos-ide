@@ -41,7 +41,8 @@ pub struct Turn {
     pub steps: Vec<Step>,
 }
 
-/// One step of a turn, written as a one-key object such as `{ "say": "text" }`.
+/// One step of a turn, written as a one-key object such as `{ "say": "text" }`, or as
+/// `"signIn"`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Step {
@@ -59,6 +60,8 @@ pub enum Step {
     Sleep(u64),
     /// Ends the turn with this stop reason.
     Stop(StopKind),
+    /// Fails the prompt with ACP's authentication-required error.
+    SignIn,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -238,7 +241,8 @@ mod tests {
                     { "content": "c", "status": "completed" } ] },
                 { "sleep": 250 },
                 { "tool": { "name": "list_kinds" } },
-                { "ownTool": { "title": "Edit a.txt" } }
+                { "ownTool": { "title": "Edit a.txt" } },
+                "signIn"
             ] } ] }"#,
         )
         .unwrap();
@@ -267,6 +271,7 @@ mod tests {
                     title: "Edit a.txt".to_owned(),
                     permission: false,
                 }),
+                Step::SignIn,
             ]
         );
     }

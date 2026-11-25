@@ -32,6 +32,13 @@ use crate::script::{
 /// leave stdout.
 const EXIT_PAUSE: Duration = Duration::from_millis(200);
 
+/// How a played turn ends its prompt.
+enum Played {
+    Stop(StopReason),
+    /// With ACP's authentication-required error.
+    SignIn,
+}
+
 pub struct Fake {
     script: Script,
     log: Option<Mutex<File>>,
@@ -122,12 +129,12 @@ impl Fake {
         self.send(cx, session, SessionUpdate::AgentMessageChunk(chunk))
     }
 
-    /// Plays the next turn of the script and returns its stop reason.
+    /// Plays the next turn of the script and returns how it ended.
     async fn play_turn(
         &self,
         cx: &ConnectionTo<Client>,
         session: &SessionId,
-    ) -> Result<StopReason, Error> {
+    ) -> Result<Played, Error> {
         let index = self.next_turn.fetch_add(1, Ordering::SeqCst);
         let steps = self
             .script
@@ -137,7 +144,7 @@ impl Fake {
             .unwrap_or_default();
         for step in steps {
             if self.is_cancelled() {
-                return Ok(StopReason::Cancelled);
+                return Ok(Played::Stop(StopReason::Cancelled));
             }
             match step {
                 Step::Plan(items) => self.send(cx, session, SessionUpdate::Plan(plan(&items)))?,
@@ -150,14 +157,15 @@ impl Fake {
                     std::process::exit(code);
                 }
                 Step::Sleep(millis) => self.sleep(Duration::from_millis(millis)).await,
-                Step::Stop(kind) => return Ok(stop_reason(kind)),
+                Step::Stop(kind) => return Ok(Played::Stop(stop_reason(kind))),
+                Step::SignIn => return Ok(Played::SignIn),
             }
         }
-        Ok(if self.is_cancelled() {
+        Ok(Played::Stop(if self.is_cancelled() {
             StopReason::Cancelled
         } else {
             StopReason::EndTurn
-        })
+        }))
     }
 
     /// Waits `time`, or until `session/cancel` arrives.
@@ -333,8 +341,10 @@ pub async fn run(fake: Arc<Fake>) -> Result<(), Error> {
                 // The turn runs beside the dispatch loop, which stays free for
                 // `session/cancel` and the answers to permission requests.
                 cx.spawn(async move {
-                    let stop = fake.play_turn(&turn_cx, &request.session_id).await?;
-                    responder.respond(PromptResponse::new(stop))
+                    match fake.play_turn(&turn_cx, &request.session_id).await? {
+                        Played::Stop(stop) => responder.respond(PromptResponse::new(stop)),
+                        Played::SignIn => responder.respond_with_error(Error::auth_required()),
+                    }
                 })
             },
             agent_client_protocol::on_receive_request!(),

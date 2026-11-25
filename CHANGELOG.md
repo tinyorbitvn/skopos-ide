@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **A chat with Claude stays signed in on macOS:** a chat no longer asks you to sign in once the Claude Code sign-in it started with runs out, after about eight hours. Before your next message, SkoposIDE takes Claude Code's renewed sign-in from the Keychain and reopens Claude in the same chat. When the Keychain has nothing newer either, the chat says to run claude in a terminal to renew it, then send your message again.
+
 ## [0.13.2] - 2026-11-24
 
 - **Claude uses your Claude Code sign-in on macOS:** a chat with Claude on macOS uses the sign-in of the Claude Code you signed in to on this Mac, where it said only Authentication required before. SkoposIDE reads Claude Code's sign-in from the Keychain itself and hands Claude only its access token; agents still cannot read the Keychain. When that token has run out, the chat asks you to sign in: run claude in a terminal, then start a new chat.

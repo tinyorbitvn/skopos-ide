@@ -66,6 +66,7 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         keychain_login: Some(KeychainLogin {
             service: "Claude Code-credentials",
             var: "CLAUDE_CODE_OAUTH_TOKEN",
+            hint: "Run claude in a terminal to renew its sign-in, then send your message again.",
         }),
     },
     AgentDef {
@@ -711,6 +712,8 @@ mod tests {
             Some(&KeychainLogin {
                 service: "Claude Code-credentials",
                 var: "CLAUDE_CODE_OAUTH_TOKEN",
+                hint:
+                    "Run claude in a terminal to renew its sign-in, then send your message again.",
             })
         );
         agent.id = "codex".to_owned();

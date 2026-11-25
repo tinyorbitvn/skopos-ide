@@ -13,6 +13,7 @@ use base64::Engine;
 use serde_json::{json, Value};
 use skopos_core::agents::approvals::{ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
+use skopos_core::agents::cli_login::{now_ms, KeychainLogin, KeychainSource};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
 use skopos_core::agents::registry::AgentState;
 use skopos_core::app_core::AppCore;
@@ -844,6 +845,134 @@ async fn a_stored_chat_continues_through_session_load() {
     assert_eq!(stored.items.len(), first_items.len() + new_items.len());
     assert_eq!(stored.title, "First question");
     assert_eq!(bench.core.chat_list(&bench.scope()).unwrap().len(), 1);
+}
+
+/// The fake agent's sign-in, as a keychain item that `security` in `dir` prints.
+const FAKE_LOGIN: KeychainLogin = KeychainLogin {
+    service: "Fake-credentials",
+    var: "FAKE_OAUTH_TOKEN",
+    hint: "Run fake login, then send your message again.",
+};
+const HOUR_MS: i64 = 3_600_000;
+
+/// Has the chats read the fake agent's sign-in from a `security` in `dir`, which prints the
+/// item that `write_item` last wrote.
+fn fake_keychain(core: &AppCore, dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let security = dir.join("security");
+    let script = format!(
+        "#!/bin/sh\n[ \"$*\" = 'find-generic-password -s Fake-credentials -w' ] || exit 44\n\
+         cat '{}'\n",
+        dir.join("item").display()
+    );
+    std::fs::write(&security, script).unwrap();
+    std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o755)).unwrap();
+    core.set_agent_keychain_for_test(KeychainSource {
+        security,
+        login: FAKE_LOGIN,
+    });
+}
+
+fn write_item(dir: &std::path::Path, token: &str, ends_ms: i64) {
+    let item = json!({
+        "claudeAiOauth": { "accessToken": token, "refreshToken": "refresh", "expiresAt": ends_ms }
+    });
+    std::fs::write(dir.join("item"), item.to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn a_chat_whose_sign_in_ran_out_reopens_with_the_keychain_s_new_one() {
+    let bench = Bench::new(script(vec![turn(vec![json!("signIn")])])).await;
+    let keychain = bench.root.path().join("keychain");
+    std::fs::create_dir_all(&keychain).unwrap();
+    fake_keychain(&bench.core, &keychain);
+    write_item(&keychain, "old-token", now_ms() - HOUR_MS);
+    let (info, mut events) = bench.start(MAIN).await;
+    assert!(!bench.agent_env().contains("FAKE_OAUTH_TOKEN"));
+    let first_agent = bench.agent_pid();
+    // Nothing newer in the keychain: the same agent answers, and the chat says how to renew.
+    bench.ask(&info.chat_id, "First question").await;
+    assert_eq!(
+        events.notices(),
+        ["Fake needs you to sign in. Run fake login, then send your message again."]
+    );
+    assert!(requests(&bench.log(), "session/load").is_empty());
+    assert_eq!(bench.agent_pid(), first_agent);
+    // The CLI renewed its sign-in: the next message reopens the agent with it, in this chat.
+    write_item(&keychain, "new-token", now_ms() + 8 * HOUR_MS);
+    bench.write_script(&script(vec![turn(vec![say("An answer.")])]));
+    bench.ask(&info.chat_id, "Second question").await;
+    let loads = requests(&bench.log(), "session/load");
+    assert_eq!(loads.len(), 1);
+    assert_eq!(
+        loads[0]["sessionId"],
+        bench
+            .core
+            .chat_get(&info.chat_id)
+            .unwrap()
+            .session_id
+            .unwrap()
+            .as_str()
+    );
+    assert!(bench
+        .agent_env()
+        .lines()
+        .any(|line| line == "FAKE_OAUTH_TOKEN=new-token"));
+    assert_ne!(bench.agent_pid(), first_agent);
+    wait_gone(first_agent).await;
+    assert_eq!(agent_texts(&events.items()), ["An answer."]);
+    assert_eq!(prompts(&bench.log()).last().unwrap(), &["Second question"]);
+    // The window saw one chat throughout.
+    events.drain();
+    assert!(!events
+        .seen
+        .iter()
+        .any(|event| matches!(event, ChatEvent::Closed { .. })));
+    // A token with time left is kept.
+    bench.ask(&info.chat_id, "Third question").await;
+    assert_eq!(requests(&bench.log(), "session/load").len(), 1);
+    let users = bench
+        .core
+        .chat_get(&info.chat_id)
+        .unwrap()
+        .items
+        .into_iter()
+        .filter(|item| matches!(item.body, ChatItemBody::User { .. }))
+        .count();
+    assert_eq!(users, 3);
+}
+
+#[tokio::test]
+async fn a_chat_whose_agent_refused_its_sign_in_reopens_with_another_one() {
+    let bench = Bench::new(script(vec![turn(vec![json!("signIn")])])).await;
+    let keychain = bench.root.path().join("keychain");
+    std::fs::create_dir_all(&keychain).unwrap();
+    fake_keychain(&bench.core, &keychain);
+    write_item(&keychain, "first-token", now_ms() + 8 * HOUR_MS);
+    let (info, mut events) = bench.start(MAIN).await;
+    assert!(bench
+        .agent_env()
+        .lines()
+        .any(|line| line == "FAKE_OAUTH_TOKEN=first-token"));
+    // Signed out elsewhere, say: the agent refuses a token that has time left.
+    bench.ask(&info.chat_id, "First question").await;
+    assert_eq!(
+        events.notices(),
+        ["Fake needs you to sign in. Run fake login, then send your message again."]
+    );
+    // The keychain still holds that token: the same agent gets the next message.
+    bench.ask(&info.chat_id, "Second question").await;
+    assert!(requests(&bench.log(), "session/load").is_empty());
+    // Signed in again: another token, and the chat reopens with it.
+    write_item(&keychain, "second-token", now_ms() + 8 * HOUR_MS);
+    bench.write_script(&script(vec![turn(vec![say("An answer.")])]));
+    bench.ask(&info.chat_id, "Third question").await;
+    assert_eq!(requests(&bench.log(), "session/load").len(), 1);
+    assert!(bench
+        .agent_env()
+        .lines()
+        .any(|line| line == "FAKE_OAUTH_TOKEN=second-token"));
+    assert_eq!(agent_texts(&events.items()), ["An answer."]);
 }
 
 #[tokio::test]
