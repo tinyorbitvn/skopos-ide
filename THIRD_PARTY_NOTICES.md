@@ -127,7 +127,8 @@ MIT:
 - `@tauri-apps/plugin-clipboard-manager`, `@tauri-apps/plugin-dialog`: Copyright 2019-2022, The
   Tauri Programme in the Commons Conservancy
 - `@thesvg/ui-react`: Copyright (c) 2025 thesvg.org. The app's icons are theSVG UI's drawings,
-  from `@thesvg/ui-react`.
+  from `@thesvg/ui-react`. The project site draws the same drawings: `scripts/build-site.mjs`
+  copies their fill look from the package into its pages.
 - `@xterm/xterm`, `@xterm/addon-fit`: Copyright (c) 2017-2019, The xterm.js authors; Copyright
   (c) 2014-2016, SourceLair Private Company; Copyright (c) 2012-2013, Christopher Jeffrey
 - `aria-hidden`, `react-remove-scroll`, `react-remove-scroll-bar`, `react-style-singleton`,
@@ -150,7 +151,7 @@ ISC:
 
 - `lucide-react`: Copyright (c) 2026 Lucide Icons and Contributors. The resource map's Gateway,
   HTTPRoute, GatewayClass, ApplicationSet and AppProject icons put a Lucide glyph in the frame of
-  the Kubernetes Ingress icon, and the project site draws Lucide's icons.
+  the Kubernetes Ingress icon.
 - `yaml`: Copyright Eemeli Aro
 
 Apache-2.0, text under [License texts](#license-texts):

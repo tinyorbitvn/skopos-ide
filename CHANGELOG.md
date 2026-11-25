@@ -10,6 +10,7 @@ release notes (see `docs/releasing.md`).
 - **New tab button on the dock:** a `+` after the last dock tab opens a searchable list: a blank YAML tab, Draft with AI and a terminal session first, then every template by group.
 - **Field hints in the YAML editor:** hovering a key shows its type, default, values and description from the cluster's API docs, and completion lists the fields that fit where the caret is, their values, and the kinds and versions the cluster serves.
 - **AI in YAML tabs:** Ask AI in a create or edit tab sends the tab's text to the agent, which proposes new text. The tab shows the proposal as a diff to accept or reject, and Secret values stay hidden from the agent when the cluster hides them.
+- **Project site:** the landing page, the Metrics setup page and the Privacy page now draw the app's own icons, theSVG UI's filled drawings, in place of the thinner outline icons. Each feature card shows the icon the app shows for its subject, such as the dashboard of the Overview tab, the pen of an edit tab and the list of a resource tab.
 
 ## [0.14.1] - 2026-11-25
 
