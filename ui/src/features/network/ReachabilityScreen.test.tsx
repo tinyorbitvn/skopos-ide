@@ -422,8 +422,16 @@ test("a filter that matches nothing says so instead of an empty matrix", async (
   expect(rowIds()).toHaveLength(8);
 });
 
-test("past 100 workloads the matrix draws 100 and says how many there are", async () => {
+// The capped matrix is 102 × 102 cells, about 32,000 jsdom nodes, drawn in one render. The
+// test takes about 2 s alone and took 10 s in a full run with the host's load at 25 on 8
+// cores, so it gets 30 s instead of the default 5 s. A query that walks the whole page costs
+// about 0.1 s at this size, so the filter is found before the matrix is drawn, and the row
+// buttons are counted with getElementsByTagName instead of a selector.
+test("past 100 workloads the matrix draws 100 and says how many there are", {
+  timeout: 30_000,
+}, async () => {
   await show(`${PAGE}?ns=big`);
+  const filter = screen.getByTestId("reach-filter");
   const groups = Array.from({ length: 150 }, (_, i) =>
     rgroup("Deployment", "big", `app-${String(i).padStart(3, "0")}`),
   );
@@ -431,11 +439,10 @@ test("past 100 workloads the matrix draws 100 and says how many there are", asyn
   expect(text("reach-cap")).toBe(
     "Showing 100 of 150 workloads. Filter to see the rest.",
   );
-  expect(
-    screen.getByTestId("reach-matrix").querySelectorAll("button[aria-pressed]"),
-  ).toHaveLength(100);
-  fireEvent.change(screen.getByTestId("reach-filter"), {
-    target: { value: "app-14" },
-  });
+  const rowButtons = [
+    ...screen.getByTestId("reach-matrix").getElementsByTagName("button"),
+  ].filter((b) => b.hasAttribute("aria-pressed"));
+  expect(rowButtons).toHaveLength(100);
+  fireEvent.change(filter, { target: { value: "app-14" } });
   expect(screen.queryByTestId("reach-cap")).toBeNull();
 });
