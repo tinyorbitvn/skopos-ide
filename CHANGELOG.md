@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-25
+
 - **More YAML templates:** creating a resource starts from 36 templates in six groups, including a Deployment with probes and resources, NodePort, LoadBalancer and headless Services, a default-deny NetworkPolicy, TLS and registry Secrets, and RBAC, quota and storage kinds. Kinds the cluster does not serve are dimmed.
 - **New tab button on the dock:** a `+` after the last dock tab opens a searchable list: a blank YAML tab, Draft with AI and a terminal session first, then every template by group.
 - **Field hints in the YAML editor:** hovering a key shows its type, default, values and description from the cluster's API docs, and completion lists the fields that fit where the caret is, their values, and the kinds and versions the cluster serves.
