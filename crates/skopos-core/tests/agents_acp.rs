@@ -322,6 +322,7 @@ async fn the_prompt_blocks_reach_the_agent_in_order() {
     let block = hidden_block(&PromptContext {
         clusters: vec![("prod".to_owned(), ClusterAgentSettings::default())],
         global: false,
+        kubeconfig: PathBuf::from("/run/chat/kubeconfig"),
     });
     let object = object_line("Pod", Some("payments"), "api-1", "prod");
     let end = within(session.prompt(vec![

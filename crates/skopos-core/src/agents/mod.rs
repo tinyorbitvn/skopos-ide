@@ -13,6 +13,7 @@ pub mod editor_tab;
 pub mod endpoint;
 pub mod events;
 pub mod known_folders;
+pub(crate) mod kubeconfig;
 pub mod mcp;
 pub mod modes;
 pub mod probe;

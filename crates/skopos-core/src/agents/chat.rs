@@ -246,6 +246,7 @@ mod running {
     };
     use crate::agents::endpoint::{new_token, read_token_line, AsyncStream, Endpoint, Listen};
     use crate::agents::events::{ChatEvent, ChatItem, ChatItemBody, ChatNotice, ObjectRef};
+    use crate::agents::kubeconfig;
     use crate::agents::mcp::cards::ToolCard;
     use crate::agents::mcp::changes::ChatGate;
     use crate::agents::mcp::trim::namespace_allowed;
@@ -374,11 +375,30 @@ mod running {
         let wiring = wire(core, &clusters, scope.global).await?;
         let app_binary = chats.app_binary()?;
         // Native agents spec §4.2: the person's own process, with the app's environment.
-        let env = spawn::agent_env(
-            spawn::app_env(),
-            &agent,
-            &[(TOKEN_VAR.to_owned(), wiring.token.clone())],
-        );
+        let parts = clusters
+            .iter()
+            .map(|cluster| {
+                Ok((
+                    cluster.name.clone(),
+                    core.cluster_kubeconfig_path(&cluster.id)?,
+                ))
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        let kubeconfig = run_folder.path.join(kubeconfig::CHAT_KUBECONFIG);
+        kubeconfig::write_chat_kubeconfig(&parts, &kubeconfig).map_err(|error| {
+            IpcError::new(
+                error.code,
+                format!("Could not write the chat's kubeconfig: {}", error.message),
+            )
+        })?;
+        let extra = [
+            (TOKEN_VAR.to_owned(), wiring.token.clone()),
+            (
+                "KUBECONFIG".to_owned(),
+                kubeconfig.to_string_lossy().into_owned(),
+            ),
+        ];
+        let env = spawn::agent_env(spawn::app_env(), &agent, &extra);
         let command = spawn::agent_command(&agent, &agent_dir, env);
         let mcp = McpEntry {
             command: app_binary,
@@ -463,6 +483,7 @@ mod running {
             agent_name: agent.name.clone(),
             sign_in_hint: sign_in_hint(&agent),
             clusters,
+            kubeconfig,
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
             approvals,
@@ -646,6 +667,8 @@ mod running {
         /// How to sign in to the agent, for a notice when a turn needs it.
         sign_in_hint: Option<&'static str>,
         clusters: Vec<ScopeCluster>,
+        /// The chat's own kubeconfig in its run folder.
+        kubeconfig: PathBuf,
         global: bool,
         /// `None` once the chat closes.
         session: Mutex<Option<Arc<AcpSession>>>,
@@ -924,6 +947,7 @@ mod running {
                     })
                     .collect(),
                 global: self.global,
+                kubeconfig: self.kubeconfig.clone(),
             }
         }
     }

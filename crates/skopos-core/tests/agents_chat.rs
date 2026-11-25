@@ -98,6 +98,16 @@ impl Bench {
         std::fs::read_to_string(self.agent_dir().join("agent.env")).unwrap()
     }
 
+    /// The catalog name of the chat's cluster.
+    fn scope_cluster_name(&self) -> String {
+        self.core
+            .catalog_list()
+            .into_iter()
+            .find(|entry| entry.id == self.cluster)
+            .map(|entry| entry.name)
+            .expect("cluster in the catalog")
+    }
+
     /// How many chat run folders exist.
     fn run_folders(&self) -> usize {
         std::fs::read_dir(self.root.path().join("app/data/agents/run"))
@@ -577,8 +587,8 @@ async fn the_hidden_block_and_the_object_line_reach_the_agent_first() {
     assert_eq!(first.len(), 3, "{first:#?}");
     assert!(
         first[0].starts_with(
-            "You are running inside SkoposIDE, a Kubernetes desktop app. You can reach fake only \
-             through the tools of the skopos MCP server"
+            "You are running inside SkoposIDE, a Kubernetes desktop app, on the person's computer. \
+             You can reach fake through the tools of the skopos MCP server"
         ),
         "{}",
         first[0]
@@ -1169,4 +1179,25 @@ async fn a_proposal_outside_the_namespace_limit_is_refused_before_the_dry_run() 
             && texts[0].ends_with(" limits agents to these namespaces: default."),
         "{texts:?}"
     );
+}
+
+#[tokio::test]
+async fn the_agent_gets_the_chat_s_kubeconfig_which_goes_with_the_chat() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (info, _events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "Hello").await;
+    let env = bench.agent_env();
+    let path = env
+        .lines()
+        .find_map(|line| line.strip_prefix("KUBECONFIG="))
+        .map(PathBuf::from)
+        .expect("KUBECONFIG");
+    assert!(path.ends_with("kubeconfig"), "{path:?}");
+    let doc: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let cluster_name = bench.scope_cluster_name();
+    assert_eq!(doc["current-context"].as_str(), Some(cluster_name.as_str()));
+    assert_eq!(doc["contexts"].as_sequence().unwrap().len(), 1);
+    bench.core.chat_close(&info.chat_id).await;
+    assert!(!path.exists(), "{path:?}");
 }
