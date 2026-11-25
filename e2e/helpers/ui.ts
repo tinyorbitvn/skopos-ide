@@ -238,7 +238,7 @@ export async function resourceRowMenu(
 }
 
 /** Picks an item of the dock's Create menu: Create resource or Terminal session. */
-export async function newInDock(item: "create-resource" | "dock-terminal"): Promise<void> {
+export async function newInDock(item: "create-resource" | "dock-terminal" | "dock-ai-draft"): Promise<void> {
   await pointerClick(await shown("dock-new"));
   await clickWhenShown(item);
 }
