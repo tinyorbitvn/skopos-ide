@@ -9,6 +9,7 @@ release notes (see `docs/releasing.md`).
 - **Agents run natively, on Windows too:** agents now run as you, with your own setup, on Linux, macOS and Windows. Each chat gives its agent a kubeconfig with only the chat's clusters.
 - **The agent asks in the chat:** before the agent runs a command or edits a file, the chat shows its request with its own Allow and Reject choices.
 - **Link previews for the project site:** a link to the site or one of its docs pages now shows a large preview card in chats and posts, with the app icon, the name SkoposIDE, the tagline "A desktop IDE for the clusters you already run." and the app showing the Pods of a cluster.
+- **The project site at skopos-ide.app:** the site now lives at https://skopos-ide.app/, and its link preview cards point there; the old address forwards to it.
 
 ## [0.15.0] - 2026-11-25
 

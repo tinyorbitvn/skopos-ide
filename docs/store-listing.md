@@ -7,9 +7,9 @@ The text to paste into Partner Center for the first submission, and the answers 
 - Name: SkoposIDE
 - Category: Developer tools
 - Price: Free, all markets
-- Website: https://tinyorbitvn.github.io/skopos-ide/
+- Website: https://skopos-ide.app/
 - Support: https://github.com/tinyorbitvn/skopos-ide/issues
-- Privacy policy: https://tinyorbitvn.github.io/skopos-ide/docs/privacy.html
+- Privacy policy: https://skopos-ide.app/docs/privacy.html
 - Copyright: Copyright Nguyen Van Long
 - License terms: https://github.com/tinyorbitvn/skopos-ide/blob/main/LICENSE (PolyForm Shield 1.0.0)
 

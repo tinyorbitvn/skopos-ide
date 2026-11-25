@@ -6,7 +6,7 @@ your kubeconfig files, connects to several clusters at once and lets you switch
 between them from a hotbar.
 
 Project site, with downloads for Linux, macOS and Windows:
-https://tinyorbitvn.github.io/skopos-ide/
+https://skopos-ide.app/
 
 ![SkoposIDE with the Pods of the prod-eu-west cluster and the details drawer of a payments-api Pod](site/images/canvas-pods-drawer-dark.png)
 

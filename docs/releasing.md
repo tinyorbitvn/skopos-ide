@@ -274,7 +274,7 @@ Store signs the package. Pre-release tags skip the job.
 
 ## Project site
 
-The project site at https://tinyorbitvn.github.io/skopos-ide/ is built from `site/` by
+The project site at https://skopos-ide.app/ is built from `site/` by
 `scripts/build-site.mjs` and deployed by `.github/workflows/pages.yml`.
 
 - A push to `main` that changes `site/`, the build script, the tokens, the icon or

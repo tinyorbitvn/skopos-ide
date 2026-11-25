@@ -22,7 +22,7 @@ import { CARD, MAX_BYTES, cardFiles } from "./social-image.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_URL = "https://github.com/tinyorbitvn/skopos-ide";
 // Where GitHub Pages serves the site; link previews need absolute addresses.
-const SITE_URL = "https://tinyorbitvn.github.io/skopos-ide/";
+const SITE_URL = "https://skopos-ide.app/";
 // The pages link only to the repository and the maintainer's GitHub Sponsors page.
 const SITE_LINK =
   /^https:\/\/(github\.com\/(tinyorbitvn\/skopos-ide($|[/#])|sponsors\/vanlongme$)|apps\.microsoft\.com\/detail\/[0-9A-Z]{12}$)/;
