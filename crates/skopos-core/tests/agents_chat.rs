@@ -13,6 +13,7 @@ use skopos_core::agents::approvals::{ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
 use skopos_core::agents::editor_tab::{EditorTab, EditorTabMode};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
+use skopos_core::agents::permissions::{ChoiceKind, PermissionCard, PermissionState};
 use skopos_core::agents::registry::AgentState;
 use skopos_core::agents::tabs::ProposalState;
 use skopos_core::app_core::AppCore;
@@ -528,28 +529,216 @@ async fn a_skopos_tool_call_is_a_tool_card_and_not_an_agent_tool() {
     );
 }
 
-#[tokio::test]
-async fn the_agent_s_permission_requests_are_answered_allow_once() {
-    let own_tool = json!({ "ownTool": { "title": "Run ls", "permission": true } });
-    let bench = Bench::new(script(vec![turn(vec![own_tool, say("Done.")])])).await;
-    let (info, mut events) = bench.start(MAIN).await;
-    bench.ask(&info.chat_id, "List the folder.").await;
-    let log = bench.log();
-    let mut chosen = Vec::new();
-    for line in &log {
-        values_of(line, "optionId", &mut chosen);
+fn permission(title: &str, command: &str) -> Value {
+    json!({ "permission": { "title": title, "kind": "execute", "command": command } })
+}
+
+fn permission_of(event: &ChatEvent) -> Option<&PermissionCard> {
+    match event {
+        ChatEvent::Item { item } => match &item.body {
+            ChatItemBody::Permission { card } => Some(card),
+            _ => None,
+        },
+        _ => None,
     }
-    assert!(!chosen.is_empty(), "{log:#?}");
-    assert!(
-        chosen.iter().all(|id| id.as_str() == Some("allow_once")),
-        "{chosen:?}"
+}
+
+fn is_waiting_permission(event: &ChatEvent) -> bool {
+    permission_of(event).is_some_and(|card| card.state == PermissionState::Waiting)
+}
+
+fn chosen_options(log: &[Value]) -> Vec<String> {
+    let mut found = Vec::new();
+    for line in log {
+        values_of(line, "optionId", &mut found);
+    }
+    found
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .collect()
+}
+
+fn permission_state(items: &[ChatItem]) -> Option<PermissionState> {
+    items.iter().rev().find_map(|item| match &item.body {
+        ChatItemBody::Permission { card } => Some(card.state.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn the_agent_s_permission_request_waits_for_the_person_s_choice() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls -la"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    let waiting = events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    let card = permission_of(&waiting).unwrap().clone();
+    assert_eq!(card.title, "Run ls");
+    assert_eq!(card.kind, "execute");
+    assert_eq!(card.command.as_deref(), Some("ls -la"));
+    assert_eq!(
+        card.options
+            .iter()
+            .map(|option| option.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Reject", "Always allow", "Allow", "Never allow"]
     );
-    let items = events.items();
     assert!(
-        items.iter().any(
-            |item| matches!(&item.body, ChatItemBody::AgentTool { title, .. } if title == "Run ls")
-        ),
-        "{items:#?}"
+        chosen_options(&bench.log()).is_empty(),
+        "answered before the person chose"
+    );
+    bench
+        .core
+        .chat_permission(&info.chat_id, &card.id, "allow_once")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    assert_eq!(chosen_options(&bench.log()), ["allow_once"]);
+    assert_eq!(
+        permission_state(&events.items()),
+        Some(PermissionState::Chosen {
+            option_id: "allow_once".into(),
+            kind: ChoiceKind::AllowOnce
+        })
+    );
+    assert!(agent_texts(&events.items()).contains(&"Done.".to_owned()));
+    let again = bench
+        .core
+        .chat_permission(&info.chat_id, &card.id, "allow_once")
+        .unwrap_err();
+    assert_eq!(again.message, "This request was already answered.");
+}
+
+#[tokio::test]
+async fn an_unknown_option_is_refused_and_the_card_keeps_waiting() {
+    let bench = Bench::new(script(vec![turn(vec![permission("Run ls", "ls")])])).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    let waiting = events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    let id = permission_of(&waiting).unwrap().id.clone();
+    let refused = bench
+        .core
+        .chat_permission(&info.chat_id, &id, "maybe")
+        .unwrap_err();
+    assert_eq!(refused.message, "That option is not on this request.");
+    bench
+        .core
+        .chat_permission(&info.chat_id, &id, "reject_always")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    assert_eq!(chosen_options(&bench.log()), ["reject_always"]);
+}
+
+#[tokio::test]
+async fn stop_cancels_a_waiting_permission_request() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    bench.core.chat_stop(&info.chat_id);
+    let _ = turn.await.unwrap();
+    events
+        .until("a cancelled card", |event| {
+            permission_of(event).is_some_and(|card| card.state == PermissionState::Cancelled)
+        })
+        .await;
+    assert_eq!(chosen_options(&bench.log()), ["cancelled"]);
+}
+
+#[tokio::test]
+async fn close_cancels_a_waiting_permission_request_and_history_keeps_it_cancelled() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List the folder.");
+    events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    bench.core.chat_close(&info.chat_id).await;
+    let _ = turn.await.unwrap();
+    let stored = bench.core.chat_get(&info.chat_id).unwrap();
+    assert_eq!(
+        permission_state(&stored.items),
+        Some(PermissionState::Cancelled)
+    );
+}
+
+#[tokio::test]
+async fn two_waiting_requests_are_answered_one_by_one() {
+    let both = json!({ "permissions": [
+        { "title": "Run a", "kind": "execute", "command": "a" },
+        { "title": "Run b", "kind": "execute", "command": "b" }
+    ] });
+    let bench = Bench::new(script(vec![turn(vec![both, say("Done.")])])).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "Run both.");
+    let mut ids: Vec<String> = Vec::new();
+    while ids.len() < 2 {
+        let event = events
+            .until("two waiting cards", |event| {
+                permission_of(event).is_some_and(|card| {
+                    card.state == PermissionState::Waiting && !ids.contains(&card.id)
+                })
+            })
+            .await;
+        ids.push(permission_of(&event).unwrap().id.clone());
+    }
+    assert!(chosen_options(&bench.log()).is_empty());
+    bench
+        .core
+        .chat_permission(&info.chat_id, &ids[1], "reject_once")
+        .unwrap();
+    bench
+        .core
+        .chat_permission(&info.chat_id, &ids[0], "allow_once")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    let mut chosen = chosen_options(&bench.log());
+    chosen.sort();
+    assert_eq!(chosen, ["allow_once", "reject_once"]);
+}
+
+#[tokio::test]
+async fn a_stored_chat_keeps_its_permission_card() {
+    let bench = Bench::new(script(vec![turn(vec![
+        permission("Run ls", "ls"),
+        say("Done."),
+    ])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let turn = bench.ask_in_background(&info.chat_id, "List.");
+    let event = events
+        .until("a waiting permission card", is_waiting_permission)
+        .await;
+    let id = permission_of(&event).unwrap().id.clone();
+    bench
+        .core
+        .chat_permission(&info.chat_id, &id, "reject_once")
+        .unwrap();
+    turn.await.unwrap().unwrap();
+    bench.core.chat_close(&info.chat_id).await;
+    let stored = bench.core.chat_get(&info.chat_id).unwrap();
+    assert_eq!(
+        permission_state(&stored.items),
+        Some(PermissionState::Chosen {
+            option_id: "reject_once".into(),
+            kind: ChoiceKind::RejectOnce
+        })
     );
 }
 

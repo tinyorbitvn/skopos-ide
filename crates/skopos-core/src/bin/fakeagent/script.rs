@@ -54,6 +54,10 @@ pub enum Step {
     Tool(ToolStep),
     /// A `tool_call` of the agent's own, with a permission request when asked.
     OwnTool(OwnToolStep),
+    /// A `tool_call` of the agent's own that asks for permission, then runs or not.
+    Permission(PermissionStep),
+    /// Several `permission` steps whose requests wait at the same time.
+    Permissions(Vec<PermissionStep>),
     /// Exits the process with this code in the middle of the turn.
     Exit(i32),
     /// Waits this many milliseconds; `session/cancel` ends the wait.
@@ -94,6 +98,18 @@ pub struct OwnToolStep {
     /// Asks `session/request_permission` with all four option kinds before it runs.
     #[serde(default)]
     pub permission: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PermissionStep {
+    pub title: String,
+    /// The ACP tool kind, such as `execute`; `other` when left out.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The tool call's `rawInput.command`.
+    #[serde(default)]
+    pub command: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -168,6 +184,8 @@ mod tests {
         { "say": "text chunk" },
         { "tool": { "name": "list_objects", "args": { "kind": "Pod", "namespace": "payments" } } },
         { "ownTool": { "title": "Run ls", "permission": true } },
+        { "permission": { "title": "Run ls", "kind": "execute", "command": "ls -la" } },
+        { "permissions": [ { "title": "Read a" }, { "title": "Run b", "command": "b" } ] },
         { "exit": 3 },
         { "stop": "end_turn" }
       ] } ] }"#;
@@ -208,6 +226,23 @@ mod tests {
                             title: "Run ls".to_owned(),
                             permission: true,
                         }),
+                        Step::Permission(PermissionStep {
+                            title: "Run ls".to_owned(),
+                            kind: Some("execute".to_owned()),
+                            command: Some("ls -la".to_owned()),
+                        }),
+                        Step::Permissions(vec![
+                            PermissionStep {
+                                title: "Read a".to_owned(),
+                                kind: None,
+                                command: None,
+                            },
+                            PermissionStep {
+                                title: "Run b".to_owned(),
+                                kind: None,
+                                command: Some("b".to_owned()),
+                            },
+                        ]),
                         Step::Exit(3),
                         Step::Stop(StopKind::EndTurn),
                     ],

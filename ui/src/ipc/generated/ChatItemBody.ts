@@ -3,6 +3,7 @@ import type { AgentToolStatus } from "./AgentToolStatus";
 import type { ChangeCard } from "./ChangeCard";
 import type { ChatNotice } from "./ChatNotice";
 import type { ObjectRef } from "./ObjectRef";
+import type { PermissionCard } from "./PermissionCard";
 import type { PlanEntry } from "./PlanEntry";
 import type { ProposalCard } from "./ProposalCard";
 import type { TabChip } from "./TabChip";
@@ -15,4 +16,4 @@ export type ChatItemBody = { "type": "user", text: string, object: ObjectRef | n
 /**
  * The YAML tab the message carried (YAML authoring spec A3).
  */
-tab?: TabChip, } | { "type": "agent", text: string, } | { "type": "plan", entries: Array<PlanEntry>, } | { "type": "tool", card: ToolCard, } | { "type": "agentTool", title: string, status: AgentToolStatus, details: string, } | { "type": "change", card: ChangeCard, } | { "type": "proposal", card: ProposalCard, } | { "type": "notice", notice: ChatNotice, text: string, };
+tab?: TabChip, } | { "type": "agent", text: string, } | { "type": "plan", entries: Array<PlanEntry>, } | { "type": "tool", card: ToolCard, } | { "type": "agentTool", title: string, status: AgentToolStatus, details: string, } | { "type": "change", card: ChangeCard, } | { "type": "proposal", card: ProposalCard, } | { "type": "permission", card: PermissionCard, } | { "type": "notice", notice: ChatNotice, text: string, };

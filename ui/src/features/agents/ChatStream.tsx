@@ -120,6 +120,8 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
           live={props.live}
         />
       );
+    case "permission":
+      return null;
     case "notice":
       return (
         <NoticeLine

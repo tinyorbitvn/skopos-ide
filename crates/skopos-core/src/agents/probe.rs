@@ -27,7 +27,12 @@ pub async fn probe(command: Command, cwd: &Path, name: &str) -> AgentState {
 pub async fn probe_within(command: Command, cwd: &Path, name: &str, limit: Duration) -> AgentState {
     // A probe shows no updates.
     let (updates, _) = mpsc::channel(1);
-    match tokio::time::timeout(limit, AcpSession::open(command, cwd, None, None, updates)).await {
+    match tokio::time::timeout(
+        limit,
+        AcpSession::open(command, cwd, None, None, updates, None),
+    )
+    .await
+    {
         Ok(Ok(session)) => {
             session.close().await;
             AgentState::Ready

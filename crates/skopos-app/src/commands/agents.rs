@@ -142,6 +142,16 @@ pub async fn chat_answer(
 }
 
 #[tauri::command]
+pub async fn chat_permission(
+    state: State<'_, AppState>,
+    chat_id: String,
+    card_id: String,
+    option_id: String,
+) -> Result<(), IpcError> {
+    state.core.chat_permission(&chat_id, &card_id, &option_id)
+}
+
+#[tauri::command]
 pub async fn chat_proposal_answer(
     state: State<'_, AppState>,
     chat_id: String,

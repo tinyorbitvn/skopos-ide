@@ -8,6 +8,7 @@ use super::acp::{PlanEntry, ToolStatus};
 use super::approvals::ChangeCard;
 use super::editor_tab::TabChip;
 use super::mcp::cards::ToolCard;
+use super::permissions::PermissionCard;
 use super::tabs::ProposalCard;
 use crate::kubeconfig::ClusterId;
 
@@ -64,6 +65,8 @@ pub enum ChatItemBody {
     Change { card: Box<ChangeCard> },
     /// A YAML tab proposal (YAML authoring spec A11).
     Proposal { card: Box<ProposalCard> },
+    /// A permission request of the agent's own (native agents spec §4.2).
+    Permission { card: Box<PermissionCard> },
     /// One of the app's lines, with its text.
     Notice { notice: ChatNotice, text: String },
 }

@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use skopos_core::agents::acp::{
     AcpSession, AcpUpdate, McpEntry, PlanEntry, PlanStatus, StartError, ToolStatus, TurnEnd,
 };
+use skopos_core::agents::permissions::{PermissionState, Permissions};
 use skopos_core::agents::probe::probe_within;
 use skopos_core::agents::prompt::{hidden_block, object_line, PromptContext};
 use skopos_core::agents::registry::AgentStatus;
@@ -163,6 +164,7 @@ async fn start(fake: &Fake) -> (AcpSession, mpsc::Receiver<AcpUpdate>) {
         &fake.work(),
         mcp_entry(),
         updates,
+        None,
     ))
     .await;
     match started {
@@ -173,7 +175,7 @@ async fn start(fake: &Fake) -> (AcpSession, mpsc::Receiver<AcpUpdate>) {
 
 async fn start_error(command: Command, cwd: &Path) -> StartError {
     let (updates, _received) = mpsc::channel(64);
-    match within(AcpSession::start(command, cwd, mcp_entry(), updates)).await {
+    match within(AcpSession::start(command, cwd, mcp_entry(), updates, None)).await {
         Ok(session) => {
             session.close().await;
             panic!("the agent started")
@@ -277,19 +279,61 @@ async fn a_turn_streams_the_plan_the_text_and_the_agents_own_tool() {
 }
 
 #[tokio::test]
-async fn permission_requests_are_answered_with_allow_once() {
+async fn a_permission_request_waits_for_the_answer_given_through_permissions() {
+    let fake = Fake::new(json!({ "turns": [ { "steps": [
+        { "ownTool": { "title": "Run ls", "permission": true } }
+    ] } ] }));
+    let (cards_sender, mut cards) = mpsc::channel(8);
+    let permissions = Permissions::new(cards_sender);
+    let (updates, mut received) = mpsc::channel(64);
+    let started = within(AcpSession::start(
+        fake.command(),
+        &fake.work(),
+        mcp_entry(),
+        updates,
+        Some(permissions.clone()),
+    ))
+    .await;
+    let session = match started {
+        Ok(session) => session,
+        Err(error) => panic!("the fake agent did not start: {error:?}"),
+    };
+    let prompt = session.prompt(vec!["List the files".to_owned()]);
+    let answer = async {
+        let card = cards.recv().await.expect("a permission card");
+        assert_eq!(card.state, PermissionState::Waiting);
+        assert_eq!(card.tool_call_id, "own-1");
+        assert_eq!(card.title, "Run ls");
+        assert!(fake.permission_answers().is_empty());
+        permissions.answer(&card.id, "allow_always").unwrap();
+    };
+    let (end, ()) = within(async { tokio::join!(prompt, answer) }).await;
+    assert_eq!(end, TurnEnd::EndTurn);
+    assert_eq!(fake.permission_answers(), vec![json!("allow_always")]);
+    assert_eq!(
+        drain(&mut received),
+        vec![
+            own_tool(ToolStatus::Pending, ""),
+            own_tool(ToolStatus::Completed, "ran Run ls"),
+        ]
+    );
+    session.close().await;
+}
+
+#[tokio::test]
+async fn without_permissions_a_permission_request_is_cancelled() {
     let fake = Fake::new(json!({ "turns": [ { "steps": [
         { "ownTool": { "title": "Run ls", "permission": true } }
     ] } ] }));
     let (session, mut updates) = start(&fake).await;
     let end = within(session.prompt(vec!["List the files".to_owned()])).await;
     assert_eq!(end, TurnEnd::EndTurn);
-    assert_eq!(fake.permission_answers(), vec![json!("allow_once")]);
+    assert_eq!(fake.permission_answers(), vec![json!("cancelled")]);
     assert_eq!(
         drain(&mut updates),
         vec![
             own_tool(ToolStatus::Pending, ""),
-            own_tool(ToolStatus::Completed, "ran Run ls"),
+            own_tool(ToolStatus::Failed, "refused Run ls"),
         ]
     );
     session.close().await;
@@ -468,6 +512,7 @@ async fn a_chat_reopens_with_session_load_when_the_agent_can_load() {
         mcp_entry(),
         updates,
         "fake-session-7",
+        None,
     ))
     .await;
     let session = match loaded {
@@ -505,6 +550,7 @@ async fn load_is_refused_when_the_agent_cannot_load() {
         mcp_entry(),
         updates,
         "fake-session-7",
+        None,
     ))
     .await;
     match loaded {

@@ -16,6 +16,7 @@ pub mod known_folders;
 pub(crate) mod kubeconfig;
 pub mod mcp;
 pub mod modes;
+pub mod permissions;
 pub mod probe;
 pub mod prompt;
 pub mod registry;

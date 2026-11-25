@@ -1,6 +1,6 @@
 //! The ACP client (spec §4.3): it starts an agent, speaks ACP v1 to it over the child's
-//! stdio, answers its permission requests, hides its calls to the `skopos` MCP server and
-//! turns the rest of its updates into the chat's.
+//! stdio, forwards its permission requests to the chat, hides its calls to the `skopos` MCP
+//! server and turns the rest of its updates into the chat's.
 //!
 //! `agent-client-protocol` runs a connection as one future whose handlers and spawned tasks
 //! are `Send`, and its `ConnectionTo` handle is `Clone + Send + Sync`. The connection runs as
@@ -18,10 +18,9 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
     self as wire, CancelNotification, ClientCapabilities, ContentBlock, EnvVariable,
     FileSystemCapabilities, Implementation, InitializeRequest, LoadSessionRequest, McpServer,
-    McpServerStdio, NewSessionRequest, PermissionOption, PermissionOptionId, PermissionOptionKind,
-    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, StopReason,
-    ToolCallContent, ToolCallStatus,
+    McpServerStdio, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
+    SessionNotification, SessionUpdate, StopReason, ToolCallContent, ToolCallStatus,
 };
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{Agent, ByteStreams, Client, Error as AcpError};
@@ -34,6 +33,7 @@ use tokio::task::JoinHandle;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use ts_rs::TS;
 
+use crate::agents::permissions::{permission_card, Permissions};
 use crate::error::sanitize_text;
 use crate::process::configure_agent;
 use crate::process::{stop, KILL_GRACE};
@@ -171,14 +171,16 @@ pub struct AcpSession {
 impl AcpSession {
     /// Starts `command` (stdin, stdout and stderr are piped, it is killed when dropped and
     /// gets its own process group), then `initialize` and `session/new` with `cwd` and the
-    /// `skopos` entry. Updates go to `updates`, which must be read while a turn runs.
+    /// `skopos` entry. Updates go to `updates`, which must be read while a turn runs. The
+    /// agent's permission requests wait on `permissions`; without it they are cancelled.
     pub async fn start(
         command: Command,
         cwd: &Path,
         mcp: McpEntry,
         updates: mpsc::Sender<AcpUpdate>,
+        permissions: Option<Arc<Permissions>>,
     ) -> Result<AcpSession, StartError> {
-        Self::open(command, cwd, Some(mcp), None, updates).await
+        Self::open(command, cwd, Some(mcp), None, updates, permissions).await
     }
 
     /// As `start`, but continues the chat `session_id` with `session/load`. The agent's
@@ -189,8 +191,17 @@ impl AcpSession {
         mcp: McpEntry,
         updates: mpsc::Sender<AcpUpdate>,
         session_id: &str,
+        permissions: Option<Arc<Permissions>>,
     ) -> Result<AcpSession, StartError> {
-        Self::open(command, cwd, Some(mcp), Some(session_id), updates).await
+        Self::open(
+            command,
+            cwd,
+            Some(mcp),
+            Some(session_id),
+            updates,
+            permissions,
+        )
+        .await
     }
 
     /// `start` or `load`; a probe passes no MCP entry.
@@ -200,9 +211,10 @@ impl AcpSession {
         mcp: Option<McpEntry>,
         load: Option<&str>,
         updates: mpsc::Sender<AcpUpdate>,
+        permissions: Option<Arc<Permissions>>,
     ) -> Result<AcpSession, StartError> {
         let live = Arc::new(AtomicBool::new(false));
-        let running = Running::spawn(command, updates, Arc::clone(&live)).await?;
+        let running = Running::spawn(command, updates, permissions, Arc::clone(&live)).await?;
         match handshake(&running, cwd, mcp, load).await {
             Ok((session_id, can_load)) => {
                 live.store(true, Ordering::SeqCst);
@@ -275,6 +287,7 @@ impl Running {
     async fn spawn(
         mut command: Command,
         updates: mpsc::Sender<AcpUpdate>,
+        permissions: Option<Arc<Permissions>>,
         live: Arc<AtomicBool>,
     ) -> Result<Running, StartError> {
         configure_agent(&mut command);
@@ -294,7 +307,7 @@ impl Running {
         let (kill, killed) = oneshot::channel();
         let (exited, exit) = watch::channel(None);
         let process = tokio::spawn(watch_process(child, stderr, killed, exited));
-        let (connected, done, driver) = run_connection(stdin, stdout, updates, live);
+        let (connected, done, driver) = run_connection(stdin, stdout, updates, permissions, live);
         let Ok(connection) = connected.await else {
             let _ = kill.send(());
             let _ = process.await;
@@ -398,6 +411,7 @@ fn run_connection(
     stdin: ChildStdin,
     stdout: ChildStdout,
     updates: mpsc::Sender<AcpUpdate>,
+    permissions: Option<Arc<Permissions>>,
     live: Arc<AtomicBool>,
 ) -> (
     oneshot::Receiver<ConnectionTo<Agent>>,
@@ -426,14 +440,39 @@ fn run_connection(
                 agent_client_protocol::on_receive_notification!(),
             )
             .on_receive_request(
+                // Native agents spec §4.2: the request waits for the person's choice. It is
+                // answered from a task of its own, so the connection keeps reading the agent's
+                // other messages while the person decides.
                 async move |request: RequestPermissionRequest, responder, _cx| {
-                    let outcome = match pick_permission(&request.options) {
-                        Some(option_id) => RequestPermissionOutcome::Selected(
-                            SelectedPermissionOutcome::new(option_id),
-                        ),
-                        None => RequestPermissionOutcome::Cancelled,
-                    };
-                    responder.respond(RequestPermissionResponse::new(outcome))
+                    let permissions = permissions.clone();
+                    tokio::spawn(async move {
+                        let chosen = match permissions {
+                            Some(permissions) if !request.options.is_empty() => {
+                                let card = permission_card(permissions.next_id(), &request);
+                                permissions.ask(card).await
+                            }
+                            Some(_) => {
+                                tracing::warn!("the agent asked for permission with no options");
+                                None
+                            }
+                            None => None,
+                        };
+                        let outcome = match chosen {
+                            Some(option_id) => RequestPermissionOutcome::Selected(
+                                SelectedPermissionOutcome::new(option_id),
+                            ),
+                            None => RequestPermissionOutcome::Cancelled,
+                        };
+                        if let Err(error) =
+                            responder.respond(RequestPermissionResponse::new(outcome))
+                        {
+                            tracing::debug!(
+                                "cannot answer a permission request: {}",
+                                sanitize_text(&error.message)
+                            );
+                        }
+                    });
+                    Ok(())
                 },
                 agent_client_protocol::on_receive_request!(),
             )
@@ -573,19 +612,6 @@ impl StderrTail {
             .find(|line| !line.is_empty())
             .map(str::to_owned)
     }
-}
-
-/// Spec §4.3: the first `allow_once` option, else the first `allow_always`, else
-/// `reject_once`. `None` answers the request as cancelled.
-fn pick_permission(options: &[PermissionOption]) -> Option<PermissionOptionId> {
-    [
-        PermissionOptionKind::AllowOnce,
-        PermissionOptionKind::AllowAlways,
-        PermissionOptionKind::RejectOnce,
-    ]
-    .iter()
-    .find_map(|kind| options.iter().find(|option| option.kind == *kind))
-    .map(|option| option.option_id.clone())
 }
 
 /// Whether an ACP tool call is a call to the `skopos` server, which the client hides
@@ -845,10 +871,6 @@ mod tests {
 
     use super::*;
 
-    fn option(id: &'static str, kind: PermissionOptionKind) -> PermissionOption {
-        PermissionOption::new(id, id, kind)
-    }
-
     fn chunk(text: &str) -> ContentChunk {
         ContentChunk::new(ContentBlock::from(text))
     }
@@ -864,27 +886,6 @@ mod tests {
 
     fn update(id: &'static str, fields: ToolCallUpdateFields) -> SessionUpdate {
         SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(id, fields))
-    }
-
-    #[test]
-    fn permission_answers_prefer_allow_once_then_allow_always_then_reject_once() {
-        let all = [
-            option("never", PermissionOptionKind::RejectAlways),
-            option("no", PermissionOptionKind::RejectOnce),
-            option("always", PermissionOptionKind::AllowAlways),
-            option("yes", PermissionOptionKind::AllowOnce),
-        ];
-        assert_eq!(pick_permission(&all), Some(PermissionOptionId::from("yes")));
-        assert_eq!(
-            pick_permission(&all[..3]),
-            Some(PermissionOptionId::from("always"))
-        );
-        assert_eq!(
-            pick_permission(&all[..2]),
-            Some(PermissionOptionId::from("no"))
-        );
-        assert_eq!(pick_permission(&all[..1]), None);
-        assert_eq!(pick_permission(&[]), None);
     }
 
     #[test]

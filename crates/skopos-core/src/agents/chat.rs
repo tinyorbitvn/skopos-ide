@@ -139,6 +139,19 @@ impl AppCore {
         }
     }
 
+    /// The person's choice on a waiting permission card (native agents spec §4.2).
+    pub fn chat_permission(&self, chat_id: &str, card_id: &str, option_id: &str) -> CoreResult<()> {
+        #[cfg(unix)]
+        {
+            running::permission(self, chat_id, card_id, option_id)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (chat_id, card_id, option_id);
+            Err(unsupported())
+        }
+    }
+
     /// The person's answer to a YAML tab proposal (YAML authoring spec A4, A11).
     pub async fn chat_proposal_answer(
         &self,
@@ -252,6 +265,7 @@ mod running {
     use crate::agents::mcp::trim::namespace_allowed;
     use crate::agents::mcp::{scope_names, serve_mcp, ScopeCluster, ToolContext, ToolScope};
     use crate::agents::modes::AGENT_MCP;
+    use crate::agents::permissions::{PermissionCard, Permissions};
     use crate::agents::prompt::{hidden_block, object_line, tab_block, PromptContext, TabView};
     use crate::agents::registry::{default_agent, sign_in_hint, AgentSpec, AgentState};
     use crate::agents::spawn::{self, TOKEN_VAR};
@@ -411,12 +425,31 @@ mod running {
         // Task 10 forwards nothing before the session is open, so a loaded session's replay
         // never reaches `updates` (spec §4.3).
         let (update_sender, updates) = mpsc::channel(UPDATE_BACKLOG);
+        let (permission_sender, permission_cards) = mpsc::channel(CARD_BACKLOG);
+        let permissions = Permissions::new(permission_sender);
         let started = match &stored {
             Some(stored) => {
                 let session_id = stored.session_id.clone().unwrap_or_default();
-                AcpSession::load(command, &agent_dir, mcp, update_sender, &session_id).await
+                AcpSession::load(
+                    command,
+                    &agent_dir,
+                    mcp,
+                    update_sender,
+                    &session_id,
+                    Some(permissions.clone()),
+                )
+                .await
             }
-            None => AcpSession::start(command, &agent_dir, mcp, update_sender).await,
+            None => {
+                AcpSession::start(
+                    command,
+                    &agent_dir,
+                    mcp,
+                    update_sender,
+                    Some(permissions.clone()),
+                )
+                .await
+            }
         };
         let session = match started {
             Ok(session) => session,
@@ -487,6 +520,7 @@ mod running {
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
             approvals,
+            permissions,
             tabs,
             feed,
             transcript: Mutex::new(Transcript::new(record)),
@@ -512,6 +546,7 @@ mod running {
             cards,
             changes,
             proposals,
+            permissions: permission_cards,
             feed: feed_receiver,
         };
         *lock(&chat.pump) = Some(tokio::spawn(pump(chat.clone(), inputs)));
@@ -615,6 +650,17 @@ mod running {
             .answer(card_id, answer)
     }
 
+    pub(super) fn permission(
+        core: &AppCore,
+        chat_id: &str,
+        card_id: &str,
+        option_id: &str,
+    ) -> CoreResult<()> {
+        running_chat(core.chats(), chat_id)?
+            .permissions
+            .answer(card_id, option_id)
+    }
+
     pub(super) async fn proposal_answer(
         core: &AppCore,
         chat_id: &str,
@@ -673,6 +719,8 @@ mod running {
         /// `None` once the chat closes.
         session: Mutex<Option<Arc<AcpSession>>>,
         approvals: Arc<Approvals>,
+        /// The agent's own permission requests that wait for the person.
+        permissions: Arc<Permissions>,
         /// The YAML tab of this chat and its proposals.
         tabs: Arc<EditorTabs>,
         feed: mpsc::Sender<Feed>,
@@ -726,6 +774,7 @@ mod running {
         cards: mpsc::Receiver<ToolCard>,
         changes: mpsc::Receiver<ChangeCard>,
         proposals: mpsc::Receiver<ProposalCard>,
+        permissions: mpsc::Receiver<PermissionCard>,
         feed: mpsc::Receiver<Feed>,
     }
 
@@ -811,9 +860,11 @@ mod running {
             }
         }
 
-        /// Spec §4.3: Stop answers waiting approvals as stopped and sends `session/cancel`.
+        /// Spec §4.3: Stop answers waiting approvals as stopped, the agent's waiting permission
+        /// requests as cancelled (native agents spec §4.2), and sends `session/cancel`.
         fn stop(&self) {
             self.approvals.stop_all();
+            self.permissions.cancel_all();
             if self.working.load(Ordering::SeqCst) {
                 self.stop_requested.store(true, Ordering::SeqCst);
                 if let Some(session) = lock(&self.session).as_ref() {
@@ -848,6 +899,8 @@ mod running {
                     ),
                 }
             }
+            // A request the agent sent after `stop` would otherwise wait for good.
+            self.permissions.cancel_all();
             self.services.cancel();
             let tasks = std::mem::take(&mut *lock(&self.service_tasks));
             for task in tasks {
@@ -969,8 +1022,9 @@ mod running {
             chat.sign_in_hint,
         );
         if exited {
-            // Spec §8: waiting approvals close as stopped.
+            // Spec §8: waiting approvals close as stopped, waiting permission cards cancelled.
             chat.approvals.stop_all();
+            chat.permissions.cancel_all();
             *lock(&chat.close_reason) = notice.as_ref().map(ChatNotice::text);
         }
         chat.end_turn(notice).await;
@@ -1034,6 +1088,11 @@ mod running {
                 Some(card) = inputs.proposals.recv() => {
                     let item = chat.apply(|transcript| transcript.proposal_card(card));
                     chat.deliver(ChatEvent::Item { item }).await;
+                }
+                Some(card) = inputs.permissions.recv() => {
+                    let item = chat.apply(|transcript| transcript.permission_card(card));
+                    chat.deliver(ChatEvent::Item { item }).await;
+                    chat.save().await;
                 }
                 feed = inputs.feed.recv() => {
                     let more = match feed {
@@ -1468,6 +1527,15 @@ mod running {
             self.keyed(
                 format!("proposal:{}", card.id),
                 ChatItemBody::Proposal {
+                    card: Box::new(card),
+                },
+            )
+        }
+
+        fn permission_card(&mut self, card: PermissionCard) -> ChatItem {
+            self.keyed(
+                format!("permission:{}", card.id),
+                ChatItemBody::Permission {
                     card: Box::new(card),
                 },
             )
