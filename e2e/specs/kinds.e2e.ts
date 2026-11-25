@@ -66,6 +66,10 @@ describe("kinds on a real cluster", () => {
     await browser.keys(["ArrowRight"]);
     await until(async () => (await nameWidth()) === before + 16, "the pod list's Name column never grew");
     await clickWhenShown("detail-close");
+    // Close changes the URL in a React transition, so the drawer stays until that renders.
+    // A row click before then still finds its row open and only resets the drawer, which
+    // the close then removes: the drawer never reopens.
+    await gone("detail-drawer");
     await byTestId(rowId(NS, "steady")).click();
     await until(async () => (await (await shown("detail-pods")).getText()).includes("steady-"), "no pod listed again");
     await until(async () => (await nameWidth()) === before + 16, "the pod list lost its Name column's width");
