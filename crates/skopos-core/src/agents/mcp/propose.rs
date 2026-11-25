@@ -12,7 +12,8 @@ use super::trim::namespace_allowed;
 use super::ToolContext;
 use crate::agents::diff::text_diff;
 use crate::agents::editor_tab::{
-    restore_values, tab_namespaces, EditTarget, EditorTabMode, TAB_TEXT_CAP,
+    redact, restore_values, tab_namespaces, uses_anchors, EditTarget, EditorTabMode, HIDDEN,
+    TAB_TEXT_CAP,
 };
 use crate::agents::tabs::{ProposalCard, ProposalState};
 use crate::cluster::ConnectionState;
@@ -133,7 +134,17 @@ async fn propose(ctx: &ToolContext, args: &JsonObject) -> Result<String, String>
             .ok_or("This edit tab names no object.")?;
         same_object(&documents, target)?;
     }
+    // An alias would copy a value put back from the tab to a place the server may quote in an
+    // error, so a tab with hidden values takes no anchors or aliases.
+    if !attached.hidden.is_empty() && uses_anchors(&yaml) {
+        return Err(format!(
+            "The proposal uses YAML anchors or aliases, which a tab with {HIDDEN} values does not allow. Write each value out."
+        ));
+    }
     let restored = restore_values(&yaml, &attached.hidden)?;
+    // The dry run reads the text with the hidden values put back; its messages go to the agent
+    // without them.
+    let hide = |message: &str| redact(message, &attached.hidden);
     let cluster = &attached.cluster;
     if !matches!(
         ctx.core.cluster_state(&cluster.id),
@@ -165,7 +176,7 @@ async fn propose(ctx: &ToolContext, args: &JsonObject) -> Result<String, String>
                     &restored,
                 )
                 .await
-                .map_err(|error| error.message)?;
+                .map_err(|error| hide(&error.message))?;
         }
         _ => {
             let defined = crd_kinds(&documents);
@@ -173,7 +184,7 @@ async fn propose(ctx: &ToolContext, args: &JsonObject) -> Result<String, String>
                 .core
                 .resource_apply_dry_run(&cluster.id, &restored, &tab.default_namespace)
                 .await
-                .map_err(|error| error.message)?;
+                .map_err(|error| hide(&error.message))?;
             for result in results.iter().filter(|result| !result.ok) {
                 let document = documents.get(result.index as usize);
                 let kind = result.kind.clone().unwrap_or_default();
@@ -192,7 +203,7 @@ async fn propose(ctx: &ToolContext, args: &JsonObject) -> Result<String, String>
                     result.index + 1,
                     kind,
                     result.name.clone().unwrap_or_default(),
-                    result.message
+                    hide(&result.message)
                 ));
             }
         }

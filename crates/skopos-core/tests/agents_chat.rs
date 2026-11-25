@@ -1369,6 +1369,33 @@ async fn a_proposal_the_server_refuses_returns_its_message() {
 }
 
 #[tokio::test]
+async fn a_proposal_with_aliases_is_refused_when_the_tab_has_hidden_values() {
+    // `labels: *d` would copy the Secret's data, put back from the tab, into the labels.
+    let proposal =
+        "apiVersion: v1\nkind: Secret\ndata: &d\n  password: (hidden)\nmetadata:\n  name: s\n  labels: *d\n";
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "propose_yaml",
+        json!({ "yaml": proposal, "summary": "x" }),
+    )])]))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let tab = create_tab(
+        &bench.cluster,
+        "apiVersion: v1\nkind: Secret\nmetadata:\n  name: s\ndata:\n  password: c2VjcmV0\n",
+    );
+    bench
+        .core
+        .chat_prompt(&info.chat_id, "go".into(), None, Some(tab))
+        .await
+        .unwrap();
+    let texts = agent_texts(&events.items());
+    assert!(
+        texts[0].starts_with("tool:propose_yaml:error: The proposal uses YAML anchors or aliases"),
+        "{texts:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_proposal_outside_the_namespace_limit_is_refused_before_the_dry_run() {
     let bench = Bench::new(script(vec![turn(vec![tool(
         "propose_yaml",
