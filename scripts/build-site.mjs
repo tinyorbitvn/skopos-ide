@@ -314,7 +314,7 @@ function parseArgs(argv) {
 }
 
 function fetchLatestRelease() {
-  const repo = process.env.GITHUB_REPOSITORY || "vanlongme/skopos-ide";
+  const repo = process.env.GITHUB_REPOSITORY || "tinyorbitvn/skopos-ide";
   try {
     const text = execFileSync("gh", ["api", `repos/${repo}/releases/latest`], {
       encoding: "utf8",

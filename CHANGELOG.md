@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **New home for the project:** SkoposIDE moved to https://github.com/tinyorbitvn/skopos-ide and its site to https://tinyorbitvn.github.io/skopos-ide/. The app checks for updates and links to release notes there; the old addresses on GitHub redirect to the new ones.
+
 ## [0.13.3] - 2026-11-25
 
 - **A chat with Claude stays signed in on macOS:** a chat no longer asks you to sign in once the Claude Code sign-in it started with runs out, after about eight hours. Before your next message, SkoposIDE takes Claude Code's renewed sign-in from the Keychain and reopens Claude in the same chat. When the Keychain has nothing newer either, the chat says to run claude in a terminal to renew it, then send your message again.
@@ -133,7 +135,7 @@ release notes (see `docs/releasing.md`).
 - **Export the resource map:** the cluster and object maps save what they show as a PNG image or a PDF document.
 - **SkoposIDE's own action icons:** the icons of actions such as Delete, Edit YAML, Logs, Shell, Scale, Restart and Drain are drawn for SkoposIDE in one flat style, and each action shows the same icon in every toolbar, menu and button.
 - **Metrics from a Prometheus-compatible URL:** Cluster settings gain a "Prometheus-compatible URL" option that reads metrics straight from Grafana Mimir, Grafana Cloud or another Prometheus API, with a tenant, a cluster label and no authentication, Basic, a Bearer token or a client certificate, plus an optional CA file. Passwords and tokens are kept only in the system keychain. The source line names the URL's host.
-- **Project site:** a landing page at https://vanlongme.github.io/skopos-ide/ with what the app does, the latest release's installers for each platform and the roadmap. It is built from `site/` by `scripts/build-site.mjs` and deployed by the new `pages` workflow after every change to it and after every release.
+- **Project site:** a landing page at https://tinyorbitvn.github.io/skopos-ide/ with what the app does, the latest release's installers for each platform and the roadmap. It is built from `site/` by `scripts/build-site.mjs` and deployed by the new `pages` workflow after every change to it and after every release.
 - **License notices:** `THIRD_PARTY_NOTICES.md` now lists the license of every npm package bundled in the interface and of the 543 Rust crates linked into the app, with the copyright notices and license texts those licenses ask for.
 
 ## [0.6.1] - 2026-11-16

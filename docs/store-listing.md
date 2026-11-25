@@ -7,11 +7,11 @@ The text to paste into Partner Center for the first submission, and the answers 
 - Name: SkoposIDE
 - Category: Developer tools
 - Price: Free, all markets
-- Website: https://vanlongme.github.io/skopos-ide/
-- Support: https://github.com/vanlongme/skopos-ide/issues
-- Privacy policy: https://vanlongme.github.io/skopos-ide/docs/privacy.html
+- Website: https://tinyorbitvn.github.io/skopos-ide/
+- Support: https://github.com/tinyorbitvn/skopos-ide/issues
+- Privacy policy: https://tinyorbitvn.github.io/skopos-ide/docs/privacy.html
 - Copyright: Copyright Nguyen Van Long
-- License terms: https://github.com/vanlongme/skopos-ide/blob/main/LICENSE (PolyForm Shield 1.0.0)
+- License terms: https://github.com/tinyorbitvn/skopos-ide/blob/main/LICENSE (PolyForm Shield 1.0.0)
 
 ## Short description
 

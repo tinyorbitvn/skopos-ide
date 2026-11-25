@@ -14,10 +14,10 @@ import {
 
 test("the release pages are the project's own", () => {
   expect(DOWNLOAD_PAGE).toBe(
-    "https://github.com/vanlongme/skopos-ide/releases/latest",
+    "https://github.com/tinyorbitvn/skopos-ide/releases/latest",
   );
   expect(releasePage("0.10.0")).toBe(
-    "https://github.com/vanlongme/skopos-ide/releases/tag/v0.10.0",
+    "https://github.com/tinyorbitvn/skopos-ide/releases/tag/v0.10.0",
   );
 });
 

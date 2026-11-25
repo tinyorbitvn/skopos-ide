@@ -51,7 +51,7 @@ function alert(state, ecosystem, name, id, severity) {
   return {
     number: 1,
     state,
-    html_url: "https://github.com/vanlongme/skopos-ide/security/dependabot/1",
+    html_url: "https://github.com/tinyorbitvn/skopos-ide/security/dependabot/1",
     dependency: {
       package: { ecosystem, name },
       manifest_path: ecosystem === "rust" ? "Cargo.lock" : "pnpm-lock.yaml",

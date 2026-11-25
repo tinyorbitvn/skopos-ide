@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-export const REPO_URL = "https://github.com/vanlongme/skopos-ide";
+export const REPO_URL = "https://github.com/tinyorbitvn/skopos-ide";
 
 /**
  * Each platform key of latest.json and the end of its file's name. The plugin looks up

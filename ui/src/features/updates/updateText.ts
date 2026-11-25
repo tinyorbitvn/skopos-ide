@@ -1,7 +1,7 @@
 import type { Release } from "../../ipc/generated/Release";
 import type { UpdateState } from "../../ipc/generated/UpdateState";
 
-export const RELEASES = "https://github.com/vanlongme/skopos-ide/releases";
+export const RELEASES = "https://github.com/tinyorbitvn/skopos-ide/releases";
 /** Where to download the app by hand. */
 export const DOWNLOAD_PAGE = `${RELEASES}/latest`;
 

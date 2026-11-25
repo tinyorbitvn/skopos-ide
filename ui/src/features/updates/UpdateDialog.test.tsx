@@ -82,7 +82,7 @@ test("an available release shows its notes, its date and the three choices", asy
   fireEvent.click(screen.getByRole("button", { name: "Full release notes" }));
   await act(flush);
   expect(backend.callsTo("open_external")).toEqual([
-    { url: "https://github.com/vanlongme/skopos-ide/releases/tag/v0.10.0" },
+    { url: "https://github.com/tinyorbitvn/skopos-ide/releases/tag/v0.10.0" },
   ]);
 });
 
@@ -145,7 +145,7 @@ test("a copy that cannot update itself says why and offers the download page", a
   fireEvent.click(screen.getByRole("button", { name: "Open Download Page" }));
   await act(flush);
   expect(backend.callsTo("open_external")).toEqual([
-    { url: "https://github.com/vanlongme/skopos-ide/releases/latest" },
+    { url: "https://github.com/tinyorbitvn/skopos-ide/releases/latest" },
   ]);
 });
 

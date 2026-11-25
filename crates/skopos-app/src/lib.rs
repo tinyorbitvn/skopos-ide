@@ -489,7 +489,7 @@ mod updater_config_tests {
         assert_eq!(
             updater["endpoints"],
             serde_json::json!([
-                "https://github.com/vanlongme/skopos-ide/releases/latest/download/latest.json"
+                "https://github.com/tinyorbitvn/skopos-ide/releases/latest/download/latest.json"
             ])
         );
         assert_eq!(updater["windows"]["installMode"], "passive");
