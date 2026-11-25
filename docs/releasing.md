@@ -293,6 +293,11 @@ The project site at https://tinyorbitvn.github.io/skopos-ide/ is built from `sit
   `project/App.dc.html`, the `project/ds/…` files the board's head names,
   `artifact-type/dc-runtime.js` (the board's `./support.js`) and, for each `/_blob/<id>` script
   the board loads, the asset saved as `_blob/<id>.js`. The script names any file still missing.
+- `make site-social` renders the link preview card, `site/social-card.png` (1200 × 630), from
+  `scripts/social-card.html` in headless Chrome or Chromium, with the site's tokens, styles,
+  ribbon, fonts, icon and pictures. Run it after a change to the look, the tagline or the hero
+  picture. It stops when the card passes 300 KB, a size some previews skip. The pages name the
+  card in their `og:` and `twitter:` tags by its absolute address on the site.
 - Every `.html` file under `site/` is a page template with the same placeholders, such as
   `site/docs/metrics.html`, the metrics setup page. Keep it in step with the metrics settings and
   queries in `crates/skopos-core/src/metrics/` and `ui/src/features/settings/`.

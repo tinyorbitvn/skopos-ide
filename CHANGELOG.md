@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Link previews for the project site:** a link to the site or one of its docs pages now shows a large preview card in chats and posts, with the app icon, the name SkoposIDE, the tagline "A desktop IDE for the clusters you already run." and the app showing the Pods of a cluster.
+
 ## [0.15.0] - 2026-11-25
 
 - **More YAML templates:** creating a resource starts from 36 templates in six groups, including a Deployment with probes and resources, NodePort, LoadBalancer and headless Services, a default-deny NetworkPolicy, TLS and registry Secrets, and RBAC, quota and storage kinds. Kinds the cluster does not serve are dimmed.

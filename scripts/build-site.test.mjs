@@ -17,9 +17,12 @@ import {
   pngSize,
   render,
 } from "./build-site.mjs";
+import { CARD, MAX_BYTES, cardFiles } from "./social-image.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_URL = "https://github.com/tinyorbitvn/skopos-ide";
+// Where GitHub Pages serves the site; link previews need absolute addresses.
+const SITE_URL = "https://tinyorbitvn.github.io/skopos-ide/";
 // The pages link only to the repository and the maintainer's GitHub Sponsors page.
 const SITE_LINK =
   /^https:\/\/(github\.com\/(tinyorbitvn\/skopos-ide($|[/#])|sponsors\/vanlongme$)|apps\.microsoft\.com\/detail\/[0-9A-Z]{12}$)/;
@@ -468,6 +471,41 @@ describe("build", () => {
       const { defined, referenced } = idsOf(text);
       assert.equal(new Set(defined).size, defined.length, `${page}: ids are unique`);
       for (const id of referenced) assert.ok(defined.includes(id), `${page}: ${id}`);
+    }
+  });
+
+  test("names the social card in each page's head, with absolute addresses, and ships it", () => {
+    const card = fs.readFileSync(path.join(out, "social-card.png"));
+    assert.deepEqual(pngSize(card), CARD);
+    assert.ok(card.length <= MAX_BYTES, `social-card.png has ${card.length} bytes`);
+    for (const page of ["index.html", "docs/metrics.html", "docs/privacy.html"]) {
+      const text = fs.readFileSync(path.join(out, ...page.split("/")), "utf8");
+      const head = text.slice(0, text.indexOf("</head>"));
+      const meta = {};
+      for (const [, key, content] of head.matchAll(/<meta (?:property|name)="([^"]+)" content="([^"]*)">/g)) {
+        assert.ok(!Object.hasOwn(meta, key), `${page}: ${key} twice`);
+        meta[key] = content;
+      }
+      assert.equal(meta["og:type"], "website", page);
+      assert.equal(meta["og:site_name"], "SkoposIDE", page);
+      assert.equal(meta["og:url"], page === "index.html" ? SITE_URL : SITE_URL + page, page);
+      assert.equal(meta["og:title"], /<title>([^<]+)<\/title>/.exec(head)?.[1], page);
+      assert.equal(meta["og:description"], meta.description, page);
+      assert.equal(meta["og:image"], `${SITE_URL}social-card.png`, page);
+      assert.equal(meta["og:image:type"], "image/png", page);
+      assert.equal(meta["og:image:width"], String(CARD.width), page);
+      assert.equal(meta["og:image:height"], String(CARD.height), page);
+      assert.match(meta["og:image:alt"] ?? "", /^SkoposIDE, .{40,}[a-z]$/, page);
+      assert.equal(meta["twitter:card"], "summary_large_image", page);
+    }
+  });
+
+  test("the social card loads the site's own files, from the paths the site serves them at", () => {
+    const files = [...cardFiles(ROOT)].filter(([rel]) => rel !== "card.html");
+    assert.ok(files.some(([rel]) => rel.startsWith("fonts/")));
+    assert.ok(files.some(([rel]) => rel.startsWith("images/")));
+    for (const [rel, source] of files) {
+      assert.deepEqual(fs.readFileSync(path.join(out, ...rel.split("/"))), fs.readFileSync(source), rel);
     }
   });
 
