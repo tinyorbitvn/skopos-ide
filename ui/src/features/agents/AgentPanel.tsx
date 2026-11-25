@@ -74,6 +74,7 @@ function OpenPanel() {
         busy={busy}
         agentName={agentName ?? "The agent"}
         live={start.phase === "running"}
+        chatId={start.phase === "running" ? start.chatId : null}
         past={past}
         undone={undone}
         onAnswer={(cardId, answer) => chat.answer(cardId, answer)}

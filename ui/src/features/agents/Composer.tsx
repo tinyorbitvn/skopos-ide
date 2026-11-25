@@ -23,6 +23,7 @@ export function Composer(props: {
 }) {
   const draft = useAgentChat((s) => s.draft);
   const object = useAgentChat((s) => s.object);
+  const tab = useAgentChat((s) => s.tab);
   const scope = useAgentChat((s) => s.scope);
   const settings = useAgentChat((s) => s.clusterSettings);
   const busy = useAgentChat((s) => s.busy);
@@ -51,6 +52,11 @@ export function Composer(props: {
               onClick={() => chat.removeObject()}
               data-testid="agent-object-remove"
             />
+          </span>
+        ) : null}
+        {tab ? (
+          <span className={styles.chip} data-testid="agent-tab-chip">
+            YAML tab · {tab.title}
           </span>
         ) : null}
       </div>

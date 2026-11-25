@@ -11,6 +11,7 @@ function show(items: ChatItem[], more: Partial<ChatStreamProps> = {}) {
     busy: false,
     agentName: "Claude",
     live: true,
+    chatId: null,
     past: [],
     undone: [],
     onAnswer: vi.fn(async () => {}),
@@ -205,4 +206,21 @@ test("a sign-in notice reads as an error with its hint", () => {
   );
   expect(signIn.className).toBe("noticeDanger");
   expect(stopped.className).toBe("notice");
+});
+
+test("a user message shows the YAML tab it carried", () => {
+  show([
+    {
+      id: "u",
+      body: {
+        type: "user",
+        text: "Add a port",
+        object: null,
+        tab: { tabId: "t1", title: "New Service" },
+      },
+    },
+  ]);
+  expect(screen.getByTestId("agent-user-tab").textContent).toBe(
+    "YAML tab · New Service",
+  );
 });

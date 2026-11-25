@@ -14,7 +14,7 @@ const SIGN: Record<DiffLine["kind"], string> = {
   more: "",
 };
 
-function Diff(props: { lines: DiffLine[] }) {
+export function Diff(props: { lines: DiffLine[] }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset brings a border and a legend the diff does not want.
     <div role="group" aria-label="Diff" className={styles.diff}>
