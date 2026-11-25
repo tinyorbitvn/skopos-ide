@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -6,7 +6,7 @@ import {
   ErrorNotice,
   PickerMenu,
 } from "../../design";
-import { ChevronDown } from "../../design/icons";
+import { ChevronDown, Sparkles } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage, IpcFailure } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
@@ -17,14 +17,20 @@ import {
   useDock,
   writeDraft,
 } from "../../stores/dock";
+import { useProposals } from "../../stores/proposals";
+import { registerTabSource } from "../../stores/tabSources";
+import { agentsSupported } from "../agents/supported";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
+import { AiBar } from "./AiBar";
 import { useCreateTarget } from "./apiDocsKind";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
+import { ProposalBar } from "./ProposalBar";
 import { servedKinds } from "./servedKinds";
 import type { Template } from "./templates/catalog";
 import { templateSections } from "./templates/pickerSections";
 import { useYamlCheck } from "./useYamlCheck";
 import { yamlProblem } from "./validate";
+import { YamlDiff } from "./YamlDiff";
 import { YamlEditor } from "./YamlEditor";
 import styles from "./YamlEditor.module.css";
 
@@ -33,6 +39,8 @@ export interface CreateDraft {
   /** Text that counts as nothing to lose: a template as it came, or what was applied. */
   baseline: string;
   results: ApplyResult[];
+  /** Opened by Draft with AI: the AI bar starts open. */
+  ai?: boolean;
 }
 
 /** Where documents with no namespace go: the first in the cluster's filter. */
@@ -76,6 +84,26 @@ export function CreateResourceTab(props: {
     () => ({ clusterId, fixedTarget: null, served }),
     [clusterId, served],
   );
+  const [aiOpen, setAiOpen] = useState(restored?.ai ?? false);
+  const [replace, setReplace] = useState<{ id: number; text: string } | null>(
+    null,
+  );
+  const pending = useProposals((s) => s.byTab[id] ?? null);
+  const latestText = useRef(text);
+  latestText.current = text;
+  useEffect(
+    () =>
+      registerTabSource(id, async () => ({
+        tabId: id,
+        title: props.tab.title,
+        cluster: clusterId,
+        mode: "create",
+        yaml: latestText.current,
+        target: null,
+        defaultNamespace: await defaultNamespace(clusterId),
+      })),
+    [id, clusterId, props.tab.title],
+  );
 
   const dirty = text.trim() !== "" && text !== baseline;
   // `unchecked` while a long text waits for its check: it is not sent before.
@@ -86,8 +114,13 @@ export function CreateResourceTab(props: {
   }, [id, dirty]);
 
   useEffect(() => {
-    writeDraft(id, { text, baseline, results } satisfies CreateDraft);
-  }, [id, text, baseline, results]);
+    writeDraft(id, {
+      text,
+      baseline,
+      results,
+      ai: aiOpen,
+    } satisfies CreateDraft);
+  }, [id, text, baseline, results, aiOpen]);
 
   function fill(template: Template): void {
     setText(template.yaml);
@@ -128,6 +161,7 @@ export function CreateResourceTab(props: {
             <Button
               size="sm"
               aria-expanded={open}
+              disabled={pending !== null}
               onClick={toggle}
               data-testid="create-template"
             >
@@ -140,7 +174,9 @@ export function CreateResourceTab(props: {
           variant="primary"
           size="sm"
           loading={busy}
-          disabled={!check.ok || check.documents === 0 || unchecked}
+          disabled={
+            pending !== null || !check.ok || check.documents === 0 || unchecked
+          }
           onClick={() => void apply()}
           data-testid="create-apply"
         >
@@ -150,8 +186,39 @@ export function CreateResourceTab(props: {
           A document with no namespace goes to the first namespace selected in
           the namespace filter, or to default.
         </span>
+        {agentsSupported() ? (
+          <Button
+            size="sm"
+            className={styles.aiToggle}
+            aria-pressed={aiOpen}
+            onClick={() => setAiOpen((open) => !open)}
+            data-testid="yaml-ai"
+          >
+            <Sparkles size={14} aria-hidden="true" />
+            Ask AI
+          </Button>
+        ) : null}
         <ApiDocsButton />
       </div>
+      {aiOpen && agentsSupported() ? (
+        <AiBar
+          tabId={id}
+          placeholder="Describe the objects to create"
+          disabled={pending !== null}
+          onClose={() => setAiOpen(false)}
+        />
+      ) : null}
+      {pending ? (
+        <ProposalBar
+          card={pending.card}
+          onAccept={() => {
+            const next = useProposals.getState().accept(id);
+            if (next !== null)
+              setReplace((last) => ({ id: (last?.id ?? 0) + 1, text: next }));
+          }}
+          onReject={() => useProposals.getState().reject(id)}
+        />
+      ) : null}
       {check.ok ? null : (
         <div className={styles.problem} role="alert" data-testid="yaml-error">
           {yamlProblem(check)}
@@ -169,14 +236,22 @@ export function CreateResourceTab(props: {
         </div>
       ) : null}
       <EditorLayout clusterId={clusterId} target={target}>
-        <YamlEditor
-          value={text}
-          onChange={setText}
-          onCaret={setCaret}
-          readOnly={busy}
-          hints={hints}
-          testId="yaml-editor"
-        />
+        <div className={styles.stack}>
+          <div className={styles.layer} hidden={pending !== null}>
+            <YamlEditor
+              value={text}
+              onChange={setText}
+              onCaret={setCaret}
+              readOnly={busy}
+              hints={hints}
+              replaceRequest={replace}
+              testId="yaml-editor"
+            />
+          </div>
+          {pending ? (
+            <YamlDiff original={text} modified={pending.card.yaml} />
+          ) : null}
+        </div>
       </EditorLayout>
       {results.length > 0 ? (
         <ul className={styles.results} data-testid="apply-results">

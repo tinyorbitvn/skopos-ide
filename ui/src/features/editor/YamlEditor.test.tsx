@@ -38,6 +38,14 @@ class FakeEditor {
     this.value = next;
     this.listener?.();
   }
+  pushUndoStop() {
+    return true;
+  }
+  executeEdits(_: string, edits: { text: string }[]) {
+    this.value = edits[0].text;
+    this.listener?.();
+    return true;
+  }
   moveCaret(offset: number) {
     this.caretListener?.({ position: { offset } });
   }
@@ -56,6 +64,7 @@ class FakeEditor {
     return {
       uri: { toString: () => "inmemory://model/1" },
       getOffsetAt: (position: { offset: number }) => position.offset,
+      getFullModelRange: () => ({}),
       dispose: () => (this.modelDisposed = true),
     };
   }
@@ -197,4 +206,19 @@ test("turns word suggestions off and registers the hint source until unmount", a
     "inmemory://model/1",
     null,
   );
+});
+
+test("a replace request becomes one undoable edit", async () => {
+  const { editor, onChange, view } = await mounted("a: 1\n");
+  const undoStops = vi.spyOn(editor, "pushUndoStop");
+  view.rerender(
+    <YamlEditor
+      value="a: 1\n"
+      onChange={onChange}
+      testId="editor"
+      replaceRequest={{ id: 1, text: "b: 2\n" }}
+    />,
+  );
+  expect(onChange).toHaveBeenCalledWith("b: 2\n");
+  expect(undoStops).toHaveBeenCalledTimes(2);
 });

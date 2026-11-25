@@ -14,6 +14,8 @@ export function YamlEditor(props: {
   testId?: string;
   /** Where hover and completion read the schema; none for no hints. */
   hints?: HintSource;
+  /** Puts `text` into the editor as one undoable edit, once per `id` (spec A4). */
+  replaceRequest?: { id: number; text: string } | null;
 }): React.JSX.Element {
   const { value, readOnly = false } = props;
   const host = useRef<HTMLDivElement>(null);
@@ -106,6 +108,26 @@ export function YamlEditor(props: {
   useEffect(() => {
     editor.current?.updateOptions({ readOnly });
   }, [readOnly]);
+
+  const replaceId = props.replaceRequest?.id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each request id runs once.
+  useEffect(() => {
+    const request = props.replaceRequest;
+    if (!request) return;
+    const current = editor.current;
+    const model = current?.getModel();
+    if (!current || !model) {
+      latest.current.onChange(request.text);
+      return;
+    }
+    current.pushUndoStop();
+    const edited = current.executeEdits("ai-proposal", [
+      { range: model.getFullModelRange(), text: request.text },
+    ]);
+    current.pushUndoStop();
+    // A read-only editor refuses edits; the text still goes in, through `value`.
+    if (!edited) latest.current.onChange(request.text);
+  }, [replaceId]);
 
   const hintCluster = props.hints?.clusterId;
   const hintTarget = props.hints?.fixedTarget;

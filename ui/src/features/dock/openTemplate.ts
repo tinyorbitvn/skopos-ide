@@ -12,3 +12,15 @@ export function openTemplate(clusterId: string, template: Template): void {
     results: [],
   } satisfies CreateDraft);
 }
+
+/** A blank create tab with its AI bar open (spec D2's Draft with AI). */
+export function openAiDraft(clusterId: string): void {
+  const tab = newCreateTab(clusterId);
+  useDock.getState().open(tab);
+  writeDraft(tab.id, {
+    text: "",
+    baseline: "",
+    results: [],
+    ai: true,
+  } satisfies CreateDraft);
+}

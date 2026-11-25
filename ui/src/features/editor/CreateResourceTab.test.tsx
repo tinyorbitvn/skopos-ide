@@ -7,11 +7,14 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ApplyResult } from "../../ipc/generated/ApplyResult";
 import { resetDockForTest, useDock, writeDraft } from "../../stores/dock";
+import { resetProposalsForTest, useProposals } from "../../stores/proposals";
 import { kindSchema } from "../../test/apiDocs";
 import { flush, mockBackend } from "../../test/ipc";
+import { proposal } from "../../test/proposals";
+import { setAgentsSupportedForTest } from "../agents/supported";
 import { namespaceFilterKey } from "../resources/NamespaceFilter";
 import { resetApiDocsCacheForTest } from "./apiDocsCache";
 import { resetApiDocsToggleForTest } from "./apiDocsToggle";
@@ -19,28 +22,44 @@ import { CreateResourceTab } from "./CreateResourceTab";
 import { TEMPLATES } from "./templates/catalog";
 import { CHECK_AT_ONCE_CHARS } from "./useYamlCheck";
 
-vi.mock("./YamlEditor", () => ({
-  YamlEditor: (props: {
+vi.mock("./YamlDiff", () => ({
+  YamlDiff: (p: { modified: string }) => (
+    <pre data-testid="yaml-proposal-diff">{p.modified}</pre>
+  ),
+}));
+
+vi.mock("./YamlEditor", async () => {
+  const { useEffect } = await import("react");
+  function FakeYamlEditor(props: {
     value: string;
     onChange(v: string): void;
     onCaret?(offset: number): void;
     readOnly?: boolean;
     testId?: string;
-  }) => (
-    <>
-      <textarea
-        data-testid={props.testId}
-        value={props.value}
-        readOnly={props.readOnly}
-        onChange={(e) => props.onChange(e.target.value)}
-      />
-      <input
-        data-testid="yaml-caret"
-        onChange={(e) => props.onCaret?.(Number(e.target.value))}
-      />
-    </>
-  ),
-}));
+    replaceRequest?: { id: number; text: string } | null;
+  }) {
+    const { onChange, replaceRequest } = props;
+    useEffect(() => {
+      if (replaceRequest) onChange(replaceRequest.text);
+    }, [replaceRequest?.id]);
+    return (
+      <>
+        <textarea
+          data-testid={props.testId}
+          value={props.value}
+          readOnly={props.readOnly}
+          onChange={(e) => props.onChange(e.target.value)}
+        />
+        <input
+          data-testid="yaml-caret"
+          onChange={(e) => props.onCaret?.(Number(e.target.value))}
+        />
+      </>
+    );
+  }
+
+  return { YamlEditor: FakeYamlEditor };
+});
 
 const TAB = {
   id: "create-tab",
@@ -60,6 +79,7 @@ function backend(
     ui_state_get: () => namespaces,
     ui_state_set: () => null,
     resource_apply: apply,
+    chat_proposal_answer: () => null,
     api_schema: (args: { apiVersion: string; kind: string }) =>
       kindSchema({ apiVersion: args.apiVersion, kind: args.kind }),
   });
@@ -101,6 +121,11 @@ function pickTemplate(id: string) {
   fireEvent.click(screen.getByTestId("create-template"));
   fireEvent.click(screen.getByTestId(`menu-item-${id}`));
 }
+
+beforeEach(() => {
+  resetProposalsForTest();
+  setAgentsSupportedForTest(true);
+});
 
 afterEach(() => {
   // Unmount before the resets, so no mounted panel asks for API docs again and fills
@@ -444,4 +469,76 @@ test("text that does not parse keeps the kind shown last (spec L15)", async () =
 
   expect(screen.getByTestId("api-docs-kind").textContent).toBe("ConfigMap");
   expect(calls.callsTo("api_schema")).toHaveLength(1);
+});
+
+test("Ask AI is hidden where agents are not supported", async () => {
+  backend();
+  setAgentsSupportedForTest(false);
+  show();
+  expect(screen.queryByTestId("yaml-ai")).toBeNull();
+  setAgentsSupportedForTest(true);
+});
+
+test("Ask AI opens the bar with the create placeholder", async () => {
+  backend();
+  show();
+  fireEvent.click(screen.getByTestId("yaml-ai"));
+  expect(screen.getByTestId("yaml-ai").getAttribute("aria-pressed")).toBe(
+    "true",
+  );
+  expect(
+    (screen.getByTestId("yaml-ai-input") as HTMLTextAreaElement).placeholder,
+  ).toBe("Describe the objects to create");
+});
+
+test("a pending proposal shows its bar and diff, locks Apply, and Accept puts it in the editor", async () => {
+  backend();
+  show();
+  act(() =>
+    useProposals.getState().receive(
+      "chat-1",
+      proposal({
+        tabId: TAB.id,
+        yaml: "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: x\n",
+      }),
+    ),
+  );
+  expect(screen.getByTestId("yaml-proposal-bar").textContent).toContain(
+    "AI proposal",
+  );
+  expect(screen.getByTestId("yaml-proposal-diff").textContent).toContain(
+    "kind: Namespace",
+  );
+  expect(
+    (screen.getByTestId("create-apply") as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByTestId("create-template") as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByTestId("yaml-proposal-accept"));
+  expect(
+    (screen.getByTestId("yaml-editor") as HTMLTextAreaElement).value,
+  ).toContain("kind: Namespace");
+  expect(screen.queryByTestId("yaml-proposal-bar")).toBeNull();
+});
+
+test("Reject drops the proposal and keeps the text", async () => {
+  backend();
+  show();
+  type(DOCUMENT);
+  act(() =>
+    useProposals.getState().receive("chat-1", proposal({ tabId: TAB.id })),
+  );
+  fireEvent.click(screen.getByTestId("yaml-proposal-reject"));
+  expect(screen.queryByTestId("yaml-proposal-bar")).toBeNull();
+  expect(editor().value).toBe(DOCUMENT);
+});
+
+test("a draft made for AI opens with the bar", async () => {
+  backend();
+  // A draft is kept only for an open tab, as `openAiDraft` writes it.
+  useDock.getState().open(TAB);
+  writeDraft(TAB.id, { text: "", baseline: "", results: [], ai: true });
+  show();
+  expect(screen.getByTestId("yaml-ai-bar")).toBeTruthy();
 });

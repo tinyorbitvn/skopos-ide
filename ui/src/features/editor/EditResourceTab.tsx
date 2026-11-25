@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { stringify } from "yaml";
 import { Button, Dialog, ErrorNotice, Spinner } from "../../design";
+import { Sparkles } from "../../design/icons";
 import { api } from "../../ipc/api";
 import { failureMessage, IpcFailure } from "../../ipc/client";
 import type { ApiResourceInfo } from "../../ipc/generated/ApiResourceInfo";
@@ -13,12 +14,18 @@ import {
   useDock,
   writeDraft,
 } from "../../stores/dock";
+import { useProposals } from "../../stores/proposals";
+import { registerTabSource } from "../../stores/tabSources";
+import { agentsSupported } from "../agents/supported";
+import { AiBar } from "./AiBar";
 import { editTarget } from "./apiDocsKind";
 import type { CreateDraft } from "./CreateResourceTab";
 import { ApiDocsButton, EditorLayout } from "./EditorLayout";
+import { ProposalBar } from "./ProposalBar";
 import { servedKinds } from "./servedKinds";
 import { useYamlCheck } from "./useYamlCheck";
 import { stripServerFields, yamlProblem } from "./validate";
+import { YamlDiff } from "./YamlDiff";
 import { YamlEditor } from "./YamlEditor";
 import styles from "./YamlEditor.module.css";
 
@@ -79,6 +86,26 @@ export function EditResourceTab(props: {
   const hints = useMemo(
     () => ({ clusterId, fixedTarget: target, served }),
     [clusterId, target, served],
+  );
+  const [aiOpen, setAiOpen] = useState(false);
+  const [replace, setReplace] = useState<{ id: number; text: string } | null>(
+    null,
+  );
+  const pending = useProposals((s) => s.byTab[id] ?? null);
+  const latestText = useRef(text);
+  latestText.current = text;
+  useEffect(
+    () =>
+      registerTabSource(id, async () => ({
+        tabId: id,
+        title,
+        cluster: clusterId,
+        mode: "edit",
+        yaml: latestText.current,
+        target: { resource, namespace: namespace ?? null, name },
+        defaultNamespace: namespace ?? "default",
+      })),
+    [id, title, clusterId, resource, namespace, name],
   );
   let problem: string | null = null;
   if (!check.ok) problem = yamlProblem(check);
@@ -223,7 +250,9 @@ export function EditResourceTab(props: {
             variant="primary"
             size="sm"
             loading={busy}
-            disabled={!dirty || problem !== null || unchecked}
+            disabled={
+              pending !== null || !dirty || problem !== null || unchecked
+            }
             onClick={() => void save(false)}
             data-testid="yaml-save"
           >
@@ -232,9 +261,40 @@ export function EditResourceTab(props: {
           <span className={styles.hint}>
             {dirty ? "Unsaved changes" : "No changes"}
           </span>
+          {agentsSupported() ? (
+            <Button
+              size="sm"
+              className={styles.aiToggle}
+              aria-pressed={aiOpen}
+              onClick={() => setAiOpen((open) => !open)}
+              data-testid="yaml-ai"
+            >
+              <Sparkles size={14} aria-hidden="true" />
+              Ask AI
+            </Button>
+          ) : null}
           <ApiDocsButton />
         </div>
       )}
+      {!gone && aiOpen && agentsSupported() ? (
+        <AiBar
+          tabId={id}
+          placeholder={`Describe the change to ${resource.kind} ${name}`}
+          disabled={pending !== null}
+          onClose={() => setAiOpen(false)}
+        />
+      ) : null}
+      {pending ? (
+        <ProposalBar
+          card={pending.card}
+          onAccept={() => {
+            const next = useProposals.getState().accept(id);
+            if (next !== null)
+              setReplace((last) => ({ id: (last?.id ?? 0) + 1, text: next }));
+          }}
+          onReject={() => useProposals.getState().reject(id)}
+        />
+      ) : null}
       {!gone && problem ? (
         <div className={styles.problem} role="alert" data-testid="yaml-error">
           {problem}
@@ -251,13 +311,21 @@ export function EditResourceTab(props: {
       ) : null}
       {gone && !text ? null : (
         <EditorLayout clusterId={clusterId} target={target}>
-          <YamlEditor
-            value={text}
-            onChange={setText}
-            readOnly={busy || gone}
-            hints={hints}
-            testId="yaml-editor"
-          />
+          <div className={styles.stack}>
+            <div className={styles.layer} hidden={pending !== null}>
+              <YamlEditor
+                value={text}
+                onChange={setText}
+                readOnly={busy || gone}
+                hints={hints}
+                replaceRequest={replace}
+                testId="yaml-editor"
+              />
+            </div>
+            {pending ? (
+              <YamlDiff original={text} modified={pending.card.yaml} />
+            ) : null}
+          </div>
         </EditorLayout>
       )}
       {conflict ? (

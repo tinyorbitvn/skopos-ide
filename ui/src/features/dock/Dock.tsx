@@ -32,6 +32,7 @@ import {
   Plug,
   Plus,
   ScrollText,
+  Sparkles,
   SquareTerminal,
   Terminal,
   X,
@@ -47,6 +48,7 @@ import {
   tabsForCluster,
   useDock,
 } from "../../stores/dock";
+import { agentsSupported } from "../agents/supported";
 import { CreateResourceTab } from "../editor/CreateResourceTab";
 import { EditResourceTab } from "../editor/EditResourceTab";
 import { servedKinds } from "../editor/servedKinds";
@@ -57,7 +59,7 @@ import { isTerminalShortcut } from "../terminal/terminalKeys";
 import { DetailsTab } from "./DetailsTab";
 import styles from "./Dock.module.css";
 import { useOpenAsDrawer } from "./openAsDrawer";
-import { openTemplate } from "./openTemplate";
+import { openAiDraft, openTemplate } from "./openTemplate";
 import { newTerminal, openTerminal } from "./openTerminal";
 import { shownDetailsEntry } from "./useDetailsHistory";
 
@@ -363,6 +365,17 @@ export function Dock(props: {
                     onSelect: () =>
                       useDock.getState().open(newCreateTab(clusterId)),
                   },
+                  ...(agentsSupported()
+                    ? [
+                        {
+                          id: "ai-draft",
+                          label: "Draft with AI",
+                          icon: <Sparkles size={14} aria-hidden="true" />,
+                          testId: "dock-ai-draft",
+                          onSelect: () => openAiDraft(clusterId),
+                        },
+                      ]
+                    : []),
                 ],
               },
               ...templateSections(served, (template) =>

@@ -30,6 +30,7 @@ import {
   connectClusters,
   installFakeViews,
 } from "../../test/terminal";
+import { setAgentsSupportedForTest } from "../agents/supported";
 import { resetSessionsForTest } from "../terminal/sessions";
 import { setTermViewFactory } from "../terminal/termView";
 import { Dock } from "./Dock";
@@ -84,6 +85,7 @@ let backend: Backend;
 
 beforeEach(() => {
   resetDockForTest();
+  setAgentsSupportedForTest(true);
   vi.stubGlobal("innerHeight", 1000);
   installFakeViews();
   captureResizeObservers();
@@ -630,4 +632,31 @@ test("restored tabs: a hidden terminal starts when its tab is shown, a node shel
   await act(flush);
   expect(backend.callsTo("terminal_start")).toHaveLength(1);
   expect(backend.callsTo("node_shell_start")).toEqual([]);
+});
+
+test("Draft with AI opens a blank create tab with its AI bar open", async () => {
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  expect(screen.getByTestId("dock-ai-draft").textContent).toContain(
+    "Draft with AI",
+  );
+  fireEvent.click(screen.getByTestId("dock-ai-draft"));
+  await act(flush);
+  const [tab] = useDock.getState().tabs;
+  expect(tab).toMatchObject({
+    kind: "create",
+    clusterId: "c1",
+    title: "Create",
+  });
+  expect(screen.getByTestId("yaml-ai-bar")).toBeTruthy();
+  expect(
+    (screen.getByTestId("yaml-ai-input") as HTMLTextAreaElement).placeholder,
+  ).toBe("Describe the objects to create");
+});
+
+test("Draft with AI is not offered where agents are not supported", async () => {
+  setAgentsSupportedForTest(false);
+  await show();
+  fireEvent.click(screen.getByTestId("dock-new"));
+  expect(screen.queryByTestId("dock-ai-draft")).toBeNull();
 });
