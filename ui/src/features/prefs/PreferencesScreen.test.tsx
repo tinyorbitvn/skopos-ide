@@ -93,6 +93,7 @@ test("shows an error with a retry when prefs cannot be read", async () => {
     },
     tools_status: () => [],
     helm_repo_list: () => [],
+    tunnel_list: () => [],
     helm_chart_search: () => ({ charts: [], repoProblems: [] }),
   });
   render(
@@ -278,7 +279,7 @@ test("the theme is a Segmented control, and Dark applies and saves the theme", a
   expect(usePrefs.getState().prefs?.theme).toBe("dark");
 });
 
-test("Tools, Agents and Helm repositories sit between Kubeconfig sources and Appearance", async () => {
+test("Tools, Agents, Helm repositories and Tunnels sit between Kubeconfig sources and Appearance", async () => {
   show();
   await screen.findByTestId("pref-tool-helm");
   expect(
@@ -290,6 +291,7 @@ test("Tools, Agents and Helm repositories sit between Kubeconfig sources and App
     "Agent changes",
     "No clusters yet",
     "Helm repositories",
+    "Tunnels",
     "Appearance",
     "Updates",
   ]);
