@@ -2,9 +2,6 @@
 //! runs with `run_in_terminal`, one at a time, each in a PTY of its own, and the scrollback the
 //! dock tab `Agent · <cluster>` shows.
 
-// The tab (Task 4) still has to use the rest of the runner; drop this then.
-#![allow(dead_code)]
-
 pub(crate) mod output;
 pub(crate) mod process;
 pub(crate) mod shell;
@@ -23,8 +20,11 @@ use tokio_util::sync::CancellationToken;
 
 use self::output::OutputTail;
 use self::process::{CommandSpec, Spawned};
+use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
-use crate::sessions::{spawn_writer, FlowControl, Master, SessionOutput, TerminalSize};
+use crate::sessions::{
+    spawn_writer, FlowControl, Master, SessionEvent, SessionOutput, TerminalSize,
+};
 
 /// The card shows this many of the newest lines.
 pub(crate) const CARD_LINES: usize = 20;
@@ -127,7 +127,7 @@ impl AgentTerminals {
     }
 }
 
-/// Where a tab takes the output (Task 4 attaches one).
+/// Where a tab takes the output.
 #[derive(Clone)]
 struct Sink {
     session: String,
@@ -275,6 +275,62 @@ impl AgentTerminal {
             return true;
         }
         false
+    }
+
+    /// Makes a tab the terminal's screen: `Started`, the scrollback, then what comes. A tab
+    /// attached before is ended, without stopping the command. Under the lock, so that no
+    /// live output can overtake the scrollback.
+    pub(crate) fn attach(
+        &self,
+        session: &str,
+        output: mpsc::Sender<SessionOutput>,
+        flow: Arc<FlowControl>,
+        token: CancellationToken,
+    ) -> CoreResult<()> {
+        let mut screen = self.screen();
+        if let Some(old) = screen.sink.take() {
+            old.flow.release();
+            old.token.cancel();
+        }
+        let full = |_| {
+            IpcError::new(
+                ErrorCode::Internal,
+                "The terminal could not start: its output is full.",
+            )
+        };
+        output
+            .try_send(SessionOutput::Event(SessionEvent::Started { tty: true }))
+            .map_err(full)?;
+        let scrollback: Vec<u8> = screen.scrollback.iter().copied().collect();
+        if !scrollback.is_empty() {
+            flow.sent(scrollback.len() as u64);
+            output
+                .try_send(SessionOutput::Data(scrollback))
+                .map_err(full)?;
+        }
+        screen.sink = Some(Sink {
+            session: session.to_owned(),
+            output,
+            flow,
+            token,
+        });
+        Ok(())
+    }
+
+    /// The person's input, for the running command. Without one it is dropped.
+    pub(crate) fn write(&self, data: Vec<u8>) {
+        if let Some(running) = &self.screen().running {
+            let _ = running.input.try_send(data);
+        }
+    }
+
+    /// The tab's size, for the running command and the next ones.
+    pub(crate) fn resize(&self, size: TerminalSize) {
+        let mut screen = self.screen();
+        screen.size = size;
+        if let Some(running) = &screen.running {
+            running.resize.send_replace(size);
+        }
     }
 
     pub(crate) fn running_card(&self) -> Option<String> {
@@ -516,6 +572,115 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    /// Collects a sink's data until it contains `wanted`.
+    async fn read_until(
+        rx: &mut mpsc::Receiver<SessionOutput>,
+        flow: &FlowControl,
+        wanted: &str,
+    ) -> String {
+        let mut text = String::new();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while !output::plain_text(&text).contains(wanted) {
+                match rx.recv().await {
+                    Some(SessionOutput::Data(data)) => {
+                        flow.acked(data.len() as u64);
+                        text.push_str(&String::from_utf8_lossy(&data));
+                    }
+                    Some(SessionOutput::Event(_)) => {}
+                    None => panic!("the sink closed before {wanted:?}: {text:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{wanted:?} never came: {text:?}"));
+        output::plain_text(&text)
+    }
+
+    #[tokio::test]
+    async fn a_tab_gets_the_scrollback_first_then_live_output() {
+        let folder = tempfile::tempdir().unwrap();
+        let terminal = Arc::new(AgentTerminal::new());
+        run(
+            &terminal,
+            request(folder.path(), "k1", "echo first-run", 30),
+        )
+        .await;
+        let (tx, mut rx) = mpsc::channel(32);
+        let flow = Arc::new(FlowControl::new());
+        terminal
+            .attach("s1", tx, flow.clone(), CancellationToken::new())
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(SessionOutput::Event(SessionEvent::Started { tty: true }))
+        ));
+        let replay = read_until(&mut rx, &flow, "exit 0").await;
+        assert!(replay.contains("$ echo first-run"), "{replay:?}");
+        run(
+            &terminal,
+            request(folder.path(), "k2", "echo second-run", 30),
+        )
+        .await;
+        let live = read_until(&mut rx, &flow, "second-run").await;
+        assert!(live.contains("$ echo second-run"), "{live:?}");
+    }
+
+    #[tokio::test]
+    async fn a_newer_tab_takes_over_without_stopping_the_command() {
+        let terminal = Arc::new(AgentTerminal::new());
+        let (one, _rx_one) = mpsc::channel(32);
+        let old = CancellationToken::new();
+        terminal
+            .attach("s1", one, Arc::new(FlowControl::new()), old.clone())
+            .unwrap();
+        let (two, _rx_two) = mpsc::channel(32);
+        terminal
+            .attach(
+                "s2",
+                two,
+                Arc::new(FlowControl::new()),
+                CancellationToken::new(),
+            )
+            .unwrap();
+        assert!(old.is_cancelled(), "the older tab's session was not ended");
+        assert!(
+            !terminal.detach("s1"),
+            "the older tab is no longer attached"
+        );
+        assert!(terminal.detach("s2"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn what_the_person_types_reaches_the_running_command() {
+        let folder = tempfile::tempdir().unwrap();
+        let terminal = Arc::new(AgentTerminal::new());
+        let (tx, mut rx) = mpsc::channel(32);
+        let flow = Arc::new(FlowControl::new());
+        terminal
+            .attach("s1", tx, flow.clone(), CancellationToken::new())
+            .unwrap();
+        let task = tokio::spawn({
+            let terminal = terminal.clone();
+            let request = request(folder.path(), "k1", "read answer; echo got-$answer", 30);
+            async move { run(&terminal, request).await }
+        });
+        running(&terminal, "k1").await;
+        terminal.write(b"yes\r".to_vec());
+        read_until(&mut rx, &flow, "got-yes").await;
+        assert_eq!(task.await.unwrap().end, RunEnd::Exited(0));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_resize_reaches_the_running_command() {
+        let folder = tempfile::tempdir().unwrap();
+        let terminal = Arc::new(AgentTerminal::new());
+        terminal.resize(TerminalSize { cols: 91, rows: 17 });
+        let result = run(&terminal, request(folder.path(), "k1", "stty size", 30)).await;
+        assert!(result.text.contains("17 91"), "{}", result.text);
     }
 
     #[tokio::test]

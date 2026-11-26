@@ -878,6 +878,24 @@ export const api = {
   /** NotFound when no change card waits under `cardId`. */
   chatAnswer: (chatId: string, cardId: string, answer: ChangeAnswer) =>
     call<void>("chat_answer", { chatId, cardId, answer }),
+  /** The chat's Agent terminal on one cluster: what ran there so far, then what comes. */
+  chatTerminalAttach: (
+    chatId: string,
+    clusterId: string,
+    size: TerminalSize,
+    onData: (chunk: ArrayBuffer) => void,
+    onEvent: (event: SessionEvent) => void,
+  ) =>
+    call<string>("chat_terminal_attach", {
+      chatId,
+      clusterId,
+      size,
+      onData: new Channel<ArrayBuffer>(onData),
+      onEvent: new Channel<SessionEvent>(onEvent),
+    }),
+  /** Stops the terminal command of the card `cardId`. NotFound when it no longer runs. */
+  chatCommandStop: (chatId: string, cardId: string) =>
+    call<void>("chat_command_stop", { chatId, cardId }),
   /** The person's choice on one of the agent's permission requests. */
   chatPermission: (chatId: string, cardId: string, optionId: string) =>
     call<void>("chat_permission", { chatId, cardId, optionId }),

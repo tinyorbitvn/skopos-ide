@@ -56,6 +56,11 @@ test.each<[string, () => Promise<string>, Record<string, unknown>]>([
     () => api.nodeShellStart("c1", "worker-1", SIZE, noop, noop),
     { clusterId: "c1", node: "worker-1", size: SIZE },
   ],
+  [
+    "chat_terminal_attach",
+    () => api.chatTerminalAttach("a1b2c3d4", "c1", SIZE, noop, noop),
+    { chatId: "a1b2c3d4", clusterId: "c1", size: SIZE },
+  ],
 ])(
   "%s gets its target, the size and two channels, and gives the session id",
   async (cmd, start, args) => {
@@ -686,6 +691,11 @@ test.each<[string, () => Promise<unknown>, Record<string, unknown>]>([
     "chat_answer",
     () => api.chatAnswer("a1b2c3d4", "change-1", "approveForChat"),
     { chatId: "a1b2c3d4", cardId: "change-1", answer: "approveForChat" },
+  ],
+  [
+    "chat_command_stop",
+    () => api.chatCommandStop("a1b2c3d4", "change-1"),
+    { chatId: "a1b2c3d4", cardId: "change-1" },
   ],
   [
     "chat_undo_standing",

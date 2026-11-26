@@ -12,10 +12,12 @@ use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
 use skopos_core::kubeconfig::ClusterId;
 use skopos_core::prefs::{AgentChanges, AgentPrefs, ClusterAgentSettings};
-use tauri::ipc::Channel;
+use skopos_core::sessions::{SessionEvent, TerminalSize};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{State, WebviewWindow};
 use tokio::sync::mpsc;
 
+use crate::commands::sessions::{forward_output, OUTPUT_BACKLOG};
 use crate::state::AppState;
 
 /// Chat events wait here while the webview catches up.
@@ -139,6 +141,34 @@ pub async fn chat_answer(
     answer: ChangeAnswer,
 ) -> Result<(), IpcError> {
     state.core.chat_answer(&chat_id, &card_id, answer)
+}
+
+#[tauri::command]
+pub async fn chat_terminal_attach(
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+    chat_id: String,
+    cluster_id: ClusterId,
+    size: TerminalSize,
+    on_data: Channel<InvokeResponseBody>,
+    on_event: Channel<SessionEvent>,
+) -> Result<String, IpcError> {
+    let (tx, rx) = mpsc::channel(OUTPUT_BACKLOG);
+    let id = state
+        .core
+        .chat_terminal_attach(&chat_id, &cluster_id, size, tx, window.label())
+        .await?;
+    forward_output(state.core.clone(), id.clone(), rx, on_data, on_event);
+    Ok(id)
+}
+
+#[tauri::command]
+pub async fn chat_command_stop(
+    state: State<'_, AppState>,
+    chat_id: String,
+    card_id: String,
+) -> Result<(), IpcError> {
+    state.core.chat_command_stop(&chat_id, &card_id)
 }
 
 #[tauri::command]

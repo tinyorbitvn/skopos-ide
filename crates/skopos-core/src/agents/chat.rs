@@ -14,6 +14,7 @@ use super::events::{ChatEvent, ObjectRef};
 use crate::app_core::AppCore;
 use crate::error::CoreResult;
 use crate::kubeconfig::ClusterId;
+use crate::sessions::{SessionOutput, TerminalSize};
 
 pub(crate) use running::Chats;
 
@@ -83,6 +84,25 @@ impl AppCore {
         tab: Option<EditorTab>,
     ) -> CoreResult<()> {
         running::prompt(self, chat_id, text, object, tab).await
+    }
+
+    /// The chat's Agent terminal on `cluster` as a terminal session of the window `owner`
+    /// (native agents spec §5.3): what ran so far, then what comes. Its stop, when the tab
+    /// closes or the window reloads, stops the command that runs.
+    pub async fn chat_terminal_attach(
+        &self,
+        chat_id: &str,
+        cluster: &ClusterId,
+        size: TerminalSize,
+        output: mpsc::Sender<SessionOutput>,
+        owner: &str,
+    ) -> CoreResult<String> {
+        running::terminal_attach(self, chat_id, cluster, size, output, owner)
+    }
+
+    /// The card's Stop: ends the terminal command of `card_id`.
+    pub fn chat_command_stop(&self, chat_id: &str, card_id: &str) -> CoreResult<()> {
+        running::command_stop(self, chat_id, card_id)
     }
 
     /// `Stop`: cancels the turn and answers waiting changes as stopped. An id that is not
@@ -161,7 +181,7 @@ mod running {
 
     use dashmap::DashMap;
     use k8s_openapi::jiff::Timestamp;
-    use tokio::sync::{mpsc, oneshot};
+    use tokio::sync::{mpsc, oneshot, watch};
     use tokio::task::{JoinHandle, JoinSet};
     use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -186,12 +206,16 @@ mod running {
     use crate::agents::spawn::{self, TOKEN_VAR};
     use crate::agents::tabs::{AttachedTab, EditorTabs, ProposalCard};
     use crate::agents::terminal::AgentTerminals;
+    use crate::agents::terminal::Stop;
     use crate::app_core::AppCore;
     use crate::error::{CoreResult, ErrorCode, IpcError};
     use crate::kubeconfig::ClusterId;
     use crate::paths::create_private_dir;
     use crate::resources::invalid;
-    use crate::sessions::{random_hex, SessionGuard};
+    use crate::sessions::{
+        random_hex, FlowControl, SessionEvent, SessionGuard, SessionOutput, TerminalControl,
+        TerminalSize,
+    };
 
     const WORK: &str = "work";
     const RUN: &str = "run";
@@ -542,6 +566,83 @@ mod running {
         // A turn cut short by a close drops `done`; the turn has ended either way.
         let _ = finished.await;
         Ok(())
+    }
+
+    const TERMINAL_INPUT_BACKLOG: usize = 64;
+
+    pub(super) fn terminal_attach(
+        core: &AppCore,
+        chat_id: &str,
+        cluster: &ClusterId,
+        size: TerminalSize,
+        output: mpsc::Sender<SessionOutput>,
+        owner: &str,
+    ) -> CoreResult<String> {
+        let chat = running_chat(core.chats(), chat_id)?;
+        if !chat.clusters.iter().any(|known| &known.id == cluster) {
+            return Err(IpcError::new(
+                ErrorCode::NotFound,
+                "That cluster is not in this chat.",
+            ));
+        }
+        let terminal = chat.terminals.get(cluster);
+        let token = chat.life.child_token();
+        let flow = Arc::new(FlowControl::new());
+        let (input, mut input_rx) = mpsc::channel(TERMINAL_INPUT_BACKLOG);
+        let (resize, mut resize_rx) = watch::channel(size);
+        let guard = core.sessions().register(
+            token.clone(),
+            Some(TerminalControl {
+                input: Some(input),
+                resize,
+                flow: flow.clone(),
+            }),
+            owner,
+        );
+        let session = guard.id().to_owned();
+        terminal.resize(size);
+        terminal.attach(&session, output.clone(), flow.clone(), token.clone())?;
+        let id = session.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    () = token.cancelled() => break,
+                    data = input_rx.recv() => match data {
+                        Some(data) => terminal.write(data),
+                        None => break,
+                    },
+                    changed = resize_rx.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                        let size = *resize_rx.borrow_and_update();
+                        terminal.resize(size);
+                    }
+                }
+            }
+            // Closing the tab stops the command it shows; a newer tab of it does not.
+            if terminal.detach(&session) {
+                terminal.stop_running(Stop::Person);
+            }
+            flow.release();
+            let _ = output
+                .send(SessionOutput::Event(SessionEvent::Exited { code: None }))
+                .await;
+            drop(guard);
+        });
+        Ok(id)
+    }
+
+    pub(super) fn command_stop(core: &AppCore, chat_id: &str, card_id: &str) -> CoreResult<()> {
+        let chat = running_chat(core.chats(), chat_id)?;
+        if chat.terminals.stop_card(card_id) {
+            Ok(())
+        } else {
+            Err(IpcError::new(
+                ErrorCode::NotFound,
+                "That command is not running.",
+            ))
+        }
     }
 
     pub(super) fn stop(core: &AppCore, chat_id: &str) {
