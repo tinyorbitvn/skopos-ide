@@ -1,5 +1,7 @@
 //! User settings kept in the JSON stores.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -111,6 +113,16 @@ pub struct CustomAgent {
     pub command: String,
 }
 
+/// What the person chose for one agent (native agents spec §6.2).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct AgentChoices {
+    /// The model new chats with the agent start on, when the agent still offers it: the
+    /// person's last pick.
+    pub model: Option<String>,
+}
+
 /// Preferences → Agents (agents spec §3.5, §4.8). Files saved with the sandbox's `domains`
 /// and `folders` still read: serde ignores fields it does not know.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS, PartialEq, Eq)]
@@ -121,6 +133,8 @@ pub struct AgentPrefs {
     pub default_agent: Option<String>,
     /// The agents the person added, in the order added.
     pub custom: Vec<CustomAgent>,
+    /// By agent id.
+    pub agents: BTreeMap<String, AgentChoices>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, TS, PartialEq)]
@@ -298,6 +312,7 @@ mod tests {
                 name: "Mine".into(),
                 command: "my-agent --acp".into(),
             }],
+            agents: BTreeMap::new(),
         };
         let v = serde_json::to_value(&prefs).unwrap();
         assert_eq!(v["defaultAgent"], "codex");
@@ -415,5 +430,21 @@ mod tests {
             !saved.contains("domains") && !saved.contains("folders"),
             "{saved}"
         );
+    }
+
+    #[test]
+    fn agent_choices_read_from_files_saved_before_them_and_by_agent_id() {
+        let old: AgentPrefs =
+            serde_json::from_str(r#"{"defaultAgent":"codex","custom":[]}"#).unwrap();
+        assert!(old.agents.is_empty());
+        let prefs: AgentPrefs = serde_json::from_str(
+            r#"{"agents":{"claude":{"model":"opus"},"codex":{},"gemini":{"controlApp":true}}}"#,
+        )
+        .unwrap();
+        assert_eq!(prefs.agents["claude"].model.as_deref(), Some("opus"));
+        assert_eq!(prefs.agents["codex"], AgentChoices::default());
+        assert_eq!(prefs.agents["gemini"], AgentChoices::default());
+        let value = serde_json::to_value(&prefs).unwrap();
+        assert_eq!(value["agents"]["claude"]["model"], "opus");
     }
 }

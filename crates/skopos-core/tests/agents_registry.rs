@@ -514,3 +514,37 @@ async fn custom_agents_and_the_default_are_saved_and_a_removed_default_is_forgot
     assert!(fixture.nothing_ran());
     core.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_saved_model_is_kept_per_agent_and_goes_with_a_removed_agent() {
+    let fixture = Fixture::new();
+    fixture.install("my-agent");
+    let core = fixture.core().await;
+    let mine = core.agent_custom_add("Mine", "my-agent --acp").unwrap();
+    core.agent_model_save("claude", "opus").unwrap();
+    core.agent_model_save(&mine.id, "fast").unwrap();
+    core.agent_model_save(&mine.id, "slow").unwrap();
+    // An agent that is not listed keeps nothing.
+    core.agent_model_save("custom-ffffffff", "x").unwrap();
+    core.shutdown().await;
+
+    let core = fixture.core().await;
+    let model = |prefs: &skopos_core::prefs::AgentPrefs, id: &str| {
+        prefs
+            .agents
+            .get(id)
+            .and_then(|choices| choices.model.clone())
+    };
+    let prefs = core.agent_prefs();
+    assert_eq!(model(&prefs, "claude").as_deref(), Some("opus"));
+    assert_eq!(model(&prefs, &mine.id).as_deref(), Some("slow"));
+    assert!(!prefs.agents.contains_key("custom-ffffffff"));
+
+    core.agent_custom_remove(&mine.id).unwrap();
+
+    let prefs = core.agent_prefs();
+    assert!(!prefs.agents.contains_key(&mine.id));
+    assert_eq!(model(&prefs, "claude").as_deref(), Some("opus"));
+    assert!(fixture.nothing_ran());
+    core.shutdown().await;
+}
