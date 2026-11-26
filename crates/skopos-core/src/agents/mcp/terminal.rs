@@ -167,32 +167,22 @@ impl ChatGate {
             armed: true,
         };
         running.card.state = ChangeState::Running;
+        // The card shows Running at once, so that no answer button is left on an approved
+        // command. A command queued behind another can be stopped from it as well.
+        self.approvals.show(running.card.clone()).await;
         let terminal = self.terminals.get(&cluster.id);
         let (lines, mut fresh_lines) = watch::channel(String::new());
         let run = terminal.run(request, lines);
         tokio::pin!(run);
-        // The card shows Running once the command holds the terminal, so that a Stop which
-        // follows the card finds it. A command queued behind another keeps its card as it was.
-        let mut shown = false;
-        let mut poll = tokio::time::interval(Duration::from_millis(10));
         let result = loop {
             tokio::select! {
                 result = &mut run => break result,
-                _ = poll.tick(), if !shown => {
-                    if terminal.running_card().as_deref() == Some(running.card.id.as_str()) {
-                        shown = true;
-                        self.approvals.show(running.card.clone()).await;
-                    }
-                }
-                Ok(()) = fresh_lines.changed(), if shown => {
+                Ok(()) = fresh_lines.changed() => {
                     running.card.output = Some(fresh_lines.borrow_and_update().clone());
                     self.approvals.show(running.card.clone()).await;
                 }
             }
         };
-        if !shown {
-            self.approvals.show(running.card.clone()).await;
-        }
         running.armed = false;
         let mut card = running.card.clone();
         card.output = (!result.lines.is_empty()).then(|| result.lines.clone());

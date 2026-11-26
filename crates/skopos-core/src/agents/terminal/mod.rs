@@ -157,7 +157,16 @@ struct Screen {
 pub(crate) struct AgentTerminal {
     /// Held while a command runs: one at a time (spec §5.3).
     turn: tokio::sync::Mutex<()>,
+    /// Commands that wait for the turn, or hold it but have not shown as running yet, so that
+    /// a Stop reaches them too.
+    queued: Mutex<Vec<Queued>>,
     screen: Mutex<Screen>,
+}
+
+struct Queued {
+    card_id: String,
+    stop: CancellationToken,
+    reason: Arc<OnceLock<Stop>>,
 }
 
 /// Stops the command when the run is dropped before its end, because the agent's call went
@@ -168,6 +177,18 @@ struct StopOnDrop {
     stop: CancellationToken,
     reason: Arc<OnceLock<Stop>>,
     armed: bool,
+}
+
+/// Takes the command off the queue when the run ends by any path.
+struct QueueEntry {
+    terminal: Arc<AgentTerminal>,
+    card_id: String,
+}
+
+impl Drop for QueueEntry {
+    fn drop(&mut self) {
+        self.terminal.unqueue(&self.card_id);
+    }
 }
 
 impl Drop for StopOnDrop {
@@ -200,6 +221,7 @@ impl AgentTerminal {
     pub(crate) fn new() -> AgentTerminal {
         AgentTerminal {
             turn: tokio::sync::Mutex::new(()),
+            queued: Mutex::new(Vec::new()),
             screen: Mutex::new(Screen {
                 scrollback: VecDeque::new(),
                 at_line_start: true,
@@ -340,22 +362,42 @@ impl AgentTerminal {
             .map(|running| running.card_id.clone())
     }
 
+    /// Stops the running command and every command queued behind it.
     pub(crate) fn stop_running(&self, reason: Stop) {
         if let Some(running) = &self.screen().running {
             let _ = running.reason.set(reason);
             running.stop.cancel();
         }
+        for queued in lock(&self.queued).iter() {
+            let _ = queued.reason.set(reason);
+            queued.stop.cancel();
+        }
     }
 
+    /// Stops the command of the card, running or still queued.
     pub(crate) fn stop_card(&self, card_id: &str, reason: Stop) -> bool {
-        match &self.screen().running {
-            Some(running) if running.card_id == card_id => {
+        if let Some(running) = &self.screen().running {
+            if running.card_id == card_id {
                 let _ = running.reason.set(reason);
                 running.stop.cancel();
+                return true;
+            }
+        }
+        match lock(&self.queued)
+            .iter()
+            .find(|queued| queued.card_id == card_id)
+        {
+            Some(queued) => {
+                let _ = queued.reason.set(reason);
+                queued.stop.cancel();
                 true
             }
-            _ => false,
+            None => false,
         }
+    }
+
+    fn unqueue(&self, card_id: &str) {
+        lock(&self.queued).retain(|queued| queued.card_id != card_id);
     }
 
     /// Waits for the command before it, then runs this one. `lines` gets the card's last lines
@@ -365,10 +407,26 @@ impl AgentTerminal {
         request: RunRequest,
         lines: watch::Sender<String>,
     ) -> RunResult {
-        let _turn = self.turn.lock().await;
-        self.line(&command_line(&request.command)).await;
         let stop = request.cluster.child_token();
-        let reason = Arc::new(OnceLock::new());
+        let reason: Arc<OnceLock<Stop>> = Arc::new(OnceLock::new());
+        lock(&self.queued).push(Queued {
+            card_id: request.card_id.clone(),
+            stop: stop.clone(),
+            reason: reason.clone(),
+        });
+        let _queue_entry = QueueEntry {
+            terminal: self.clone(),
+            card_id: request.card_id.clone(),
+        };
+        let _turn = tokio::select! {
+            biased;
+            () = stop.cancelled() => return Self::stopped_before_start(&reason),
+            turn = self.turn.lock() => turn,
+        };
+        if stop.is_cancelled() {
+            return Self::stopped_before_start(&reason);
+        }
+        self.line(&command_line(&request.command)).await;
         let mut guard = StopOnDrop {
             terminal: self.clone(),
             card_id: request.card_id.clone(),
@@ -385,6 +443,10 @@ impl AgentTerminal {
             path: request.path.clone(),
             size,
         };
+        if stop.is_cancelled() {
+            guard.armed = false;
+            return Self::stopped_before_start(&reason);
+        }
         let spawned = match tokio::task::spawn_blocking(move || process::spawn(&spec)).await {
             Ok(Ok(spawned)) => spawned,
             Ok(Err(message)) => return self.failed(&mut guard, message).await,
@@ -406,6 +468,8 @@ impl AgentTerminal {
             input: input.clone(),
             resize,
         });
+        // From here a Stop finds the command as running. One that came before ends it now.
+        self.unqueue(&request.card_id);
         let tail = Arc::new(Mutex::new(OutputTail::default()));
         let fresh = Arc::new(AtomicBool::new(false));
         let reader_done = self.spawn_reader(reader, tail.clone(), fresh.clone(), input);
@@ -455,6 +519,14 @@ impl AgentTerminal {
             end,
             text: tail.agent_text(),
             lines: tail.last_lines(CARD_LINES),
+        }
+    }
+
+    fn stopped_before_start(reason: &OnceLock<Stop>) -> RunResult {
+        RunResult {
+            end: RunEnd::Stopped(reason.get().copied().unwrap_or(Stop::Chat)),
+            text: String::new(),
+            lines: String::new(),
         }
     }
 
@@ -1010,5 +1082,64 @@ mod tests {
         assert!(Arc::ptr_eq(&a, &again));
         assert!(!terminals.stop_card("nothing"));
         terminals.stop_all();
+    }
+
+    #[tokio::test]
+    async fn stop_all_also_ends_commands_queued_behind_the_running_one() {
+        let folder = tempfile::tempdir().unwrap();
+        let terminal = Arc::new(AgentTerminal::new());
+        let long = script("sleep 30", "ping -n 30 127.0.0.1 >NUL");
+        let one = tokio::spawn({
+            let terminal = terminal.clone();
+            let request = request(folder.path(), "k1", &long, 60);
+            async move { run(&terminal, request).await }
+        });
+        running(&terminal, "k1").await;
+        let two = tokio::spawn({
+            let terminal = terminal.clone();
+            let request = request(folder.path(), "k2", "echo second", 60);
+            async move { run(&terminal, request).await }
+        });
+        while !lock(&terminal.queued)
+            .iter()
+            .any(|queued| queued.card_id == "k2")
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        terminal.stop_running(Stop::Chat);
+        assert_eq!(one.await.unwrap().end, RunEnd::Stopped(Stop::Chat));
+        assert_eq!(two.await.unwrap().end, RunEnd::Stopped(Stop::Chat));
+        assert!(!output::plain_text(&terminal.scrollback_text()).contains("second"));
+        assert_eq!(terminal.running_card(), None);
+    }
+
+    #[tokio::test]
+    async fn stop_card_ends_a_queued_command_alone() {
+        let folder = tempfile::tempdir().unwrap();
+        let terminal = Arc::new(AgentTerminal::new());
+        let first = script(
+            "sleep 1; echo first",
+            "ping -n 2 127.0.0.1 >NUL & echo first",
+        );
+        let one = tokio::spawn({
+            let terminal = terminal.clone();
+            let request = request(folder.path(), "k1", &first, 30);
+            async move { run(&terminal, request).await }
+        });
+        running(&terminal, "k1").await;
+        let two = tokio::spawn({
+            let terminal = terminal.clone();
+            let request = request(folder.path(), "k2", "echo second", 30);
+            async move { run(&terminal, request).await }
+        });
+        while !lock(&terminal.queued)
+            .iter()
+            .any(|queued| queued.card_id == "k2")
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(terminal.stop_card("k2", Stop::Person));
+        assert_eq!(two.await.unwrap().end, RunEnd::Stopped(Stop::Person));
+        assert_eq!(one.await.unwrap().end, RunEnd::Exited(0));
     }
 }
