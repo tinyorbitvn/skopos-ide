@@ -27,7 +27,7 @@ const SAMPLES_TIMEOUT = 5 * 60_000;
 /** metrics-server is read every 15 s; its own scrape adds up to a minute on a new install. */
 const USAGE_TIMEOUT = 45_000;
 const SAVED =
-  "Saved. Changes apply at once; the proxy applies on the next connect.";
+  "Saved. Changes apply at once; the tunnel applies on the next connect.";
 
 let prometheus: PrometheusService = { namespace: "", service: "", port: 0 };
 
