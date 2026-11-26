@@ -5,8 +5,10 @@ import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import type { ClusterInfo } from "../ipc/generated/ClusterInfo";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
+import { resetTunnelsForTest, useTunnels } from "../stores/tunnels";
 import { resetWindowLayoutForTest } from "../stores/windowLayout";
 import { clusterEntry, mockBackend } from "../test/ipc";
+import { tunnel } from "../test/tunnels";
 import { AppHeader } from "./AppHeader";
 import { ShellRouter } from "./tabs/ShellRouter";
 
@@ -74,6 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetCatalogForTest();
   resetShellForTest();
+  resetTunnelsForTest();
 });
 
 test("on the catalog: the title, the palette button and Add cluster", async () => {
@@ -209,4 +212,26 @@ test("an empty window is titled No tabs open, with Back and Forward off", async 
   expect(
     (screen.getByTestId("header-back") as HTMLButtonElement).disabled,
   ).toBe(true);
+});
+
+test("a connected cluster whose tunnel failed shows Tunnel failed with the reason", async () => {
+  useTunnels.setState({
+    tunnels: [
+      tunnel({ state: { status: "failed", message: "no answer within 15 s" } }),
+    ],
+  });
+  await show(["/cluster/c1"], [{ ...PROD, tunnel: "t1" }, STAGING]);
+
+  const badge = screen.getByTestId("header-tunnel");
+  expect(badge.textContent).toBe("Tunnel failed");
+  expect(badge.getAttribute("title")).toBe(
+    'Tunnel "corp": no answer within 15 s',
+  );
+  expect(text("connection-status")).toBe("Connected");
+});
+
+test("a cluster whose tunnel is up shows no tunnel badge", async () => {
+  useTunnels.setState({ tunnels: [tunnel({ state: { status: "up" } })] });
+  await show(["/cluster/c1"], [{ ...PROD, tunnel: "t1" }, STAGING]);
+  expect(screen.queryByTestId("header-tunnel")).toBeNull();
 });

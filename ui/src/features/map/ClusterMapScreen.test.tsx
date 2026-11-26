@@ -56,7 +56,6 @@ async function show(
       defaultNamespace,
       accessibleNamespaces: [],
       terminalCwd: null,
-      proxyUrl: null,
       nodeShellImage: null,
     }),
   });

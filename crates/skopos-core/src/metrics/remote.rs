@@ -33,6 +33,9 @@ pub(crate) struct RemoteEndpoint {
     pub(crate) matcher: Option<LabelMatcher>,
     pub(crate) auth: RemoteAuth,
     pub(crate) ca_path: Option<String>,
+    /// The cluster's tunnel gateway URL (`U(T)`), when the cluster has a tunnel. A `Secret`, so
+    /// `Debug` never shows its token.
+    pub(crate) proxy: Option<Secret>,
 }
 
 impl RemoteEndpoint {
@@ -109,12 +112,21 @@ impl Remote {
         if let Some(value) = authorization(&endpoint.auth, secret.as_ref())? {
             headers.insert(AUTHORIZATION, value);
         }
-        // The system proxy applies, not the cluster's (spec I44).
+        // The cluster's tunnel when it has one, otherwise the system proxy; never for this
+        // machine (spec I44, I33; tunnels spec §5.7).
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers);
         if !uses_proxy(&endpoint.url) {
             builder = builder.no_proxy();
+        } else if let Some(gateway) = &endpoint.proxy {
+            let proxy = reqwest::Proxy::all(gateway.expose()).map_err(|_| {
+                crate::error::IpcError::new(
+                    crate::error::ErrorCode::Internal,
+                    "the tunnel gateway URL is not valid",
+                )
+            })?;
+            builder = builder.proxy(proxy);
         }
         if let Some(ca_path) = &endpoint.ca_path {
             let pem = read_pem_file(ca_path, PemFile::Ca)?;
@@ -303,7 +315,22 @@ impl AppCore {
             ),
             RemoteAuth::Anonymous | RemoteAuth::Mtls { .. } => None,
         };
-        self.metrics().remote(id, endpoint, secret)
+        let gateway = match self.cluster_tunnel(id) {
+            Some(def) if !is_loopback(&endpoint.url) => {
+                if endpoint.url.scheme() != "https" {
+                    return Err(invalid(
+                        "A remote metrics URL needs https:// to go through the cluster's tunnel",
+                    ));
+                }
+                Some(self.tunnel_url(&def)?)
+            }
+            _ => None,
+        };
+        let endpoint = RemoteEndpoint {
+            proxy: gateway,
+            ..endpoint.clone()
+        };
+        self.metrics().remote(id, &endpoint, secret)
     }
 }
 
@@ -331,6 +358,7 @@ mod tests {
             matcher: None,
             auth,
             ca_path: None,
+            proxy: None,
         }
     }
 

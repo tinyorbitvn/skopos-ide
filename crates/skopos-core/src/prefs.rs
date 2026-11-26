@@ -19,7 +19,14 @@ pub struct ClusterSettings {
     pub default_namespace: Option<String>,
     pub accessible_namespaces: Vec<String>,
     pub terminal_cwd: Option<String>,
+    /// The old per-cluster proxy, read from files of earlier versions so the tunnels migration
+    /// can move it (tunnels spec §5.4). Never written, never sent to the webview.
+    #[serde(skip_serializing)]
+    #[ts(skip)]
     pub proxy_url: Option<String>,
+    /// The id of the tunnel this cluster is reached through (tunnels spec §5.2). An id that
+    /// names no tunnel counts as none.
+    pub tunnel: Option<String>,
     pub node_shell_image: Option<String>,
     /// How metrics are read for this cluster (F16).
     pub metrics_provider: MetricsProviderSetting,

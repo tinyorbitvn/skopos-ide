@@ -32,6 +32,7 @@ import { HelmReposSection } from "./HelmReposSection";
 import styles from "./PreferencesScreen.module.css";
 import { type PrefsSection, prefsSectionId } from "./paths";
 import { ToolsSection } from "./ToolsSection";
+import { TunnelsSection } from "./TunnelsSection";
 
 const SECTIONS: PrefsSection[] = ["agents", "agent-changes"];
 
@@ -215,6 +216,7 @@ export function PreferencesScreen() {
       <AgentsSection />
       <AgentChangesSection />
       <HelmReposSection />
+      <TunnelsSection />
       <section className={styles.section}>
         <h3 className={styles.heading}>Appearance</h3>
         <div className={styles.themeRow}>

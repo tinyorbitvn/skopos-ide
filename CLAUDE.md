@@ -8,7 +8,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 ## Product
 
 - **Catalog and clusters:** kubeconfig files are watched and synced into a catalog with folders
-  and a hotbar; several clusters connect at once, one failing never affects another.
+  and a hotbar; several clusters connect at once, one failing never affects another. A cluster can reach its API server through a named proxy tunnel.
 - **Shell:** sidebar, tabs across several windows (restored on restart), command palette, dock.
 - **Resources:** live tables per kind (columns, status badges, filter by any column), a detail
   drawer with actions, a YAML editor to edit and create, cluster and section overviews, a
@@ -74,6 +74,11 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 - The login shell's environment is loaded at startup (`shell_env.rs`) so exec auth plugins work
   from a GUI launch.
 - Argo CD actions write the Application through the Kubernetes API, not the Argo CD API server.
+- Tunnels (`skopos-core/src/tunnels/`): named proxy tunnels behind one local CONNECT gateway on
+  `127.0.0.1`, with a per-run token per tunnel and an allowlist of each cluster's API server and
+  metrics host. The `kube` client, `{id}.yaml` and chat kubeconfigs use the gateway as their
+  `proxy-url`; exports keep the source's own `proxy-url`. Passwords live in the keychain service
+  `SkoposIDE tunnels`.
 - Security: CSP with no remote scripts, fonts and Monaco bundled; URLs leave the app only through
   `external_url.rs`; a system dialog picks save paths, never the page; errors and logs never quote
   kubeconfig, store or Secret values; destructive actions confirm and name the target.

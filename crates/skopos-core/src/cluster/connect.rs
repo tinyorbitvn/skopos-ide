@@ -21,10 +21,11 @@ use super::manager::{ClusterHandle, LogLevel};
 use super::state::{ClusterInfo, FailureKind};
 use crate::error::{
     auth_error_text, error_chain, find_auth_error, friendly_transport_message, sanitize_text,
-    ErrorCode,
+    CoreResult, ErrorCode, IpcError,
 };
 use crate::kubeconfig::{extract_context, ContextEntry};
 use crate::prefs::ClusterSettings;
+use crate::tunnels::no_proxy::env_proxy;
 
 /// Spec F3 only bounds `GET /version`, but a server that stalls afterwards must
 /// not leave the cluster connecting forever. This is roomy, because discovery
@@ -88,10 +89,32 @@ pub(crate) struct Established {
     pub(crate) info: ClusterInfo,
     /// The kubeconfig's server URL for the context.
     pub(crate) server: Option<String>,
+    pub(crate) proxy_origin: ProxyOrigin,
 }
 
-/// Writes the per-context kubeconfig to `dest` and reads it back.
-pub(crate) fn prepare_kubeconfig(entry: &ContextEntry, dest: &Path) -> Result<Kubeconfig, Failure> {
+/// Where the `proxy-url` of `{id}.yaml` came from (tunnels spec §5.7).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum ProxyOrigin {
+    /// The source kubeconfig's own, or none.
+    #[default]
+    Source,
+    /// The tunnel's gateway URL, written over the source's own value, which exports put back.
+    Tunnel { source_proxy_url: Option<String> },
+}
+
+/// The context's kubeconfig as the source file has it, and what `{id}.yaml` holds instead.
+pub(crate) struct Prepared {
+    pub(crate) source: Kubeconfig,
+    pub(crate) proxy_origin: ProxyOrigin,
+}
+
+/// Writes the per-context kubeconfig to `dest` and reads it back. With a tunnel, `proxy` is
+/// the gateway URL, which the file gets as its cluster's `proxy-url` (spec §5.7).
+pub(crate) fn prepare_kubeconfig(
+    entry: &ContextEntry,
+    dest: &Path,
+    proxy: Option<&str>,
+) -> Result<Prepared, Failure> {
     extract_context(Path::new(&entry.source_path), &entry.context_name, dest).map_err(|e| {
         let kind = match e.code {
             ErrorCode::InvalidInput | ErrorCode::NotFound => FailureKind::ConfigInvalid,
@@ -106,7 +129,65 @@ pub(crate) fn prepare_kubeconfig(entry: &ContextEntry, dest: &Path) -> Result<Ku
         };
         Failure::new(kind, message)
     })?;
-    Kubeconfig::read_from(dest).map_err(|e| config_failure(&entry.source_path, &e))
+    let source = Kubeconfig::read_from(dest).map_err(|e| config_failure(&entry.source_path, &e))?;
+    let Some(proxy) = proxy else {
+        return Ok(Prepared {
+            source,
+            proxy_origin: ProxyOrigin::Source,
+        });
+    };
+    write_proxy_url(dest, proxy).map_err(|e| {
+        Failure::new(
+            FailureKind::Other,
+            format!(
+                "cannot prepare a kubeconfig from {}: {}",
+                entry.source_path, e.message
+            ),
+        )
+    })?;
+    let source_proxy_url = source
+        .clusters
+        .first()
+        .and_then(|named| named.cluster.as_ref())
+        .and_then(|cluster| cluster.proxy_url.clone());
+    Ok(Prepared {
+        source,
+        proxy_origin: ProxyOrigin::Tunnel { source_proxy_url },
+    })
+}
+
+/// The kubeconfig with every cluster's `proxy-url` set to `proxy`.
+pub(crate) fn with_proxy_url(kubeconfig: &Kubeconfig, proxy: &str) -> Kubeconfig {
+    let mut copy = kubeconfig.clone();
+    for named in &mut copy.clusters {
+        if let Some(cluster) = named.cluster.as_mut() {
+            cluster.proxy_url = Some(proxy.to_owned());
+        }
+    }
+    copy
+}
+
+/// Sets the `proxy-url` of every cluster of the private kubeconfig at `path`. Errors never
+/// quote the file.
+pub(crate) fn write_proxy_url(path: &Path, proxy: &str) -> CoreResult<()> {
+    use serde_yaml_ng::Value;
+    let text = std::fs::read_to_string(path)?;
+    let mut doc: Value = serde_yaml_ng::from_str(&text)
+        .map_err(|_| IpcError::new(ErrorCode::InvalidInput, "the kubeconfig is not valid YAML"))?;
+    if let Some(clusters) = doc.get_mut("clusters").and_then(Value::as_sequence_mut) {
+        for item in clusters {
+            if let Some(Value::Mapping(cluster)) = item.get_mut("cluster") {
+                cluster.insert(Value::from("proxy-url"), Value::from(proxy));
+            }
+        }
+    }
+    let text = serde_yaml_ng::to_string(&doc).map_err(|e| {
+        IpcError::new(
+            ErrorCode::Internal,
+            format!("cannot write the kubeconfig: {e}"),
+        )
+    })?;
+    crate::kubeconfig::write_private(path, text.as_bytes())
 }
 
 fn config_failure(source: &str, err: &KubeconfigError) -> Failure {
@@ -211,33 +292,40 @@ fn exec_failure_detail(err: &AuthError) -> Option<String> {
     })
 }
 
-/// Everything after `prepare_kubeconfig`. The caller races this against cancellation.
+/// The allowance for the tunnel probe, the client build and `GET /version` together, because
+/// `kube` runs an exec plugin while building the client.
+pub(crate) fn connect_limit(entry: &ContextEntry, timeouts: &ConnectTimeouts) -> Duration {
+    if entry.uses_exec {
+        timeouts.version_exec
+    } else {
+        timeouts.version
+    }
+}
+
+/// Everything after `prepare_kubeconfig`. `deadline` is the connect deadline, set before the
+/// tunnel probe. The caller races this against cancellation.
 pub(crate) async fn establish(
     handle: &ClusterHandle,
     kubeconfig: Kubeconfig,
     entry: &ContextEntry,
     settings: &ClusterSettings,
     timeouts: &ConnectTimeouts,
+    proxy: Option<&str>,
+    deadline: Instant,
 ) -> Result<Established, Failure> {
     let classifier = Classifier {
         exec_command: exec_command(&kubeconfig).map(|command| command.command),
     };
-    let limit = if entry.uses_exec {
-        timeouts.version_exec
-    } else {
-        timeouts.version
-    };
-    // One allowance for both, because `kube` runs an exec plugin while building the client.
-    let deadline = Instant::now() + limit;
+    let limit = connect_limit(entry, timeouts);
 
     let client = build_client(
         handle,
         kubeconfig,
         entry,
-        settings,
         &classifier,
         deadline,
         limit,
+        proxy,
     )
     .await?;
 
@@ -282,22 +370,30 @@ pub(crate) async fn establish(
         discovery: Arc::new(discovery),
         info,
         server: entry.server.clone(),
+        proxy_origin: ProxyOrigin::Source,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_client(
     handle: &ClusterHandle,
     kubeconfig: Kubeconfig,
     entry: &ContextEntry,
-    settings: &ClusterSettings,
     classifier: &Classifier,
     deadline: Instant,
     limit: Duration,
+    proxy: Option<&str>,
 ) -> Result<Client, Failure> {
     let options = KubeConfigOptions {
         context: Some(entry.context_name.clone()),
         ..Default::default()
     };
+    let own_proxy = kubeconfig
+        .clusters
+        .first()
+        .and_then(|named| named.cluster.as_ref())
+        .and_then(|cluster| cluster.proxy_url.clone())
+        .filter(|url| !url.trim().is_empty());
     let mut config = Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
         .map_err(|e| config_failure(&entry.source_path, &e))?;
@@ -309,14 +405,22 @@ async fn build_client(
              (insecure-skip-tls-verify), so the server's identity is not checked",
         );
     }
-    let proxy_url = settings.proxy_url.as_deref().map(str::trim);
-    if let Some(url) = proxy_url.filter(|url| !url.is_empty()) {
-        // The error text does not quote the URL, which can hold a password.
-        let parsed = url
-            .parse::<http::Uri>()
-            .map_err(|e| Failure::config(format!("the proxy URL setting is invalid: {e}")))?;
-        config.proxy_url = Some(parsed);
-    }
+    // Chosen here, after `kube` read the kubeconfig: `kube` checks NO_PROXY against the
+    // proxy's own address, which drops a gateway on 127.0.0.1 and keeps a proxy NO_PROXY
+    // exempts the server from (tunnels spec §5.7, §5.8).
+    let chosen = match proxy {
+        Some(gateway) => Some(gateway.to_owned()),
+        None => own_proxy.or_else(|| {
+            entry
+                .server
+                .as_deref()
+                .and_then(|server| env_proxy(server, |name| std::env::var(name).ok()))
+        }),
+    };
+    config.proxy_url = chosen
+        .map(|url| url.parse::<http::Uri>())
+        .transpose()
+        .map_err(|_| Failure::config("the proxy URL is not valid"))?;
     // A 429 is an answer to show, such as an eviction a disruption budget refuses.
     // The default retry would hold the user's action for minutes.
     config.default_retry = false;

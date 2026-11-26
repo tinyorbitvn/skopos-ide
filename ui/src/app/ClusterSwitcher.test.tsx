@@ -9,8 +9,10 @@ import { beforeEach, expect, test, vi } from "vitest";
 import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetFoldersForTest, useFolders } from "../stores/folders";
+import { resetTunnelsForTest, useTunnels } from "../stores/tunnels";
 import { CSS_FILES, cssRules } from "../test/css";
 import { clusterEntry } from "../test/ipc";
+import { tunnel } from "../test/tunnels";
 import { ClusterSwitcher, switcherOverline } from "./ClusterSwitcher";
 
 const INFO = {
@@ -25,6 +27,7 @@ const INFO = {
 beforeEach(() => {
   resetCatalogForTest();
   resetFoldersForTest();
+  resetTunnelsForTest();
   useCatalog.setState({
     loading: false,
     clusters: [
@@ -399,4 +402,24 @@ test("collapsing closes the open menu", () => {
   expect(screen.queryByTestId("switcher-menu")).toBeNull();
   rerender(<ClusterSwitcher {...props} />);
   expect(screen.queryByTestId("switcher-menu")).toBeNull();
+});
+
+test("a connected cluster whose tunnel failed reads Tunnel failed in the list", () => {
+  useTunnels.setState({
+    tunnels: [tunnel({ state: { status: "failed", message: "refused" } })],
+  });
+  useCatalog.setState({
+    clusters: useCatalog
+      .getState()
+      .clusters.map((c) =>
+        c.contextName === "prod-eu-1" ? { ...c, tunnel: "t1" } : c,
+      ),
+  });
+  renderSwitcher("id-prod-eu-1");
+  fireEvent.click(screen.getByTestId("switcher-trigger"));
+  const row = screen.getByTestId("switcher-cluster-prod-eu-1");
+  expect(row.getAttribute("aria-label")).toBe("prod-eu-1, Tunnel failed");
+  expect(within(row).getByText("Tunnel failed").getAttribute("title")).toBe(
+    'Tunnel "corp": refused',
+  );
 });

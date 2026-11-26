@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { clusterStatus } from "../../app/clusterStatus";
 import { connectionNotes } from "../../app/connectionNotes";
+import { tunnelProblem } from "../../app/tunnelProblem";
 import {
   Badge,
   Button,
@@ -31,6 +32,7 @@ import type { ClusterEntry } from "../../ipc/generated/ClusterEntry";
 import { useCatalog } from "../../stores/catalog";
 import { connectAndAsk } from "../../stores/clusters";
 import { useFolders } from "../../stores/folders";
+import { useTunnels } from "../../stores/tunnels";
 import { settingsPath } from "../settings/paths";
 import styles from "./CatalogScreen.module.css";
 import { dropText, startCatalogDrag, useCatalogDrag } from "./catalogDrag";
@@ -434,6 +436,8 @@ function ClusterRow(props: {
   const dragging = useDragging(c.id);
   const status = clusterStatus(c.state);
   const detail = statusDetail(c);
+  const tunnels = useTunnels((s) => s.tunnels);
+  const problem = tunnelProblem(c, tunnels);
   const to = `/cluster/${encodeURIComponent(c.id)}`;
   return (
     <tr
@@ -489,6 +493,11 @@ function ClusterRow(props: {
         <span className={styles.status}>
           <StatusDot tone={status.tone} label={status.label} />
           <span>{status.label}</span>
+          {problem !== null ? (
+            <span title={problem.detail} data-testid={`catalog-tunnel-${c.id}`}>
+              <Badge tone={problem.tone}>{problem.label}</Badge>
+            </span>
+          ) : null}
           {detail ? (
             <span className={styles.detail} title={detail}>
               {detail}

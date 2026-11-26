@@ -6,7 +6,11 @@ export type ClusterEntry = { id: string,
 /**
  * The display name when one is set, otherwise the context name.
  */
-name: string, contextName: string, server: string | null, icon: string | null, source: ClusterSource, 
+name: string, contextName: string, server: string | null, 
+/**
+ * The id of the tunnel the cluster picked, if any (tunnels spec §5.1).
+ */
+tunnel: string | null, icon: string | null, source: ClusterSource, 
 /**
  * The command a connect runs for credentials, when the kubeconfig names an exec plugin.
  */

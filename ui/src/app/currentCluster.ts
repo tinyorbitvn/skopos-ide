@@ -8,6 +8,8 @@ export interface CurrentCluster {
   /** The catalog name, or "Cluster" while the id is not in the catalog. */
   name: string;
   state: ConnectionState;
+  /** The id of the tunnel the cluster reaches its API through, if any. */
+  tunnel?: string | null;
 }
 
 const DISCONNECTED: ConnectionState = { status: "disconnected" };
@@ -26,6 +28,7 @@ export function useCurrentCluster(): CurrentCluster | null {
             id,
             name: entry?.name ?? "Cluster",
             state: entry?.state ?? DISCONNECTED,
+            tunnel: entry?.tunnel ?? null,
           },
     [id, entry],
   );

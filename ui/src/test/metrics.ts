@@ -133,7 +133,7 @@ export function clusterSettings(
     defaultNamespace: null,
     accessibleNamespaces: [],
     terminalCwd: null,
-    proxyUrl: null,
+    tunnel: null,
     nodeShellImage: null,
     metricsProvider: { kind: "auto" },
     agent: {

@@ -26,7 +26,7 @@ use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::graph::GraphHub;
 use crate::helm::Helm;
 use crate::kubeconfig::{
-    default_sources, ClusterId, KubeconfigSync, SyncSnapshot, SyncSource, SyncWarning,
+    default_sources, ClusterId, ContextEntry, KubeconfigSync, SyncSnapshot, SyncSource, SyncWarning,
 };
 use crate::metrics::Metrics;
 use crate::openapi::ApiDocs;
@@ -47,7 +47,7 @@ use crate::windows::{WindowLayout, Windows, MAIN_WINDOW};
 
 const STORE_VERSION: u32 = 1;
 const PREFS_FILE: &str = "prefs.json";
-const CLUSTERS_FILE: &str = "clusters.json";
+pub(crate) const CLUSTERS_FILE: &str = "clusters.json";
 const HOTBAR_FILE: &str = "hotbar.json";
 const PORTFORWARDS_FILE: &str = "portforwards.json";
 const UI_STATE_FILE: &str = "ui-state.json";
@@ -79,6 +79,8 @@ pub enum CoreEvent {
     PortForwardsChanged {
         forwards: Vec<PortForward>,
     },
+    /// The tunnels or one tunnel's state changed (tunnels spec §5.2, §5.9).
+    TunnelsChanged,
     ToolProgress {
         progress: ToolProgress,
     },
@@ -102,6 +104,22 @@ pub struct AppCore {
     inner: Arc<Inner>,
 }
 
+/// A handle that does not keep the core alive, for the tasks the core starts.
+#[derive(Clone)]
+pub(crate) struct WeakCore(std::sync::Weak<Inner>);
+
+impl WeakCore {
+    pub(crate) fn upgrade(&self) -> Option<AppCore> {
+        self.0.upgrade().map(|inner| AppCore { inner })
+    }
+
+    /// A handle whose core is gone.
+    #[cfg(test)]
+    pub(crate) fn none() -> WeakCore {
+        WeakCore(std::sync::Weak::new())
+    }
+}
+
 struct Inner {
     prefs: JsonStore<Prefs>,
     clusters: JsonStore<HashMap<ClusterId, ClusterSettings>>,
@@ -110,6 +128,7 @@ struct Inner {
     /// never with a cluster's settings, which the window replaces whole.
     exec_consents: JsonStore<HashMap<ClusterId, ExecConsent>>,
     folders: JsonStore<CatalogFolders>,
+    tunnels: JsonStore<Vec<crate::tunnels::model::TunnelDef>>,
     windows: Windows,
     ui_state: UiState,
     pasted: PastedConfigs,
@@ -137,6 +156,8 @@ struct Inner {
     metrics: Metrics,
     /// The passwords and tokens of metrics URLs (spec §10).
     secrets: Secrets,
+    tunnel_secrets: crate::tunnels::secrets::TunnelSecrets,
+    tunnel_runtime: crate::tunnels::runtime::TunnelRuntime,
     /// The API docs read from each cluster, until it disconnects (spec L5).
     api_docs: ApiDocs,
     /// Held across a preferences write and the matching source change, so
@@ -277,6 +298,22 @@ impl AppCore {
         kubeconfig_env: Option<OsString>,
         secrets: Arc<dyn SecretStore>,
     ) -> CoreResult<AppCore> {
+        Self::start_with_secret_stores(
+            paths,
+            kubeconfig_env,
+            secrets,
+            Arc::new(MemorySecretStore::default()),
+        )
+        .await
+    }
+
+    /// As `start_with_secret_store`, with the keychain of tunnel passwords (tunnels spec §5.3).
+    pub async fn start_with_secret_stores(
+        paths: AppPaths,
+        kubeconfig_env: Option<OsString>,
+        secrets: Arc<dyn SecretStore>,
+        tunnel_secrets: Arc<dyn SecretStore>,
+    ) -> CoreResult<AppCore> {
         paths.ensure_dirs()?;
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
         let connections = Arc::new(ClusterManager::start(&paths.data, events.clone()));
@@ -287,6 +324,7 @@ impl AppCore {
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
         let exec_consents = open_store(&paths, EXEC_CONSENTS_FILE, &mut warnings);
         let folders = open_folders(&paths, &mut warnings);
+        let tunnels = open_store(&paths, crate::tunnels::store::TUNNELS_FILE, &mut warnings);
         let (windows, windows_warning) = Windows::open(
             paths.config.join(WINDOWS_FILE),
             STORE_VERSION,
@@ -308,13 +346,14 @@ impl AppCore {
             connections.clone(),
         ));
 
-        Ok(AppCore {
+        let core = AppCore {
             inner: Arc::new(Inner {
                 prefs,
                 clusters,
                 hotbar,
                 exec_consents,
                 folders,
+                tunnels,
                 windows,
                 ui_state,
                 pasted,
@@ -337,6 +376,10 @@ impl AppCore {
                 helm,
                 metrics: Metrics::default(),
                 secrets: Secrets::new(secrets),
+                tunnel_secrets: crate::tunnels::secrets::TunnelSecrets::new(tunnel_secrets),
+                tunnel_runtime: crate::tunnels::runtime::TunnelRuntime::new(
+                    tokio::runtime::Handle::current(),
+                ),
                 api_docs: ApiDocs::default(),
                 sync: Mutex::new(Some(sync)),
                 snapshots,
@@ -347,7 +390,12 @@ impl AppCore {
                 quit: QuitWatch::default(),
                 agent_probes: AgentProbes::default(),
             }),
-        })
+        };
+        // Before anything connects (tunnels spec §5.4).
+        let migrating = core.clone();
+        let moved = crate::blocking::blocking(move || Ok(migrating.migrate_proxy_urls())).await?;
+        lock(&core.inner.startup_warnings).extend(moved);
+        Ok(core)
     }
 
     /// Nobody may be subscribed yet; subscribers read the current state when they start.
@@ -431,6 +479,21 @@ impl AppCore {
 
     pub(crate) fn folders(&self) -> &JsonStore<CatalogFolders> {
         &self.inner.folders
+    }
+
+    pub(crate) fn tunnels_store(&self) -> &JsonStore<Vec<crate::tunnels::model::TunnelDef>> {
+        &self.inner.tunnels
+    }
+
+    pub(crate) fn cluster_settings_store(&self) -> &JsonStore<HashMap<ClusterId, ClusterSettings>> {
+        &self.inner.clusters
+    }
+
+    /// The catalog's contexts as the last sync saw them.
+    // Used by the consumers of the next tasks.
+    #[allow(dead_code)]
+    pub(crate) fn context_entries(&self) -> Vec<ContextEntry> {
+        self.inner.snapshots.borrow().entries.clone()
     }
 
     pub(crate) fn windows(&self) -> &Windows {
@@ -561,10 +624,11 @@ impl AppCore {
             .get()
             .get(id)
             .map(|consent| consent.fingerprint.clone());
+        let route = self.cluster_route(id)?;
         Ok(self
             .inner
             .connections
-            .connect(entry, settings, allowed)
+            .connect(entry, settings, allowed, route)
             .await)
     }
 
@@ -670,6 +734,11 @@ impl AppCore {
             .find(|entry| entry.id == *id)
             .cloned()
             .ok_or_else(|| IpcError::new(ErrorCode::NotFound, format!("no cluster {id}")))?;
+        let tunnel = self.cluster_tunnel(id);
+        let gateway = tunnel
+            .as_ref()
+            .map(|def| self.tunnel_url(def))
+            .transpose()?;
         crate::kubeconfig::extract_context(
             Path::new(&entry.source_path),
             &entry.context_name,
@@ -683,7 +752,17 @@ impl AppCore {
                 format!("cannot read the kubeconfig of {}", entry.context_name),
             ));
         };
-        let Some(command) = exec_command(&kubeconfig) else {
+        if let Some(url) = &gateway {
+            if let Err(e) = crate::cluster::write_proxy_url(dest, url.expose()) {
+                let _ = std::fs::remove_file(dest);
+                return Err(e);
+            }
+        }
+        // The approval covers the tunnel's target, not this run's gateway URL (spec §5.7).
+        let trust = tunnel
+            .as_ref()
+            .map(|def| crate::cluster::with_proxy_url(&kubeconfig, &def.kind.trust_marker()));
+        let Some(command) = exec_command(trust.as_ref().unwrap_or(&kubeconfig)) else {
             return Ok(true);
         };
         let allowed = self
@@ -814,6 +893,18 @@ impl AppCore {
 
     pub(crate) fn secrets(&self) -> &Secrets {
         &self.inner.secrets
+    }
+
+    pub(crate) fn tunnel_secrets(&self) -> &crate::tunnels::secrets::TunnelSecrets {
+        &self.inner.tunnel_secrets
+    }
+
+    pub(crate) fn tunnel_runtime(&self) -> &crate::tunnels::runtime::TunnelRuntime {
+        &self.inner.tunnel_runtime
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakCore {
+        WeakCore(Arc::downgrade(&self.inner))
     }
 
     pub(crate) fn api_docs(&self) -> &ApiDocs {

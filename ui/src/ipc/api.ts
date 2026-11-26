@@ -82,6 +82,8 @@ import type { TerminalSize } from "./generated/TerminalSize";
 import type { ToolName } from "./generated/ToolName";
 import type { ToolStatus } from "./generated/ToolStatus";
 import type { TopologyEvent } from "./generated/TopologyEvent";
+import type { TunnelInput } from "./generated/TunnelInput";
+import type { TunnelView } from "./generated/TunnelView";
 import type { UpdateState } from "./generated/UpdateState";
 import type { UsageOf } from "./generated/UsageOf";
 import type { UsageSnapshot } from "./generated/UsageSnapshot";
@@ -228,6 +230,17 @@ export const api = {
     }),
   nodeTopologyUnsubscribe: (subscriptionId: string) =>
     call<void>("node_topology_unsubscribe", { subscriptionId }),
+  tunnelList: () => call<TunnelView[]>("tunnel_list"),
+  tunnelSave: (tunnel: TunnelInput) =>
+    call<TunnelView>("tunnel_save", { tunnel }),
+  tunnelDelete: (id: string) => call<void>("tunnel_delete", { id }),
+  tunnelTest: (id: string) => call<TunnelView>("tunnel_test", { id }),
+  tunnelStop: (id: string) => call<TunnelView>("tunnel_stop", { id }),
+  /** The only call a tunnel password crosses IPC in, inward (tunnels spec T1). */
+  tunnelSetPassword: (id: string, password: string) =>
+    call<TunnelView>("tunnel_set_password", { id, password }),
+  tunnelClearPassword: (id: string) =>
+    call<TunnelView>("tunnel_clear_password", { id }),
   /**
    * Returns the subscription id. Snapshots of `namespace`'s reachability go to `onEvent`
    * until unsubscribed or until a `failure` ends it (network policies spec §7.3).

@@ -79,10 +79,12 @@ pub fn run(shell_env_warning: Option<String>) {
     let started = paths.and_then(|paths| {
         let secrets = Arc::new(KeychainStore::new(keychain::SERVICE));
         let kubeconfig_env = std::env::var_os("KUBECONFIG");
-        tauri::async_runtime::block_on(AppCore::start_with_secret_store(
+        let tunnel_secrets = Arc::new(KeychainStore::new(keychain::TUNNELS_SERVICE));
+        tauri::async_runtime::block_on(AppCore::start_with_secret_stores(
             paths,
             kubeconfig_env,
             secrets,
+            tunnel_secrets,
         ))
     });
     match started {
@@ -214,6 +216,13 @@ fn run_app(
             commands::graph::resource_graph_unsubscribe,
             commands::topology::node_topology_subscribe,
             commands::topology::node_topology_unsubscribe,
+            commands::tunnels::tunnel_list,
+            commands::tunnels::tunnel_save,
+            commands::tunnels::tunnel_delete,
+            commands::tunnels::tunnel_test,
+            commands::tunnels::tunnel_stop,
+            commands::tunnels::tunnel_set_password,
+            commands::tunnels::tunnel_clear_password,
             commands::network::network_reachability_subscribe,
             commands::network::network_reachability_unsubscribe,
             commands::map::map_export,

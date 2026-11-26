@@ -15,6 +15,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 const CATALOG_CHANGED: &str = "catalog://changed";
 const CATALOG_FOLDERS_CHANGED: &str = "catalog://folders-changed";
+const TUNNELS_CHANGED: &str = "tunnels://changed";
 const CLUSTER_STATE: &str = "cluster://state";
 const KUBECONFIG_WARNINGS: &str = "kubeconfig://warnings";
 const STORE_WARNING: &str = "store://warning";
@@ -52,6 +53,7 @@ fn route(event: CoreEvent) -> serde_json::Result<(&'static str, EventTarget, Val
         CoreEvent::PortForwardsChanged { forwards } => {
             to_all(PORTFORWARD_CHANGED, serde_json::to_value(forwards)?)
         }
+        CoreEvent::TunnelsChanged => to_all(TUNNELS_CHANGED, Value::Null),
         CoreEvent::ToolProgress { progress } => {
             to_all(TOOLS_PROGRESS, serde_json::to_value(progress)?)
         }
@@ -89,6 +91,7 @@ fn resync_events(
     let shared = [
         CoreEvent::CatalogChanged,
         CoreEvent::CatalogFoldersChanged,
+        CoreEvent::TunnelsChanged,
         CoreEvent::KubeconfigWarnings { warnings },
         CoreEvent::PortForwardsChanged { forwards },
         CoreEvent::UpdateState { state: update },
@@ -233,6 +236,7 @@ mod tests {
             [
                 ("catalog://changed", EventTarget::Any),
                 ("catalog://folders-changed", EventTarget::Any),
+                ("tunnels://changed", EventTarget::Any),
                 ("kubeconfig://warnings", EventTarget::Any),
                 ("portforward://changed", EventTarget::Any),
                 ("update://state", EventTarget::Any),

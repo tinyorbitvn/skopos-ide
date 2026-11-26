@@ -216,3 +216,12 @@
   color: var(--status-warning-text);
   font: var(--type-body-sm);
 }
+
+/* A saved secret: the field's name, where the secret is kept, Replace and Clear. */
+.savedSecret {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}

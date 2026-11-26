@@ -12,6 +12,7 @@ import { AgentButton } from "../features/agents/AgentButton";
 import { useCatalog } from "../stores/catalog";
 import { useConnect } from "../stores/clusters";
 import { useShell } from "../stores/shell";
+import { useTunnels } from "../stores/tunnels";
 import { useWindowLayout } from "../stores/windowLayout";
 import styles from "./AppHeader.module.css";
 import { clusterStatus } from "./clusterStatus";
@@ -20,6 +21,7 @@ import { IS_MAC, shortKeys } from "./shortcuts";
 import { focusedTab } from "./tabs/layout";
 import { tabInfo } from "./tabs/routes";
 import { useFocusedPath } from "./tabs/ShellRouter";
+import { tunnelProblem } from "./tunnelProblem";
 
 /** The focused tab's title (spec P3, P9), or the empty window's. */
 function useFocusedTitle(): string {
@@ -63,6 +65,14 @@ export function AppHeader() {
     return tab !== null && tab.index < tab.history.length - 1;
   });
   const status = cluster === null ? null : clusterStatus(cluster.state);
+  const tunnels = useTunnels((s) => s.tunnels);
+  const problem =
+    cluster === null
+      ? null
+      : tunnelProblem(
+          { state: cluster.state, tunnel: cluster.tunnel ?? null },
+          tunnels,
+        );
   const info =
     cluster?.state.status === "connected" ? cluster.state.info : null;
   const paletteKeys = shortKeys("palette", IS_MAC);
@@ -91,6 +101,11 @@ export function AppHeader() {
       {status !== null ? (
         <span data-testid="connection-status">
           <Badge tone={status.tone}>{status.label}</Badge>
+        </span>
+      ) : null}
+      {problem !== null ? (
+        <span data-testid="header-tunnel" title={problem.detail}>
+          <Badge tone={problem.tone}>{problem.label}</Badge>
         </span>
       ) : null}
       {info !== null ? (

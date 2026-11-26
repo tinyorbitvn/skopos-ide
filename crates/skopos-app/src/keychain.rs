@@ -8,6 +8,8 @@ use skopos_core::secrets::{keychain_unavailable, Secret, SecretStore};
 
 /// The keychain service of the metrics secrets; each entry's account is the cluster's id.
 pub const SERVICE: &str = "SkoposIDE metrics";
+/// The keychain service of tunnel passwords; each entry's account is `<tunnel-id>:<slot>`.
+pub const TUNNELS_SERVICE: &str = "SkoposIDE tunnels";
 
 /// One keychain service, an entry per cluster.
 pub struct KeychainStore {

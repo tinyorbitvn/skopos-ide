@@ -41,6 +41,8 @@ pub struct ClusterEntry {
     pub name: String,
     pub context_name: String,
     pub server: Option<String>,
+    /// The id of the tunnel the cluster picked, if any (tunnels spec §5.1).
+    pub tunnel: Option<String>,
     pub icon: Option<String>,
     pub source: ClusterSource,
     /// The command a connect runs for credentials, when the kubeconfig names an exec plugin.
@@ -237,6 +239,7 @@ pub(crate) fn build_entries(
             ClusterEntry {
                 name: display_name(own).unwrap_or_else(|| context.context_name.clone()),
                 icon: own.and_then(|s| s.icon.clone()),
+                tunnel: own.and_then(|s| s.tunnel.clone()),
                 state: state_of(&context.id),
                 exec_allowed: exec_allowed(&context.id),
                 id: context.id,

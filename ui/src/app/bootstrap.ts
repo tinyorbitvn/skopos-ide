@@ -4,6 +4,7 @@ import { events } from "../ipc/events";
 import { restoreDockLayout } from "../stores/dockLayout";
 import { usePortForwards } from "../stores/portForwards";
 import { usePrefs } from "../stores/prefs";
+import { useTunnels } from "../stores/tunnels";
 
 /**
  * Runs before the first render. The store warning listener must be in place
@@ -20,6 +21,8 @@ export async function bootstrap(): Promise<void> {
   await usePrefs.getState().load();
   // After the preferences (spec §4.2), and awaited last so a slow list holds up nothing.
   const forwards = usePortForwards.getState().load();
+  // Read once for the cluster badges; never awaited, so a slow list holds up nothing.
+  void useTunnels.getState().load();
   const { prefs } = usePrefs.getState();
   if (prefs) applyTheme(prefs.theme);
   await dock;

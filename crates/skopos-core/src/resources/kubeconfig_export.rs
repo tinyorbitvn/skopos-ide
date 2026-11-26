@@ -9,8 +9,10 @@ use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
 use super::ops::invalid;
+use crate::app_core::AppCore;
+use crate::cluster::ProxyOrigin;
 use crate::error::{CoreResult, ErrorCode, IpcError};
-use crate::kubeconfig::write_private;
+use crate::kubeconfig::{write_private, ClusterId};
 
 /// The first cluster entry of a cluster's own kubeconfig, ready for a new file.
 #[derive(Debug, Clone, PartialEq)]
@@ -144,6 +146,31 @@ pub(crate) fn client_cert_kubeconfig(
         .map_err(|_| IpcError::new(ErrorCode::Internal, "the kubeconfig cannot be written"))
 }
 
+/// Puts back the source's own `proxy-url` where `{id}.yaml` holds a tunnel's gateway URL, so
+/// an export never carries this run's token (tunnels spec §5.7).
+pub(crate) fn restore_proxy_url(cluster: &mut Value, origin: &ProxyOrigin) {
+    let (ProxyOrigin::Tunnel { source_proxy_url }, Value::Object(map)) = (origin, cluster) else {
+        return;
+    };
+    match source_proxy_url {
+        Some(url) => {
+            map.insert("proxy-url".to_owned(), Value::String(url.clone()));
+        }
+        None => {
+            map.remove("proxy-url");
+        }
+    }
+}
+
+impl AppCore {
+    /// The connected cluster's entry for an export, with the source's own `proxy-url`.
+    pub(crate) fn cluster_export_source(&self, id: &ClusterId) -> CoreResult<SourceCluster> {
+        let mut source = source_cluster(&self.cluster_kubeconfig_path(id)?)?;
+        restore_proxy_url(&mut source.cluster, &self.connections().proxy_origin(id)?);
+        Ok(source)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +293,30 @@ clusters:
         let dir = tempfile::tempdir().unwrap();
         assert!(check_destination(&dir.path().join("missing").join("config")).is_err());
         assert!(check_destination(&dir.path().join("config")).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    #[test]
+    fn the_source_proxy_url_replaces_the_gateway_or_none_removes_it() {
+        let mut cluster = json!({ "server": "https://a", "proxy-url": "http://t:tok@127.0.0.1:1" });
+        let origin = ProxyOrigin::Tunnel {
+            source_proxy_url: Some("http://corp:3128".into()),
+        };
+        restore_proxy_url(&mut cluster, &origin);
+        assert_eq!(cluster["proxy-url"], "http://corp:3128");
+        restore_proxy_url(
+            &mut cluster,
+            &ProxyOrigin::Tunnel {
+                source_proxy_url: None,
+            },
+        );
+        assert!(cluster.get("proxy-url").is_none());
+        let mut own = json!({ "proxy-url": "http://own:1" });
+        restore_proxy_url(&mut own, &ProxyOrigin::Source);
+        assert_eq!(own["proxy-url"], "http://own:1");
     }
 }

@@ -16,11 +16,13 @@ import {
 import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { resetCatalogForTest, useCatalog } from "../stores/catalog";
 import { resetShellForTest, useShell } from "../stores/shell";
+import { resetTunnelsForTest, useTunnels } from "../stores/tunnels";
 import {
   resetWindowLayoutForTest,
   useWindowLayout,
 } from "../stores/windowLayout";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
+import { tunnel } from "../test/tunnels";
 import { updateState } from "../test/updates";
 import { Hotbar } from "./Hotbar";
 import { tabPath } from "./tabs/layout";
@@ -71,6 +73,7 @@ beforeEach(() => {
   resetCatalogForTest();
   resetShellForTest();
   resetUpdatesForTest();
+  resetTunnelsForTest();
   // One Catalog tab, focused.
   resetWindowLayoutForTest();
 });
@@ -385,4 +388,32 @@ test("a Microsoft Store copy's Help menu has no Check for Updates", async () => 
     "help-shortcuts",
     "help-about",
   ]);
+});
+
+test("a pinned cluster whose tunnel failed shows a danger dot named Tunnel failed", async () => {
+  useTunnels.setState({
+    tunnels: [tunnel({ state: { status: "failed", message: "refused" } })],
+  });
+  const connected = clusterEntry({
+    id: "c",
+    contextName: "gamma",
+    tunnel: "t1",
+    state: {
+      status: "connected",
+      info: {
+        version: "v1.31.0",
+        distribution: "kind",
+        nodeCount: 1,
+        namespaces: [],
+        namespacesRestricted: false,
+        isAdmin: true,
+      },
+    },
+  });
+  await show([connected], ["c"]);
+  expect(
+    within(screen.getByTestId("hotbar-item-c")).getByRole("img", {
+      name: "Tunnel failed",
+    }),
+  ).toBeTruthy();
 });

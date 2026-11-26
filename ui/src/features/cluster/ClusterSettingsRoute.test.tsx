@@ -33,6 +33,7 @@ async function show(state: ConnectionState) {
     cluster_disconnect: () => null,
     resources_discover: () => [],
     cluster_settings_get: () => clusterSettings(),
+    tunnel_list: () => [],
   });
   await useCatalog.getState().init();
   render(
@@ -82,9 +83,9 @@ test("a connected cluster shows the Settings page inside its layout", async () =
 
 test("a draft survives the cluster connecting while the page is open", async () => {
   const ipc = await show({ status: "disconnected" });
-  const proxy = () =>
-    screen.getByTestId("settings-proxy-url") as HTMLInputElement;
-  fireEvent.change(proxy(), { target: { value: "http://proxy.example:3128" } });
+  const image = () =>
+    screen.getByTestId("settings-node-shell-image") as HTMLInputElement;
+  fireEvent.change(image(), { target: { value: "alpine:3.22" } });
   expect(screen.getByTestId("settings-status").textContent).toBe(
     "Unsaved changes.",
   );
@@ -95,7 +96,7 @@ test("a draft survives the cluster connecting while the page is open", async () 
   // The page moved into the cluster layout, so it mounted again and read the settings again.
   expect(ipc.callsTo("cluster_settings_get")).toHaveLength(2);
   expect(screen.getByTestId("settings-back").textContent).toBe("Back to x");
-  expect(proxy().value).toBe("http://proxy.example:3128");
+  expect(image().value).toBe("alpine:3.22");
   expect(screen.getByTestId("settings-status").textContent).toBe(
     "Unsaved changes.",
   );

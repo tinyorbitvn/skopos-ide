@@ -3,6 +3,7 @@
 
 pub mod discovery;
 pub mod objects;
+pub mod proxy;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;

@@ -17,6 +17,7 @@ import type { ConnectionState } from "../ipc/generated/ConnectionState";
 import { useCatalog } from "../stores/catalog";
 import { connectCluster } from "../stores/clusters";
 import { useFolders } from "../stores/folders";
+import { useTunnels } from "../stores/tunnels";
 import { useWindowLayout } from "../stores/windowLayout";
 import styles from "./ClusterSwitcher.module.css";
 import { clusterRelease, clusterStatus } from "./clusterStatus";
@@ -24,6 +25,7 @@ import { clusterColor, clusterInitials } from "./clusterVisual";
 import { focusedPane, focusedTab } from "./tabs/layout";
 import { tabCluster } from "./tabs/routes";
 import { useFocusedPath } from "./tabs/ShellRouter";
+import { tunnelProblem } from "./tunnelProblem";
 
 const NAME = "Cluster shown in the sidebar";
 /** Each level of the list sits this much further in. */
@@ -139,6 +141,7 @@ function Row(props: {
   onPick(id: string): void;
 }) {
   const { row } = props;
+  const tunnels = useTunnels((s) => s.tunnels);
   const indent = {
     paddingLeft: `calc(var(--space-3) + ${row.depth * INDENT_PX}px)`,
   };
@@ -168,6 +171,7 @@ function Row(props: {
   }
   const { cluster } = row;
   const status = clusterStatus(cluster.state);
+  const problem = tunnelProblem(cluster, tunnels);
   return (
     <button
       type="button"
@@ -176,14 +180,18 @@ function Row(props: {
       style={indent}
       aria-level={row.depth + 1}
       aria-selected={cluster.id === props.selected}
-      aria-label={`${cluster.name}, ${status.label}`}
+      aria-label={`${cluster.name}, ${problem?.label ?? status.label}`}
       data-testid={`switcher-cluster-${cluster.contextName}`}
       onClick={() => props.onPick(cluster.id)}
     >
       <span className={styles.chevron} />
       <StatusDot tone={status.tone} label={status.label} />
       <span className={styles.label}>{cluster.name}</span>
-      {cluster.state.status === "connected" ? null : (
+      {problem !== null ? (
+        <span className={styles.state} title={problem.detail}>
+          {problem.label}
+        </span>
+      ) : cluster.state.status === "connected" ? null : (
         <span className={styles.state}>{status.label}</span>
       )}
     </button>

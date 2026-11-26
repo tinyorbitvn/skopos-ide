@@ -33,7 +33,9 @@ import {
   forgetQueries,
   useMetrics,
 } from "../../stores/metrics";
+import { useTunnels } from "../../stores/tunnels";
 import { useFetch } from "../helm/useFetch";
+import { TunnelDialog } from "../prefs/TunnelDialogs";
 import { AgentCard } from "./AgentCard";
 import styles from "./ClusterSettingsScreen.module.css";
 import { dropDraft, keepDraft, restoredDraft } from "./drafts";
@@ -60,6 +62,9 @@ import {
 
 /** The Select value that stands for no default namespace: the kubeconfig's. */
 const FROM_KUBECONFIG = "__kubeconfig__";
+/** The Tunnel select's values that are not tunnel ids. */
+const NO_TUNNEL = "__none__";
+const NEW_TUNNEL = "__new__";
 
 /** The password or token field's placeholder while the keychain keeps one (spec I57). */
 const SAVED_SECRET = "Saved in the keychain";
@@ -216,6 +221,12 @@ function SettingsForm(props: {
   );
   const [justSaved, setJustSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const tunnels = useTunnels((s) => s.tunnels);
+  const loadTunnels = useTunnels((s) => s.load);
+  const [addingTunnel, setAddingTunnel] = useState(false);
+  useEffect(() => {
+    void loadTunnels();
+  }, [loadTunnels]);
   // The URL's password or token as typed: never in the draft, so never kept past a remount.
   const [secret, setSecret] = useState("");
   // What the save found wrong with a file, under its field until the field changes.
@@ -299,9 +310,9 @@ function SettingsForm(props: {
       await api.clusterSettingsSet(clusterId, next);
       toast.success(
         `Saved the settings for ${next.displayName ?? props.contextName}`,
-        next.proxyUrl === saved.proxyUrl
+        next.tunnel === saved.tunnel
           ? undefined
-          : "Reconnect to use the new proxy.",
+          : "Reconnect to use the new tunnel.",
       );
       forgetProvider(clusterId);
       forgetQueries(clusterId);
@@ -357,6 +368,20 @@ function SettingsForm(props: {
   ) {
     namespaces.push(saved.defaultNamespace);
   }
+  // An id that names no tunnel counts as None (tunnels spec §5.2).
+  const knownTunnel = tunnels?.some((t) => t.id === draft.tunnel) ?? false;
+  const tunnelValue =
+    draft.tunnel === null || (tunnels !== null && !knownTunnel)
+      ? NO_TUNNEL
+      : draft.tunnel;
+  const tunnelOptions = [
+    { value: NO_TUNNEL, label: "None" },
+    ...(tunnels ?? []).map((t) => ({ value: t.id, label: t.name })),
+    ...(tunnels === null && draft.tunnel !== null
+      ? [{ value: draft.tunnel, label: "Loading…" }]
+      : []),
+    { value: NEW_TUNNEL, label: "New tunnel…" },
+  ];
   const namespaceOptions = [
     { value: FROM_KUBECONFIG, label: "From the kubeconfig" },
     ...namespaces.map((n) => ({ value: n, label: n })),
@@ -428,15 +453,30 @@ function SettingsForm(props: {
 
       <section className={styles.section}>
         <h2 className={styles.heading}>Network</h2>
-        <Input
-          label="Proxy URL"
-          help="For this cluster's API server. Empty uses the kubeconfig's proxy-url, if it has one"
-          className={styles.mono}
-          value={draft.proxyUrl}
-          error={errors.proxyUrl}
-          onChange={(e) => update({ proxyUrl: e.target.value })}
-          data-testid="settings-proxy-url"
+        <Select
+          label="Tunnel"
+          value={tunnelValue}
+          options={tunnelOptions}
+          onChange={(v) => {
+            if (v === NEW_TUNNEL) setAddingTunnel(true);
+            else update({ tunnel: v === NO_TUNNEL ? null : v });
+          }}
+          testId="settings-tunnel"
         />
+        <p className={styles.sub}>
+          How this cluster's API server is reached. None uses the kubeconfig's
+          proxy-url, if it has one
+        </p>
+        {addingTunnel ? (
+          <TunnelDialog
+            onClose={() => setAddingTunnel(false)}
+            onSaved={(view) => {
+              update({ tunnel: view.id });
+              // The list event may come later; read now so the select names the new tunnel.
+              void useTunnels.getState().retry();
+            }}
+          />
+        ) : null}
       </section>
 
       <section className={styles.section}>

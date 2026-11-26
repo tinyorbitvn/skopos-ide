@@ -21,5 +21,6 @@ pub mod sessions;
 pub mod settings;
 pub mod tools;
 pub mod topology;
+pub mod tunnels;
 pub mod updates;
 pub mod windows;

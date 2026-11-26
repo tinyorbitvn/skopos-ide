@@ -64,6 +64,7 @@ async function show(
         </Route>
         <Route path="/cluster/:id/settings" element={<p>settings page</p>} />
         <Route path="/catalog" element={<p>catalog page</p>} />
+        <Route path="/preferences" element={<p>preferences page</p>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -257,4 +258,30 @@ test("a connect that waits for permission offers to review it", async () => {
 
   await waitFor(() => expect(ipc.callsTo("cluster_connect")).toHaveLength(1));
   await waitFor(() => expect(useExecConsent.getState().clusterId).toBe("id-x"));
+});
+
+test("a connect the tunnel failed offers the tunnel settings", async () => {
+  const failed = {
+    status: "failed",
+    kind: "tunnel",
+    message:
+      'Tunnel "corp": the proxy answered 407 Proxy Authentication Required',
+  } as const;
+  await show(failed);
+
+  expect(await screen.findByText("Cannot open the tunnel")).toBeTruthy();
+  expect(screen.getByText(failed.message)).toBeTruthy();
+  expect(screen.getByTestId("cluster-reconnect")).toBeTruthy();
+  fireEvent.click(screen.getByTestId("cluster-tunnel-settings"));
+  expect(await screen.findByText("preferences page")).toBeTruthy();
+});
+
+test("other failures offer no tunnel settings", async () => {
+  await show({
+    status: "failed",
+    kind: "unreachable",
+    message: "connection refused",
+  });
+  await screen.findByText("Cannot reach the cluster");
+  expect(screen.queryByTestId("cluster-tunnel-settings")).toBeNull();
 });

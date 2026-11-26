@@ -15,7 +15,8 @@ use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 use super::connect::{
-    establish, prepare_kubeconfig, run_discovery, ConnectTimeouts, Established, Failure,
+    connect_limit, establish, prepare_kubeconfig, run_discovery, with_proxy_url, ConnectTimeouts,
+    Established, Failure, Prepared, ProxyOrigin,
 };
 use super::exec_command::{exec_command, ExecCommand, ExecEnvVar, ExecRequest, ExecRequestDetails};
 use super::state::{ConnectionState, FailureKind};
@@ -25,6 +26,7 @@ use crate::kubeconfig::{ClusterId, ContextEntry};
 use crate::paths::create_private_dir;
 use crate::prefs::ClusterSettings;
 use crate::resources::{ApiResourceInfo, ObjectNames, NAMES_TTL};
+use crate::tunnels::route::TunnelRoute;
 
 const RUNTIME_DIR: &str = "runtime";
 const LOG_CAPACITY: usize = 500;
@@ -91,6 +93,8 @@ struct Live {
     discovery: Arc<Discovery>,
     /// The kubeconfig's server URL for the context.
     server: Option<String>,
+    /// Where the `proxy-url` of `{id}.yaml` came from, for exports.
+    proxy_origin: ProxyOrigin,
     /// Told apart from the connection that replaces this one, so a late result
     /// of the old one is not stored.
     epoch: u64,
@@ -304,6 +308,7 @@ impl ClusterHandle {
                     client: established.client,
                     discovery: established.discovery,
                     server: established.server,
+                    proxy_origin: established.proxy_origin,
                     epoch: NEXT_EPOCH.fetch_add(1, Ordering::Relaxed),
                     resources: None,
                     names: None,
@@ -347,6 +352,7 @@ async fn run_attempt(
     settings: ClusterSettings,
     allowed: Option<String>,
     timeouts: ConnectTimeouts,
+    route: Option<TunnelRoute>,
 ) {
     let _running = handle.attempt.lock().await;
     if token.is_cancelled() {
@@ -359,23 +365,42 @@ async fn run_attempt(
     let prepared = {
         let entry = entry.clone();
         let path = handle.kubeconfig_path.clone();
-        tokio::task::spawn_blocking(move || prepare_kubeconfig(&entry, &path)).await
+        let proxy = route.as_ref().map(|route| route.url.expose().to_owned());
+        tokio::task::spawn_blocking(move || prepare_kubeconfig(&entry, &path, proxy.as_deref()))
+            .await
     };
     let mut held_exec = None;
     let outcome = match prepared {
-        Ok(Ok(kubeconfig)) => match refused_exec(&kubeconfig, &entry, allowed.as_deref()) {
-            // Before `establish`, where `kube` would run the program.
-            Some(refused) => {
-                let failure = refused.failure();
-                held_exec = Some(refused);
-                Err(failure)
+        Ok(Ok(prepared)) => {
+            // The approval covers the tunnel's target, not this run's gateway URL (spec §5.7).
+            let trust = route
+                .as_ref()
+                .map(|route| with_proxy_url(&prepared.source, &route.trust_marker()));
+            match refused_exec(
+                trust.as_ref().unwrap_or(&prepared.source),
+                &entry,
+                allowed.as_deref(),
+            ) {
+                // Before `establish`, where `kube` would run the program.
+                Some(refused) => {
+                    let failure = refused.failure();
+                    held_exec = Some(refused);
+                    Err(failure)
+                }
+                None => tokio::select! {
+                    biased;
+                    () = token.cancelled() => Err(Failure::new(FailureKind::Other, "cancelled")),
+                    outcome = establish_routed(
+                        &handle,
+                        prepared,
+                        &entry,
+                        &settings,
+                        &timeouts,
+                        route.as_ref(),
+                    ) => outcome,
+                },
             }
-            None => tokio::select! {
-                biased;
-                () = token.cancelled() => Err(Failure::new(FailureKind::Other, "cancelled")),
-                outcome = establish(&handle, kubeconfig, &entry, &settings, &timeouts) => outcome,
-            },
-        },
+        }
         Ok(Err(failure)) => Err(failure),
         Err(e) => Err(Failure::new(
             FailureKind::Other,
@@ -383,6 +408,46 @@ async fn run_attempt(
         )),
     };
     handle.finish_attempt(&token, outcome, held_exec);
+}
+
+/// Probes the tunnel when the cluster has one, then establishes (tunnels spec §5.7).
+async fn establish_routed(
+    handle: &ClusterHandle,
+    prepared: Prepared,
+    entry: &ContextEntry,
+    settings: &ClusterSettings,
+    timeouts: &ConnectTimeouts,
+    route: Option<&TunnelRoute>,
+) -> Result<Established, Failure> {
+    let limit = connect_limit(entry, timeouts);
+    let deadline = tokio::time::Instant::now() + limit;
+    if let Some(route) = route {
+        handle.log(LogLevel::Info, format!("opening tunnel {}", route.name()));
+        let probed = tokio::time::timeout_at(deadline, route.probe(entry.server.as_deref()))
+            .await
+            .unwrap_or_else(|_| Err(format!("timed out after {}s", limit.as_secs())));
+        if let Err(reason) = probed {
+            return Err(Failure::new(
+                FailureKind::Tunnel,
+                format!("Tunnel \"{}\": {reason}", route.name()),
+            ));
+        }
+    }
+    let proxy = route.map(|route| route.url.expose().to_owned());
+    let established = establish(
+        handle,
+        prepared.source,
+        entry,
+        settings,
+        timeouts,
+        proxy.as_deref(),
+        deadline,
+    )
+    .await?;
+    Ok(Established {
+        proxy_origin: prepared.proxy_origin,
+        ..established
+    })
 }
 
 pub(crate) struct ClusterManager {
@@ -425,12 +490,14 @@ impl ClusterManager {
 
     /// Returns once the attempt this call began or joined has ended. The attempt
     /// runs in its own task, so a caller going away neither stops it nor leaves it stuck.
-    /// `allowed` is the fingerprint of the exec command the user allowed for this cluster.
+    /// `allowed` is the fingerprint of the exec command the user allowed for this cluster;
+    /// `route` is the cluster's tunnel, dropped when this call joins a running attempt.
     pub(crate) async fn connect(
         &self,
         entry: ContextEntry,
         settings: ClusterSettings,
         allowed: Option<String>,
+        route: Option<TunnelRoute>,
     ) -> ConnectionState {
         let handle = self
             .handles
@@ -453,6 +520,7 @@ impl ClusterManager {
                 settings,
                 allowed,
                 timeouts,
+                route,
             ));
         }
         handle.settled().await
@@ -527,6 +595,11 @@ impl ClusterManager {
 
     pub(crate) fn kubeconfig_path(&self, id: &ClusterId) -> CoreResult<PathBuf> {
         self.with_live(id, |_, handle, _| handle.kubeconfig_path.clone())
+    }
+
+    /// Where the `proxy-url` of `{id}.yaml` came from (tunnels spec §5.7).
+    pub(crate) fn proxy_origin(&self, id: &ClusterId) -> CoreResult<ProxyOrigin> {
+        self.with_live(id, |live, _, _| live.proxy_origin.clone())
     }
 
     /// The connection's identity, for `store_resources`.

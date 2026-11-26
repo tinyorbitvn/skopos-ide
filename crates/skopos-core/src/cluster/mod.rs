@@ -9,6 +9,7 @@ mod raw;
 mod state;
 
 pub use connect::ConnectTimeouts;
+pub(crate) use connect::{with_proxy_url, write_proxy_url, ProxyOrigin};
 pub use control_plane::{
     ApiServer, ControlPlane, ControlPlaneComponent, HealthCheck, HealthState, Leader, PodCounts,
 };
