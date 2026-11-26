@@ -12,6 +12,7 @@ use skopos_core::agents::approvals::{ChangeAnswer, ChangeCard, ChangeState};
 use skopos_core::agents::chat::{ChatInfo, ChatScope, ChatStart};
 use skopos_core::agents::editor_tab::{EditorTab, EditorTabMode};
 use skopos_core::agents::events::{ChatEvent, ChatItem, ChatItemBody, ObjectRef};
+use skopos_core::agents::model::ModelChoice;
 use skopos_core::agents::permissions::{ChoiceKind, PermissionCard, PermissionState};
 use skopos_core::agents::registry::AgentState;
 use skopos_core::agents::tabs::ProposalState;
@@ -1757,4 +1758,319 @@ async fn the_cards_stop_stops_its_command_and_a_stale_stop_is_refused() {
         .await
         .unwrap_err();
     assert_eq!(error.message, "That cluster is not in this chat.");
+}
+
+/// A model option as agents send it: `fast` and `deep`, with `current` in use.
+fn models(current: &str) -> Value {
+    json!([{
+        "id": "model", "name": "Model", "category": "model", "type": "select",
+        "currentValue": current,
+        "options": [
+            { "value": "fast", "name": "Fast", "description": "Quick answers" },
+            { "value": "deep", "name": "Deep" }
+        ]
+    }])
+}
+
+fn with_models(mut script: Value, options: Value) -> Value {
+    script["configOptions"] = options;
+    script
+}
+
+/// Waits until the chat's latest `Model` event says `value`, and returns that choice.
+async fn until_model(events: &mut Events, value: &str) -> ModelChoice {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        events.drain();
+        let latest = events.seen.iter().rev().find_map(|event| match event {
+            ChatEvent::Model { model } => Some(model.clone()),
+            _ => None,
+        });
+        if let Some(Some(model)) = latest {
+            if model.current == value {
+                return model;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the model never became {value}: {:#?}",
+            events.seen
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The `current` of each `Model` event so far, `None` for one without a choice.
+fn models_seen(events: &mut Events) -> Vec<Option<String>> {
+    events.drain();
+    events
+        .seen
+        .iter()
+        .filter_map(|event| match event {
+            ChatEvent::Model { model } => Some(model.as_ref().map(|model| model.current.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn saved_model(bench: &Bench) -> Option<String> {
+    bench
+        .core
+        .agent_prefs()
+        .agents
+        .get(&bench.agent)
+        .and_then(|choices| choices.model.clone())
+}
+
+#[tokio::test]
+async fn a_pick_reaches_the_agent_and_becomes_the_agent_s_model() {
+    let bench = Bench::new(with_models(
+        script(vec![turn(vec![say("Hi.")])]),
+        models("fast"),
+    ))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    let model = until_model(&mut events, "fast").await;
+    assert_eq!(model.option_id, "model");
+    assert_eq!(model.choices.len(), 2);
+    assert_eq!(
+        model.choices[0].description.as_deref(),
+        Some("Quick answers")
+    );
+    assert!(requests(&bench.log(), "session/set_config_option").is_empty());
+
+    bench
+        .core
+        .chat_set_model(&info.chat_id, "deep")
+        .await
+        .unwrap();
+
+    until_model(&mut events, "deep").await;
+    let sets = requests(&bench.log(), "session/set_config_option");
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0]["configId"], "model");
+    assert_eq!(sets[0]["value"], "deep");
+    assert_eq!(saved_model(&bench).as_deref(), Some("deep"));
+    // The agent's update and the answer say the same model: one event for the change.
+    assert_eq!(
+        models_seen(&mut events),
+        [Some("fast".to_owned()), Some("deep".to_owned())]
+    );
+    bench.ask(&info.chat_id, "Hello").await;
+    bench.core.chat_close(&info.chat_id).await;
+    let stored = bench.core.chat_get(&info.chat_id).unwrap();
+    assert_eq!(stored.model.as_deref(), Some("deep"));
+
+    // A new chat with the agent starts on the saved model.
+    let (_second, mut again) = bench.start(MAIN).await;
+    until_model(&mut again, "deep").await;
+    let sets = requests(&bench.log(), "session/set_config_option");
+    assert_eq!(sets.len(), 2);
+    assert_eq!(sets[1]["value"], "deep");
+    assert!(again.notices().is_empty());
+}
+
+#[tokio::test]
+async fn a_saved_model_that_is_not_offered_is_skipped() {
+    let bench = Bench::new(with_models(script(vec![]), models("fast"))).await;
+    bench
+        .core
+        .agent_model_save(&bench.agent, "retired")
+        .unwrap();
+    let (_info, mut events) = bench.start(MAIN).await;
+    until_model(&mut events, "fast").await;
+    assert!(requests(&bench.log(), "session/set_config_option").is_empty());
+    assert!(events.notices().is_empty());
+    assert_eq!(models_seen(&mut events), [Some("fast".to_owned())]);
+}
+
+#[tokio::test]
+async fn a_refused_change_shows_a_notice_and_keeps_the_model() {
+    let mut refusing = with_models(script(vec![]), models("fast"));
+    refusing["refuseConfigOption"] = json!("Deep is not on your plan.");
+    let bench = Bench::new(refusing).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    until_model(&mut events, "fast").await;
+
+    bench
+        .core
+        .chat_set_model(&info.chat_id, "deep")
+        .await
+        .unwrap();
+
+    events
+        .until("the notice", |event| {
+            matches!(event, ChatEvent::Item { item }
+                if matches!(item.body, ChatItemBody::Notice { .. }))
+        })
+        .await;
+    assert_eq!(
+        events.notices(),
+        ["Could not change the model: Deep is not on your plan."]
+    );
+    assert_eq!(models_seen(&mut events), [Some("fast".to_owned())]);
+    assert_eq!(saved_model(&bench), None);
+}
+
+#[tokio::test]
+async fn the_model_cannot_change_while_the_agent_answers() {
+    let bench = Bench::new(with_models(
+        script(vec![turn(vec![json!({ "sleep": 30000 })])]),
+        models("fast"),
+    ))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    until_model(&mut events, "fast").await;
+    let asked = bench.ask_in_background(&info.chat_id, "Think");
+    events
+        .until("working", |event| {
+            matches!(event, ChatEvent::Working { working: true })
+        })
+        .await;
+
+    let error = bench
+        .core
+        .chat_set_model(&info.chat_id, "deep")
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, ErrorCode::Conflict);
+    assert_eq!(error.message, "Wait for the answer to change the model.");
+    assert!(requests(&bench.log(), "session/set_config_option").is_empty());
+    bench.core.chat_stop(&info.chat_id);
+    asked.await.unwrap().unwrap();
+    events
+        .until("the answer's end", |event| {
+            matches!(event, ChatEvent::Working { working: false })
+        })
+        .await;
+    bench
+        .core
+        .chat_set_model(&info.chat_id, "deep")
+        .await
+        .unwrap();
+    until_model(&mut events, "deep").await;
+}
+
+#[tokio::test]
+async fn a_pick_needs_a_running_chat_and_an_offered_model() {
+    let bench = Bench::new(script(vec![turn(vec![say("Hi.")])])).await;
+    let (info, mut events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "Hello").await;
+    // An agent without a model option gives no model choice.
+    assert!(models_seen(&mut events).is_empty());
+    let none = bench
+        .core
+        .chat_set_model(&info.chat_id, "fast")
+        .await
+        .unwrap_err();
+    assert_eq!(none.code, ErrorCode::InvalidInput);
+    assert_eq!(none.message, "This agent offers no model choice.");
+    let gone = bench
+        .core
+        .chat_set_model("00000000", "fast")
+        .await
+        .unwrap_err();
+    assert_eq!(gone.code, ErrorCode::NotFound);
+
+    bench.write_script(&with_models(script(vec![]), models("fast")));
+    let (second, mut again) = bench.start(MAIN).await;
+    until_model(&mut again, "fast").await;
+    let unknown = bench
+        .core
+        .chat_set_model(&second.chat_id, "huge")
+        .await
+        .unwrap_err();
+    assert_eq!(unknown.code, ErrorCode::InvalidInput);
+    assert_eq!(unknown.message, "The agent does not offer that model.");
+    // Picking the model in use asks the agent nothing and saves it for the agent.
+    bench
+        .core
+        .chat_set_model(&second.chat_id, "fast")
+        .await
+        .unwrap();
+    assert!(requests(&bench.log(), "session/set_config_option").is_empty());
+    assert_eq!(saved_model(&bench).as_deref(), Some("fast"));
+}
+
+#[tokio::test]
+async fn a_reopened_chat_keeps_its_own_model() {
+    let bench = Bench::new(with_models(
+        script(vec![turn(vec![say("A.")])]),
+        models("fast"),
+    ))
+    .await;
+    // The first chat runs on deep.
+    let (one, mut events) = bench.start(MAIN).await;
+    until_model(&mut events, "fast").await;
+    bench
+        .core
+        .chat_set_model(&one.chat_id, "deep")
+        .await
+        .unwrap();
+    until_model(&mut events, "deep").await;
+    bench.ask(&one.chat_id, "First").await;
+    bench.core.chat_close(&one.chat_id).await;
+    // The second chat starts on deep, then makes fast the agent's model.
+    let (two, mut events) = bench.start(MAIN).await;
+    until_model(&mut events, "deep").await;
+    bench
+        .core
+        .chat_set_model(&two.chat_id, "fast")
+        .await
+        .unwrap();
+    until_model(&mut events, "fast").await;
+    bench.core.chat_close(&two.chat_id).await;
+    assert_eq!(saved_model(&bench).as_deref(), Some("fast"));
+
+    let (sender, mut again) = Events::new();
+    bench
+        .core
+        .chat_start(bench.start_of(Some(one.chat_id.clone())), sender, MAIN)
+        .await
+        .unwrap();
+
+    until_model(&mut again, "deep").await;
+    let values: Vec<Value> = requests(&bench.log(), "session/set_config_option")
+        .iter()
+        .map(|set| set["value"].clone())
+        .collect();
+    // deep (one), deep at two's start, fast (two), deep at one's load.
+    assert_eq!(
+        values,
+        [json!("deep"), json!("deep"), json!("fast"), json!("deep")]
+    );
+    assert_eq!(saved_model(&bench).as_deref(), Some("fast"));
+}
+
+#[tokio::test]
+async fn the_agent_s_own_model_change_moves_the_picker_but_is_not_saved() {
+    let bench = Bench::new(with_models(
+        script(vec![
+            turn(vec![
+                json!({ "configOptions": models("deep") }),
+                say("Switched."),
+            ]),
+            turn(vec![
+                json!({ "configOptions": models("deep") }),
+                say("Again."),
+            ]),
+        ]),
+        models("fast"),
+    ))
+    .await;
+    let (info, mut events) = bench.start(MAIN).await;
+    until_model(&mut events, "fast").await;
+    bench.ask(&info.chat_id, "Switch").await;
+    until_model(&mut events, "deep").await;
+    bench.ask(&info.chat_id, "Again").await;
+    // An update that leaves the model as it was sends nothing.
+    assert_eq!(
+        models_seen(&mut events),
+        [Some("fast".to_owned()), Some("deep".to_owned())]
+    );
+    assert_eq!(saved_model(&bench), None);
+    bench.core.chat_close(&info.chat_id).await;
+    let stored = bench.core.chat_get(&info.chat_id).unwrap();
+    assert_eq!(stored.model.as_deref(), Some("deep"));
 }
