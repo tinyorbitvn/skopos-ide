@@ -550,6 +550,7 @@ export function settingsFrom(draft: SettingsDraft): ClusterSettings {
     accessibleNamespaces: splitNamespaces(draft.accessibleNamespaces),
     terminalCwd: textOrNull(draft.terminalCwd),
     proxyUrl: textOrNull(draft.proxyUrl),
+    tunnel: null,
     nodeShellImage: textOrNull(draft.nodeShellImage),
     metricsProvider: providerSetting(draft),
     agent: {

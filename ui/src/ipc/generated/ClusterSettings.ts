@@ -6,7 +6,12 @@ export type ClusterSettings = { displayName: string | null,
 /**
  * A data URL.
  */
-icon: string | null, defaultNamespace: string | null, accessibleNamespaces: Array<string>, terminalCwd: string | null, proxyUrl: string | null, nodeShellImage: string | null, 
+icon: string | null, defaultNamespace: string | null, accessibleNamespaces: Array<string>, terminalCwd: string | null, proxyUrl: string | null, 
+/**
+ * The id of the tunnel this cluster is reached through (tunnels spec §5.2). An id that
+ * names no tunnel counts as none.
+ */
+tunnel: string | null, nodeShellImage: string | null, 
 /**
  * How metrics are read for this cluster (F16).
  */

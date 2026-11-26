@@ -29,6 +29,7 @@ pub mod store;
 mod subscriptions;
 pub mod tools;
 pub mod topology;
+pub mod tunnels;
 pub mod ui_state;
 pub mod updates;
 pub mod windows;

@@ -60,6 +60,7 @@ export function clusterEntry(partial: Partial<ClusterEntry>): ClusterEntry {
     contextName,
     server: "http://127.0.0.1:1",
     icon: null,
+    tunnel: null,
     source: { kind: "synced", path: "/home/me/.kube/config" },
     execCommand: null,
     execAllowed: false,

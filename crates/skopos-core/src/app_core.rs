@@ -26,7 +26,7 @@ use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::graph::GraphHub;
 use crate::helm::Helm;
 use crate::kubeconfig::{
-    default_sources, ClusterId, KubeconfigSync, SyncSnapshot, SyncSource, SyncWarning,
+    default_sources, ClusterId, ContextEntry, KubeconfigSync, SyncSnapshot, SyncSource, SyncWarning,
 };
 use crate::metrics::Metrics;
 use crate::openapi::ApiDocs;
@@ -79,6 +79,8 @@ pub enum CoreEvent {
     PortForwardsChanged {
         forwards: Vec<PortForward>,
     },
+    /// The tunnels or one tunnel's state changed (tunnels spec §5.2, §5.9).
+    TunnelsChanged,
     ToolProgress {
         progress: ToolProgress,
     },
@@ -110,6 +112,7 @@ struct Inner {
     /// never with a cluster's settings, which the window replaces whole.
     exec_consents: JsonStore<HashMap<ClusterId, ExecConsent>>,
     folders: JsonStore<CatalogFolders>,
+    tunnels: JsonStore<Vec<crate::tunnels::model::TunnelDef>>,
     windows: Windows,
     ui_state: UiState,
     pasted: PastedConfigs,
@@ -287,6 +290,7 @@ impl AppCore {
         let hotbar = open_store(&paths, HOTBAR_FILE, &mut warnings);
         let exec_consents = open_store(&paths, EXEC_CONSENTS_FILE, &mut warnings);
         let folders = open_folders(&paths, &mut warnings);
+        let tunnels = open_store(&paths, crate::tunnels::store::TUNNELS_FILE, &mut warnings);
         let (windows, windows_warning) = Windows::open(
             paths.config.join(WINDOWS_FILE),
             STORE_VERSION,
@@ -315,6 +319,7 @@ impl AppCore {
                 hotbar,
                 exec_consents,
                 folders,
+                tunnels,
                 windows,
                 ui_state,
                 pasted,
@@ -431,6 +436,21 @@ impl AppCore {
 
     pub(crate) fn folders(&self) -> &JsonStore<CatalogFolders> {
         &self.inner.folders
+    }
+
+    pub(crate) fn tunnels_store(&self) -> &JsonStore<Vec<crate::tunnels::model::TunnelDef>> {
+        &self.inner.tunnels
+    }
+
+    pub(crate) fn cluster_settings_store(&self) -> &JsonStore<HashMap<ClusterId, ClusterSettings>> {
+        &self.inner.clusters
+    }
+
+    /// The catalog's contexts as the last sync saw them.
+    // Used by the consumers of the next tasks.
+    #[allow(dead_code)]
+    pub(crate) fn context_entries(&self) -> Vec<ContextEntry> {
+        self.inner.snapshots.borrow().entries.clone()
     }
 
     pub(crate) fn windows(&self) -> &Windows {
