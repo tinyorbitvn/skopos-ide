@@ -1544,6 +1544,8 @@ mod running {
                     self.message = None;
                     None
                 }
+                // Task 3's pump applies it before it gets here.
+                AcpUpdate::Model(_) => None,
             }
         }
 
