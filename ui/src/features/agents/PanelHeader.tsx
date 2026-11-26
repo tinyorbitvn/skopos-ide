@@ -7,10 +7,11 @@ import { useAgents } from "../../stores/agents";
 import { useCatalog } from "../../stores/catalog";
 import styles from "./AgentPanel.module.css";
 import { scopeLabel } from "./chatModel";
+import { ModelPicker } from "./ModelPicker";
 
 export type PopoverName = "scope" | "agent" | null;
 
-/** The panel's header row (spec §3.2): scope, agent, New chat, Chat history, Close. */
+/** The panel's header row (spec §3.2): scope, agent, model, New chat, Chat history, Close. */
 export function PanelHeader(props: {
   page: string | null;
   popover: PopoverName;
@@ -71,6 +72,7 @@ export function PanelHeader(props: {
         <span className={styles.ellipsis}>{shownAgent}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </button>
+      <ModelPicker />
       {clusterId && settings?.changes === "readOnly" ? (
         <span data-testid="agent-read-only">
           <Badge tone="neutral">Read only</Badge>

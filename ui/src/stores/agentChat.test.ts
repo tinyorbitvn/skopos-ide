@@ -5,6 +5,7 @@ import type { AgentStatus } from "../ipc/generated/AgentStatus";
 import type { ChangeCard } from "../ipc/generated/ChangeCard";
 import type { ChatEvent } from "../ipc/generated/ChatEvent";
 import type { EditorTab } from "../ipc/generated/EditorTab";
+import type { ModelChoice } from "../ipc/generated/ModelChoice";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
 import { proposal } from "../test/proposals";
 import {
@@ -570,4 +571,69 @@ test("Show in terminal opens the tab and Stop stops the command, toasting a fail
     "Could not stop the command",
     "That command is not running.",
   );
+});
+
+const MODELS: ModelChoice = {
+  optionId: "model",
+  current: "fast",
+  choices: [
+    { id: "fast", name: "Fast", description: "Quick answers", group: null },
+    { id: "deep", name: "Deep", description: null, group: null },
+  ],
+};
+
+test("the chat keeps the agent's models and a pick asks the core", async () => {
+  catalog({ a: "prod" });
+  const { ipc, channels } = backend({ chat_set_model: () => null });
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  expect(useAgentChat.getState().model).toBeNull();
+  act(() => channels[0]?.onmessage({ type: "model", model: MODELS }));
+  expect(useAgentChat.getState().model).toEqual(MODELS);
+  await act(() => useAgentChat.getState().setModel("deep"));
+  expect(ipc.callsTo("chat_set_model")).toEqual([
+    { chatId: "c1", valueId: "deep" },
+  ]);
+  expect(useAgentChat.getState().modelChanging).toBe(false);
+  // A new chat forgets the old one's models; an ended chat has none.
+  await act(async () => {
+    await useAgentChat.getState().newChat("a");
+    await flush();
+  });
+  expect(useAgentChat.getState().model).toBeNull();
+  act(() => channels[1]?.onmessage({ type: "model", model: MODELS }));
+  act(() => channels[1]?.onmessage({ type: "closed", reason: null }));
+  expect(useAgentChat.getState().model).toBeNull();
+});
+
+test("no pick while the agent answers; a failed call shows a toast", async () => {
+  catalog({ a: "prod" });
+  const { ipc, channels } = backend({
+    chat_set_model: () => {
+      throw {
+        code: "Conflict",
+        message: "Wait for the answer to change the model.",
+      };
+    },
+  });
+  const error = vi.spyOn(toast, "error");
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  act(() => {
+    channels[0]?.onmessage({ type: "model", model: MODELS });
+    channels[0]?.onmessage({ type: "working", working: true });
+  });
+  await act(() => useAgentChat.getState().setModel("deep"));
+  expect(ipc.callsTo("chat_set_model")).toEqual([]);
+  act(() => channels[0]?.onmessage({ type: "working", working: false }));
+  await act(() => useAgentChat.getState().setModel("deep"));
+  expect(error).toHaveBeenCalledWith(
+    "Could not change the model",
+    "Wait for the answer to change the model.",
+  );
+  expect(useAgentChat.getState().modelChanging).toBe(false);
 });

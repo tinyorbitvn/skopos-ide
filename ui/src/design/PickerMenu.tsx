@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Check } from "./icons";
 import styles from "./PickerMenu.module.css";
 
 export interface PickerItem {
@@ -17,6 +18,10 @@ export interface PickerItem {
   keywords?: string[];
   icon?: ReactNode;
   hint?: string;
+  /** A second line under the label. */
+  description?: string;
+  /** Marks the item in use with a check; `false` keeps the check's room. */
+  checked?: boolean;
   disabled?: boolean;
   /** Why the item is disabled, shown in place of the hint. */
   disabledHint?: string;
@@ -228,17 +233,36 @@ export function PickerMenu(props: {
                       tabIndex={-1}
                       aria-selected={item.id === current?.id}
                       aria-disabled={item.disabled ? true : undefined}
-                      className={styles.item}
+                      aria-current={item.checked ? "true" : undefined}
+                      className={
+                        item.description
+                          ? `${styles.item} ${styles.described}`
+                          : styles.item
+                      }
                       data-testid={item.testId ?? `menu-item-${item.id}`}
                       onPointerMove={() => {
                         if (!item.disabled) setActive(item.id);
                       }}
                       onClick={() => pick(item)}
                     >
+                      {item.checked === undefined ? null : (
+                        <span className={styles.check} aria-hidden="true">
+                          {item.checked ? <Check size={14} /> : null}
+                        </span>
+                      )}
                       {item.icon ? (
                         <span className={styles.icon}>{item.icon}</span>
                       ) : null}
-                      <span className={styles.label}>{item.label}</span>
+                      {item.description ? (
+                        <span className={styles.text}>
+                          <span className={styles.label}>{item.label}</span>
+                          <span className={styles.description}>
+                            {item.description}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className={styles.label}>{item.label}</span>
+                      )}
                       {item.disabled && item.disabledHint ? (
                         <span className={styles.hint}>{item.disabledHint}</span>
                       ) : item.hint ? (

@@ -120,3 +120,47 @@ test("filterSections keeps order and drops sections with nothing left", () => {
   expect(result.map((s) => s.id)).toEqual(["workloads"]);
   expect(result[0].items.map((i) => i.id)).toEqual(["job"]);
 });
+
+test("a description shows under the label and the checked item is marked", () => {
+  render(
+    <PickerMenu
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={toggle}
+          data-testid="open"
+        >
+          Model
+        </button>
+      )}
+      label="Model"
+      searchLabel="Search models"
+      sections={[
+        {
+          id: "models",
+          items: [
+            {
+              id: "fast",
+              label: "Fast",
+              description: "Quick answers",
+              checked: true,
+              onSelect: vi.fn(),
+            },
+            { id: "deep", label: "Deep", checked: false, onSelect: vi.fn() },
+          ],
+        },
+      ]}
+      empty={(query) => `No model matches "${query}".`}
+      testId="models"
+    />,
+  );
+  fireEvent.click(screen.getByTestId("open"));
+  const fast = screen.getByTestId("menu-item-fast");
+  expect(fast.textContent).toContain("Fast");
+  expect(fast.textContent).toContain("Quick answers");
+  expect(fast.getAttribute("aria-current")).toBe("true");
+  expect(
+    screen.getByTestId("menu-item-deep").getAttribute("aria-current"),
+  ).toBeNull();
+});

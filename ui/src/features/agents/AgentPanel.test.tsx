@@ -10,6 +10,7 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, expect, test } from "vitest";
 import type { AgentStatus } from "../../ipc/generated/AgentStatus";
 import type { ChatEvent } from "../../ipc/generated/ChatEvent";
+import type { ModelChoice } from "../../ipc/generated/ModelChoice";
 import { resetAgentChatForTest, useAgentChat } from "../../stores/agentChat";
 import { resetAgentsForTest } from "../../stores/agents";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
@@ -305,4 +306,100 @@ test("Escape closes a popover but not the panel", async () => {
   expect(screen.queryByRole("dialog", { name: "Scope" })).toBeNull();
   expect(screen.getByTestId("agent-panel")).toBeTruthy();
   expect(document.activeElement).toBe(within(panel).getByTestId("agent-scope"));
+});
+
+const GROUPED: ModelChoice = {
+  optionId: "model",
+  current: "sonnet",
+  choices: [
+    {
+      id: "opus",
+      name: "Opus",
+      description: "Most capable",
+      group: "Anthropic",
+    },
+    { id: "sonnet", name: "Sonnet", description: null, group: "Anthropic" },
+    { id: "gpt", name: "GPT", description: null, group: "OpenAI" },
+  ],
+};
+
+test("the header lists the agent's models in its groups and picks one", async () => {
+  const ipc = backend({ chat_set_model: () => null });
+  const panel = await openOn("/cluster/a/overview");
+  expect(within(panel).queryByTestId("agent-model")).toBeNull();
+  act(() => channel?.onmessage({ type: "model", model: GROUPED }));
+  const trigger = within(panel).getByTestId("agent-model");
+  expect(trigger.textContent).toContain("Sonnet");
+  expect(trigger.getAttribute("aria-label")).toBe("Model: Sonnet");
+  fireEvent.click(trigger);
+  const menu = screen.getByTestId("agent-model-menu");
+  const headings = within(menu)
+    .getAllByRole("group")
+    .map((group) => group.getAttribute("aria-label"));
+  expect(headings).toEqual(["Anthropic", "OpenAI"]);
+  expect(within(menu).getByTestId("agent-model-opus").textContent).toContain(
+    "Most capable",
+  );
+  expect(
+    within(menu).getByTestId("agent-model-sonnet").getAttribute("aria-current"),
+  ).toBe("true");
+  fireEvent.click(within(menu).getByTestId("agent-model-opus"));
+  await waitFor(() =>
+    expect(ipc.callsTo("chat_set_model")).toEqual([
+      { chatId: "c1", valueId: "opus" },
+    ]),
+  );
+});
+
+test("while the agent answers the picker stays shut and says why", async () => {
+  backend({ chat_set_model: () => null });
+  const panel = await openOn("/cluster/a/overview");
+  act(() => {
+    channel?.onmessage({ type: "model", model: GROUPED });
+    channel?.onmessage({ type: "working", working: true });
+  });
+  const trigger = within(panel).getByTestId("agent-model");
+  expect(trigger.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(trigger);
+  expect(screen.queryByTestId("agent-model-menu")).toBeNull();
+  fireEvent.focus(trigger);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip.textContent).toContain("Wait for the answer to change the model");
+});
+
+test("the trigger shows the raw value when the model is not listed", async () => {
+  backend();
+  const panel = await openOn("/cluster/a/overview");
+  act(() =>
+    channel?.onmessage({
+      type: "model",
+      model: { ...GROUPED, current: "provider/custom" },
+    }),
+  );
+  expect(within(panel).getByTestId("agent-model").textContent).toContain(
+    "provider/custom",
+  );
+});
+
+test("a model the agent refused shows its notice as an error", async () => {
+  backend();
+  const panel = await openOn("/cluster/a/overview");
+  act(() =>
+    channel?.onmessage({
+      type: "item",
+      item: {
+        id: "n1",
+        body: {
+          type: "notice",
+          notice: { kind: "modelNotChanged", message: "Plan limit" },
+          text: "Could not change the model: Plan limit.",
+        },
+      },
+    }),
+  );
+  const notice = within(panel).getByTestId("agent-notice");
+  expect(notice.textContent).toContain(
+    "Could not change the model: Plan limit.",
+  );
+  expect(notice.getAttribute("data-tone")).toBe("danger");
 });
