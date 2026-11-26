@@ -109,6 +109,7 @@ impl AppCore {
                 }
             }
         })?;
+        self.tunnel_runtime().reset(&def.id);
         self.emit(CoreEvent::TunnelsChanged);
         self.tunnel_def(id)
             .map(|d| self.tunnel_view(&d))
@@ -125,6 +126,7 @@ impl AppCore {
                 tunnel.remembered.retain(|kept| kept != &account);
             }
         })?;
+        self.tunnel_runtime().reset(&def.id);
         self.emit(CoreEvent::TunnelsChanged);
         self.tunnel_def(id)
             .map(|d| self.tunnel_view(&d))

@@ -104,6 +104,22 @@ pub struct AppCore {
     inner: Arc<Inner>,
 }
 
+/// A handle that does not keep the core alive, for the tasks the core starts.
+#[derive(Clone)]
+pub(crate) struct WeakCore(std::sync::Weak<Inner>);
+
+impl WeakCore {
+    pub(crate) fn upgrade(&self) -> Option<AppCore> {
+        self.0.upgrade().map(|inner| AppCore { inner })
+    }
+
+    /// A handle whose core is gone.
+    #[cfg(test)]
+    pub(crate) fn none() -> WeakCore {
+        WeakCore(std::sync::Weak::new())
+    }
+}
+
 struct Inner {
     prefs: JsonStore<Prefs>,
     clusters: JsonStore<HashMap<ClusterId, ClusterSettings>>,
@@ -141,6 +157,7 @@ struct Inner {
     /// The passwords and tokens of metrics URLs (spec §10).
     secrets: Secrets,
     tunnel_secrets: crate::tunnels::secrets::TunnelSecrets,
+    tunnel_runtime: crate::tunnels::runtime::TunnelRuntime,
     /// The API docs read from each cluster, until it disconnects (spec L5).
     api_docs: ApiDocs,
     /// Held across a preferences write and the matching source change, so
@@ -360,6 +377,9 @@ impl AppCore {
                 metrics: Metrics::default(),
                 secrets: Secrets::new(secrets),
                 tunnel_secrets: crate::tunnels::secrets::TunnelSecrets::new(tunnel_secrets),
+                tunnel_runtime: crate::tunnels::runtime::TunnelRuntime::new(
+                    tokio::runtime::Handle::current(),
+                ),
                 api_docs: ApiDocs::default(),
                 sync: Mutex::new(Some(sync)),
                 snapshots,
@@ -856,6 +876,14 @@ impl AppCore {
 
     pub(crate) fn tunnel_secrets(&self) -> &crate::tunnels::secrets::TunnelSecrets {
         &self.inner.tunnel_secrets
+    }
+
+    pub(crate) fn tunnel_runtime(&self) -> &crate::tunnels::runtime::TunnelRuntime {
+        &self.inner.tunnel_runtime
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakCore {
+        WeakCore(Arc::downgrade(&self.inner))
     }
 
     pub(crate) fn api_docs(&self) -> &ApiDocs {

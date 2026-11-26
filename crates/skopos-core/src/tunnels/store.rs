@@ -4,6 +4,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use super::model::{invalid, tunnel_name, TunnelDef, TunnelInput, TunnelKind};
+use super::state::TunnelState;
 use crate::agents::endpoint::new_token;
 use crate::app_core::{AppCore, CoreEvent};
 use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -29,6 +30,7 @@ pub struct TunnelView {
     pub has_password: bool,
     /// Set when the password lives in memory only (spec §5.3).
     pub password_note: Option<String>,
+    pub state: TunnelState,
 }
 
 impl AppCore {
@@ -48,7 +50,7 @@ impl AppCore {
     pub fn tunnel_save(&self, input: TunnelInput) -> CoreResult<TunnelView> {
         let name = tunnel_name(&input.name)?;
         let kind = input.kind.normalized()?;
-        let saved = self.tunnels_store().try_update(|all| {
+        let (saved, changed) = self.tunnels_store().try_update(|all| {
             let lower = name.to_lowercase();
             let taken = all
                 .iter()
@@ -61,9 +63,10 @@ impl AppCore {
             match &input.id {
                 Some(id) => {
                     let def = all.iter_mut().find(|t| &t.id == id).ok_or_else(gone)?;
+                    let changed = def.kind != kind;
                     def.name = name.clone();
                     def.kind = kind.clone();
-                    Ok(def.clone())
+                    Ok((def.clone(), changed))
                 }
                 None => {
                     let def = TunnelDef {
@@ -73,10 +76,13 @@ impl AppCore {
                         remembered: Vec::new(),
                     };
                     all.push(def.clone());
-                    Ok(def)
+                    Ok((def, false))
                 }
             }
         })?;
+        if changed {
+            self.tunnel_runtime().reset(&saved.id);
+        }
         self.emit(CoreEvent::TunnelsChanged);
         Ok(self.tunnel_view(&saved))
     }
@@ -88,6 +94,7 @@ impl AppCore {
             Ok(all.remove(at))
         })?;
         self.tunnel_forget_secrets(&removed);
+        self.tunnel_runtime().forget(id);
         self.cluster_settings_store().update(|all| {
             for settings in all.values_mut() {
                 if settings.tunnel.as_deref() == Some(id) {
@@ -131,6 +138,7 @@ impl AppCore {
             cluster_count: u32::try_from(count).unwrap_or(u32::MAX),
             has_password,
             password_note,
+            state: self.tunnel_state(&def.id),
         }
     }
 }
