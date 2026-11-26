@@ -26,6 +26,9 @@ pub struct TunnelView {
     pub kind: TunnelKind,
     /// How many clusters pick this tunnel in their settings.
     pub cluster_count: u32,
+    pub has_password: bool,
+    /// Set when the password lives in memory only (spec §5.3).
+    pub password_note: Option<String>,
 }
 
 impl AppCore {
@@ -80,10 +83,11 @@ impl AppCore {
 
     /// Deletes a tunnel; the clusters that picked it go back to none.
     pub fn tunnel_delete(&self, id: &str) -> CoreResult<()> {
-        self.tunnels_store().try_update(|all| {
+        let removed = self.tunnels_store().try_update(|all| {
             let at = all.iter().position(|t| t.id == id).ok_or_else(gone)?;
             Ok(all.remove(at))
         })?;
+        self.tunnel_forget_secrets(&removed);
         self.cluster_settings_store().update(|all| {
             for settings in all.values_mut() {
                 if settings.tunnel.as_deref() == Some(id) {
@@ -119,11 +123,14 @@ impl AppCore {
             .values()
             .filter(|s| s.tunnel.as_deref() == Some(def.id.as_str()))
             .count();
+        let (has_password, password_note) = self.tunnel_password_state(def);
         TunnelView {
             id: def.id.clone(),
             name: def.name.clone(),
             kind: def.kind.clone(),
             cluster_count: u32::try_from(count).unwrap_or(u32::MAX),
+            has_password,
+            password_note,
         }
     }
 }

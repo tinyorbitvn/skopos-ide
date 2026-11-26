@@ -8,4 +8,8 @@ export type TunnelView = { id: string, name: string, kind: TunnelKind,
 /**
  * How many clusters pick this tunnel in their settings.
  */
-clusterCount: number, };
+clusterCount: number, hasPassword: boolean, 
+/**
+ * Set when the password lives in memory only (spec §5.3).
+ */
+passwordNote: string | null, };

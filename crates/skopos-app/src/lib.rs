@@ -79,10 +79,12 @@ pub fn run(shell_env_warning: Option<String>) {
     let started = paths.and_then(|paths| {
         let secrets = Arc::new(KeychainStore::new(keychain::SERVICE));
         let kubeconfig_env = std::env::var_os("KUBECONFIG");
-        tauri::async_runtime::block_on(AppCore::start_with_secret_store(
+        let tunnel_secrets = Arc::new(KeychainStore::new(keychain::TUNNELS_SERVICE));
+        tauri::async_runtime::block_on(AppCore::start_with_secret_stores(
             paths,
             kubeconfig_env,
             secrets,
+            tunnel_secrets,
         ))
     });
     match started {

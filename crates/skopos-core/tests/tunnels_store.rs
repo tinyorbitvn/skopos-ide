@@ -86,3 +86,93 @@ async fn deleting_a_tunnel_clears_the_clusters_that_use_it() {
         ErrorCode::NotFound
     );
 }
+
+use std::sync::Arc;
+
+use skopos_core::error::CoreResult;
+use skopos_core::kubeconfig::ClusterId;
+use skopos_core::secrets::{keychain_unavailable, MemorySecretStore, Secret, SecretStore};
+
+/// A keychain that refuses every write, as a Linux desktop without Secret Service does.
+struct RefusingStore;
+
+impl SecretStore for RefusingStore {
+    fn get(&self, _: &ClusterId) -> CoreResult<Option<Secret>> {
+        Ok(None)
+    }
+    fn set(&self, _: &ClusterId, _: &Secret) -> CoreResult<()> {
+        Err(keychain_unavailable("no Secret Service"))
+    }
+    fn delete(&self, _: &ClusterId) -> CoreResult<()> {
+        Ok(())
+    }
+}
+
+async fn start_with(root: &TempDir, tunnel_store: Arc<dyn SecretStore>) -> AppCore {
+    let paths = AppPaths::under(&root.path().join("app"), &root.path().join("home"));
+    AppCore::start_with_secret_stores(
+        paths,
+        None,
+        Arc::new(MemorySecretStore::default()),
+        tunnel_store,
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_proxy_password_goes_to_the_keychain_and_never_to_the_store_file() {
+    let root = tempfile::tempdir().unwrap();
+    let keychain = Arc::new(MemorySecretStore::default());
+    let core = start_with(&root, keychain.clone()).await;
+    let corp = core.tunnel_save(proxy("corp", "http://a:1")).unwrap();
+    let view = core
+        .tunnel_set_password(&corp.id, Secret::new("hunter2"))
+        .unwrap();
+    assert!(view.has_password);
+    assert_eq!(view.password_note, None);
+    let account = format!("{}:proxy-password", corp.id);
+    assert_eq!(
+        keychain.get(&account).unwrap(),
+        Some(Secret::new("hunter2"))
+    );
+    let file = std::fs::read_to_string(root.path().join("app/config/tunnels.json")).unwrap();
+    assert!(!file.contains("hunter2"));
+    let view = core.tunnel_clear_password(&corp.id).unwrap();
+    assert!(!view.has_password);
+    assert_eq!(keychain.get(&account).unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_refusing_keychain_keeps_the_password_in_memory_and_says_so() {
+    let root = tempfile::tempdir().unwrap();
+    let core = start_with(&root, Arc::new(RefusingStore)).await;
+    let corp = core.tunnel_save(proxy("corp", "http://a:1")).unwrap();
+    let view = core
+        .tunnel_set_password(&corp.id, Secret::new("pw"))
+        .unwrap();
+    assert!(view.has_password);
+    assert_eq!(
+        view.password_note.as_deref(),
+        Some(
+            "Kept until SkoposIDE quits: the system keychain is not available (no Secret Service)"
+        )
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_tunnel_deletes_its_password() {
+    let root = tempfile::tempdir().unwrap();
+    let keychain = Arc::new(MemorySecretStore::default());
+    let core = start_with(&root, keychain.clone()).await;
+    let corp = core.tunnel_save(proxy("corp", "http://a:1")).unwrap();
+    core.tunnel_set_password(&corp.id, Secret::new("pw"))
+        .unwrap();
+    core.tunnel_delete(&corp.id).unwrap();
+    assert_eq!(
+        keychain
+            .get(&format!("{}:proxy-password", corp.id))
+            .unwrap(),
+        None
+    );
+}

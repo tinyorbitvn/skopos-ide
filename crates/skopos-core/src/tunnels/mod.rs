@@ -2,6 +2,7 @@
 //! local gateway every consumer goes through.
 
 pub mod model;
+pub mod secrets;
 pub mod store;
 
 pub use model::{TunnelInput, TunnelKind};

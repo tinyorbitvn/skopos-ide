@@ -140,6 +140,7 @@ struct Inner {
     metrics: Metrics,
     /// The passwords and tokens of metrics URLs (spec §10).
     secrets: Secrets,
+    tunnel_secrets: crate::tunnels::secrets::TunnelSecrets,
     /// The API docs read from each cluster, until it disconnects (spec L5).
     api_docs: ApiDocs,
     /// Held across a preferences write and the matching source change, so
@@ -280,6 +281,22 @@ impl AppCore {
         kubeconfig_env: Option<OsString>,
         secrets: Arc<dyn SecretStore>,
     ) -> CoreResult<AppCore> {
+        Self::start_with_secret_stores(
+            paths,
+            kubeconfig_env,
+            secrets,
+            Arc::new(MemorySecretStore::default()),
+        )
+        .await
+    }
+
+    /// As `start_with_secret_store`, with the keychain of tunnel passwords (tunnels spec §5.3).
+    pub async fn start_with_secret_stores(
+        paths: AppPaths,
+        kubeconfig_env: Option<OsString>,
+        secrets: Arc<dyn SecretStore>,
+        tunnel_secrets: Arc<dyn SecretStore>,
+    ) -> CoreResult<AppCore> {
         paths.ensure_dirs()?;
         let (events, _) = broadcast::channel(EVENT_BACKLOG);
         let connections = Arc::new(ClusterManager::start(&paths.data, events.clone()));
@@ -342,6 +359,7 @@ impl AppCore {
                 helm,
                 metrics: Metrics::default(),
                 secrets: Secrets::new(secrets),
+                tunnel_secrets: crate::tunnels::secrets::TunnelSecrets::new(tunnel_secrets),
                 api_docs: ApiDocs::default(),
                 sync: Mutex::new(Some(sync)),
                 snapshots,
@@ -834,6 +852,10 @@ impl AppCore {
 
     pub(crate) fn secrets(&self) -> &Secrets {
         &self.inner.secrets
+    }
+
+    pub(crate) fn tunnel_secrets(&self) -> &crate::tunnels::secrets::TunnelSecrets {
+        &self.inner.tunnel_secrets
     }
 
     pub(crate) fn api_docs(&self) -> &ApiDocs {
