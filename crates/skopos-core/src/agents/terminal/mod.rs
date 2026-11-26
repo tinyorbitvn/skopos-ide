@@ -88,6 +88,10 @@ pub(crate) struct RunRequest {
     pub(crate) timeout: Duration,
     /// The cluster's token: a disconnect stops the command.
     pub(crate) cluster: CancellationToken,
+    /// Checked again once the command holds the terminal, just before it starts: while it
+    /// waited for an answer or its turn, the person may have turned the terminal off, picked
+    /// Read only, or the cluster may have gone. An error ends the command unstarted.
+    pub(crate) recheck: Box<dyn FnOnce() -> Result<(), String> + Send + Sync>,
 }
 
 /// The Agent terminals of one chat, one per cluster.
@@ -355,6 +359,7 @@ impl AgentTerminal {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn running_card(&self) -> Option<String> {
         self.screen()
             .running
@@ -404,7 +409,7 @@ impl AgentTerminal {
     /// at most every `CARD_REFRESH` while it runs.
     pub(crate) async fn run(
         self: &Arc<Self>,
-        request: RunRequest,
+        mut request: RunRequest,
         lines: watch::Sender<String>,
     ) -> RunResult {
         let stop = request.cluster.child_token();
@@ -425,6 +430,14 @@ impl AgentTerminal {
         };
         if stop.is_cancelled() {
             return Self::stopped_before_start(&reason);
+        }
+        let recheck = std::mem::replace(&mut request.recheck, Box::new(|| Ok(())));
+        if let Err(message) = recheck() {
+            return RunResult {
+                end: RunEnd::Failed(message),
+                text: String::new(),
+                lines: String::new(),
+            };
         }
         self.line(&command_line(&request.command)).await;
         let mut guard = StopOnDrop {
@@ -626,6 +639,7 @@ mod tests {
             path: None,
             timeout: Duration::from_secs(seconds),
             cluster: CancellationToken::new(),
+            recheck: Box::new(|| Ok(())),
         }
     }
 
@@ -1110,6 +1124,24 @@ mod tests {
         assert_eq!(one.await.unwrap().end, RunEnd::Stopped(Stop::Chat));
         assert_eq!(two.await.unwrap().end, RunEnd::Stopped(Stop::Chat));
         assert!(!output::plain_text(&terminal.scrollback_text()).contains("second"));
+        assert_eq!(terminal.running_card(), None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_recheck_ends_the_command_unstarted() {
+        let folder = tempfile::tempdir().unwrap();
+        let terminal = Arc::new(AgentTerminal::new());
+        let marker = folder.path().join("ran");
+        let command = format!("echo x > {}", marker.display());
+        let mut request = request(folder.path(), "k1", &command, 30);
+        request.recheck = Box::new(|| Err("Terminal commands are off for fake.".to_owned()));
+        let result = run(&terminal, request).await;
+        assert_eq!(
+            result.end,
+            RunEnd::Failed("Terminal commands are off for fake.".to_owned())
+        );
+        assert!(!marker.exists(), "the command ran after its recheck failed");
+        assert!(terminal.scrollback_text().is_empty());
         assert_eq!(terminal.running_card(), None);
     }
 

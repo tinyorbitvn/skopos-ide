@@ -18,6 +18,7 @@ use crate::agents::approvals::{
 };
 use crate::agents::terminal::shell::shell_command;
 use crate::agents::terminal::{RunEnd, RunRequest, Stop};
+use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::prefs::{AgentChanges, ClusterAgentSettings};
 use crate::sessions::{random_hex, resolve_shell};
@@ -111,7 +112,7 @@ impl ChatGate {
         timeout_seconds: u64,
         summary: &str,
     ) -> ChangeOutcome {
-        let settings = match self.terminal_allowed(cluster, command) {
+        let settings = match terminal_allowed(&self.core, &self.scope, cluster, command) {
             Ok(settings) => settings,
             Err(text) => return ChangeOutcome::Refused { text },
         };
@@ -244,45 +245,6 @@ impl ChatGate {
         outcome
     }
 
-    /// The refusals of spec §5.3 in order; the cluster's settings when none applies.
-    fn terminal_allowed(
-        &self,
-        cluster: &ScopeCluster,
-        command: &str,
-    ) -> Result<ClusterAgentSettings, String> {
-        if !self
-            .scope
-            .clusters
-            .iter()
-            .any(|known| known.id == cluster.id)
-        {
-            return Err(format!(
-                "{} is not one of this chat's clusters.",
-                cluster.name
-            ));
-        }
-        let settings = self.core.cluster_agent_settings(&cluster.id);
-        if matches!(settings.changes, AgentChanges::ReadOnly) {
-            return Err(read_only_text(&cluster.name));
-        }
-        if !settings.terminal {
-            return Err(terminal_off_text(&cluster.name));
-        }
-        if !matches!(
-            self.core.cluster_state(&cluster.id),
-            ConnectionState::Connected { .. }
-        ) {
-            return Err(not_connected_text(&cluster.name));
-        }
-        if command.trim().is_empty() {
-            return Err("Give the command to run.".to_owned());
-        }
-        if command.len() > MAX_COMMAND_BYTES {
-            return Err("The command is longer than 16 KiB.".to_owned());
-        }
-        Ok(settings)
-    }
-
     /// The process to start: the terminal shell, the cluster's kubeconfig (the local
     /// terminal's, `cluster_kubeconfig_path`), the chat's work folder, the managed tools on
     /// `PATH`.
@@ -301,6 +263,8 @@ impl ChatGate {
             .core
             .cluster_cancel_token(&cluster.id)
             .map_err(|_| not_connected_text(&cluster.name))?;
+        let (core, scope) = (self.core.clone(), self.scope.clone());
+        let (recheck_cluster, recheck_command) = (cluster.clone(), command.to_owned());
         let shell = resolve_shell(self.core.prefs_get().terminal_shell.as_deref());
         let (program, args) = shell_command(&shell, command, cfg!(windows));
         Ok(RunRequest {
@@ -316,6 +280,45 @@ impl ChatGate {
             ),
             timeout: Duration::from_secs(timeout_seconds),
             cluster: token,
+            recheck: Box::new(move || {
+                terminal_allowed(&core, &scope, &recheck_cluster, &recheck_command).map(|_| ())
+            }),
         })
     }
+}
+
+/// The refusals of spec §5.3 in order; the cluster's settings when none applies. Run when the
+/// call comes and again when the command takes its turn.
+fn terminal_allowed(
+    core: &AppCore,
+    scope: &ToolScope,
+    cluster: &ScopeCluster,
+    command: &str,
+) -> Result<ClusterAgentSettings, String> {
+    if !scope.clusters.iter().any(|known| known.id == cluster.id) {
+        return Err(format!(
+            "{} is not one of this chat's clusters.",
+            cluster.name
+        ));
+    }
+    let settings = core.cluster_agent_settings(&cluster.id);
+    if matches!(settings.changes, AgentChanges::ReadOnly) {
+        return Err(read_only_text(&cluster.name));
+    }
+    if !settings.terminal {
+        return Err(terminal_off_text(&cluster.name));
+    }
+    if !matches!(
+        core.cluster_state(&cluster.id),
+        ConnectionState::Connected { .. }
+    ) {
+        return Err(not_connected_text(&cluster.name));
+    }
+    if command.trim().is_empty() {
+        return Err("Give the command to run.".to_owned());
+    }
+    if command.len() > MAX_COMMAND_BYTES {
+        return Err("The command is longer than 16 KiB.".to_owned());
+    }
+    Ok(settings)
 }

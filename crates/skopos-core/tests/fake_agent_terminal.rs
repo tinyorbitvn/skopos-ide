@@ -417,3 +417,42 @@ async fn colour_codes_do_not_reach_the_agent() {
     assert!(!text.contains('\x1b'), "{text:?}");
     assert!(text.contains("red"), "{text}");
 }
+
+#[tokio::test]
+async fn a_command_queued_while_the_terminal_is_turned_off_does_not_run() {
+    let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    set_agent(&core, &id, terminal_on(AgentChanges::DontAsk));
+    let mut chat = Chat::start(&core, &id, false).await;
+    let first = chat.call_in_background(json!({ "command": sleep_30() }));
+    let running = chat
+        .card_until(|state| matches!(state, ChangeState::Running))
+        .await;
+    let marker = chat.work_dir().join("ran");
+    let second = chat.call_in_background(json!({ "command": "echo ran > ran" }));
+    // The second command's card shows Running at once, while it waits for the first.
+    loop {
+        let card = chat.next_card().await;
+        if card.id != running.id && card.state == ChangeState::Running {
+            break;
+        }
+    }
+    set_agent(
+        &core,
+        &id,
+        ClusterAgentSettings {
+            changes: AgentChanges::DontAsk,
+            terminal: false,
+            ..ClusterAgentSettings::default()
+        },
+    );
+    assert!(chat.terminals.stop_card(&running.id));
+    assert!(first.await.unwrap().0);
+    assert_eq!(
+        second.await.unwrap(),
+        (true, "Terminal commands are off for fake.".to_owned())
+    );
+    assert!(
+        !marker.exists(),
+        "the queued command ran with the terminal off"
+    );
+}
