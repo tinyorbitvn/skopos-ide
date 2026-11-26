@@ -5,6 +5,7 @@ pub(crate) mod gateway;
 #[cfg(test)]
 mod gateway_tests;
 pub(crate) mod http;
+pub(crate) mod migrate;
 pub mod model;
 pub(crate) mod no_proxy;
 pub(crate) mod route;

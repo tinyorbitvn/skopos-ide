@@ -27,7 +27,7 @@ export interface SettingsDraft {
   accessibleNamespaces: string;
   terminalCwd: string;
   nodeShellImage: string;
-  proxyUrl: string;
+  tunnel: string | null;
   provider: ProviderKind;
   promNamespace: string;
   promService: string;
@@ -80,7 +80,6 @@ export type FileField = "remoteCa" | "remoteCert" | "remoteKey";
 export type DraftField =
   | "accessibleNamespaces"
   | "nodeShellImage"
-  | "proxyUrl"
   | "promNamespace"
   | "promService"
   | "promPort"
@@ -136,9 +135,6 @@ const ICON_TYPES = ["image/png", "image/svg+xml"];
 const ICON_NAME = /\.(png|svg)$/i;
 const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const DNS_1035_LABEL = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
-const PROXY_PROTOCOLS = ["http:", "https:", "socks5:"];
-const PROXY_ERROR =
-  "Use http://, https:// or socks5:// with a host and an optional port";
 /** A path prefix character other than `/`: one that needs no escaping in a URL path. */
 const PATH_CHAR = /^[A-Za-z0-9._~-]$/;
 /** Mimir's tenant ID characters. */
@@ -166,7 +162,7 @@ export function draftFrom(settings: ClusterSettings): SettingsDraft {
     accessibleNamespaces: settings.accessibleNamespaces.join(", "),
     terminalCwd: settings.terminalCwd ?? "",
     nodeShellImage: settings.nodeShellImage ?? "",
-    proxyUrl: settings.proxyUrl ?? "",
+    tunnel: settings.tunnel,
     provider: provider.kind,
     promNamespace: prom?.namespace ?? "",
     promService: prom?.service ?? "",
@@ -205,7 +201,7 @@ export function emptyDraft(): SettingsDraft {
     accessibleNamespaces: "",
     terminalCwd: "",
     nodeShellImage: "",
-    proxyUrl: "",
+    tunnel: null,
     provider: "auto",
     promNamespace: "",
     promService: "",
@@ -263,16 +259,6 @@ function isPort(s: string): boolean {
   if (!/^\d+$/.test(s)) return false;
   const port = Number(s);
   return port >= 1 && port <= 65535;
-}
-
-function isProxyUrl(text: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(text);
-  } catch {
-    return false;
-  }
-  return PROXY_PROTOCOLS.includes(url.protocol) && url.hostname !== "";
 }
 
 /** The path prefix as the core saves it: trimmed, without trailing `/`; null when empty. */
@@ -444,8 +430,6 @@ export function validate(
   if (/\s/.test(draft.nodeShellImage.trim())) {
     errors.nodeShellImage = "An image reference, such as alpine:3.22";
   }
-  const proxy = draft.proxyUrl.trim();
-  if (proxy !== "" && !isProxyUrl(proxy)) errors.proxyUrl = PROXY_ERROR;
   if (draft.provider === "prometheus") {
     if (!isDnsLabel(draft.promNamespace.trim())) {
       errors.promNamespace = "A namespace name";
@@ -549,8 +533,7 @@ export function settingsFrom(draft: SettingsDraft): ClusterSettings {
     defaultNamespace: draft.defaultNamespace,
     accessibleNamespaces: splitNamespaces(draft.accessibleNamespaces),
     terminalCwd: textOrNull(draft.terminalCwd),
-    proxyUrl: textOrNull(draft.proxyUrl),
-    tunnel: null,
+    tunnel: draft.tunnel,
     nodeShellImage: textOrNull(draft.nodeShellImage),
     metricsProvider: providerSetting(draft),
     agent: {
@@ -608,7 +591,7 @@ export function statusText(
   }
   if (changed) return "Unsaved changes.";
   if (justSaved) {
-    return "Saved. Changes apply at once; the proxy applies on the next connect.";
+    return "Saved. Changes apply at once; the tunnel applies on the next connect.";
   }
   return "";
 }

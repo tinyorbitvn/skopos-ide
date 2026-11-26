@@ -42,7 +42,7 @@ const SAVED: ClusterSettings = clusterSettings({
   defaultNamespace: "shop",
   accessibleNamespaces: ["shop", "default"],
   terminalCwd: "/srv/work",
-  proxyUrl: "http://proxy.example:3128",
+  tunnel: "t1",
   nodeShellImage: "alpine:3.22",
   metricsProvider: { kind: "metricsServer" },
 });
@@ -107,7 +107,7 @@ test("a draft shows the saved settings as text, and saving it gives them back", 
     accessibleNamespaces: "shop, default",
     terminalCwd: "/srv/work",
     nodeShellImage: "alpine:3.22",
-    proxyUrl: "http://proxy.example:3128",
+    tunnel: "t1",
     provider: "metricsServer",
     promNamespace: "",
     promService: "",
@@ -167,13 +167,13 @@ test("empty and blank fields save null, and text is trimmed", () => {
       displayName: "  ",
       terminalCwd: "",
       nodeShellImage: " alpine:3.22 ",
-      proxyUrl: " ",
+      tunnel: null,
     }),
   );
   expect(out.displayName).toBeNull();
   expect(out.terminalCwd).toBeNull();
   expect(out.nodeShellImage).toBe("alpine:3.22");
-  expect(out.proxyUrl).toBeNull();
+  expect(out.tunnel).toBeNull();
 });
 
 test("Restore defaults is an empty draft with no icon, no namespaces and Detect", () => {
@@ -184,7 +184,7 @@ test("Restore defaults is an empty draft with no icon, no namespaces and Detect"
     accessibleNamespaces: "",
     terminalCwd: "",
     nodeShellImage: "",
-    proxyUrl: "",
+    tunnel: null,
     provider: "auto",
     promNamespace: "",
     promService: "",
@@ -330,21 +330,6 @@ test("a node shell image with whitespace inside is refused", () => {
   expect(
     validate(draft({ nodeShellImage: "" })).nodeShellImage,
   ).toBeUndefined();
-});
-
-test("a proxy with a user and password passes; a scheme-less or ftp proxy fails", () => {
-  const error =
-    "Use http://, https:// or socks5:// with a host and an optional port";
-  const check = (proxyUrl: string) => validate(draft({ proxyUrl })).proxyUrl;
-  expect(check("http://user:secret@proxy.example:3128")).toBeUndefined();
-  expect(check("https://proxy.example")).toBeUndefined();
-  expect(check("socks5://proxy.example:1080")).toBeUndefined();
-  expect(check(" http://proxy.example:3128 ")).toBeUndefined();
-  expect(check("")).toBeUndefined();
-  expect(check("proxy.example:3128")).toBe(error);
-  expect(check("ftp://proxy.example")).toBe(error);
-  expect(check("http://")).toBe(error);
-  expect(check("not a url")).toBe(error);
 });
 
 test("port 0 and 65536 fail, 1 and 65535 pass", () => {
@@ -583,7 +568,7 @@ test("drafts are the same only when every field is", () => {
     { accessibleNamespaces: "x" },
     { terminalCwd: "x" },
     { nodeShellImage: "x" },
-    { proxyUrl: "x" },
+    { tunnel: "t2" },
     { provider: "none" },
     { promNamespace: "x" },
     { promService: "x" },
@@ -622,13 +607,13 @@ test("drafts are the same only when every field is", () => {
 });
 
 test("the status says what blocks a save, then what is unsaved, then what was saved", () => {
-  const errors = { proxyUrl: "bad" };
+  const errors = { nodeShellImage: "bad" };
   expect(statusText(errors, true, true)).toBe(
     "Fix the fields marked in red to save.",
   );
   expect(statusText({}, true, true)).toBe("Unsaved changes.");
   expect(statusText({}, false, true)).toBe(
-    "Saved. Changes apply at once; the proxy applies on the next connect.",
+    "Saved. Changes apply at once; the tunnel applies on the next connect.",
   );
   expect(statusText({}, false, false)).toBe("");
 });

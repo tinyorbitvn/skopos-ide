@@ -21,10 +21,12 @@ import {
   resetMetricsForTest,
   useMetrics,
 } from "../../stores/metrics";
+import { resetTunnelsForTest } from "../../stores/tunnels";
 import { CSS_FILES, cssRules } from "../../test/css";
 import { type Backend, clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { clusterSettings, metricsResult, prometheus } from "../../test/metrics";
 import { CONNECTED } from "../../test/terminal";
+import { tunnel } from "../../test/tunnels";
 import { ClusterSettingsRoute } from "./ClusterSettingsScreen";
 import { keptDraft, resetDraftsForTest } from "./drafts";
 
@@ -33,6 +35,7 @@ beforeEach(() => {
   resetMetricsForTest();
   resetDraftsForTest();
   resetAgentsForTest();
+  resetTunnelsForTest();
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -59,7 +62,7 @@ const FULL = clusterSettings({
   defaultNamespace: "shop",
   accessibleNamespaces: ["shop", "default"],
   terminalCwd: "/srv/work",
-  proxyUrl: "http://proxy.example:3128",
+  tunnel: "t1",
   nodeShellImage: "alpine:3.22",
   metricsProvider: { kind: "metricsServer" },
 });
@@ -101,6 +104,7 @@ async function show(
   const backend = mockBackend({
     cluster_settings_get: () => options.saved ?? clusterSettings(),
     cluster_settings_set: () => null,
+    tunnel_list: () => [tunnel()],
     agents_status: () => [
       agentRow({ isDefault: true }),
       agentRow({ id: "codex", name: "Codex" }),
@@ -251,7 +255,7 @@ test("the head names the cluster and its kubeconfig, and the fields show the sav
   expect(input("settings-accessible-namespaces").value).toBe("shop, default");
   expect(input("settings-terminal-cwd").value).toBe("/srv/work");
   expect(input("settings-node-shell-image").value).toBe("alpine:3.22");
-  expect(input("settings-proxy-url").value).toBe("http://proxy.example:3128");
+  expect(screen.getByTestId("settings-tunnel").textContent).toBe("corp");
   expect(radio("metricsServer").checked).toBe(true);
   expect(screen.queryByTestId("settings-prom-namespace")).toBeNull();
   expect(status()).toBe("");
@@ -274,9 +278,11 @@ test("each field carries its label and help, and the provider options their desc
   expect(field("settings-node-shell-image")).toBe(
     "Node shell imageThe privileged Pod that enters a node",
   );
-  expect(field("settings-proxy-url")).toBe(
-    "Proxy URLFor this cluster's API server. Empty uses the kubeconfig's proxy-url, if it has one",
-  );
+  expect(
+    screen.getByText(
+      "How this cluster's API server is reached. None uses the kubeconfig's proxy-url, if it has one",
+    ),
+  ).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "Default namespace" })).toBe(
     screen.getByTestId("settings-default-namespace"),
   );
@@ -305,7 +311,6 @@ test("every field's error shows under it; Save stays disabled and the status say
   await show();
   type("settings-accessible-namespaces", "shop, Bad_NS");
   type("settings-node-shell-image", "alpine 3.22");
-  type("settings-proxy-url", "ftp://proxy.example");
   pickProvider("prometheus");
   type("settings-prom-namespace", "Bad");
   type("settings-prom-service", "9svc");
@@ -315,9 +320,6 @@ test("every field's error shows under it; Save stays disabled and the status say
   );
   expect(errorOf("settings-node-shell-image")).toBe(
     "An image reference, such as alpine:3.22",
-  );
-  expect(errorOf("settings-proxy-url")).toBe(
-    "Use http://, https:// or socks5:// with a host and an optional port",
   );
   expect(errorOf("settings-prom-namespace")).toBe("A namespace name");
   expect(errorOf("settings-prom-service")).toBe("A Service name");
@@ -331,7 +333,7 @@ test("every field's error shows under it; Save stays disabled and the status say
   expect(errorOf("settings-prom-port")).toBeNull();
 });
 
-test("Save sends the trimmed settings, toasts with the proxy line, forgets the provider and says Saved", async () => {
+test("Save sends the trimmed settings and the tunnel, toasts the reconnect line, and says Saved", async () => {
   const success = vi.spyOn(toast, "success");
   useMetrics.setState({
     providers: { "id-x": { value: prometheus(), error: null, loading: false } },
@@ -339,10 +341,17 @@ test("Save sends the trimmed settings, toasts with the proxy line, forgets the p
   const backend = await show();
   type("settings-display-name", " Prod ");
   type("settings-accessible-namespaces", "shop, default shop");
-  type("settings-proxy-url", "http://proxy.example:3128");
+  fireEvent.keyDown(screen.getByTestId("settings-tunnel"), { key: "Enter" });
+  const options = await screen.findAllByRole("option");
+  expect(options.map((o) => o.textContent)).toEqual([
+    "None",
+    "corp",
+    "New tunnel…",
+  ]);
+  fireEvent.click(screen.getByRole("option", { name: "corp" }));
+  await act(flush);
   expect(status()).toBe("Unsaved changes.");
-  expect(button("settings-save").disabled).toBe(false);
-  expect(keptDraft("id-x")?.proxyUrl).toBe("http://proxy.example:3128");
+  expect(keptDraft("id-x")?.tunnel).toBe("t1");
 
   await save();
 
@@ -352,27 +361,54 @@ test("Save sends the trimmed settings, toasts with the proxy line, forgets the p
       settings: clusterSettings({
         displayName: "Prod",
         accessibleNamespaces: ["shop", "default"],
-        proxyUrl: "http://proxy.example:3128",
+        tunnel: "t1",
       }),
     },
   ]);
   expect(success).toHaveBeenCalledWith(
     "Saved the settings for Prod",
-    "Reconnect to use the new proxy.",
+    "Reconnect to use the new tunnel.",
   );
   expect(useMetrics.getState().providers["id-x"]).toBeUndefined();
   expect(keptDraft("id-x")).toBeUndefined();
   expect(status()).toBe(
-    "Saved. Changes apply at once; the proxy applies on the next connect.",
+    "Saved. Changes apply at once; the tunnel applies on the next connect.",
   );
   expect(button("settings-save").disabled).toBe(true);
-  expect(input("settings-display-name").value).toBe("Prod");
-
-  type("settings-terminal-cwd", "/srv");
-  expect(status()).toBe("Unsaved changes.");
 });
 
-test("a save that keeps the proxy toasts without the reconnect line, under the context name", async () => {
+test("New tunnel… opens the tunnel dialog and picks the tunnel it saves", async () => {
+  const edge = tunnel({ id: "t2", name: "edge" });
+  let saved = false;
+  const backend = await show({
+    handlers: {
+      tunnel_save: () => {
+        saved = true;
+        return edge;
+      },
+      tunnel_list: () => (saved ? [tunnel(), edge] : [tunnel()]),
+    },
+  });
+  fireEvent.keyDown(screen.getByTestId("settings-tunnel"), { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: "New tunnel…" }));
+  await act(flush);
+  type("tunnel-name", "edge");
+  type("tunnel-url", "http://edge.corp:3128");
+  fireEvent.click(screen.getByTestId("tunnel-save"));
+  await act(flush);
+  expect(backend.callsTo("tunnel_save")).toHaveLength(1);
+  expect(keptDraft("id-x")?.tunnel).toBe("t2");
+  await waitFor(() =>
+    expect(screen.getByTestId("settings-tunnel").textContent).toBe("edge"),
+  );
+});
+
+test("a tunnel that no longer exists reads None", async () => {
+  await show({ saved: clusterSettings({ tunnel: "gone" }) });
+  expect(screen.getByTestId("settings-tunnel").textContent).toBe("None");
+});
+
+test("a save that keeps the tunnel toasts without the reconnect line, under the context name", async () => {
   const success = vi.spyOn(toast, "success");
   await show();
   type("settings-terminal-cwd", "/srv/work");
@@ -459,9 +495,9 @@ test("Restore defaults empties the draft without saving; Reset brings the saved 
       "settings-accessible-namespaces",
       "settings-terminal-cwd",
       "settings-node-shell-image",
-      "settings-proxy-url",
     ].map((id) => input(id).value),
-  ).toEqual(["", "", "", "", ""]);
+  ).toEqual(["", "", "", ""]);
+  expect(screen.getByTestId("settings-tunnel").textContent).toBe("None");
   expect(radio("auto").checked).toBe(true);
   expect(preview().textContent).toBe("No icon");
   expect(screen.getByTestId("settings-default-namespace").textContent).toBe(
@@ -474,7 +510,7 @@ test("Restore defaults empties the draft without saving; Reset brings the saved 
   fireEvent.click(button("settings-reset"));
   expect(keptDraft("id-x")).toBeUndefined();
   expect(input("settings-display-name").value).toBe("Prod");
-  expect(input("settings-proxy-url").value).toBe("http://proxy.example:3128");
+  expect(screen.getByTestId("settings-tunnel").textContent).toBe("corp");
   expect(radio("metricsServer").checked).toBe(true);
   expect(preview().getAttribute("src")).toBe(ICON);
   expect(status()).toBe("");
@@ -1031,7 +1067,7 @@ test("Save writes the typed secret first, then the settings, and forgets the typ
   );
   expect(errorOf("settings-remote-token")).toBeNull();
   expect(status()).toBe(
-    "Saved. Changes apply at once; the proxy applies on the next connect.",
+    "Saved. Changes apply at once; the tunnel applies on the next connect.",
   );
   expect(keptDraft("id-x")).toBeUndefined();
 

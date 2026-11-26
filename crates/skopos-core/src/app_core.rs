@@ -47,7 +47,7 @@ use crate::windows::{WindowLayout, Windows, MAIN_WINDOW};
 
 const STORE_VERSION: u32 = 1;
 const PREFS_FILE: &str = "prefs.json";
-const CLUSTERS_FILE: &str = "clusters.json";
+pub(crate) const CLUSTERS_FILE: &str = "clusters.json";
 const HOTBAR_FILE: &str = "hotbar.json";
 const PORTFORWARDS_FILE: &str = "portforwards.json";
 const UI_STATE_FILE: &str = "ui-state.json";
@@ -346,7 +346,7 @@ impl AppCore {
             connections.clone(),
         ));
 
-        Ok(AppCore {
+        let core = AppCore {
             inner: Arc::new(Inner {
                 prefs,
                 clusters,
@@ -390,7 +390,12 @@ impl AppCore {
                 quit: QuitWatch::default(),
                 agent_probes: AgentProbes::default(),
             }),
-        })
+        };
+        // Before anything connects (tunnels spec §5.4).
+        let migrating = core.clone();
+        let moved = crate::blocking::blocking(move || Ok(migrating.migrate_proxy_urls())).await?;
+        lock(&core.inner.startup_warnings).extend(moved);
+        Ok(core)
     }
 
     /// Nobody may be subscribed yet; subscribers read the current state when they start.
