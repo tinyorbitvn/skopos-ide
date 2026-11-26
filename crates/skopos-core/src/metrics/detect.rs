@@ -220,6 +220,7 @@ fn from_setting(setting: &MetricsProviderSetting) -> CoreResult<Option<Chosen>> 
                 matcher: matcher.clone(),
                 auth: auth.clone(),
                 ca_path: ca_path.clone(),
+                proxy: None,
             };
             Chosen {
                 provider: MetricsProvider::Remote {

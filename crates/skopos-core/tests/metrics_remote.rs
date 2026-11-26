@@ -4,7 +4,9 @@
 
 mod support;
 
+use std::collections::HashMap;
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -32,6 +34,8 @@ use skopos_core::metrics::{
     MetricsResult, MetricsTarget, RemoteAuth, RemoteChoice,
 };
 use skopos_core::secrets::{keychain_unavailable, MemorySecretStore, Secret, SecretStore};
+use skopos_core::tunnels::{TunnelInput, TunnelKind};
+use skopos_fakekube::proxy::{http_proxy, ProxyOptions, TestProxy};
 use skopos_fakekube::FakeKubeConfig;
 use support::{connected_fake, connected_fake_with};
 use tempfile::TempDir;
@@ -208,25 +212,31 @@ impl Pki {
         let ca_cert = ca.self_signed(&ca_key).unwrap();
         let issuer = Issuer::new(ca, ca_key);
 
-        let leaf =
-            |name: &str, usage: ExtendedKeyUsagePurpose, validity: fn(&mut CertificateParams)| {
-                let key = KeyPair::generate().unwrap();
-                let mut params = CertificateParams::new(vec![name.to_owned()]).unwrap();
-                params.distinguished_name.push(DnType::CommonName, name);
-                params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-                params.extended_key_usages = vec![usage];
-                validity(&mut params);
-                (params.signed_by(&key, &issuer).unwrap(), key)
-            };
-        let (server, server_key) =
-            leaf("127.0.0.1", ExtendedKeyUsagePurpose::ServerAuth, valid_now);
+        let leaf = |names: &[&str],
+                    usage: ExtendedKeyUsagePurpose,
+                    validity: fn(&mut CertificateParams)| {
+            let key = KeyPair::generate().unwrap();
+            let mut params =
+                CertificateParams::new(names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>())
+                    .unwrap();
+            params.distinguished_name.push(DnType::CommonName, names[0]);
+            params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+            params.extended_key_usages = vec![usage];
+            validity(&mut params);
+            (params.signed_by(&key, &issuer).unwrap(), key)
+        };
+        let (server, server_key) = leaf(
+            &["127.0.0.1", "metrics.internal"],
+            ExtendedKeyUsagePurpose::ServerAuth,
+            valid_now,
+        );
         let (client, client_key) = leaf(
-            "metrics-client",
+            &["metrics-client"],
             ExtendedKeyUsagePurpose::ClientAuth,
             valid_now,
         );
         let (old, old_key) = leaf(
-            "metrics-client",
+            &["metrics-client"],
             ExtendedKeyUsagePurpose::ClientAuth,
             expired,
         );
@@ -703,4 +713,83 @@ async fn an_expired_client_certificate_is_refused_before_any_request() {
         err.message
     );
     assert!(server.seen().is_empty());
+}
+
+/// Makes the cluster use a tunnel through an HTTP test proxy that resolves `metrics.internal`
+/// to `server`, as a DNS on the far side would.
+async fn metrics_tunnel(core: &AppCore, id: &ClusterId, server: &Server) -> TestProxy {
+    let mut hosts = HashMap::new();
+    hosts.insert(
+        "metrics.internal".to_owned(),
+        SocketAddr::from(([127, 0, 0, 1], server.port)),
+    );
+    let proxy = http_proxy(ProxyOptions {
+        hosts,
+        ..Default::default()
+    })
+    .await;
+    let tunnel = core
+        .tunnel_save(TunnelInput {
+            id: None,
+            name: "corp".into(),
+            kind: TunnelKind::Proxy {
+                url: format!("http://{}", proxy.addr),
+                username: None,
+            },
+        })
+        .unwrap();
+    let mut settings = core.cluster_settings_get(id);
+    settings.tunnel = Some(tunnel.id);
+    core.cluster_settings_set(id, settings).unwrap();
+    proxy
+}
+
+#[tokio::test]
+async fn a_remote_url_goes_through_the_cluster_tunnel() {
+    let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    let pki = Pki::new();
+    let server = Server::start(Some(pki.server_config(false)), samples).await;
+    let proxy = metrics_tunnel(&core, &id, &server).await;
+    let url = format!("https://metrics.internal:{}/prometheus", server.port);
+    save(
+        &core,
+        &id,
+        remote(&url, RemoteAuth::Anonymous, Some(pki.path("ca.pem"))),
+    )
+    .unwrap();
+
+    let result = query(&core, &id).await.unwrap();
+
+    assert!(result.series.contains_key(&MetricName::CpuUsage));
+    // One query makes several requests, each its own CONNECT.
+    let targets = proxy.seen.targets();
+    assert!(!targets.is_empty());
+    assert!(targets
+        .iter()
+        .all(|t| *t == format!("metrics.internal:{}", server.port)));
+}
+
+#[tokio::test]
+async fn through_a_tunnel_a_remote_url_needs_https_and_this_machine_skips_it() {
+    let (core, _fake, id, _root) = connected_fake(FakeKubeConfig::default()).await;
+    let server = Server::start(None, samples).await;
+    let proxy = metrics_tunnel(&core, &id, &server).await;
+    let plain = format!("http://metrics.internal:{}/prometheus", server.port);
+    save(&core, &id, remote(&plain, RemoteAuth::Anonymous, None)).unwrap();
+
+    let err = query(&core, &id).await.unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+    assert_eq!(
+        err.message,
+        "A remote metrics URL needs https:// to go through the cluster's tunnel"
+    );
+    save(
+        &core,
+        &id,
+        remote(&server.url("http"), RemoteAuth::Anonymous, None),
+    )
+    .unwrap();
+    assert!(query(&core, &id).await.is_ok());
+    assert!(proxy.seen.targets().is_empty());
 }

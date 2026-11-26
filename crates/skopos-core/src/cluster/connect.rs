@@ -25,6 +25,7 @@ use crate::error::{
 };
 use crate::kubeconfig::{extract_context, ContextEntry};
 use crate::prefs::ClusterSettings;
+use crate::tunnels::no_proxy::env_proxy;
 
 /// Spec F3 only bounds `GET /version`, but a server that stalls afterwards must
 /// not leave the cluster connecting forever. This is roomy, because discovery
@@ -383,6 +384,12 @@ async fn build_client(
         context: Some(entry.context_name.clone()),
         ..Default::default()
     };
+    let own_proxy = kubeconfig
+        .clusters
+        .first()
+        .and_then(|named| named.cluster.as_ref())
+        .and_then(|cluster| cluster.proxy_url.clone())
+        .filter(|url| !url.trim().is_empty());
     let mut config = Config::from_custom_kubeconfig(kubeconfig, &options)
         .await
         .map_err(|e| config_failure(&entry.source_path, &e))?;
@@ -402,13 +409,28 @@ async fn build_client(
             .map_err(|e| Failure::config(format!("the proxy URL setting is invalid: {e}")))?;
         config.proxy_url = Some(parsed);
     }
-    if let Some(url) = proxy {
-        // Set after `kube` read the kubeconfig: `kube` checks NO_PROXY against the proxy's own
-        // address, and NO_PROXY often holds 127.0.0.1.
-        let parsed = url
-            .parse::<http::Uri>()
-            .map_err(|_| Failure::new(FailureKind::Other, "the tunnel gateway URL is not valid"))?;
-        config.proxy_url = Some(parsed);
+    // Chosen here, after `kube` read the kubeconfig: `kube` checks NO_PROXY against the
+    // proxy's own address, which drops a gateway on 127.0.0.1 and keeps a proxy NO_PROXY
+    // exempts the server from (tunnels spec §5.7, §5.8). The legacy setting still wins.
+    let legacy = settings
+        .proxy_url
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    if proxy.is_some() || legacy.is_empty() {
+        let chosen = match proxy {
+            Some(gateway) => Some(gateway.to_owned()),
+            None => own_proxy.or_else(|| {
+                entry
+                    .server
+                    .as_deref()
+                    .and_then(|server| env_proxy(server, |name| std::env::var(name).ok()))
+            }),
+        };
+        config.proxy_url = chosen
+            .map(|url| url.parse::<http::Uri>())
+            .transpose()
+            .map_err(|_| Failure::config("the proxy URL is not valid"))?;
     }
     // A 429 is an answer to show, such as an eviction a disruption budget refuses.
     // The default retry would hold the user's action for minutes.
