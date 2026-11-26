@@ -610,7 +610,8 @@ impl AgentTerminal {
         String::from_utf8_lossy(&bytes).into_owned()
     }
 
-    #[cfg(test)]
+    /// Only the flood test reads it, and that test runs on Unix only.
+    #[cfg(all(test, unix))]
     fn scrollback_len(&self) -> usize {
         self.screen().scrollback.len()
     }
