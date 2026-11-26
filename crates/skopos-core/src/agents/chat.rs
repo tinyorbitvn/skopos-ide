@@ -163,6 +163,12 @@ impl AppCore {
         running::get(self, id)
     }
 
+    /// Native agents spec §6.2: sets the chat's model to `value_id` and saves it as the
+    /// model new chats with its agent start on. The agent's refusal is a notice in the chat.
+    pub async fn chat_set_model(&self, chat_id: &str, value_id: &str) -> CoreResult<()> {
+        running::set_model(self, chat_id, value_id).await
+    }
+
     /// The program the agent launches as its `skopos` MCP server, in place of the app's own
     /// binary. Tests pass `skopos-agent-host` (R1).
     pub fn set_agent_app_binary_for_test(&self, path: PathBuf) {
@@ -199,6 +205,7 @@ mod running {
     use crate::agents::mcp::changes::ChatGate;
     use crate::agents::mcp::trim::namespace_allowed;
     use crate::agents::mcp::{scope_names, serve_mcp, ScopeCluster, ToolContext, ToolScope};
+    use crate::agents::model::ModelChoice;
     use crate::agents::modes::AGENT_MCP;
     use crate::agents::permissions::{PermissionCard, Permissions};
     use crate::agents::prompt::{hidden_block, object_line, tab_block, PromptContext, TabView};
@@ -224,6 +231,9 @@ mod running {
     const ONE_CLUSTER: &str = "A chat on one cluster names exactly one cluster.";
     const EMPTY_MESSAGE: &str = "Write a message first.";
     const STILL_ANSWERING: &str = "The agent is still answering.";
+    const WAIT_TO_CHANGE_MODEL: &str = "Wait for the answer to change the model.";
+    const NO_MODEL_CHOICE: &str = "This agent offers no model choice.";
+    const MODEL_NOT_OFFERED: &str = "The agent does not offer that model.";
     const OTHER_CLUSTER: &str = "That object is on a cluster this chat does not reach.";
     const OTHER_TAB_CLUSTER: &str = "That tab is on a cluster this chat does not reach.";
     const TAB_TOO_LARGE: &str = "The tab's text is over 64 KiB, so it was not sent.";
@@ -410,6 +420,17 @@ mod running {
         set_probe_state(core, &agent.id, AgentState::Ready);
         let can_load = session.can_load();
         let continued = stored.is_some();
+        // Native agents spec §6.2: a new chat starts on the agent's saved model, a continued
+        // one on its own last model.
+        let wanted = match &stored {
+            Some(stored) => stored.model.clone(),
+            None => core
+                .agent_prefs()
+                .agents
+                .get(&agent.id)
+                .and_then(|choices| choices.model.clone()),
+        };
+        let started_on = session.model().cloned();
         let record = match stored {
             Some(mut stored) => {
                 stored.session_id = Some(session.session_id().to_owned());
@@ -425,6 +446,7 @@ mod running {
                     agent_name: agent.name.clone(),
                     session_id: Some(session.session_id().to_owned()),
                     can_load,
+                    model: None,
                     title: String::new(),
                     created: now.clone(),
                     updated: now,
@@ -451,6 +473,7 @@ mod running {
             id: id.clone(),
             owner: owner.to_owned(),
             agent_name: agent.name.clone(),
+            agent_id: agent.id.clone(),
             sign_in_hint: sign_in_hint(&agent),
             clusters,
             kubeconfig,
@@ -489,6 +512,10 @@ mod running {
             feed: feed_receiver,
         };
         *lock(&chat.pump) = Some(tokio::spawn(pump(chat.clone(), inputs)));
+        let session = lock(&chat.session).clone();
+        if let (Some(session), Some(model), Some(wanted)) = (session, started_on, wanted) {
+            start_on(&chat, &session, &model, &wanted).await;
+        }
         chats.running.insert(id.clone(), chat.clone());
         tokio::spawn(supervise(core.clone(), chat));
         let _ = services_guard.disarm();
@@ -726,6 +753,8 @@ mod running {
         /// The window that started it.
         owner: String,
         agent_name: String,
+        /// The agent's id, for the model saved per agent.
+        agent_id: String,
         /// How to sign in to the agent, for a notice when a turn needs it.
         sign_in_hint: Option<&'static str>,
         clusters: Vec<ScopeCluster>,
@@ -786,6 +815,8 @@ mod running {
             notice: Option<ChatNotice>,
             ack: oneshot::Sender<()>,
         },
+        /// A notice from outside a turn, such as a refused model pick.
+        Notice(ChatNotice),
         Shutdown,
     }
 
@@ -845,6 +876,11 @@ mod running {
                     self.deliver(ChatEvent::Working { working: false }).await;
                     self.working.store(false, Ordering::SeqCst);
                     let _ = ack.send(());
+                    true
+                }
+                Feed::Notice(notice) => {
+                    let item = self.apply(|transcript| transcript.notice(notice));
+                    self.deliver(ChatEvent::Item { item }).await;
                     true
                 }
                 Feed::Shutdown => false,
@@ -1097,7 +1133,11 @@ mod running {
             tokio::select! {
                 biased;
                 Some(update) = inputs.updates.recv() => {
-                    if let Some(item) = chat.apply(|transcript| transcript.update(update)) {
+                    if let AcpUpdate::Model(model) = update {
+                        if chat.apply(|transcript| transcript.set_model(model.clone())) {
+                            chat.deliver(ChatEvent::Model { model }).await;
+                        }
+                    } else if let Some(item) = chat.apply(|transcript| transcript.update(update)) {
                         chat.deliver(ChatEvent::Item { item }).await;
                     }
                 }
@@ -1153,6 +1193,50 @@ mod running {
 
     fn find(chats: &Chats, id: &str) -> Option<Arc<Chat>> {
         chats.running.get(id).map(|entry| entry.value().clone())
+    }
+
+    /// Sets `wanted` when the agent offers it and runs another model. A failure keeps the
+    /// agent's model, which the picker shows; it is logged, not drawn, since a new chat has
+    /// no message yet.
+    async fn start_on(chat: &Chat, session: &AcpSession, model: &ModelChoice, wanted: &str) {
+        if model.current == wanted || !model.offers(wanted) {
+            return;
+        }
+        if let Err(message) = session.set_model(&model.option_id, wanted).await {
+            tracing::warn!(
+                "chat {}: {} kept its model: {message}",
+                chat.id,
+                chat.agent_name
+            );
+        }
+    }
+
+    pub(super) async fn set_model(core: &AppCore, chat_id: &str, value: &str) -> CoreResult<()> {
+        let chat = running_chat(core.chats(), chat_id)?;
+        if chat.working.load(Ordering::SeqCst) {
+            return Err(IpcError::new(ErrorCode::Conflict, WAIT_TO_CHANGE_MODEL));
+        }
+        let Some(model) = chat.apply(|transcript| transcript.model()) else {
+            return Err(invalid(NO_MODEL_CHOICE));
+        };
+        if !model.offers(value) {
+            return Err(invalid(MODEL_NOT_OFFERED));
+        }
+        let session = lock(&chat.session).clone();
+        let Some(session) = session else {
+            return Err(IpcError::new(
+                ErrorCode::NotFound,
+                format!("Chat {chat_id} has ended."),
+            ));
+        };
+        if model.current != value {
+            if let Err(message) = session.set_model(&model.option_id, value).await {
+                let notice = ChatNotice::ModelNotChanged { message };
+                let _ = chat.feed.send(Feed::Notice(notice)).await;
+                return Ok(());
+            }
+        }
+        core.agent_model_save(&chat.agent_id, value)
     }
 
     fn running_chat(chats: &Chats, id: &str) -> CoreResult<Arc<Chat>> {
@@ -1444,6 +1528,8 @@ mod running {
         message: Option<String>,
         /// This turn's plan.
         plan: Option<String>,
+        /// The agent's model choice, as the pump last heard it.
+        model: Option<ModelChoice>,
         changed: bool,
     }
 
@@ -1468,6 +1554,7 @@ mod running {
                 keyed: HashMap::new(),
                 message: None,
                 plan: None,
+                model: None,
                 changed: false,
             }
         }
@@ -1544,6 +1631,8 @@ mod running {
                     self.message = None;
                     None
                 }
+                // The pump handles it before it gets here.
+                AcpUpdate::Model(_) => None,
             }
         }
 
@@ -1563,6 +1652,26 @@ mod running {
             let item = self.push(ChatItemBody::Agent { text: chunk });
             self.message = Some(item.id.clone());
             item
+        }
+
+        /// Sets the model choice; `true` when it differs from the one before. The stored
+        /// chat keeps the last model in use, which a continued chat sets again.
+        fn set_model(&mut self, model: Option<ModelChoice>) -> bool {
+            if self.model == model {
+                return false;
+            }
+            if let Some(model) = &model {
+                if self.chat.model.as_deref() != Some(model.current.as_str()) {
+                    self.chat.model = Some(model.current.clone());
+                    self.changed = true;
+                }
+            }
+            self.model = model;
+            true
+        }
+
+        fn model(&self) -> Option<ModelChoice> {
+            self.model.clone()
         }
 
         /// Spec §4.3: a plan replaces the turn's Plan card.
@@ -1617,9 +1726,9 @@ mod running {
         }
 
         /// The chat to save, when something changed since the last save. A chat with no
-        /// items is never saved.
+        /// items or no title (nothing but a notice so far) is never saved.
         fn take_save(&mut self) -> Option<StoredChat> {
-            if !self.changed || self.chat.items.is_empty() {
+            if !self.changed || self.chat.items.is_empty() || self.chat.title.is_empty() {
                 return None;
             }
             self.changed = false;
@@ -1647,6 +1756,7 @@ mod running {
         use super::*;
         use crate::agents::acp::{PlanStatus, ToolStatus};
         use crate::agents::mcp::cards::{CardDetails, CardTone};
+        use crate::agents::model::ModelValue;
 
         fn empty_chat() -> StoredChat {
             StoredChat {
@@ -1659,11 +1769,42 @@ mod running {
                 agent_name: "Fake".to_owned(),
                 session_id: Some("session-1".to_owned()),
                 can_load: true,
+                model: None,
                 title: String::new(),
                 created: "2026-11-22T10:00:00Z".to_owned(),
                 updated: "2026-11-22T10:00:00Z".to_owned(),
                 items: Vec::new(),
             }
+        }
+
+        fn choice(current: &str) -> ModelChoice {
+            let value = |id: &str| ModelValue {
+                id: id.to_owned(),
+                name: id.to_owned(),
+                description: None,
+                group: None,
+            };
+            ModelChoice {
+                option_id: "model".to_owned(),
+                current: current.to_owned(),
+                choices: vec![value("fast"), value("deep")],
+            }
+        }
+
+        #[test]
+        fn a_model_change_counts_only_when_it_differs_and_the_stored_model_follows() {
+            let mut transcript = Transcript::new(empty_chat());
+            assert!(!transcript.set_model(None));
+            assert!(transcript.set_model(Some(choice("fast"))));
+            assert!(!transcript.set_model(Some(choice("fast"))));
+            assert_eq!(transcript.model(), Some(choice("fast")));
+            assert_eq!(transcript.chat.model.as_deref(), Some("fast"));
+            assert!(transcript.set_model(Some(choice("deep"))));
+            assert_eq!(transcript.chat.model.as_deref(), Some("deep"));
+            assert!(transcript.set_model(None));
+            assert_eq!(transcript.model(), None);
+            // The stored model stays the last one the chat ran on.
+            assert_eq!(transcript.chat.model.as_deref(), Some("deep"));
         }
 
         fn tool_card(id: &str, running: bool) -> ToolCard {
@@ -1824,6 +1965,19 @@ mod running {
             assert_eq!(saved.items.len(), 1);
             assert_ne!(saved.updated, "2026-11-22T10:00:00Z");
             assert!(transcript.take_save().is_none());
+        }
+
+        #[test]
+        fn a_notice_before_the_first_message_is_not_saved() {
+            let mut transcript = Transcript::new(empty_chat());
+            transcript.notice(ChatNotice::ModelNotChanged {
+                message: "refused".to_owned(),
+            });
+            assert!(transcript.take_save().is_none());
+            transcript.user("Hi".to_owned(), None, None);
+            let saved = transcript.take_save().unwrap();
+            assert_eq!(saved.title, "Hi");
+            assert_eq!(saved.items.len(), 2);
         }
 
         #[test]

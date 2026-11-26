@@ -38,6 +38,10 @@ pub struct StoredChat {
     pub session_id: Option<String>,
     /// Whether the agent can load the session again.
     pub can_load: bool,
+    /// The model the chat ran on last, set again when it continues (native agents spec
+    /// §6.2). Chats saved before models have none.
+    #[serde(default)]
+    pub model: Option<String>,
     /// The person's first message, one line.
     pub title: String,
     /// RFC 3339.
@@ -349,6 +353,7 @@ mod tests {
             agent_name: "Fake".to_owned(),
             session_id: Some(format!("session-{n}")),
             can_load: true,
+            model: None,
             title: format!("Chat {n}"),
             created: at(n),
             updated: at(n),

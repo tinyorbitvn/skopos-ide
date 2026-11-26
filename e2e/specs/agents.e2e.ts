@@ -64,6 +64,20 @@ const PATCH = {
   summary: "Set MODE=fast on main",
 };
 
+const MODELS = [
+  {
+    id: "model",
+    name: "Model",
+    category: "model",
+    type: "select",
+    currentValue: "fast",
+    options: [
+      { value: "fast", name: "Fast", description: "Quick answers" },
+      { value: "deep", name: "Deep", description: "Careful answers" },
+    ],
+  },
+];
+
 const until = (
   check: () => Promise<boolean>,
   timeoutMsg: string,
@@ -427,5 +441,27 @@ describe("agents", () => {
     );
     await expectTerminalLine("$ kubectl get namespaces");
     await expectTerminalLine("exit 0");
+  });
+
+  it("picks the agent's model in the chat header and starts the next chat on it", async () => {
+    writeFakeAgentScript([[say("On it.")]], { configOptions: MODELS });
+    await openCluster(KIND);
+    await shown("agent-panel");
+    await newChat();
+    await until(
+      async () => (await text("agent-model")).includes("Fast"),
+      "the header never showed the agent's model",
+    );
+    await clickWhenShown("agent-model");
+    await clickWhenShown("agent-model-deep");
+    await until(
+      async () => (await text("agent-model")).includes("Deep"),
+      "the header never showed the picked model",
+    );
+    await newChat();
+    await until(
+      async () => (await text("agent-model")).includes("Deep"),
+      "the next chat did not start on the picked model",
+    );
   });
 });

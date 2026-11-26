@@ -1,5 +1,6 @@
 //! The fake agent's ACP side. It answers `initialize`, `session/new`, `session/load`,
-//! `session/prompt` and `session/cancel` as the script says, and logs every request it gets.
+//! `session/prompt`, `session/cancel` and `session/set_config_option` as the script says, and logs every
+//! request it gets.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -10,12 +11,15 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, CancelNotification, ContentBlock, ContentChunk,
-    InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse, McpServer,
-    NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind, Plan, PlanEntry,
-    PlanEntryPriority, PlanEntryStatus, PromptRequest, PromptResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, SessionId, SessionNotification, SessionUpdate, StopReason, ToolCall,
-    ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    AgentCapabilities, AuthMethod, AuthMethodAgent, CancelNotification, ConfigOptionUpdate,
+    ContentBlock, ContentChunk, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse, PermissionOption,
+    PermissionOptionKind, Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptRequest,
+    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, SessionConfigId,
+    SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions, SessionConfigValueId,
+    SessionId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, StopReason, ToolCall, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{Agent, Client, Error, Stdio};
@@ -64,6 +68,8 @@ pub struct Fake {
     mcp: Mutex<Option<Arc<McpClient>>>,
     /// Set by `session/cancel`, cleared by each `session/prompt`.
     cancelled: watch::Sender<bool>,
+    /// The session config options, as the script gave them and the client set them.
+    options: Mutex<Vec<SessionConfigOption>>,
 }
 
 impl Fake {
@@ -81,6 +87,7 @@ impl Fake {
             None => None,
         };
         let (cancelled, _) = watch::channel(false);
+        let options = Mutex::new(script.config_options.clone());
         Ok(Fake {
             script,
             log,
@@ -89,6 +96,7 @@ impl Fake {
             tool_calls: AtomicUsize::new(0),
             mcp: Mutex::new(None),
             cancelled,
+            options,
         })
     }
 
@@ -139,6 +147,45 @@ impl Fake {
         cx.send_notification(SessionNotification::new(session.clone(), update))
     }
 
+    /// The config options to answer with; none while the agent has none, as agents without
+    /// options answer.
+    fn config_options(&self) -> Option<Vec<SessionConfigOption>> {
+        let options = lock(&self.options).clone();
+        (!options.is_empty()).then_some(options)
+    }
+
+    /// Sets the select option `config_id` to `value` when it offers that value: all the
+    /// options after the change.
+    fn choose(
+        &self,
+        config_id: &SessionConfigId,
+        value: &SessionConfigValueId,
+    ) -> Result<Vec<SessionConfigOption>, Error> {
+        let mut options = lock(&self.options);
+        let option = options
+            .iter_mut()
+            .find(|option| option.id == *config_id)
+            .ok_or_else(Error::invalid_params)?;
+        let SessionConfigKind::Select(select) = &mut option.kind else {
+            return Err(Error::invalid_params());
+        };
+        let offered = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(values) => {
+                values.iter().any(|offered| offered.value == *value)
+            }
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .flat_map(|group| &group.options)
+                .any(|offered| offered.value == *value),
+            _ => false,
+        };
+        if !offered {
+            return Err(Error::invalid_params());
+        }
+        select.current_value = value.clone();
+        Ok(options.clone())
+    }
+
     fn say(&self, cx: &ConnectionTo<Client>, session: &SessionId, text: &str) -> Result<(), Error> {
         let chunk = ContentChunk::new(ContentBlock::from(text));
         self.send(cx, session, SessionUpdate::AgentMessageChunk(chunk))
@@ -183,6 +230,11 @@ impl Fake {
                 Step::Sleep(millis) => self.sleep(Duration::from_millis(millis)).await,
                 Step::Stop(kind) => return Ok(Played::Stop(stop_reason(kind))),
                 Step::SignIn => return Ok(Played::SignIn),
+                Step::ConfigOptions(options) => {
+                    *lock(&self.options) = options.clone();
+                    let update = ConfigOptionUpdate::new(options.clone());
+                    self.send(cx, session, SessionUpdate::ConfigOptionUpdate(update))?;
+                }
             }
         }
         Ok(Played::Stop(if self.is_cancelled() {
@@ -350,6 +402,7 @@ pub async fn run(fake: Arc<Fake>) -> Result<(), Error> {
     let on_new = Arc::clone(&fake);
     let on_load = Arc::clone(&fake);
     let on_prompt = Arc::clone(&fake);
+    let on_config = Arc::clone(&fake);
     let on_cancel = fake;
     Agent
         .v1()
@@ -376,7 +429,9 @@ pub async fn run(fake: Arc<Fake>) -> Result<(), Error> {
                 }
                 on_new.connect_mcp(&request.mcp_servers).await;
                 let number = on_new.sessions.fetch_add(1, Ordering::SeqCst) + 1;
-                responder.respond(NewSessionResponse::new(format!("fake-session-{number}")))
+                let answer = NewSessionResponse::new(format!("fake-session-{number}"))
+                    .config_options(on_new.config_options());
+                responder.respond(answer)
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -389,7 +444,8 @@ pub async fn run(fake: Arc<Fake>) -> Result<(), Error> {
                 on_load.connect_mcp(&request.mcp_servers).await;
                 // A real agent replays the chat here; the client ignores it (spec §4.3).
                 on_load.say(&cx, &request.session_id, "replayed")?;
-                responder.respond(LoadSessionResponse::new())
+                responder
+                    .respond(LoadSessionResponse::new().config_options(on_load.config_options()))
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -409,6 +465,32 @@ pub async fn run(fake: Arc<Fake>) -> Result<(), Error> {
                         Played::SignIn => responder.respond_with_error(Error::auth_required()),
                     }
                 })
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: SetSessionConfigOptionRequest,
+                        responder,
+                        cx: ConnectionTo<Client>| {
+                on_config.record_request("session/set_config_option", &request);
+                if let Some(message) = &on_config.script.refuse_config_option {
+                    return responder.respond_with_error(Error::new(-32603, message.clone()));
+                }
+                let Some(value) = request.value.as_value_id() else {
+                    return responder.respond_with_error(Error::invalid_params());
+                };
+                let options = match on_config.choose(&request.config_id, value) {
+                    Ok(options) => options,
+                    Err(error) => return responder.respond_with_error(error),
+                };
+                // As agents do: the update first, then the answer with the same options.
+                let update = ConfigOptionUpdate::new(options.clone());
+                on_config.send(
+                    &cx,
+                    &request.session_id,
+                    SessionUpdate::ConfigOptionUpdate(update),
+                )?;
+                responder.respond(SetSessionConfigOptionResponse::new(options))
             },
             agent_client_protocol::on_receive_request!(),
         )

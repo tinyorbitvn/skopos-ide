@@ -25,7 +25,7 @@ const saved: Prefs = {
     { kind: "file", path: "/etc/k/one.yaml" },
   ],
   updateCheck: true,
-  agents: { defaultAgent: null, custom: [] },
+  agents: { defaultAgent: null, custom: [], agents: {} },
 };
 
 function show(

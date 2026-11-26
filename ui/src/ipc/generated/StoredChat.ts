@@ -27,6 +27,11 @@ sessionId: string | null,
  */
 canLoad: boolean, 
 /**
+ * The model the chat ran on last, set again when it continues (native agents spec
+ * §6.2). Chats saved before models have none.
+ */
+model: string | null, 
+/**
  * The person's first message, one line.
  */
 title: string, 

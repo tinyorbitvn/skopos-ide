@@ -19,8 +19,9 @@ use agent_client_protocol::v1::schema::{
     self as wire, CancelNotification, ClientCapabilities, ContentBlock, EnvVariable,
     FileSystemCapabilities, Implementation, InitializeRequest, LoadSessionRequest, McpServer,
     McpServerStdio, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
-    SessionNotification, SessionUpdate, StopReason, ToolCallContent, ToolCallStatus,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionConfigOptionValue, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, StopReason, ToolCallContent, ToolCallStatus,
 };
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{Agent, ByteStreams, Client, Error as AcpError};
@@ -33,6 +34,7 @@ use tokio::task::JoinHandle;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use ts_rs::TS;
 
+use crate::agents::model::{model_choice, ModelChoice};
 use crate::agents::permissions::{permission_card, Permissions};
 use crate::error::sanitize_text;
 use crate::process::configure_agent;
@@ -120,6 +122,10 @@ pub enum AcpUpdate {
     },
     /// A call to the `skopos` server began; its card comes from the MCP server (spec §4.4).
     HiddenTool,
+    /// The agent's model choice: first when the session starts with one, on each
+    /// `config_option_update` (`None` when it lists no model option), and after each
+    /// `set_model` answer (native agents spec §6.2).
+    Model(Option<ModelChoice>),
 }
 
 /// How a turn ended.
@@ -174,6 +180,10 @@ pub struct AcpSession {
     running: Running,
     session_id: SessionId,
     can_load: bool,
+    /// The model choice of the `session/new` or `session/load` answer.
+    model: Option<ModelChoice>,
+    /// The session's update channel, for `set_model`'s answers.
+    updates: mpsc::Sender<AcpUpdate>,
 }
 
 impl AcpSession {
@@ -227,15 +237,22 @@ impl AcpSession {
         permissions: Option<Arc<Permissions>>,
     ) -> Result<AcpSession, StartError> {
         let live = Arc::new(AtomicBool::new(false));
+        let answers = updates.clone();
         let running =
             Running::spawn(command, name, updates, permissions, Arc::clone(&live)).await?;
         match handshake(&running, cwd, mcp, load).await {
-            Ok((session_id, can_load)) => {
+            Ok((session_id, can_load, model)) => {
+                // First on the channel: the agent's own updates are forwarded from here on.
+                if let Some(model) = &model {
+                    let _ = answers.try_send(AcpUpdate::Model(Some(model.clone())));
+                }
                 live.store(true, Ordering::SeqCst);
                 Ok(AcpSession {
                     running,
                     session_id,
                     can_load,
+                    model,
+                    updates: answers,
                 })
             }
             Err(error) => {
@@ -252,6 +269,35 @@ impl AcpSession {
     /// The agent's `loadSession` capability.
     pub fn can_load(&self) -> bool {
         self.can_load
+    }
+
+    /// The model choice the session started with (native agents spec §6.2).
+    pub fn model(&self) -> Option<&ModelChoice> {
+        self.model.as_ref()
+    }
+
+    /// Sends `session/set_config_option`, setting the select option `option_id` to `value`.
+    /// The answer's model choice goes to `updates` as `AcpUpdate::Model`, after the updates
+    /// the agent sent before it; an answer that lists no options changes nothing. The error
+    /// is the agent's message, or why it exited.
+    pub async fn set_model(&self, option_id: &str, value: &str) -> Result<(), String> {
+        let request = SetSessionConfigOptionRequest::new(
+            self.session_id.clone(),
+            option_id.to_owned(),
+            SessionConfigOptionValue::value_id(value.to_owned()),
+        );
+        let reply = self.running.connection.send_request(request).block_task();
+        match self.running.answer(reply).await {
+            Ok(answer) => {
+                if !answer.config_options.is_empty() {
+                    let model = model_choice(&answer.config_options);
+                    let _ = self.updates.send(AcpUpdate::Model(model)).await;
+                }
+                Ok(())
+            }
+            Err(Failure::Exited(reason)) => Err(reason),
+            Err(Failure::Error(error)) => Err(error_text(&error)),
+        }
     }
 
     /// Sends one `session/prompt` with `blocks` as text blocks, in order, and waits for the
@@ -398,13 +444,14 @@ impl Running {
     }
 }
 
-/// `initialize`, then `session/new` or `session/load`: the session's id and `loadSession`.
+/// `initialize`, then `session/new` or `session/load`: the session's id, `loadSession` and the
+/// answer's model choice.
 async fn handshake(
     running: &Running,
     cwd: &Path,
     mcp: Option<McpEntry>,
     load: Option<&str>,
-) -> Result<(SessionId, bool), StartError> {
+) -> Result<(SessionId, bool, Option<ModelChoice>), StartError> {
     let capabilities = ClientCapabilities::new()
         .fs(FileSystemCapabilities::new()
             .read_text_file(false)
@@ -422,7 +469,8 @@ async fn handshake(
             let request = NewSessionRequest::new(cwd).mcp_servers(servers);
             let reply = running.connection.send_request(request).block_task();
             let answer = running.answer(reply).await.map_err(start_error)?;
-            Ok((answer.session_id, can_load))
+            let model = answer.config_options.as_deref().and_then(model_choice);
+            Ok((answer.session_id, can_load, model))
         }
         Some(session_id) => {
             if !can_load {
@@ -431,8 +479,9 @@ async fn handshake(
             let session_id = SessionId::from(session_id.to_owned());
             let request = LoadSessionRequest::new(session_id.clone(), cwd).mcp_servers(servers);
             let reply = running.connection.send_request(request).block_task();
-            running.answer(reply).await.map_err(start_error)?;
-            Ok((session_id, can_load))
+            let answer = running.answer(reply).await.map_err(start_error)?;
+            let model = answer.config_options.as_deref().and_then(model_choice);
+            Ok((session_id, can_load, model))
         }
     }
 }
@@ -766,6 +815,9 @@ impl Tracker {
                     tool.details = raw_text(fields.raw_input.as_ref());
                 }
                 Some(self.show(id, tool))
+            }
+            SessionUpdate::ConfigOptionUpdate(update) => {
+                Some(AcpUpdate::Model(model_choice(&update.config_options)))
             }
             _ => None,
         }

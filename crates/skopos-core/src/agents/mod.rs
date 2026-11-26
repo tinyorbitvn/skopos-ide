@@ -14,6 +14,7 @@ pub mod events;
 pub mod known_folders;
 pub(crate) mod kubeconfig;
 pub mod mcp;
+pub mod model;
 pub mod modes;
 pub mod permissions;
 pub mod probe;
@@ -143,6 +144,7 @@ impl AppCore {
             if agents.default_agent.as_deref() == Some(id) {
                 agents.default_agent = None;
             }
+            agents.agents.remove(id);
             Ok(())
         })?;
         self.agent_probes().clear(id);
@@ -156,6 +158,18 @@ impl AppCore {
                 return Err(unknown_agent());
             }
             prefs.agents.default_agent = Some(id.to_owned());
+            Ok(())
+        })
+    }
+
+    /// Saves `model` as the model new chats with the agent `id` start on (native agents spec
+    /// §6.2). An agent that is no longer listed keeps nothing.
+    pub fn agent_model_save(&self, id: &str, model: &str) -> CoreResult<()> {
+        self.prefs_try_update(|prefs| {
+            if listed(&prefs.agents).iter().any(|agent| agent.id() == id) {
+                prefs.agents.agents.entry(id.to_owned()).or_default().model =
+                    Some(model.to_owned());
+            }
             Ok(())
         })
     }

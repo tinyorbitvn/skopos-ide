@@ -3,4 +3,4 @@
 /**
  * The app's lines in the stream (spec §3.3).
  */
-export type ChatNotice = { "kind": "stopped" } | { "kind": "exited", agent: string, reason: string, } | { "kind": "agentError", agent: string, message: string, } | { "kind": "signInNeeded", agent: string, hint: string | null, } | { "kind": "lengthLimit", agent: string, } | { "kind": "tooManySteps", agent: string, } | { "kind": "declined", agent: string, } | { "kind": "unknown" };
+export type ChatNotice = { "kind": "stopped" } | { "kind": "exited", agent: string, reason: string, } | { "kind": "agentError", agent: string, message: string, } | { "kind": "signInNeeded", agent: string, hint: string | null, } | { "kind": "lengthLimit", agent: string, } | { "kind": "tooManySteps", agent: string, } | { "kind": "declined", agent: string, } | { "kind": "modelNotChanged", message: string, } | { "kind": "unknown" };

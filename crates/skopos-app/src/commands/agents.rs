@@ -127,6 +127,16 @@ pub async fn chat_stop(state: State<'_, AppState>, chat_id: String) -> Result<()
     Ok(())
 }
 
+/// Changes the chat's model (native agents spec §6.2).
+#[tauri::command]
+pub async fn chat_set_model(
+    state: State<'_, AppState>,
+    chat_id: String,
+    value_id: String,
+) -> Result<(), IpcError> {
+    state.core.chat_set_model(&chat_id, &value_id).await
+}
+
 #[tauri::command]
 pub async fn chat_close(state: State<'_, AppState>, chat_id: String) -> Result<(), IpcError> {
     state.core.chat_close(&chat_id).await;

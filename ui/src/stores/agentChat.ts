@@ -19,6 +19,7 @@ import type { ChatScope } from "../ipc/generated/ChatScope";
 import type { ChatSummary } from "../ipc/generated/ChatSummary";
 import type { ClusterAgentSettings } from "../ipc/generated/ClusterAgentSettings";
 import type { EditorTab } from "../ipc/generated/EditorTab";
+import type { ModelChoice } from "../ipc/generated/ModelChoice";
 import type { ObjectRef } from "../ipc/generated/ObjectRef";
 import type { TabChip } from "../ipc/generated/TabChip";
 import { useAgents } from "./agents";
@@ -67,6 +68,10 @@ export interface AgentChatState {
   drawerObject: ObjectRef | null;
   /** The YAML tab this chat holds; its messages carry it (YAML authoring spec A6). */
   tab: TabChip | null;
+  /** The agent's models, when it offers a choice (native agents spec §6.1). */
+  model: ModelChoice | null;
+  /** While a pick waits for the agent. */
+  modelChanging: boolean;
   toggle(page: string | null): void;
   openPanel(page: string | null): void;
   closePanel(): void;
@@ -78,6 +83,7 @@ export interface AgentChatState {
   retry(): Promise<void>;
   send(text?: string): Promise<void>;
   stop(): Promise<void>;
+  setModel(valueId: string): Promise<void>;
   answer(cardId: string, answer: ChangeAnswer): Promise<void>;
   choose(cardId: string, optionId: string): Promise<void>;
   undo(card: ChangeCard): Promise<void>;
@@ -112,6 +118,8 @@ const INITIAL = {
   clusterSettings: null,
   drawerObject: null,
   tab: null,
+  model: null,
+  modelChanging: false,
 };
 
 /** Bumped by every start; work of an older start sees a newer number and stops (P7). */
@@ -169,8 +177,16 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
       case "working":
         set({ busy: event.working });
         break;
+      case "model":
+        set({ model: event.model });
+        break;
       case "closed":
-        set({ start: { phase: "ended" }, busy: false });
+        set({
+          start: { phase: "ended" },
+          busy: false,
+          model: null,
+          modelChanging: false,
+        });
         break;
     }
   }
@@ -224,6 +240,8 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
       cannotReopen: null,
       undone: [],
       tab: null,
+      model: null,
+      modelChanging: false,
       object: options.object ?? null,
       clusterSettings: null,
       agentId: null,
@@ -425,6 +443,20 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
         await api.chatStop(chatId);
       } catch (error) {
         toast.error("Could not stop the agent", failureMessage(error));
+      }
+    },
+
+    async setModel(valueId) {
+      const chatId = runningChatId(get());
+      const { model, busy, modelChanging } = get();
+      if (chatId === null || model === null || busy || modelChanging) return;
+      set({ modelChanging: true });
+      try {
+        await api.chatSetModel(chatId, valueId);
+      } catch (error) {
+        toast.error("Could not change the model", failureMessage(error));
+      } finally {
+        if (runningChatId(get()) === chatId) set({ modelChanging: false });
       }
     },
 

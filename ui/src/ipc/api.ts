@@ -873,6 +873,9 @@ export const api = {
   ) => call<void>("chat_prompt", { chatId, text, object, tab }),
   /** Cancels the turn and answers waiting changes as stopped. */
   chatStop: (chatId: string) => call<void>("chat_stop", { chatId }),
+  /** Changes the chat's model; the agent's refusal comes as a notice in the chat. */
+  chatSetModel: (chatId: string, valueId: string) =>
+    call<void>("chat_set_model", { chatId, valueId }),
   /** Stops the chat, ends its agent and saves the chat. */
   chatClose: (chatId: string) => call<void>("chat_close", { chatId }),
   /** NotFound when no change card waits under `cardId`. */

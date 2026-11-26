@@ -51,11 +51,15 @@ function NoticeLine(props: {
 }) {
   const { kind } = props.notice;
   const danger =
-    kind === "exited" || kind === "agentError" || kind === "signInNeeded";
+    kind === "exited" ||
+    kind === "agentError" ||
+    kind === "signInNeeded" ||
+    kind === "modelNotChanged";
   return (
     <p
       className={danger ? styles.noticeDanger : styles.notice}
       data-testid="agent-notice"
+      data-tone={danger ? "danger" : "info"}
     >
       <span>{props.text}</span>
       {kind === "exited" ? (

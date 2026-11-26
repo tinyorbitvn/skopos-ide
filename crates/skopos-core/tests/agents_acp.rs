@@ -743,3 +743,120 @@ async fn probing_an_unknown_agent_is_not_found() {
         Err(error) => assert_eq!(error.code, ErrorCode::NotFound),
     }
 }
+
+/// A mode option and a model option with `fast` and `deep`, `current` in use.
+fn model_options(current: &str) -> Value {
+    json!([
+        { "id": "mode", "name": "Mode", "category": "mode", "type": "select",
+          "currentValue": "ask", "options": [{ "value": "ask", "name": "Ask" }] },
+        { "id": "model", "name": "Model", "category": "model", "type": "select",
+          "currentValue": current,
+          "options": [
+              { "value": "fast", "name": "Fast", "description": "Quick answers" },
+              { "value": "deep", "name": "Deep" }
+          ] }
+    ])
+}
+
+/// The `current` of each `Model` update, `None` for an update without a model choice.
+fn models_of(updates: Vec<AcpUpdate>) -> Vec<Option<String>> {
+    updates
+        .into_iter()
+        .filter_map(|update| match update {
+            AcpUpdate::Model(model) => Some(model.map(|model| model.current)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_session_gives_the_agent_s_model_choice_and_changes_it() {
+    let fake = Fake::new(json!({ "configOptions": model_options("fast") }));
+    let (session, mut updates) = start(&fake).await;
+    let model = session.model().cloned().expect("a model choice");
+    assert_eq!(model.option_id, "model");
+    assert_eq!(model.current, "fast");
+    let ids: Vec<&str> = model
+        .choices
+        .iter()
+        .map(|value| value.id.as_str())
+        .collect();
+    assert_eq!(ids, ["fast", "deep"]);
+    assert_eq!(
+        model.choices[0].description.as_deref(),
+        Some("Quick answers")
+    );
+    // The choice the session started with comes first on the channel.
+    assert_eq!(drain(&mut updates), vec![AcpUpdate::Model(Some(model))]);
+
+    within(session.set_model("model", "deep")).await.unwrap();
+
+    let sets = fake.requests("session/set_config_option");
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0]["sessionId"], "fake-session-1");
+    assert_eq!(sets[0]["configId"], "model");
+    assert_eq!(sets[0]["value"], "deep");
+    // The agent's own update, then the answer's options, in that order.
+    let deep = Some("deep".to_owned());
+    assert_eq!(models_of(drain(&mut updates)), [deep.clone(), deep]);
+    session.close().await;
+}
+
+#[tokio::test]
+async fn a_refused_model_change_gives_the_agent_s_message() {
+    let fake = Fake::new(json!({
+        "configOptions": model_options("fast"),
+        "refuseConfigOption": "Deep is not on your plan."
+    }));
+    let (session, mut updates) = start(&fake).await;
+    drain(&mut updates);
+    let error = within(session.set_model("model", "deep"))
+        .await
+        .unwrap_err();
+    assert_eq!(error, "Deep is not on your plan");
+    assert!(models_of(drain(&mut updates)).is_empty());
+    // A value the agent does not offer is the agent's error too.
+    let fake = Fake::new(json!({ "configOptions": model_options("fast") }));
+    let (session_two, _updates) = start(&fake).await;
+    assert!(within(session_two.set_model("model", "huge"))
+        .await
+        .is_err());
+    session.close().await;
+    session_two.close().await;
+}
+
+#[tokio::test]
+async fn an_agent_without_config_options_offers_no_model() {
+    let fake = Fake::new(json!({ "turns": [{ "steps": [{ "say": "hi" }] }] }));
+    let (session, mut updates) = start(&fake).await;
+    assert_eq!(session.model(), None);
+    assert_eq!(
+        within(session.prompt(vec!["go".to_owned()])).await,
+        TurnEnd::EndTurn
+    );
+    assert!(models_of(drain(&mut updates)).is_empty());
+    session.close().await;
+}
+
+#[tokio::test]
+async fn the_agent_s_config_update_is_a_model_update() {
+    let fake = Fake::new(json!({
+        "configOptions": model_options("fast"),
+        "turns": [{ "steps": [
+            { "configOptions": model_options("deep") },
+            { "configOptions": [] },
+            { "say": "done" }
+        ] }]
+    }));
+    let (session, mut updates) = start(&fake).await;
+    drain(&mut updates);
+    assert_eq!(
+        within(session.prompt(vec!["go".to_owned()])).await,
+        TurnEnd::EndTurn
+    );
+    assert_eq!(
+        models_of(drain(&mut updates)),
+        [Some("deep".to_owned()), None]
+    );
+    session.close().await;
+}

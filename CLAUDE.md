@@ -23,7 +23,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   not list are hidden), and ServiceAccount kubeconfigs.
 - **Tools and updates:** managed `helm` and `kubectl` downloads; signed in-app updates.
 - **AI agents:** chats with the agent CLIs the person installed (Claude Code, Codex, OpenCode,
-  Gemini CLI, custom) over ACP, natively as the person, with a per-chat kubeconfig.
+  Gemini CLI, custom) over ACP, natively as the person, with a per-chat kubeconfig and the agent's model picked in the chat.
   The panel beside the page, Preferences and each cluster's Agent card drive it.
 
 ## Binding rules
@@ -79,7 +79,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   kubeconfig, store or Secret values; destructive actions confirm and name the target.
 - Agents (`skopos-core/src/agents/`): an ACP client over the agent's stdio and a per-chat MCP
   server (rmcp) with the cluster tools. The change gate (`Ask every time` by default,
-  `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call. `run_in_terminal` runs one shell command per PTY with the cluster's kubeconfig (`agents/terminal/`), one at a time per chat and cluster, shown in an `Agent · <cluster>` dock tab.
+  `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call. `run_in_terminal` runs one shell command per PTY with the cluster's kubeconfig (`agents/terminal/`), one at a time per chat and cluster, shown in an `Agent · <cluster>` dock tab. The chat's model comes from the agent's ACP `model` config option (`agents/model.rs`); the person's last pick per agent is saved in `AgentPrefs.agents`.
 - Agents run natively (no sandbox) with the app's environment, `KUBECONFIG` set to the chat's
   own kubeconfig and the MCP token; on Windows a Job object holds the agent's process tree. The
   app binary's hidden `--agent-mcp` mode is parsed in `main.rs` before Tauri starts.

@@ -286,6 +286,7 @@ fn run_app(
             commands::agents::chat_start,
             commands::agents::chat_prompt,
             commands::agents::chat_stop,
+            commands::agents::chat_set_model,
             commands::agents::chat_close,
             commands::agents::chat_answer,
             commands::agents::chat_terminal_attach,
@@ -493,7 +494,7 @@ mod command_tests {
     use std::collections::BTreeSet;
 
     /// The agent and chat commands (agents spec §5.2).
-    const AGENT_COMMANDS: [&str; 21] = [
+    const AGENT_COMMANDS: [&str; 22] = [
         "agents_status",
         "agent_probe",
         "agent_custom_add",
@@ -505,6 +506,7 @@ mod command_tests {
         "chat_start",
         "chat_prompt",
         "chat_stop",
+        "chat_set_model",
         "chat_close",
         "chat_answer",
         "chat_terminal_attach",

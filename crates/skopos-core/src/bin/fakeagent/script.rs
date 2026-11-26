@@ -4,6 +4,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use agent_client_protocol::v1::schema::SessionConfigOption;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -22,6 +23,11 @@ pub struct Script {
     pub auth: Auth,
     /// The `loadSession` capability that `initialize` reports.
     pub load_session: bool,
+    /// The session config options `session/new` and `session/load` answer with;
+    /// `session/set_config_option` changes them. Empty: the answers carry none.
+    pub config_options: Vec<SessionConfigOption>,
+    /// When set, `session/set_config_option` fails with this message.
+    pub refuse_config_option: Option<String>,
     /// One turn per `session/prompt`, in order; a prompt past the last one ends at once.
     pub turns: Vec<Turn>,
 }
@@ -68,6 +74,8 @@ pub enum Step {
     Stop(StopKind),
     /// Fails the prompt with ACP's authentication-required error.
     SignIn,
+    /// Sends a `config_option_update` with these options and makes them the agent's.
+    ConfigOptions(Vec<SessionConfigOption>),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -210,6 +218,28 @@ mod tests {
     }
 
     #[test]
+    fn config_options_parse_from_the_wire_shape() {
+        let script = Script::parse(
+            r#"{
+                "configOptions": [{
+                    "id": "model", "name": "Model", "category": "model", "type": "select",
+                    "currentValue": "a", "options": [{ "value": "a", "name": "A" }]
+                }],
+                "refuseConfigOption": "Model is locked",
+                "turns": [{ "steps": [{ "configOptions": [] }] }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(script.config_options.len(), 1);
+        assert_eq!(&*script.config_options[0].id.0, "model");
+        assert_eq!(
+            script.refuse_config_option.as_deref(),
+            Some("Model is locked")
+        );
+        assert_eq!(script.turns[0].steps, vec![Step::ConfigOptions(Vec::new())]);
+    }
+
+    #[test]
     fn the_plans_example_script_parses() {
         let script = Script::parse(PLAN_EXAMPLE).unwrap();
         let args = json!({ "kind": "Pod", "namespace": "payments" });
@@ -218,6 +248,8 @@ mod tests {
             Script {
                 auth: Auth::SignedIn,
                 load_session: true,
+                config_options: Vec::new(),
+                refuse_config_option: None,
                 turns: vec![Turn {
                     steps: vec![
                         Step::Plan(vec![PlanItem {

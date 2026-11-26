@@ -8,6 +8,7 @@ use super::acp::{PlanEntry, ToolStatus};
 use super::approvals::ChangeCard;
 use super::editor_tab::TabChip;
 use super::mcp::cards::ToolCard;
+use super::model::ModelChoice;
 use super::permissions::PermissionCard;
 use super::tabs::ProposalCard;
 use crate::kubeconfig::ClusterId;
@@ -21,6 +22,9 @@ pub enum ChatEvent {
     Item { item: ChatItem },
     /// `true` when a turn starts, `false` when it has ended.
     Working { working: bool },
+    /// The chat's model choice changed (native agents spec §6.1): first the one the session
+    /// started with, then each change. `None`: the agent stopped offering a model option.
+    Model { model: Option<ModelChoice> },
     /// The chat ended. `reason` is the notice of an agent that exited; `None` otherwise.
     Closed { reason: Option<String> },
 }
@@ -107,6 +111,10 @@ pub enum ChatNotice {
     Declined {
         agent: String,
     },
+    /// The agent refused the person's model pick (native agents spec §6.1).
+    ModelNotChanged {
+        message: String,
+    },
     /// A notice kind this version no longer makes, read back from a stored chat. Its item's
     /// `text` says what it was.
     #[serde(other)]
@@ -133,6 +141,9 @@ impl ChatNotice {
             }
             ChatNotice::TooManySteps { agent } => format!("{agent} stopped after too many steps."),
             ChatNotice::Declined { agent } => format!("{agent} declined to continue."),
+            ChatNotice::ModelNotChanged { message } => {
+                format!("Could not change the model: {}.", sentence(message))
+            }
             // Never made: a stored one keeps the text it was saved with.
             ChatNotice::Unknown => String::new(),
         }
@@ -165,6 +176,19 @@ mod tests {
 
     fn claude() -> String {
         "Claude".to_owned()
+    }
+
+    #[test]
+    fn a_refused_model_names_the_agent_s_message_once_with_one_period() {
+        let notice = ChatNotice::ModelNotChanged {
+            message: "Deep is not on your plan.".to_owned(),
+        };
+        assert_eq!(
+            notice.text(),
+            "Could not change the model: Deep is not on your plan."
+        );
+        let value = serde_json::to_value(&notice).unwrap();
+        assert_eq!(value["kind"], "modelNotChanged");
     }
 
     #[test]

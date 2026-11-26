@@ -24,7 +24,8 @@
 }
 
 .scopeButton,
-.agentButton {
+.agentButton,
+.modelButton {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -43,13 +44,29 @@
   max-width: 150px;
 }
 
+.modelButton {
+  max-width: 140px;
+  color: var(--text-secondary);
+}
+
+.modelButton[aria-disabled="true"] {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.modelButton[aria-disabled="true"]:hover {
+  background: none;
+}
+
 .scopeButton:hover,
-.agentButton:hover {
+.agentButton:hover,
+.modelButton:hover {
   background: var(--surface-hover);
 }
 
 .scopeButton:focus-visible,
-.agentButton:focus-visible {
+.agentButton:focus-visible,
+.modelButton:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
