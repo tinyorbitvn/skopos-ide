@@ -292,7 +292,18 @@ fn exec_failure_detail(err: &AuthError) -> Option<String> {
     })
 }
 
-/// Everything after `prepare_kubeconfig`. The caller races this against cancellation.
+/// The allowance for the tunnel probe, the client build and `GET /version` together, because
+/// `kube` runs an exec plugin while building the client.
+pub(crate) fn connect_limit(entry: &ContextEntry, timeouts: &ConnectTimeouts) -> Duration {
+    if entry.uses_exec {
+        timeouts.version_exec
+    } else {
+        timeouts.version
+    }
+}
+
+/// Everything after `prepare_kubeconfig`. `deadline` is the connect deadline, set before the
+/// tunnel probe. The caller races this against cancellation.
 pub(crate) async fn establish(
     handle: &ClusterHandle,
     kubeconfig: Kubeconfig,
@@ -300,17 +311,12 @@ pub(crate) async fn establish(
     settings: &ClusterSettings,
     timeouts: &ConnectTimeouts,
     proxy: Option<&str>,
+    deadline: Instant,
 ) -> Result<Established, Failure> {
     let classifier = Classifier {
         exec_command: exec_command(&kubeconfig).map(|command| command.command),
     };
-    let limit = if entry.uses_exec {
-        timeouts.version_exec
-    } else {
-        timeouts.version
-    };
-    // One allowance for both, because `kube` runs an exec plugin while building the client.
-    let deadline = Instant::now() + limit;
+    let limit = connect_limit(entry, timeouts);
 
     let client = build_client(
         handle,

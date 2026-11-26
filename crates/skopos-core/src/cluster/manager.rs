@@ -15,8 +15,8 @@ use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 use super::connect::{
-    establish, prepare_kubeconfig, run_discovery, with_proxy_url, ConnectTimeouts, Established,
-    Failure, Prepared, ProxyOrigin,
+    connect_limit, establish, prepare_kubeconfig, run_discovery, with_proxy_url, ConnectTimeouts,
+    Established, Failure, Prepared, ProxyOrigin,
 };
 use super::exec_command::{exec_command, ExecCommand, ExecEnvVar, ExecRequest, ExecRequestDetails};
 use super::state::{ConnectionState, FailureKind};
@@ -419,9 +419,14 @@ async fn establish_routed(
     timeouts: &ConnectTimeouts,
     route: Option<&TunnelRoute>,
 ) -> Result<Established, Failure> {
+    let limit = connect_limit(entry, timeouts);
+    let deadline = tokio::time::Instant::now() + limit;
     if let Some(route) = route {
         handle.log(LogLevel::Info, format!("opening tunnel {}", route.name()));
-        if let Err(reason) = route.probe(entry.server.as_deref()).await {
+        let probed = tokio::time::timeout_at(deadline, route.probe(entry.server.as_deref()))
+            .await
+            .unwrap_or_else(|_| Err(format!("timed out after {}s", limit.as_secs())));
+        if let Err(reason) = probed {
             return Err(Failure::new(
                 FailureKind::Tunnel,
                 format!("Tunnel \"{}\": {reason}", route.name()),
@@ -436,6 +441,7 @@ async fn establish_routed(
         settings,
         timeouts,
         proxy.as_deref(),
+        deadline,
     )
     .await?;
     Ok(Established {

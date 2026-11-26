@@ -159,6 +159,23 @@ impl AppCore {
             .is_some_and(|kept| same_bytes(kept.expose().as_bytes(), token.as_bytes()))
     }
 
+    /// The API servers of the clusters that use the tunnel, without metrics hosts.
+    fn tunnel_api_targets(&self, id: &str) -> HashSet<(String, u16)> {
+        let entries = self.context_entries();
+        let mut targets = HashSet::new();
+        for (cluster, own) in self.cluster_settings_store().get().iter() {
+            if own.tunnel.as_deref() != Some(id) {
+                continue;
+            }
+            let server = entries
+                .iter()
+                .find(|entry| &entry.id == cluster)
+                .and_then(|entry| entry.server.as_deref());
+            targets.extend(server.and_then(host_port));
+        }
+        targets
+    }
+
     /// The `host:port` the gateway may open for a tunnel: the API server of each cluster that
     /// picked it and that cluster's remote metrics URL (spec §5.5).
     pub(crate) fn tunnel_targets(&self, id: &str) -> HashSet<(String, u16)> {
@@ -256,7 +273,10 @@ impl AppCore {
     /// or, when none does, reaches the proxy itself.
     pub async fn tunnel_test(&self, id: &str) -> CoreResult<TunnelView> {
         let def = self.tunnel_def(id).ok_or_else(gone)?;
-        let mut targets: Vec<(String, u16)> = self.tunnel_targets(id).into_iter().collect();
+        let mut targets: Vec<(String, u16)> = self.tunnel_api_targets(id).into_iter().collect();
+        if targets.is_empty() {
+            targets = self.tunnel_targets(id).into_iter().collect();
+        }
         targets.sort();
         if let Some((host, port)) = targets.first() {
             // The outcome is in the state the view carries.
