@@ -34,6 +34,9 @@ export const events = {
   /** The folder tree or a placement changed; read `api.catalogFolders` again. */
   onCatalogFoldersChanged: (handler: () => void) =>
     on<unknown>("catalog://folders-changed", () => handler()),
+  /** A tunnel was added, changed, deleted, or changed state; read `api.tunnelList` again. */
+  onTunnelsChanged: (handler: () => void) =>
+    on<unknown>("tunnels://changed", () => handler()),
   onClusterState: (
     handler: (change: { id: string; state: ConnectionState }) => void,
   ) => on("cluster://state", handler),
