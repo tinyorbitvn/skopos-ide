@@ -37,11 +37,14 @@ export const permission = (title: string, command: string): Step => ({
  * Writes the script the next agent process plays, one turn per prompt. The agent reads it
  * when it starts, so write it before the chat starts (opening the panel, New chat).
  */
-export function writeFakeAgentScript(turns: Step[][]): void {
+export function writeFakeAgentScript(
+  turns: Step[][],
+  options: { configOptions?: unknown[] } = {},
+): void {
   fs.mkdirSync(DIR, { recursive: true });
   fs.writeFileSync(
     SCRIPT,
-    JSON.stringify({ turns: turns.map((steps) => ({ steps })) }),
+    JSON.stringify({ ...options, turns: turns.map((steps) => ({ steps })) }),
   );
 }
 
