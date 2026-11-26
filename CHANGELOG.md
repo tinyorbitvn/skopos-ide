@@ -6,6 +6,10 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+- **Tunnels:** Preferences has a Tunnels list of named HTTP, HTTPS and SOCKS5 proxies, each with its own user name and a password kept in the keychain. A cluster picks one under Settings › Network, and its tables, logs, shells, port forwards, `helm`, the cluster's terminal, the agent's kubeconfig and a remote metrics URL over https all go through it. A failed tunnel shows a badge on the cluster with the reason, and a failed connect offers Open tunnel settings.
+- **Proxy URLs became tunnels:** each cluster's Proxy URL setting is moved into a tunnel at the first start; a password in the URL moves to the keychain.
+- **SOCKS5 proxies with a password** now work.
+- **`NO_PROXY` is honored for clusters:** a cluster whose API server `NO_PROXY` names no longer goes through a proxy set in the environment.
 - **Agents run natively, on Windows too:** agents now run as you, with your own setup, on Linux, macOS and Windows. Each chat gives its agent a kubeconfig with only the chat's clusters.
 - **The agent asks in the chat:** before the agent runs a command or edits a file, the chat shows its request with its own Allow and Reject choices.
 - **The agent runs commands in a terminal:** with `Let the agent run commands in a terminal` on in a cluster's settings, the agent can run shell commands in an Agent tab of the dock with that cluster's kubeconfig, after your approval unless the cluster is set to Don't ask.
