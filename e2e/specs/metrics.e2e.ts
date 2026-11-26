@@ -323,6 +323,7 @@ describe("metrics", () => {
           'No samples for tenant skopos-tenant-b with cluster="skopos-e2e": check the tenant and the cluster label in the cluster settings.',
         ),
       "the note for an unknown tenant never showed",
+      SAMPLES_TIMEOUT,
     );
     expect(await text("metrics-note-action")).toBe("Cluster settings");
   });
