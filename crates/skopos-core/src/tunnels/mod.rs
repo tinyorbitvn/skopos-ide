@@ -7,3 +7,9 @@ pub mod store;
 
 pub use model::{TunnelInput, TunnelKind};
 pub use store::TunnelView;
+
+// Used by the consumers of the next tasks.
+#[allow(dead_code)]
+pub(crate) mod http;
+#[allow(dead_code)]
+pub(crate) mod upstream;
