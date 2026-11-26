@@ -1726,9 +1726,9 @@ mod running {
         }
 
         /// The chat to save, when something changed since the last save. A chat with no
-        /// items is never saved.
+        /// items or no title (nothing but a notice so far) is never saved.
         fn take_save(&mut self) -> Option<StoredChat> {
-            if !self.changed || self.chat.items.is_empty() {
+            if !self.changed || self.chat.items.is_empty() || self.chat.title.is_empty() {
                 return None;
             }
             self.changed = false;
@@ -1965,6 +1965,19 @@ mod running {
             assert_eq!(saved.items.len(), 1);
             assert_ne!(saved.updated, "2026-11-22T10:00:00Z");
             assert!(transcript.take_save().is_none());
+        }
+
+        #[test]
+        fn a_notice_before_the_first_message_is_not_saved() {
+            let mut transcript = Transcript::new(empty_chat());
+            transcript.notice(ChatNotice::ModelNotChanged {
+                message: "refused".to_owned(),
+            });
+            assert!(transcript.take_save().is_none());
+            transcript.user("Hi".to_owned(), None, None);
+            let saved = transcript.take_save().unwrap();
+            assert_eq!(saved.title, "Hi");
+            assert_eq!(saved.items.len(), 2);
         }
 
         #[test]
