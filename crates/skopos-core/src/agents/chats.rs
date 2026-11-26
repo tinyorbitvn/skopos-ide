@@ -596,6 +596,7 @@ mod tests {
             result: Some("Applied.".to_owned()),
             rollout: None,
             output: None,
+            terminal: None,
         };
         saved.items.push(ChatItem {
             id: "item-2".to_owned(),

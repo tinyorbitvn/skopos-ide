@@ -13,7 +13,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 - **Resources:** live tables per kind (columns, status badges, filter by any column), a detail
   drawer with actions, a YAML editor to edit and create, cluster and section overviews, a
   resource map and a node topology.
-- **Sessions:** logs, local terminals, pod and node shells in the dock.
+- **Sessions:** logs, local terminals, pod and node shells, and the agent's terminal commands in the dock.
 - **Port forwards:** saved definitions that never autostart, bound to `127.0.0.1` only.
 - **Helm and Argo CD:** repos, charts and releases through the `helm` CLI; Argo CD Applications
   and their actions.
@@ -79,7 +79,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   kubeconfig, store or Secret values; destructive actions confirm and name the target.
 - Agents (`skopos-core/src/agents/`): an ACP client over the agent's stdio and a per-chat MCP
   server (rmcp) with the cluster tools. The change gate (`Ask every time` by default,
-  `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call.
+  `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call. `run_in_terminal` runs one shell command per PTY with the cluster's kubeconfig (`agents/terminal/`), one at a time per chat and cluster, shown in an `Agent · <cluster>` dock tab.
 - Agents run natively (no sandbox) with the app's environment, `KUBECONFIG` set to the chat's
   own kubeconfig and the MCP token; on Windows a Job object holds the agent's process tree. The
   app binary's hidden `--agent-mcp` mode is parsed in `main.rs` before Tauri starts.

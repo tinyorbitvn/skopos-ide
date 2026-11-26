@@ -2,6 +2,7 @@ import { act } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../design";
 import type { AgentStatus } from "../ipc/generated/AgentStatus";
+import type { ChangeCard } from "../ipc/generated/ChangeCard";
 import type { ChatEvent } from "../ipc/generated/ChatEvent";
 import type { EditorTab } from "../ipc/generated/EditorTab";
 import { clusterEntry, flush, mockBackend } from "../test/ipc";
@@ -13,6 +14,7 @@ import {
 } from "./agentChat";
 import { resetAgentsForTest } from "./agents";
 import { resetCatalogForTest, useCatalog } from "./catalog";
+import { resetDockForTest, useDock } from "./dock";
 import { resetProposalsForTest, useProposals } from "./proposals";
 import { registerTabSource, resetTabSourcesForTest } from "./tabSources";
 
@@ -23,6 +25,7 @@ const SETTINGS = {
   namespaces: null,
   secretValues: false,
   exec: false,
+  terminal: false,
   defaultAgent: null,
   notes: "",
 };
@@ -75,6 +78,7 @@ beforeEach(() => {
   resetAgentChatForTest();
   resetAgentsForTest();
   resetCatalogForTest();
+  resetDockForTest();
   resetProposalsForTest();
   resetTabSourcesForTest();
 });
@@ -306,6 +310,7 @@ test("Undo ends the standing approval of the card's cluster by id", async () => 
     result: null,
     rollout: null,
     output: null,
+    terminal: null,
   };
   act(() =>
     useAgentChat.setState({
@@ -479,5 +484,90 @@ test("choose sends the option for the running chat and toasts a failure", async 
   expect(error).toHaveBeenCalledWith(
     "Could not answer the request",
     "This request was already answered.",
+  );
+});
+
+function changeItem(id: string, state: ChangeCard["state"]): ChatEvent {
+  return {
+    type: "item",
+    item: {
+      id: `change:${id}`,
+      body: {
+        type: "change",
+        card: {
+          id,
+          cluster: "prod",
+          title: "Run a command on prod",
+          summary: "",
+          diff: [],
+          command: ["kubectl get pods"],
+          secrets: [],
+          state,
+          result: null,
+          rollout: null,
+          output: null,
+          terminal: "a",
+        },
+      },
+    },
+  };
+}
+
+test("a terminal command that starts running opens its Agent tab once", async () => {
+  catalog({ a: "prod" });
+  const { channels } = backend();
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  act(() => channels[0]?.onmessage(changeItem("k1", { state: "running" })));
+  expect(useDock.getState().tabs).toEqual([
+    {
+      id: "agent:c1:a",
+      kind: "agent",
+      clusterId: "a",
+      chatId: "c1",
+      title: "Agent · prod",
+      dirty: false,
+    },
+  ]);
+  act(() => useDock.getState().close("agent:c1:a"));
+  act(() => channels[0]?.onmessage(changeItem("k1", { state: "running" })));
+  expect(useDock.getState().tabs).toEqual([]);
+  act(() => channels[0]?.onmessage(changeItem("k2", { state: "running" })));
+  expect(useDock.getState().tabs.map((t) => t.id)).toEqual(["agent:c1:a"]);
+});
+
+test("Show in terminal opens the tab and Stop stops the command, toasting a failure", async () => {
+  catalog({ a: "prod" });
+  const failure = { code: "notFound", message: "That command is not running." };
+  const { ipc } = backend({
+    chat_command_stop: () => {
+      throw failure;
+    },
+  });
+  await act(async () => {
+    useAgentChat.getState().openPanel("a");
+    await flush();
+  });
+  const item = changeItem("k1", {
+    state: "approved",
+    at: "14:02",
+    standing: false,
+  });
+  if (item.type !== "item" || item.item.body.type !== "change")
+    throw new Error("not a change");
+  const { card } = item.item.body;
+  act(() => useAgentChat.getState().showTerminal(card));
+  expect(useDock.getState().activeId).toBe("agent:c1:a");
+  const error = vi.spyOn(toast, "error");
+  await act(() => useAgentChat.getState().stopCommand("k1"));
+  expect(ipc.callsTo("chat_command_stop")[0]).toEqual({
+    chatId: "c1",
+    cardId: "k1",
+  });
+  expect(error).toHaveBeenCalledWith(
+    "Could not stop the command",
+    "That command is not running.",
   );
 });

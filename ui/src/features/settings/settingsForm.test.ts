@@ -131,6 +131,7 @@ test("a draft shows the saved settings as text, and saving it gives them back", 
     agentNamespaces: "",
     agentSecretValues: false,
     agentExec: false,
+    agentTerminal: false,
     agentDefault: null,
     agentNotes: "",
   });
@@ -207,6 +208,7 @@ test("Restore defaults is an empty draft with no icon, no namespaces and Detect"
     agentNamespaces: "",
     agentSecretValues: false,
     agentExec: false,
+    agentTerminal: false,
     agentDefault: null,
     agentNotes: "",
   });
@@ -221,6 +223,7 @@ test("saving gives the cluster's agent settings back as they were", () => {
       namespaces: ["ingest", "shop"],
       secretValues: true,
       exec: false,
+      terminal: false,
       defaultAgent: "codex",
       notes: "Deploys go through Argo CD.",
     },
@@ -235,6 +238,7 @@ test("the agent fields round-trip through the draft", () => {
       namespaces: ["payments", "ingest"],
       secretValues: true,
       exec: true,
+      terminal: false,
       defaultAgent: "codex",
       notes: "Deploys go through Argo CD.",
     },
@@ -260,6 +264,7 @@ test("all namespaces saves null, and the defaults restore Ask every time", () =>
     namespaces: null,
     secretValues: false,
     exec: false,
+    terminal: false,
     defaultAgent: null,
     notes: "",
   });
@@ -602,6 +607,7 @@ test("drafts are the same only when every field is", () => {
     { agentNamespaces: "x" },
     { agentSecretValues: true },
     { agentExec: true },
+    { agentTerminal: true },
     { agentDefault: "codex" },
     { agentNotes: "x" },
   ];

@@ -23,6 +23,7 @@ import type { ObjectRef } from "../ipc/generated/ObjectRef";
 import type { TabChip } from "../ipc/generated/TabChip";
 import { useAgents } from "./agents";
 import { useCatalog } from "./catalog";
+import { agentTab, useDock } from "./dock";
 import { useProposals } from "./proposals";
 import { tabSource } from "./tabSources";
 
@@ -80,6 +81,10 @@ export interface AgentChatState {
   answer(cardId: string, answer: ChangeAnswer): Promise<void>;
   choose(cardId: string, optionId: string): Promise<void>;
   undo(card: ChangeCard): Promise<void>;
+  /** Opens the Agent tab of a terminal command's card. */
+  showTerminal(card: ChangeCard): void;
+  /** Stops a running terminal command. */
+  stopCommand(cardId: string): Promise<void>;
   showHistory(on: boolean): void;
   loadHistory(): Promise<void>;
   openStored(id: string): Promise<void>;
@@ -122,6 +127,14 @@ export function runningChatId(state: { start: StartState }): string | null {
   return state.start.phase === "running" ? state.start.chatId : null;
 }
 
+/** Whether the chat already shows `id` as a running command. */
+function wasRunning(items: ChatItem[], id: string): boolean {
+  const item = items.find((i) => i.id === id);
+  return (
+    item?.body.type === "change" && item.body.card.state.state === "running"
+  );
+}
+
 function catalogIds(): string[] {
   return useCatalog.getState().clusters.map((c) => c.id);
 }
@@ -135,6 +148,21 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
           const chatId = runningChatId(get());
           if (chatId)
             useProposals.getState().receive(chatId, event.item.body.card);
+        }
+        if (event.item.body.type === "change") {
+          const chatId = runningChatId(get());
+          const { card } = event.item.body;
+          // Running a command opens, or reuses, its Agent tab (native agents spec §5.1).
+          if (
+            chatId &&
+            card.terminal &&
+            card.state.state === "running" &&
+            !wasRunning(get().items, event.item.id)
+          ) {
+            useDock
+              .getState()
+              .open(agentTab(chatId, card.terminal, card.cluster));
+          }
         }
         set((s) => ({ items: withItem(s.items, event.item) }));
         break;
@@ -407,6 +435,22 @@ export const useAgentChat = create<AgentChatState>((set, get) => {
         await api.chatAnswer(chatId, cardId, answer);
       } catch (error) {
         toast.error("Could not answer the change", failureMessage(error));
+      }
+    },
+
+    showTerminal(card) {
+      const chatId = runningChatId(get());
+      if (chatId === null || card.terminal === null) return;
+      useDock.getState().open(agentTab(chatId, card.terminal, card.cluster));
+    },
+
+    async stopCommand(cardId) {
+      const chatId = runningChatId(get());
+      if (chatId === null) return;
+      try {
+        await api.chatCommandStop(chatId, cardId);
+      } catch (error) {
+        toast.error("Could not stop the command", failureMessage(error));
       }
     },
 

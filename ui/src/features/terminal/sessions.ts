@@ -277,6 +277,14 @@ function startCommand(
       );
     case "nodeShell":
       return api.nodeShellStart(tab.clusterId, tab.node, size, onData, onEvent);
+    case "agent":
+      return api.chatTerminalAttach(
+        tab.chatId,
+        tab.clusterId,
+        size,
+        onData,
+        onEvent,
+      );
   }
 }
 

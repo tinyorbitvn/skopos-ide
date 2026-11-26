@@ -35,6 +35,7 @@ function card(partial: Partial<Card>): Card {
       name: "api",
     },
     output: null,
+    terminal: null,
     ...partial,
   };
 }
@@ -45,7 +46,9 @@ function show(
 ) {
   const onAnswer = vi.fn(async () => {});
   const onUndo = vi.fn();
-  render(
+  const onShowTerminal = vi.fn();
+  const onStop = vi.fn();
+  const { unmount } = render(
     <ChangeCard
       card={c}
       live={more.live ?? true}
@@ -53,9 +56,18 @@ function show(
       undone={more.undone ?? false}
       onAnswer={onAnswer}
       onUndo={onUndo}
+      onShowTerminal={onShowTerminal}
+      onStop={onStop}
     />,
   );
-  return { onAnswer, onUndo, root: screen.getByTestId("agent-change-card") };
+  return {
+    onAnswer,
+    onUndo,
+    onShowTerminal,
+    onStop,
+    unmount,
+    root: screen.getByTestId("agent-change-card"),
+  };
 }
 
 test("a waiting card shows the diff, the note and three answers", () => {
@@ -128,6 +140,8 @@ test("outcomes read as the spec words them", () => {
         undone={false}
         onAnswer={vi.fn()}
         onUndo={vi.fn()}
+        onShowTerminal={vi.fn()}
+        onStop={vi.fn()}
       />,
     );
     expect(screen.getByText(text)).toBeTruthy();
@@ -149,4 +163,60 @@ test("Secrets the change exposes are named, and a past card follows no rollout",
     ),
   ).toBeTruthy();
   expect(within(root).queryByTestId("agent-rollout")).toBeNull();
+});
+
+function command(partial: Partial<Card>): Card {
+  return card({
+    title: "Run a command on prod-eu-west",
+    diff: [],
+    rollout: null,
+    command: ["kubectl get pods -A\nkubectl get nodes"],
+    terminal: "a",
+    ...partial,
+  });
+}
+
+test("a running command shows its lines, Show in terminal and Stop", () => {
+  const { onShowTerminal, onStop, root } = show(
+    command({ state: { state: "running" }, output: "NAME READY\nweb 1/1" }),
+  );
+  expect(within(root).getByText("Running…")).toBeTruthy();
+  expect(root.querySelector("pre")?.textContent).toBe(
+    "kubectl get pods -A\nkubectl get nodes",
+  );
+  expect(root.textContent).toContain("web 1/1");
+  fireEvent.click(within(root).getByTestId("agent-command-show"));
+  expect(onShowTerminal).toHaveBeenCalled();
+  fireEvent.click(within(root).getByTestId("agent-command-stop"));
+  expect(onStop).toHaveBeenCalled();
+});
+
+test("a finished command keeps Show in terminal and loses Stop", () => {
+  const { root } = show(
+    command({
+      state: { state: "appliedWithoutAsking", standing: false },
+      result: "exit 0",
+    }),
+  );
+  expect(within(root).getByTestId("agent-command-show")).toBeTruthy();
+  expect(within(root).queryByTestId("agent-command-stop")).toBeNull();
+  expect(root.textContent).toContain("exit 0");
+});
+
+test("a command stopped while it ran says so", () => {
+  const { root } = show(command({ state: { state: "stoppedRunning" } }));
+  expect(within(root).getByText("Stopped while it ran.")).toBeTruthy();
+});
+
+test("a waiting, denied or stored command has no terminal buttons", () => {
+  for (const state of [{ state: "waiting" }, { state: "denied" }] as const) {
+    const { root, unmount } = show(command({ state }));
+    expect(within(root).queryByTestId("agent-command-show")).toBeNull();
+    unmount();
+  }
+  const { root } = show(command({ state: { state: "running" } }), {
+    live: false,
+  });
+  expect(within(root).queryByTestId("agent-command-show")).toBeNull();
+  expect(within(root).queryByTestId("agent-command-stop")).toBeNull();
 });

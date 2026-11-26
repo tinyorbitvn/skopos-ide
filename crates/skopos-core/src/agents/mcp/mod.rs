@@ -6,6 +6,7 @@ pub mod changes;
 pub mod kinds;
 mod propose;
 pub mod server;
+mod terminal;
 mod tools;
 pub mod trim;
 
@@ -123,6 +124,11 @@ pub enum ChangeTool {
         pod: String,
         container: Option<String>,
         command: Vec<String>,
+        timeout_seconds: u64,
+    },
+    /// `run_in_terminal`: one shell command in the cluster's Agent terminal.
+    Terminal {
+        command: String,
         timeout_seconds: u64,
     },
 }

@@ -20,6 +20,7 @@ const WAITING = {
       result: null,
       rollout: null,
       output: null,
+      terminal: null,
     },
   },
 };

@@ -81,6 +81,7 @@ test("scope labels and chips", () => {
     namespaces: ["payments", "ingest"],
     secretValues: false,
     exec: false,
+    terminal: false,
     defaultAgent: null,
     notes: "",
   };
@@ -126,6 +127,7 @@ test("waiting changes are counted", () => {
         result: null,
         rollout: null,
         output: null,
+        terminal: null,
       },
     },
   });

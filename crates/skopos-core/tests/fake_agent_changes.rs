@@ -205,13 +205,14 @@ async fn apply_one_takes_exactly_one_document() {
 
 const CLUSTER: &str = "fake";
 const WAIT: Duration = Duration::from_secs(10);
-const CHANGE_TOOLS: [&str; 6] = [
+const CHANGE_TOOLS: [&str; 7] = [
     "apply_object",
     "patch_object",
     "scale",
     "restart",
     "delete_object",
     "exec",
+    "run_in_terminal",
 ];
 const SECRET_S: &str = "/api/v1/namespaces/default/secrets/s";
 const DEPLOYMENT_WEB: &str = "/apis/apps/v1/namespaces/default/deployments/web";
@@ -240,6 +241,8 @@ impl Chat {
             core: core.clone(),
             approvals: approvals.clone(),
             scope: scope.clone(),
+            terminals: skopos_core::agents::terminal::AgentTerminals::new(),
+            work_dir: std::env::temp_dir(),
         });
         let (tool_cards, mut read_cards) = mpsc::channel(64);
         tokio::spawn(async move { while read_cards.recv().await.is_some() {} });

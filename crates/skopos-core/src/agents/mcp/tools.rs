@@ -582,6 +582,8 @@ fn cluster_entry(
     entry.insert("secretValues".to_owned(), json!(secret_values));
     let commands = if settings.exec { "on" } else { "off" };
     entry.insert("commandsInContainers".to_owned(), json!(commands));
+    let terminal = if settings.terminal { "on" } else { "off" };
+    entry.insert("terminalCommands".to_owned(), json!(terminal));
     Value::Object(entry)
 }
 

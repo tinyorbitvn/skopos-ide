@@ -22,6 +22,7 @@ pub mod registry;
 pub mod settings;
 pub mod spawn;
 pub mod tabs;
+pub mod terminal;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

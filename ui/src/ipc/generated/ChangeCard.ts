@@ -25,7 +25,7 @@ summary: string,
  */
 diff: Array<DiffLine>, 
 /**
- * An exec's command, word by word.
+ * An exec's command, word by word, or a terminal command whole.
  */
 command: Array<string> | null, 
 /**
@@ -35,7 +35,7 @@ command: Array<string> | null,
  */
 secrets: Array<string>, state: ChangeState, 
 /**
- * `Deleted.` or `Exit code <n>` once applied. A rollout's line is the panel's (R5).
+ * `Deleted.`, `Exit code <n>` or `exit <n>` once applied. A rollout's line is the panel's (R5).
  */
 result: string | null, 
 /**
@@ -43,6 +43,11 @@ result: string | null,
  */
 rollout: RolloutTarget | null, 
 /**
- * The first 20 lines an exec printed.
+ * The first 20 lines an exec printed, or the last 20 of a terminal command.
  */
-output: string | null, };
+output: string | null, 
+/**
+ * A terminal command's cluster, whose `Agent · <cluster>` tab shows it (native agents spec
+ * §5.1). `None` for every other change.
+ */
+terminal: string | null, };

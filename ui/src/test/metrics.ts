@@ -141,6 +141,7 @@ export function clusterSettings(
       namespaces: null,
       secretValues: false,
       exec: false,
+      terminal: false,
       defaultAgent: null,
       notes: "",
     },

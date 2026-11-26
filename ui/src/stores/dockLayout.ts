@@ -240,7 +240,7 @@ export function parseLayout(value: JsonValue | null): DockLayout {
   };
 }
 
-function savedTab(tab: DockTab): SavedTab {
+function savedTab(tab: Exclude<DockTab, { kind: "agent" }>): SavedTab {
   switch (tab.kind) {
     case "edit":
       return {
@@ -308,7 +308,10 @@ export function serializeLayout(
     height: state.height,
     minimized: state.minimized,
     activeId: state.activeId,
-    tabs: state.tabs.map(savedTab),
+    // An Agent tab belongs to a chat that does not outlive the app.
+    tabs: state.tabs.flatMap((tab) =>
+      tab.kind === "agent" ? [] : [savedTab(tab)],
+    ),
   };
 }
 

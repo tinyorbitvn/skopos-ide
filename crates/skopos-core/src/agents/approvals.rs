@@ -30,7 +30,7 @@ pub struct ChangeCard {
     pub summary: String,
     /// Empty for restart, delete and exec.
     pub diff: Vec<DiffLine>,
-    /// An exec's command, word by word.
+    /// An exec's command, word by word, or a terminal command whole.
     pub command: Option<Vec<String>>,
     /// The Secrets the changed object reads, or the Pod an exec runs in reads, named while
     /// Secret values are hidden from agents. Such a change always waits for the person: neither
@@ -38,12 +38,16 @@ pub struct ChangeCard {
     #[serde(default)]
     pub secrets: Vec<String>,
     pub state: ChangeState,
-    /// `Deleted.` or `Exit code <n>` once applied. A rollout's line is the panel's (R5).
+    /// `Deleted.`, `Exit code <n>` or `exit <n>` once applied. A rollout's line is the panel's (R5).
     pub result: Option<String>,
     /// The workload whose rollout the panel follows once the change is applied.
     pub rollout: Option<RolloutTarget>,
-    /// The first 20 lines an exec printed.
+    /// The first 20 lines an exec printed, or the last 20 of a terminal command.
     pub output: Option<String>,
+    /// A terminal command's cluster, whose `Agent · <cluster>` tab shows it (native agents spec
+    /// §5.1). `None` for every other change.
+    #[serde(default)]
+    pub terminal: Option<ClusterId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -63,8 +67,12 @@ pub enum ChangeState {
     AppliedWithoutAsking {
         standing: bool,
     },
+    /// A terminal command runs; the card's output follows it.
+    Running,
     Denied,
     Stopped,
+    /// A terminal command was stopped while it ran: by the person, or by the chat's Stop.
+    StoppedRunning,
     Failed {
         message: String,
     },
@@ -155,6 +163,11 @@ impl Approvals {
         let _ = self.cards.send(card).await;
     }
 
+    /// Sends a card without waiting, for a drop guard. A full or closed stream drops it.
+    pub(crate) fn show_now(&self, card: ChangeCard) {
+        let _ = self.cards.try_send(card);
+    }
+
     /// Sends the card, which must be `Waiting`, and waits for its answer.
     pub async fn ask(&self, card: ChangeCard) -> ChangeAnswerOrStop {
         let (reply, answer) = oneshot::channel();
@@ -238,6 +251,7 @@ mod tests {
             result: None,
             rollout: None,
             output: None,
+            terminal: None,
         }
     }
 

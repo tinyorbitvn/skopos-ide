@@ -18,6 +18,8 @@ use skopos_core::agents::tabs::ProposalState;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::{CoreResult, ErrorCode};
 use skopos_core::kubeconfig::ClusterId;
+use skopos_core::prefs::{AgentChanges, ClusterAgentSettings, ClusterSettings, Prefs};
+use skopos_core::sessions::{SessionOutput, TerminalSize};
 use skopos_fakekube::{FakeKube, FakeKubeConfig};
 use support::connected_fake;
 use tempfile::TempDir;
@@ -182,6 +184,15 @@ impl Events {
             seen: Vec::new(),
         };
         (sender, events)
+    }
+
+    /// The first `Some` that `found` gives for an event, seen or still to come.
+    async fn until_map<T>(&mut self, what: &str, found: impl Fn(&ChatEvent) -> Option<T>) -> T {
+        let event = self.until(what, |event| found(event).is_some()).await;
+        match found(&event) {
+            Some(value) => value,
+            None => panic!("{what} matched once and then not"),
+        }
     }
 
     /// The first event, seen or still to come, that `wanted` accepts.
@@ -1564,4 +1575,186 @@ async fn starting_the_app_removes_the_run_folders_a_crash_left() {
     let _core = AppCore::start(paths).await.unwrap();
     assert!(!stale.exists());
     assert!(root.path().join("app/data/agents/run").is_dir());
+}
+/// Lets the agent use the cluster's terminal, with a shell every OS has.
+fn terminal_bench_settings(bench: &Bench, changes: AgentChanges) {
+    bench
+        .core
+        .prefs_set(Prefs {
+            terminal_shell: Some(if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }.to_owned()),
+            ..bench.core.prefs_get()
+        })
+        .unwrap();
+    let settings = ClusterSettings {
+        agent: ClusterAgentSettings {
+            changes,
+            terminal: true,
+            ..ClusterAgentSettings::default()
+        },
+        ..bench.core.cluster_settings_get(&bench.cluster)
+    };
+    bench
+        .core
+        .cluster_settings_set(&bench.cluster, settings)
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_fake_agent_runs_a_terminal_command() {
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "run_in_terminal",
+        json!({ "command": "echo skopos-terminal" }),
+    )])]))
+    .await;
+    terminal_bench_settings(&bench, AgentChanges::DontAsk);
+    let (info, mut events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "go").await;
+    let texts = agent_texts(&events.items());
+    assert!(
+        texts[0].starts_with("tool:run_in_terminal:exit 0"),
+        "{texts:?}"
+    );
+    let done = events.items().into_iter().find_map(|item| match item.body {
+        ChatItemBody::Change { card } if card.terminal.is_some() => Some(card),
+        _ => None,
+    });
+    let done = done.expect("no terminal card");
+    assert_eq!(
+        done.state,
+        ChangeState::AppliedWithoutAsking { standing: false }
+    );
+    assert_eq!(done.terminal.as_ref(), Some(&bench.cluster));
+    // The fake agent reports only the first line of a result, so the output shows on the card.
+    assert!(done
+        .output
+        .as_deref()
+        .unwrap_or_default()
+        .contains("skopos-terminal"));
+}
+
+#[tokio::test]
+async fn a_tab_attached_after_a_command_shows_it_and_its_exit() {
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "run_in_terminal",
+        json!({ "command": "echo skopos-terminal" }),
+    )])]))
+    .await;
+    terminal_bench_settings(&bench, AgentChanges::DontAsk);
+    let (info, _events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "go").await;
+    let (tx, mut rx) = mpsc::channel(32);
+    let size = TerminalSize {
+        cols: 120,
+        rows: 30,
+    };
+    let session = bench
+        .core
+        .chat_terminal_attach(&info.chat_id, &bench.cluster, size, tx, MAIN)
+        .await
+        .unwrap();
+    let mut text = String::new();
+    while !text.contains("exit 0") {
+        match tokio::time::timeout(Duration::from_secs(20), rx.recv())
+            .await
+            .unwrap()
+        {
+            Some(SessionOutput::Data(data)) => {
+                bench.core.session_ack(&session, data.len() as u64);
+                text.push_str(&String::from_utf8_lossy(&data));
+            }
+            Some(SessionOutput::Event(_)) => {}
+            None => panic!("the session ended: {text:?}"),
+        }
+    }
+    assert!(text.contains("$ echo skopos-terminal"), "{text:?}");
+}
+
+#[tokio::test]
+async fn closing_the_tab_stops_the_running_command() {
+    let sleep = if cfg!(windows) {
+        "ping -n 31 127.0.0.1 >NUL"
+    } else {
+        "sleep 30"
+    };
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "run_in_terminal",
+        json!({ "command": sleep }),
+    )])]))
+    .await;
+    terminal_bench_settings(&bench, AgentChanges::DontAsk);
+    let (info, mut events) = bench.start(MAIN).await;
+    let (tx, _rx) = mpsc::channel(256);
+    let size = TerminalSize {
+        cols: 120,
+        rows: 30,
+    };
+    let session = bench
+        .core
+        .chat_terminal_attach(&info.chat_id, &bench.cluster, size, tx, MAIN)
+        .await
+        .unwrap();
+    let prompt = bench.ask_in_background(&info.chat_id, "go");
+    events
+        .until("running", |event| {
+            matches!(event, ChatEvent::Item { item } if matches!(&item.body,
+                ChatItemBody::Change { card } if card.state == ChangeState::Running))
+        })
+        .await;
+    bench.core.session_stop(&session);
+    prompt.await.unwrap().unwrap();
+    let texts = agent_texts(&events.items());
+    assert!(
+        texts[0].starts_with("tool:run_in_terminal:error: Stopped by the person."),
+        "{texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_cards_stop_stops_its_command_and_a_stale_stop_is_refused() {
+    let sleep = if cfg!(windows) {
+        "ping -n 31 127.0.0.1 >NUL"
+    } else {
+        "sleep 30"
+    };
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "run_in_terminal",
+        json!({ "command": sleep }),
+    )])]))
+    .await;
+    terminal_bench_settings(&bench, AgentChanges::DontAsk);
+    let (info, mut events) = bench.start(MAIN).await;
+    let prompt = bench.ask_in_background(&info.chat_id, "go");
+    let card_id = events
+        .until_map("running", |event| match event {
+            ChatEvent::Item { item } => match &item.body {
+                ChatItemBody::Change { card } if card.state == ChangeState::Running => {
+                    Some(card.id.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .await;
+    bench
+        .core
+        .chat_command_stop(&info.chat_id, &card_id)
+        .unwrap();
+    prompt.await.unwrap().unwrap();
+    let error = bench
+        .core
+        .chat_command_stop(&info.chat_id, &card_id)
+        .unwrap_err();
+    assert_eq!(error.message, "That command is not running.");
+    let error = bench
+        .core
+        .chat_terminal_attach(
+            &info.chat_id,
+            &"elsewhere".to_owned(),
+            TerminalSize { cols: 80, rows: 24 },
+            mpsc::channel(4).0,
+            MAIN,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "That cluster is not in this chat.");
 }

@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +25,7 @@ use crate::agents::approvals::{
     Approvals, ChangeAnswer, ChangeAnswerOrStop, ChangeCard, ChangeState, RolloutTarget,
 };
 use crate::agents::diff::{yaml_diff, DiffKind, DiffLine};
+use crate::agents::terminal::AgentTerminals;
 use crate::app_core::AppCore;
 use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -39,18 +41,19 @@ const RESTART: &str = "restart";
 const DELETE_OBJECT: &str = "delete_object";
 const EXEC: &str = "exec";
 /// Every change tool, in the order a chat lists them.
-pub const CHANGE_TOOLS: [&str; 6] = [
+pub const CHANGE_TOOLS: [&str; 7] = [
     APPLY_OBJECT,
     PATCH_OBJECT,
     SCALE,
     RESTART,
     DELETE_OBJECT,
     EXEC,
+    super::terminal::RUN_IN_TERMINAL,
 ];
 
 const APPLIED: &str = "Applied.";
-const DENIED: &str = "The person denied this change.";
-const STOPPED: &str = "The chat was stopped.";
+pub(super) const DENIED: &str = "The person denied this change.";
+pub(super) const STOPPED: &str = "The chat was stopped.";
 const DELETED: &str = "Deleted.";
 /// The longest summary a card shows (spec §4.4).
 const SUMMARY_LIMIT: usize = 200;
@@ -67,7 +70,7 @@ const DELETE_DESCRIPTION: &str =
     "Delete one object. The change may wait for the person's approval, and the person may deny it.";
 const EXEC_DESCRIPTION: &str = "Run one command in a container, without a terminal or input, and get its exit code and output (at most 64 KiB). Each command counts as a change: it may wait for the person's approval, and the person may deny it.";
 
-fn read_only_text(cluster: &str) -> String {
+pub(super) fn read_only_text(cluster: &str) -> String {
     format!("Changes to {cluster} are read only for agents.")
 }
 
@@ -127,6 +130,12 @@ struct DeleteArgs {
 }
 
 #[derive(Deserialize)]
+struct TerminalArgs {
+    command: String,
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Deserialize)]
 struct ExecArgs {
     namespace: String,
     pod: String,
@@ -137,7 +146,11 @@ struct ExecArgs {
 
 /// A JSON Schema object of these properties. A global chat adds a required `cluster`, one of
 /// the chat's clusters by name (spec §4.4).
-fn input_schema(properties: Value, required: &[&str], scope: &ToolScope) -> Arc<JsonObject> {
+pub(super) fn input_schema(
+    properties: Value,
+    required: &[&str],
+    scope: &ToolScope,
+) -> Arc<JsonObject> {
     let mut properties = match properties {
         Value::Object(properties) => properties,
         _ => JsonObject::new(),
@@ -169,7 +182,7 @@ fn kind_property() -> Value {
     })
 }
 
-fn summary_property() -> Value {
+pub(super) fn summary_property() -> Value {
     json!({
         "type": "string",
         "maxLength": SUMMARY_LIMIT,
@@ -278,7 +291,8 @@ fn exec_tool(scope: &ToolScope) -> Tool {
 
 /// The change tools this chat lists (spec §4.4, §4.5): none in a per-cluster chat on a Read only
 /// cluster; otherwise all five, and `exec` when one of the chat's clusters that is not Read only
-/// lets agents run commands.
+/// lets agents run commands, and `run_in_terminal` when one of them has the terminal on (native
+/// agents spec §5.3).
 pub fn change_tools(ctx: &ToolContext) -> Vec<Tool> {
     let settings: Vec<ClusterAgentSettings> = ctx
         .scope
@@ -300,6 +314,9 @@ pub fn change_tools(ctx: &ToolContext) -> Vec<Tool> {
     ];
     if settings.iter().any(|s| s.exec && !read_only(s)) {
         tools.push(exec_tool(scope));
+    }
+    if settings.iter().any(|s| s.terminal && !read_only(s)) {
+        tools.push(super::terminal::terminal_tool(scope));
     }
     tools
 }
@@ -444,6 +461,13 @@ fn change_tool(name: &str, args: &JsonObject) -> Result<ChangeTool, String> {
                 timeout_seconds: exec_seconds(args.timeout_seconds),
             }
         }
+        super::terminal::RUN_IN_TERMINAL => {
+            let args: TerminalArgs = parsed(name, args)?;
+            ChangeTool::Terminal {
+                command: args.command,
+                timeout_seconds: super::terminal::terminal_seconds(args.timeout_seconds),
+            }
+        }
         _ => return Err(format!("{name} is not a change tool.")),
     })
 }
@@ -453,6 +477,10 @@ pub struct ChatGate {
     pub core: AppCore,
     pub approvals: Arc<Approvals>,
     pub scope: ToolScope,
+    /// The chat's Agent terminals, one per cluster (native agents spec §5.3).
+    pub terminals: Arc<AgentTerminals>,
+    /// The chat's `work` folder, where terminal commands start.
+    pub work_dir: PathBuf,
 }
 
 impl ChangeGate for ChatGate {
@@ -526,6 +554,15 @@ impl ChatGate {
             tool,
             summary,
         } = request;
+        if let ChangeTool::Terminal {
+            command,
+            timeout_seconds,
+        } = &tool
+        {
+            return self
+                .run_terminal(&cluster, command, *timeout_seconds, &summary)
+                .await;
+        }
         let prepared = match self.prepare(&cluster, &tool, &summary).await {
             Ok(prepared) => prepared,
             Err(text) => return ChangeOutcome::Refused { text },
@@ -593,7 +630,12 @@ impl ChatGate {
     }
 
     /// A change that ends unapplied: its card says how, and the agent is told.
-    async fn ended(&self, mut card: ChangeCard, state: ChangeState, text: &str) -> ChangeOutcome {
+    pub(super) async fn ended(
+        &self,
+        mut card: ChangeCard,
+        state: ChangeState,
+        text: &str,
+    ) -> ChangeOutcome {
         card.state = state;
         card.rollout = None;
         self.approvals.show(card).await;
@@ -666,6 +708,9 @@ impl ChatGate {
                     namespace: found.namespace,
                     name: found.name,
                 });
+            }
+            ChangeTool::Terminal { .. } => {
+                return Err("run_in_terminal acts on no object.".to_owned());
             }
             ChangeTool::Exec { namespace, pod, .. } => {
                 return Ok(Target {
@@ -802,6 +847,9 @@ impl ChatGate {
                 self.existing(id, target).await?;
                 (format!("Delete {kind} {path}"), Vec::new())
             }
+            ChangeTool::Terminal { .. } => {
+                return Err("run_in_terminal acts on no object.".to_owned());
+            }
             ChangeTool::Exec { command: words, .. } => {
                 if words.is_empty() {
                     return Err(
@@ -829,6 +877,7 @@ impl ChatGate {
             result: None,
             rollout: rollout_of(id, tool, target),
             output: None,
+            terminal: None,
         })
     }
 
@@ -923,6 +972,10 @@ impl ChatGate {
                     output: None,
                 })
             }
+            ChangeTool::Terminal { .. } => Err(IpcError::new(
+                ErrorCode::Internal,
+                "run_in_terminal acts on no object.",
+            )),
             ChangeTool::Exec {
                 container,
                 command,
@@ -1093,7 +1146,7 @@ fn first_lines(text: &str, count: usize) -> String {
 }
 
 /// The local time, `HH:MM`, for `Approved. Applied at 14:02.`
-fn clock_time() -> String {
+pub(super) fn clock_time() -> String {
     Zoned::now().strftime("%H:%M").to_string()
 }
 

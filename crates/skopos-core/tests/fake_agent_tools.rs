@@ -419,6 +419,7 @@ async fn list_clusters_names_each_cluster_with_its_state_and_settings() {
                 "namespaces": ["default"],
                 "secretValues": "readable",
                 "commandsInContainers": "off",
+                "terminalCommands": "off",
             }),
             json!({
                 "name": "ghost",
@@ -427,6 +428,7 @@ async fn list_clusters_names_each_cluster_with_its_state_and_settings() {
                 "namespaces": "all",
                 "secretValues": "hidden",
                 "commandsInContainers": "off",
+                "terminalCommands": "off",
             }),
         ]
     );

@@ -51,6 +51,7 @@ let version = 0;
 function mock(): void {
   backend = mockBackend({
     terminal_start: () => "t1",
+    chat_terminal_attach: () => "g1",
     pod_exec_start: () => "x1",
     pod_attach_start: () => "a1",
     node_shell_start: () => "n1",
@@ -336,4 +337,21 @@ test("a click in the terminal area focuses the view", async () => {
   const before = viewAt(0).focuses;
   fireEvent.click(screen.getByTestId("terminal-view"));
   expect(viewAt(0).focuses).toBe(before + 1);
+});
+
+test("an Agent tab attaches to its chat's terminal and has no Reconnect", async () => {
+  await show({
+    id: "agent:chat-1:c1",
+    kind: "agent",
+    clusterId: "c1",
+    chatId: "chat-1",
+    title: "Agent · kind-dev",
+    dirty: false,
+  });
+  await act(flush);
+  expect(backend.callsTo("chat_terminal_attach")[0]).toMatchObject({
+    chatId: "chat-1",
+    clusterId: "c1",
+  });
+  expect(screen.queryByTestId("terminal-reconnect")).toBeNull();
 });
