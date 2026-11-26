@@ -29,8 +29,12 @@ use crate::error::{CoreResult, ErrorCode, IpcError};
 
 pub use exec::ExecOutput;
 pub(crate) use flow::FlowControl;
+pub(crate) use pty::{pty_size, spawn_writer, Master};
+// Read by the terminal tool (Task 3).
 pub(crate) use logs::workload_selector;
 pub use logs::{LogDownload, LogEndReason, LogEvent, LogLine, LogMarker, LogOptions, LogTarget};
+#[allow(unused_imports)]
+pub(crate) use pty::resolve_shell;
 
 /// The size of a terminal, in character cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

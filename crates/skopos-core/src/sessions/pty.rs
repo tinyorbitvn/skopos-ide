@@ -68,7 +68,7 @@ fn is_on_path(program: &str) -> bool {
 }
 
 /// Which branch runs is decided at run time, so that neither is dead code on any OS.
-fn resolve_shell(configured: Option<&str>) -> String {
+pub(crate) fn resolve_shell(configured: Option<&str>) -> String {
     if cfg!(windows) {
         let comspec = std::env::var("COMSPEC").ok();
         windows_shell(configured, is_on_path, comspec.as_deref())
@@ -86,7 +86,7 @@ fn working_directory(configured: Option<&str>, home: &Path) -> PathBuf {
         .unwrap_or_else(|| home.to_path_buf())
 }
 
-fn pty_size(size: TerminalSize) -> PtySize {
+pub(crate) fn pty_size(size: TerminalSize) -> PtySize {
     PtySize {
         rows: size.rows.max(1),
         cols: size.cols.max(1),
@@ -177,7 +177,7 @@ fn spawn_reader(
 }
 
 /// Ends when the session drops its `TerminalControl`, which closes `input`.
-fn spawn_writer(mut writer: Box<dyn Write + Send>, mut input: mpsc::Receiver<Vec<u8>>) {
+pub(crate) fn spawn_writer(mut writer: Box<dyn Write + Send>, mut input: mpsc::Receiver<Vec<u8>>) {
     std::thread::spawn(move || {
         while let Some(data) = input.blocking_recv() {
             if writer
@@ -244,10 +244,14 @@ fn spawn_waiter(
 /// Closes the PTY on a thread of its own, also when a stopping runtime drops the session's
 /// task. Closing a Windows PTY blocks until its output has been read, and until the cursor
 /// position it asked the terminal for has been answered.
-struct Master(Option<Box<dyn MasterPty + Send>>);
+pub(crate) struct Master(Option<Box<dyn MasterPty + Send>>);
 
 impl Master {
-    fn resize(&self, size: TerminalSize) {
+    pub(crate) fn new(master: Box<dyn MasterPty + Send>) -> Master {
+        Master(Some(master))
+    }
+
+    pub(crate) fn resize(&self, size: TerminalSize) {
         if let Some(master) = &self.0 {
             // A failed resize leaves the old size, which is still usable.
             let _ = master.resize(pty_size(size));

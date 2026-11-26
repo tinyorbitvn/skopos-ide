@@ -436,15 +436,22 @@ impl JobGuard {
     /// Puts `child` in a new job that ends every process in it when the job closes. What the
     /// child starts from now on joins the job too.
     pub(crate) fn contain(child: &tokio::process::Child) -> std::io::Result<JobGuard> {
+        let process = child
+            .raw_handle()
+            .ok_or_else(|| std::io::Error::other("the agent has already ended"))?;
+        Self::contain_handle(process as windows_sys::Win32::Foundation::HANDLE)
+    }
+
+    /// As `contain`, for a process known by its handle, such as a PTY's child.
+    pub(crate) fn contain_handle(
+        process: windows_sys::Win32::Foundation::HANDLE,
+    ) -> std::io::Result<JobGuard> {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         };
-        let process = child
-            .raw_handle()
-            .ok_or_else(|| std::io::Error::other("the agent has already ended"))?;
         // SAFETY: plain Win32 calls on handles this function owns or borrows for the call.
         unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
