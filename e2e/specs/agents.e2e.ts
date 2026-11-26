@@ -8,6 +8,7 @@ import {
   byTestId,
   clickWhenShown,
   editorContaining,
+  expectTerminalLine,
   gone,
   hotbarItem,
   newInDock,
@@ -374,5 +375,57 @@ describe("agents", () => {
       async () => (await text("agent-stream")).includes("Rejected once"),
       "the card never said Rejected once",
     );
+  });
+
+  it("runs the agent's command in its Agent tab and shows the output on the card", async () => {
+    writeFakeAgentScript([
+      [
+        tool("run_in_terminal", { command: "kubectl get namespaces", summary: "List namespaces" }),
+        say("Listed."),
+      ],
+    ]);
+    // The Agent card of the cluster, as the Don't ask test reaches it.
+    const tile = await hotbarItem(KIND);
+    await browser.execute((el) => {
+      const target = el as unknown as HTMLElement;
+      const { x, y } = target.getBoundingClientRect();
+      target.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: x + 4, clientY: y + 4 }),
+      );
+    }, tile);
+    await clickWhenShown("menu-item-agent-settings");
+    await shown("settings-agent-card");
+    await clickWhenShown("settings-agent-terminal");
+    await clickWhenShown("settings-save");
+    await until(
+      async () => (await byTestId("settings-save").isEnabled()) === false,
+      "the settings were not saved",
+    );
+    await openCluster(KIND);
+    await shown("agent-panel");
+    await newChat();
+    await send("List the namespaces");
+    await until(async () => {
+      const card = await lastCard();
+      if (card?.state === "waiting") await clickInLastCard("agent-approve");
+      return card?.state === "approved" || card?.state === "appliedWithoutAsking";
+    }, "the command never ran");
+    const card = await lastCard();
+    expect(card?.text).toContain(`Run a command on ${KIND}`);
+    expect(card?.text).toContain("kube-system");
+    expect(card?.text).toContain("exit 0");
+    await until(
+      async () =>
+        browser.execute(
+          (title) =>
+            Array.from(document.querySelectorAll('[data-testid^="dock-tab-agent:"]')).some((tab) =>
+              (tab.textContent ?? "").includes(title),
+            ),
+          `Agent · ${KIND}`,
+        ),
+      "the dock never showed the Agent tab",
+    );
+    await expectTerminalLine("$ kubectl get namespaces");
+    await expectTerminalLine("exit 0");
   });
 });
