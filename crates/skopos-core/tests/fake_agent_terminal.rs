@@ -282,8 +282,10 @@ async fn under_dont_ask_it_runs_at_once_with_the_clusters_kubeconfig() {
     let (failed, text) = chat.call(json!({ "command": command })).await;
     assert!(!failed, "{text}");
     let kubeconfig = core.cluster_kubeconfig_path(&id).unwrap();
+    // A long path may wrap at the terminal's width, so the check ignores line breaks.
     assert!(
-        text.contains(&format!("kc={}", kubeconfig.display())),
+        text.replace('\n', "")
+            .contains(&format!("kc={}", kubeconfig.display())),
         "{text}"
     );
     let work = std::fs::canonicalize(chat.work_dir()).unwrap();

@@ -834,9 +834,16 @@ mod tests {
             "{:?}",
             result.text
         );
+        // cmd's `set /p` leaves errorlevel 1, so the code differs by OS; the line is what counts.
         let screen = output::plain_text(&terminal.scrollback_text());
-        assert!(
-            screen.lines().any(|line| line.trim_end() == "exit 0"),
+        let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
+        let exit_at = lines
+            .iter()
+            .position(|line| line.starts_with("exit "))
+            .unwrap_or_else(|| panic!("no exit line: {screen:?}"));
+        assert_eq!(
+            lines.get(exit_at.wrapping_sub(1)).copied(),
+            Some("done"),
             "{screen:?}"
         );
     }
