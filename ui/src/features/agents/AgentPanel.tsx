@@ -79,6 +79,8 @@ function OpenPanel() {
         onAnswer={(cardId, answer) => chat.answer(cardId, answer)}
         onChoose={(cardId, optionId) => chat.choose(cardId, optionId)}
         onUndo={(card) => void chat.undo(card)}
+        onShowTerminal={(card) => chat.showTerminal(card)}
+        onStopCommand={(cardId) => chat.stopCommand(cardId)}
         onNewChat={() => void chat.newChat(pageId)}
       />
     );

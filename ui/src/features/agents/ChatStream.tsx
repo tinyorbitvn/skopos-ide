@@ -39,6 +39,8 @@ export interface ChatStreamProps {
   onAnswer(cardId: string, answer: ChangeAnswer): Promise<void>;
   onChoose(cardId: string, optionId: string): Promise<void>;
   onUndo(card: Card): void;
+  onShowTerminal(card: Card): void;
+  onStopCommand(cardId: string): Promise<void>;
   onNewChat(): void;
 }
 
@@ -112,6 +114,8 @@ function StreamItem(props: ChatStreamProps & { item: ChatItem }) {
           undone={props.undone.includes(body.card.id)}
           onAnswer={(answer) => props.onAnswer(body.card.id, answer)}
           onUndo={() => props.onUndo(body.card)}
+          onShowTerminal={() => props.onShowTerminal(body.card)}
+          onStop={() => props.onStopCommand(body.card.id)}
         />
       );
     case "proposal":

@@ -18,6 +18,8 @@ function show(items: ChatItem[], more: Partial<ChatStreamProps> = {}) {
     onAnswer: vi.fn(async () => {}),
     onChoose: vi.fn(async () => {}),
     onUndo: vi.fn(),
+    onShowTerminal: vi.fn(),
+    onStopCommand: vi.fn(),
     onNewChat: vi.fn(),
     ...more,
   };

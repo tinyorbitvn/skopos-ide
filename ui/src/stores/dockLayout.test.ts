@@ -513,6 +513,23 @@ test("a second terminal comes back numbered, and one saved before numbers is the
   ).toEqual([]);
 });
 
+test("an agent tab is not restored, as its chat does not outlive the app", () => {
+  const layout = parseLayout(
+    saved([
+      {
+        id: "agent:c1:a",
+        kind: "agent",
+        clusterId: "a",
+        chatId: "c1",
+        title: "Agent · prod",
+        dirty: false,
+      },
+      SAVED_TERMINAL,
+    ]),
+  );
+  expect(layout.tabs).toEqual([TERMINAL]);
+});
+
 test("a malformed session tab is dropped alone", () => {
   const layout = parseLayout(
     saved([

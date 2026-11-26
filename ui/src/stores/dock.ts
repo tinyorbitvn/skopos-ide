@@ -103,6 +103,15 @@ export type DockTab =
     }
   | {
       id: string;
+      kind: "agent";
+      clusterId: string;
+      /** The chat whose commands on the cluster the tab shows. */
+      chatId: string;
+      title: string;
+      dirty: false;
+    }
+  | {
+      id: string;
       kind: "details";
       clusterId: string;
       /** "<Kind> · <name>", rebuilt on load. */
@@ -119,13 +128,15 @@ export type LogsDockTab = Extract<DockTab, { kind: "logs" }>;
 export type TerminalDockTab = Extract<DockTab, { kind: "terminal" }>;
 export type PodSessionDockTab = Extract<DockTab, { kind: "shell" | "attach" }>;
 export type NodeShellDockTab = Extract<DockTab, { kind: "nodeShell" }>;
+export type AgentDockTab = Extract<DockTab, { kind: "agent" }>;
 /** A minimized details drawer (spec K5). */
 export type DetailsDockTab = Extract<DockTab, { kind: "details" }>;
 /** A tab whose body is a terminal session. */
 export type SessionDockTab =
   | TerminalDockTab
   | PodSessionDockTab
-  | NodeShellDockTab;
+  | NodeShellDockTab
+  | AgentDockTab;
 
 type EditableTab = Extract<DockTab, { kind: "edit" | "create" }>;
 
@@ -138,7 +149,8 @@ export function isSessionTab(tab: DockTab): tab is SessionDockTab {
     tab.kind === "terminal" ||
     tab.kind === "shell" ||
     tab.kind === "attach" ||
-    tab.kind === "nodeShell"
+    tab.kind === "nodeShell" ||
+    tab.kind === "agent"
   );
 }
 
@@ -482,6 +494,27 @@ export function terminalTabId(clusterId: string, number = 1): string {
 export function terminalTitle(clusterName: string | null, number = 1): string {
   const title = number === 1 ? "Terminal" : `Terminal ${number}`;
   return clusterName === null ? title : `${title} · ${clusterName}`;
+}
+
+/** The id of a chat's Agent tab on one cluster (native agents spec §5.1). */
+export function agentTabId(chatId: string, clusterId: string): string {
+  return `agent:${chatId}:${clusterId}`;
+}
+
+/** The tab `Agent · <cluster>` that shows a chat's terminal commands on one cluster. */
+export function agentTab(
+  chatId: string,
+  clusterId: string,
+  clusterName: string,
+): AgentDockTab {
+  return {
+    id: agentTabId(chatId, clusterId),
+    kind: "agent",
+    clusterId,
+    chatId,
+    title: `Agent · ${clusterName}`,
+    dirty: false,
+  };
 }
 
 /** One of the cluster's local terminals. */

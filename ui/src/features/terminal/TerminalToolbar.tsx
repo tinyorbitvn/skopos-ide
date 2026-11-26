@@ -136,7 +136,7 @@ export function TerminalToolbar({ tab }: { tab: SessionDockTab }) {
           <Unplug size={14} aria-hidden="true" />
           Detach
         </Button>
-      ) : (
+      ) : tab.kind === "agent" ? null : (
         <Button
           variant="secondary"
           size="sm"

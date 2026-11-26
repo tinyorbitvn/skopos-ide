@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Button } from "../../design";
-import { Shield, TriangleAlert } from "../../design/icons";
+import {
+  CircleStop,
+  Shield,
+  SquareTerminal,
+  TriangleAlert,
+} from "../../design/icons";
 import type { ChangeAnswer } from "../../ipc/generated/ChangeAnswer";
 import type { ChangeCard as Card } from "../../ipc/generated/ChangeCard";
 import type { DiffLine } from "../../ipc/generated/DiffLine";
@@ -152,8 +157,30 @@ export function ChangeCard(props: {
   undone: boolean;
   onAnswer(answer: ChangeAnswer): Promise<void> | void;
   onUndo(): void;
+  /** Opens the command's Agent tab. */
+  onShowTerminal(): void;
+  /** Stops the running command. */
+  onStop(): Promise<void> | void;
 }) {
   const { card } = props;
+  const [stopping, setStopping] = useState(false);
+  const state = card.state.state;
+  const ran =
+    state === "running" ||
+    state === "approved" ||
+    state === "appliedWithoutAsking" ||
+    state === "failed" ||
+    state === "stoppedRunning";
+  const terminalButtons = props.live && card.terminal !== null && ran;
+
+  async function stop(): Promise<void> {
+    setStopping(true);
+    try {
+      await props.onStop();
+    } finally {
+      setStopping(false);
+    }
+  }
   const [answering, setAnswering] = useState(false);
   const applied =
     card.state.state === "approved" ||
@@ -202,6 +229,31 @@ export function ChangeCard(props: {
         answering={answering}
         onUndo={props.onUndo}
       />
+      {terminalButtons ? (
+        <div className={styles.actions}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={props.onShowTerminal}
+            data-testid="agent-command-show"
+          >
+            <SquareTerminal size={14} aria-hidden="true" />
+            Show in terminal
+          </Button>
+          {state === "running" ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={stopping}
+              onClick={() => void stop()}
+              data-testid="agent-command-stop"
+            >
+              <CircleStop size={14} aria-hidden="true" />
+              Stop
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {card.output ? <pre className={styles.code}>{card.output}</pre> : null}
       {card.result ? <p className={styles.muted}>{card.result}</p> : null}
       {props.follow && applied && card.rollout ? (

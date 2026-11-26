@@ -75,6 +75,7 @@ const TAB_ICONS: Record<DockTab["kind"], IconComponent> = {
   shell: Terminal,
   attach: Plug,
   nodeShell: Terminal,
+  agent: Sparkles,
   details: PanelBottom,
 };
 
@@ -98,6 +99,7 @@ function TabBody({
     case "shell":
     case "attach":
     case "nodeShell":
+    case "agent":
       return <TerminalTab tab={tab} shown={shown} />;
     case "details":
       return <DetailsTab tab={tab} resources={resources} />;
