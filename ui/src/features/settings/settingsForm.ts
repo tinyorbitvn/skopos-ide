@@ -58,6 +58,8 @@ export interface SettingsDraft {
   agentSecretValues: boolean;
   /** The agent may run commands in containers. */
   agentExec: boolean;
+  /** The agent may run shell commands in the cluster's Agent terminal. */
+  agentTerminal: boolean;
   /** The agent new chats start with, or null for the app default. */
   agentDefault: string | null;
   /** Notes sent to the agent at the start of every chat. */
@@ -188,6 +190,7 @@ export function draftFrom(settings: ClusterSettings): SettingsDraft {
     agentNamespaces: (settings.agent.namespaces ?? []).join(","),
     agentSecretValues: settings.agent.secretValues,
     agentExec: settings.agent.exec,
+    agentTerminal: settings.agent.terminal,
     agentDefault: settings.agent.defaultAgent,
     agentNotes: settings.agent.notes,
   };
@@ -226,6 +229,7 @@ export function emptyDraft(): SettingsDraft {
     agentNamespaces: "",
     agentSecretValues: false,
     agentExec: false,
+    agentTerminal: false,
     agentDefault: null,
     agentNotes: "",
   };
@@ -553,6 +557,7 @@ export function settingsFrom(draft: SettingsDraft): ClusterSettings {
       namespaces: draft.agentNamespacesOnly ? agentNamespaceList(draft) : null,
       secretValues: draft.agentSecretValues,
       exec: draft.agentExec,
+      terminal: draft.agentTerminal,
       defaultAgent: draft.agentDefault,
       notes: draft.agentNotes,
     },

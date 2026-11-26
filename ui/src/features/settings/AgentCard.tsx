@@ -182,6 +182,21 @@ export function AgentCard(props: {
       </div>
 
       <div className={styles.field}>
+        <Switch
+          label="Let the agent run commands in a terminal"
+          checked={draft.agentTerminal}
+          disabled={draft.agentChanges === "readOnly"}
+          onChange={(agentTerminal) => update({ agentTerminal })}
+          description={
+            draft.agentChanges === "readOnly"
+              ? "Read only gives the agent no terminal."
+              : "The agent can run any shell command on this computer, in an Agent tab of the dock with this cluster's kubeconfig. Each command counts as a change and follows Changes above."
+          }
+          testId="settings-agent-terminal"
+        />
+      </div>
+
+      <div className={styles.field}>
         <Select
           label="Default agent"
           value={draft.agentDefault ?? APP_DEFAULT}

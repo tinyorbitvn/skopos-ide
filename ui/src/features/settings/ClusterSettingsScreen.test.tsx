@@ -585,6 +585,7 @@ const AGENT: ClusterAgentSettings = {
   namespaces: ["shop"],
   secretValues: true,
   exec: true,
+  terminal: false,
   defaultAgent: "codex",
   notes: "Deploys go through Argo CD.",
 };
@@ -1277,6 +1278,39 @@ test("the Agent card saves with the page's draft", async () => {
   expect(savedPayload(backend)).toMatchObject({
     agent: { changes: "dontAsk", exec: true, notes: "Use Argo CD." },
   });
+});
+
+test("the terminal switch saves with the page's draft", async () => {
+  const backend = await show({ state: CONNECTED, saved: FULL });
+  const card = await screen.findByTestId("settings-agent-card");
+  const toggle = within(card).getByTestId("settings-agent-terminal");
+  expect(toggle.textContent).toContain(
+    "Let the agent run commands in a terminal",
+  );
+  expect(toggle.textContent).toContain(
+    "The agent can run any shell command on this computer, in an Agent tab of the dock with this cluster's kubeconfig. Each command counts as a change and follows Changes above.",
+  );
+  fireEvent.click(within(toggle).getByRole("switch"));
+  await save();
+  expect(savedPayload(backend)).toMatchObject({
+    agent: { terminal: true },
+  });
+});
+
+test("Read only disables the terminal switch and says why", async () => {
+  await show({ state: CONNECTED, saved: FULL });
+  const card = await screen.findByTestId("settings-agent-card");
+  fireEvent.click(within(card).getByRole("radio", { name: /Read only/ }));
+  const toggle = within(card).getByTestId("settings-agent-terminal");
+  expect(within(toggle).getByRole("switch").hasAttribute("disabled")).toBe(
+    true,
+  );
+  expect(toggle.textContent).toContain(
+    "Read only gives the agent no terminal.",
+  );
+  expect(toggle.textContent).not.toContain(
+    "The agent can run any shell command",
+  );
 });
 
 test("Only these namespaces needs a namespace before Save", async () => {

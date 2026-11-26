@@ -18,6 +18,11 @@ secretValues: boolean,
  */
 exec: boolean, 
 /**
+ * Whether the agent may run shell commands in the cluster's Agent terminal, each one a
+ * change (native agents spec §5.2).
+ */
+terminal: boolean, 
+/**
  * The agent new chats on this cluster start with. `None`: the app's default.
  */
 defaultAgent: string | null, 

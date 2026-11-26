@@ -50,6 +50,9 @@ pub struct ClusterAgentSettings {
     pub secret_values: bool,
     /// Whether the agent may run commands in containers, each one a change.
     pub exec: bool,
+    /// Whether the agent may run shell commands in the cluster's Agent terminal, each one a
+    /// change (native agents spec §5.2).
+    pub terminal: bool,
     /// The agent new chats on this cluster start with. `None`: the app's default.
     pub default_agent: Option<String>,
     /// Sent to the agent at the start of every chat on this cluster.
@@ -311,6 +314,7 @@ mod tests {
         assert_eq!(v["changes"], "readOnly");
         assert_eq!(v["secretValues"], true);
         assert_eq!(v["exec"], false);
+        assert_eq!(v["terminal"], false);
         assert_eq!(v["defaultAgent"], "claude");
         assert!(v["namespaces"].is_null());
         assert_eq!(v["notes"], "");
@@ -338,6 +342,11 @@ mod tests {
         assert_eq!(partial.agent.changes, AgentChanges::Ask);
         assert_eq!(partial.agent.namespaces, None);
         assert_eq!(partial.agent.notes, "");
+
+        let partial: ClusterSettings =
+            serde_json::from_str(r#"{"agent":{"terminal":true}}"#).unwrap();
+        assert!(partial.agent.terminal);
+        assert!(!partial.agent.exec);
     }
 
     #[test]
