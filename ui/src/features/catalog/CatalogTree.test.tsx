@@ -13,7 +13,9 @@ import type { CatalogFolders } from "../../ipc/generated/CatalogFolders";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
 import { resetFoldersForTest, useFolders } from "../../stores/folders";
 import { resetShellForTest } from "../../stores/shell";
+import { resetTunnelsForTest, useTunnels } from "../../stores/tunnels";
 import { clusterEntry, mockBackend } from "../../test/ipc";
+import { tunnel } from "../../test/tunnels";
 import { CatalogScreen } from "./CatalogScreen";
 
 // prod > eu; Local. prod-eu-1 in eu, prod-main in prod, kind-a in Local; Beta and
@@ -121,6 +123,7 @@ beforeEach(() => {
   resetCatalogForTest();
   resetFoldersForTest();
   resetShellForTest();
+  resetTunnelsForTest();
   under(null);
 });
 
@@ -620,4 +623,29 @@ test("Esc cancels a drag, and a refused drop by the core shows in a toast (P44)"
       "Could not save the folders.",
     ),
   );
+});
+
+test("a connected cluster whose tunnel failed shows the badge in its status", async () => {
+  useTunnels.setState({
+    tunnels: [tunnel({ state: { status: "failed", message: "refused" } })],
+  });
+  const connected = clusterEntry({
+    contextName: "kind-a",
+    tunnel: "t1",
+    state: {
+      status: "connected",
+      info: {
+        version: "v1.31.0",
+        distribution: "kind",
+        nodeCount: 1,
+        namespaces: [],
+        namespacesRestricted: false,
+        isAdmin: true,
+      },
+    },
+  });
+  await show({ catalog_list: () => [connected] });
+  const badge = await screen.findByTestId("catalog-tunnel-id-kind-a");
+  expect(badge.textContent).toBe("Tunnel failed");
+  expect(badge.getAttribute("title")).toBe('Tunnel "corp": refused');
 });

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { Button, Spinner } from "../../design";
 import { api } from "../../ipc/api";
 import type { ConnectionLogEntry } from "../../ipc/generated/ConnectionLogEntry";
 import type { ConnectionState } from "../../ipc/generated/ConnectionState";
 import type { FailureKind } from "../../ipc/generated/FailureKind";
+import { TUNNELS_ANCHOR } from "../prefs/TunnelsSection";
 import styles from "./ClusterScreen.module.css";
 
 const HEADINGS: Record<FailureKind, string> = {
@@ -15,6 +17,9 @@ const HEADINGS: Record<FailureKind, string> = {
   tunnel: "Cannot open the tunnel",
   other: "Connection failed",
 };
+
+/** Preferences, scrolled to the Tunnels list. */
+const TUNNEL_SETTINGS_PATH = `/preferences#${TUNNELS_ANCHOR}`;
 
 const LOG_POLL_MS = 500;
 
@@ -65,6 +70,7 @@ export function ConnectionPanel(props: {
   onDisconnect(): void;
 }) {
   const { state } = props;
+  const navigate = useNavigate();
   const log = useConnectionLog(props.id, state);
   const again = state.status === "failed" || props.reconnect;
   // The kubeconfig waits for permission to run a program: connecting again asks.
@@ -113,6 +119,14 @@ export function ConnectionPanel(props: {
           >
             {connectLabel}
           </Button>
+          {state.status === "failed" && state.kind === "tunnel" ? (
+            <Button
+              data-testid="cluster-tunnel-settings"
+              onClick={() => void navigate(TUNNEL_SETTINGS_PATH)}
+            >
+              Open tunnel settings
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <ul className={styles.log} data-testid="connection-log" aria-label="Log">

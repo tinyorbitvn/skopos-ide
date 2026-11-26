@@ -76,6 +76,12 @@
   white-space: nowrap;
 }
 
+.tipNote {
+  display: block;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
 .link,
 .notice {
   display: flex;

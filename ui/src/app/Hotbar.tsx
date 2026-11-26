@@ -44,10 +44,12 @@ import type { ClusterEntry } from "../ipc/generated/ClusterEntry";
 import { useCatalog } from "../stores/catalog";
 import { connectCluster, disconnectCluster } from "../stores/clusters";
 import { useShell } from "../stores/shell";
+import { useTunnels } from "../stores/tunnels";
 import { clusterStatus } from "./clusterStatus";
 import { clusterColor, clusterInitials } from "./clusterVisual";
 import styles from "./Hotbar.module.css";
 import { openPath, useNavItem } from "./tabs/navigation";
+import { tunnelProblem } from "./tunnelProblem";
 
 function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
   const unpin = useCatalog((s) => s.unpin);
@@ -59,6 +61,9 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: cluster.id });
   const status = clusterStatus(cluster.state);
+  const tunnels = useTunnels((s) => s.tunnels);
+  const problem = tunnelProblem(cluster, tunnels);
+  const dot = problem ?? status;
   const live =
     cluster.state.status === "connected" ||
     cluster.state.status === "connecting";
@@ -110,9 +115,14 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
         <div>
           <Tooltip
             content={
-              <span className={styles.tipName} title={cluster.name}>
-                {cluster.name}
-              </span>
+              <>
+                <span className={styles.tipName} title={cluster.name}>
+                  {cluster.name}
+                </span>
+                {problem !== null ? (
+                  <span className={styles.tipNote}>{problem.detail}</span>
+                ) : null}
+              </>
             }
           >
             <button
@@ -132,7 +142,7 @@ function HotbarItem({ cluster }: { cluster: ClusterEntry }) {
                 <span aria-hidden="true">{clusterInitials(cluster.name)}</span>
               )}
               <span className={styles.status}>
-                <StatusDot tone={status.tone} label={status.label} />
+                <StatusDot tone={dot.tone} label={dot.label} />
               </span>
             </button>
           </Tooltip>
