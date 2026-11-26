@@ -45,8 +45,6 @@ impl TunnelSecrets {
         }
     }
 
-    // Used by the consumers of the next tasks.
-    #[allow(dead_code)]
     /// From memory once read. Reading the store can block.
     pub(crate) fn get(&self, account: &str) -> CoreResult<Option<Secret>> {
         if let Some(kept) = self.kept.get(account) {
@@ -133,8 +131,6 @@ impl AppCore {
             .ok_or_else(gone)
     }
 
-    // Used by the consumers of the next tasks.
-    #[allow(dead_code)]
     /// A tunnel's proxy password, read off the Tokio workers.
     pub(crate) async fn tunnel_password(&self, id: &str) -> CoreResult<Option<Secret>> {
         let core = self.clone();

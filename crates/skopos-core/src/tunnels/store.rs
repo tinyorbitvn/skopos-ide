@@ -108,15 +108,11 @@ impl AppCore {
     }
 
     /// The tunnel with this id, if it still exists.
-    // Used by the consumers of the next tasks.
-    #[allow(dead_code)]
     pub(crate) fn tunnel_def(&self, id: &str) -> Option<TunnelDef> {
         self.tunnels_store().get().into_iter().find(|t| t.id == id)
     }
 
     /// The tunnel a cluster picked, when it still exists (spec §5.2).
-    // Used by the consumers of the next tasks.
-    #[allow(dead_code)]
     pub(crate) fn cluster_tunnel(&self, cluster: &ClusterId) -> Option<TunnelDef> {
         self.cluster_settings_get(cluster)
             .tunnel

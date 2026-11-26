@@ -116,8 +116,6 @@ pub(crate) fn host_port(url: &str) -> Option<(String, u16)> {
 impl AppCore {
     /// `U(T)`: the gateway URL with the tunnel's token (spec §5.5). Binds the gateway the
     /// first time; handing out the URL does not start the tunnel.
-    // Used by the consumers of the next tasks.
-    #[allow(dead_code)]
     pub(crate) fn tunnel_url(&self, def: &TunnelDef) -> CoreResult<Secret> {
         let runtime = self.tunnel_runtime();
         let port = {

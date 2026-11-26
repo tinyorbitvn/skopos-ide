@@ -619,10 +619,11 @@ impl AppCore {
             .get()
             .get(id)
             .map(|consent| consent.fingerprint.clone());
+        let route = self.cluster_route(id)?;
         Ok(self
             .inner
             .connections
-            .connect(entry, settings, allowed)
+            .connect(entry, settings, allowed, route)
             .await)
     }
 
@@ -728,6 +729,11 @@ impl AppCore {
             .find(|entry| entry.id == *id)
             .cloned()
             .ok_or_else(|| IpcError::new(ErrorCode::NotFound, format!("no cluster {id}")))?;
+        let tunnel = self.cluster_tunnel(id);
+        let gateway = tunnel
+            .as_ref()
+            .map(|def| self.tunnel_url(def))
+            .transpose()?;
         crate::kubeconfig::extract_context(
             Path::new(&entry.source_path),
             &entry.context_name,
@@ -741,7 +747,17 @@ impl AppCore {
                 format!("cannot read the kubeconfig of {}", entry.context_name),
             ));
         };
-        let Some(command) = exec_command(&kubeconfig) else {
+        if let Some(url) = &gateway {
+            if let Err(e) = crate::cluster::write_proxy_url(dest, url.expose()) {
+                let _ = std::fs::remove_file(dest);
+                return Err(e);
+            }
+        }
+        // The approval covers the tunnel's target, not this run's gateway URL (spec §5.7).
+        let trust = tunnel
+            .as_ref()
+            .map(|def| crate::cluster::with_proxy_url(&kubeconfig, &def.kind.trust_marker()));
+        let Some(command) = exec_command(trust.as_ref().unwrap_or(&kubeconfig)) else {
             return Ok(true);
         };
         let allowed = self

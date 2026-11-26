@@ -22,6 +22,8 @@ pub enum FailureKind {
     Other,
     /// The kubeconfig would run a program for credentials that the user has not allowed.
     ExecNotAllowed,
+    /// The cluster's tunnel could not reach the API server (tunnels spec §5.7).
+    Tunnel,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

@@ -21,7 +21,7 @@ use super::manager::{ClusterHandle, LogLevel};
 use super::state::{ClusterInfo, FailureKind};
 use crate::error::{
     auth_error_text, error_chain, find_auth_error, friendly_transport_message, sanitize_text,
-    ErrorCode,
+    CoreResult, ErrorCode, IpcError,
 };
 use crate::kubeconfig::{extract_context, ContextEntry};
 use crate::prefs::ClusterSettings;
@@ -88,10 +88,32 @@ pub(crate) struct Established {
     pub(crate) info: ClusterInfo,
     /// The kubeconfig's server URL for the context.
     pub(crate) server: Option<String>,
+    pub(crate) proxy_origin: ProxyOrigin,
 }
 
-/// Writes the per-context kubeconfig to `dest` and reads it back.
-pub(crate) fn prepare_kubeconfig(entry: &ContextEntry, dest: &Path) -> Result<Kubeconfig, Failure> {
+/// Where the `proxy-url` of `{id}.yaml` came from (tunnels spec §5.7).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum ProxyOrigin {
+    /// The source kubeconfig's own, or none.
+    #[default]
+    Source,
+    /// The tunnel's gateway URL, written over the source's own value, which exports put back.
+    Tunnel { source_proxy_url: Option<String> },
+}
+
+/// The context's kubeconfig as the source file has it, and what `{id}.yaml` holds instead.
+pub(crate) struct Prepared {
+    pub(crate) source: Kubeconfig,
+    pub(crate) proxy_origin: ProxyOrigin,
+}
+
+/// Writes the per-context kubeconfig to `dest` and reads it back. With a tunnel, `proxy` is
+/// the gateway URL, which the file gets as its cluster's `proxy-url` (spec §5.7).
+pub(crate) fn prepare_kubeconfig(
+    entry: &ContextEntry,
+    dest: &Path,
+    proxy: Option<&str>,
+) -> Result<Prepared, Failure> {
     extract_context(Path::new(&entry.source_path), &entry.context_name, dest).map_err(|e| {
         let kind = match e.code {
             ErrorCode::InvalidInput | ErrorCode::NotFound => FailureKind::ConfigInvalid,
@@ -106,7 +128,65 @@ pub(crate) fn prepare_kubeconfig(entry: &ContextEntry, dest: &Path) -> Result<Ku
         };
         Failure::new(kind, message)
     })?;
-    Kubeconfig::read_from(dest).map_err(|e| config_failure(&entry.source_path, &e))
+    let source = Kubeconfig::read_from(dest).map_err(|e| config_failure(&entry.source_path, &e))?;
+    let Some(proxy) = proxy else {
+        return Ok(Prepared {
+            source,
+            proxy_origin: ProxyOrigin::Source,
+        });
+    };
+    write_proxy_url(dest, proxy).map_err(|e| {
+        Failure::new(
+            FailureKind::Other,
+            format!(
+                "cannot prepare a kubeconfig from {}: {}",
+                entry.source_path, e.message
+            ),
+        )
+    })?;
+    let source_proxy_url = source
+        .clusters
+        .first()
+        .and_then(|named| named.cluster.as_ref())
+        .and_then(|cluster| cluster.proxy_url.clone());
+    Ok(Prepared {
+        source,
+        proxy_origin: ProxyOrigin::Tunnel { source_proxy_url },
+    })
+}
+
+/// The kubeconfig with every cluster's `proxy-url` set to `proxy`.
+pub(crate) fn with_proxy_url(kubeconfig: &Kubeconfig, proxy: &str) -> Kubeconfig {
+    let mut copy = kubeconfig.clone();
+    for named in &mut copy.clusters {
+        if let Some(cluster) = named.cluster.as_mut() {
+            cluster.proxy_url = Some(proxy.to_owned());
+        }
+    }
+    copy
+}
+
+/// Sets the `proxy-url` of every cluster of the private kubeconfig at `path`. Errors never
+/// quote the file.
+pub(crate) fn write_proxy_url(path: &Path, proxy: &str) -> CoreResult<()> {
+    use serde_yaml_ng::Value;
+    let text = std::fs::read_to_string(path)?;
+    let mut doc: Value = serde_yaml_ng::from_str(&text)
+        .map_err(|_| IpcError::new(ErrorCode::InvalidInput, "the kubeconfig is not valid YAML"))?;
+    if let Some(clusters) = doc.get_mut("clusters").and_then(Value::as_sequence_mut) {
+        for item in clusters {
+            if let Some(Value::Mapping(cluster)) = item.get_mut("cluster") {
+                cluster.insert(Value::from("proxy-url"), Value::from(proxy));
+            }
+        }
+    }
+    let text = serde_yaml_ng::to_string(&doc).map_err(|e| {
+        IpcError::new(
+            ErrorCode::Internal,
+            format!("cannot write the kubeconfig: {e}"),
+        )
+    })?;
+    crate::kubeconfig::write_private(path, text.as_bytes())
 }
 
 fn config_failure(source: &str, err: &KubeconfigError) -> Failure {
@@ -218,6 +298,7 @@ pub(crate) async fn establish(
     entry: &ContextEntry,
     settings: &ClusterSettings,
     timeouts: &ConnectTimeouts,
+    proxy: Option<&str>,
 ) -> Result<Established, Failure> {
     let classifier = Classifier {
         exec_command: exec_command(&kubeconfig).map(|command| command.command),
@@ -238,6 +319,7 @@ pub(crate) async fn establish(
         &classifier,
         deadline,
         limit,
+        proxy,
     )
     .await?;
 
@@ -282,9 +364,11 @@ pub(crate) async fn establish(
         discovery: Arc::new(discovery),
         info,
         server: entry.server.clone(),
+        proxy_origin: ProxyOrigin::Source,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_client(
     handle: &ClusterHandle,
     kubeconfig: Kubeconfig,
@@ -293,6 +377,7 @@ async fn build_client(
     classifier: &Classifier,
     deadline: Instant,
     limit: Duration,
+    proxy: Option<&str>,
 ) -> Result<Client, Failure> {
     let options = KubeConfigOptions {
         context: Some(entry.context_name.clone()),
@@ -315,6 +400,14 @@ async fn build_client(
         let parsed = url
             .parse::<http::Uri>()
             .map_err(|e| Failure::config(format!("the proxy URL setting is invalid: {e}")))?;
+        config.proxy_url = Some(parsed);
+    }
+    if let Some(url) = proxy {
+        // Set after `kube` read the kubeconfig: `kube` checks NO_PROXY against the proxy's own
+        // address, and NO_PROXY often holds 127.0.0.1.
+        let parsed = url
+            .parse::<http::Uri>()
+            .map_err(|_| Failure::new(FailureKind::Other, "the tunnel gateway URL is not valid"))?;
         config.proxy_url = Some(parsed);
     }
     // A 429 is an answer to show, such as an eviction a disruption budget refuses.

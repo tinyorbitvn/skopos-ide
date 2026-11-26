@@ -6,6 +6,7 @@ pub(crate) mod gateway;
 mod gateway_tests;
 pub(crate) mod http;
 pub mod model;
+pub(crate) mod route;
 pub(crate) mod runtime;
 pub mod secrets;
 pub mod state;

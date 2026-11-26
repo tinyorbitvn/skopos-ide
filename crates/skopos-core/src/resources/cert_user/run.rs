@@ -30,7 +30,7 @@ use crate::error::{CoreResult, ErrorCode, IpcError};
 use crate::kubeconfig::ClusterId;
 use crate::resources::csr::{certificate_expiry, set_approval, CsrDecision};
 use crate::resources::kubeconfig_export::{
-    check_destination, client_cert_kubeconfig, source_cluster, write_kubeconfig, SourceCluster,
+    check_destination, client_cert_kubeconfig, write_kubeconfig, SourceCluster,
 };
 use crate::resources::subjects::BindingKind;
 
@@ -584,7 +584,7 @@ impl AppCore {
     ) -> CoreResult<String> {
         let request = request.normalized()?;
         check_destination(dest)?;
-        let source = source_cluster(&self.cluster_kubeconfig_path(id)?)?;
+        let source = self.cluster_export_source(id)?;
         let client = self.cluster_client(id)?;
         // This token is already a child of the connection's own.
         let token = self.cluster_cancel_token(id)?;

@@ -51,6 +51,14 @@ impl TunnelKind {
             }
         }
     }
+
+    /// Stands for the tunnel in the exec approval fingerprint in place of `proxy-url`: its kind
+    /// and target, never its name, token or password (spec §5.7).
+    pub(crate) fn trust_marker(&self) -> String {
+        match self {
+            TunnelKind::Proxy { url, .. } => format!("skopos-tunnel:proxy:{url}"),
+        }
+    }
 }
 
 /// One tunnel as `tunnels.json` keeps it. Never sent to the webview: see `TunnelView`.

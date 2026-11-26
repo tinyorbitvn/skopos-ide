@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use ts_rs::TS;
 
-use super::kubeconfig_export::{check_destination, source_cluster, write_kubeconfig};
+use super::kubeconfig_export::{check_destination, write_kubeconfig};
 use super::ops::{invalid, is_path_segment};
 use crate::app_core::AppCore;
 use crate::error::{CoreResult, ErrorCode, IpcError};
@@ -66,7 +66,7 @@ impl AppCore {
         }
         check_destination(dest)?;
         let client = self.cluster_client(id)?;
-        let cluster = source_cluster(&self.cluster_kubeconfig_path(id)?)?.cluster;
+        let cluster = self.cluster_export_source(id)?.cluster;
 
         let accounts: Api<ServiceAccount> = Api::namespaced(client, namespace);
         let request = TokenRequest {

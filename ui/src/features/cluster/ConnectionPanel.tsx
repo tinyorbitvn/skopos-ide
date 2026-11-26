@@ -12,6 +12,7 @@ const HEADINGS: Record<FailureKind, string> = {
   forbidden: "Access forbidden",
   configInvalid: "Kubeconfig problem",
   execNotAllowed: "Permission needed",
+  tunnel: "Cannot open the tunnel",
   other: "Connection failed",
 };
 
