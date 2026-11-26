@@ -112,6 +112,18 @@ function Outcome(props: {
           Denied. The agent was told no.
         </p>
       );
+    case "running":
+      return (
+        <p role="status" className={styles.note}>
+          Running…
+        </p>
+      );
+    case "stoppedRunning":
+      return (
+        <p role="status" className={styles.muted}>
+          Stopped while it ran.
+        </p>
+      );
     case "stopped":
       return (
         <p role="status" className={styles.muted}>

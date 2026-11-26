@@ -127,6 +127,7 @@ test("waiting changes are counted", () => {
         result: null,
         rollout: null,
         output: null,
+        terminal: null,
       },
     },
   });

@@ -35,6 +35,7 @@ function card(partial: Partial<Card>): Card {
       name: "api",
     },
     output: null,
+    terminal: null,
     ...partial,
   };
 }

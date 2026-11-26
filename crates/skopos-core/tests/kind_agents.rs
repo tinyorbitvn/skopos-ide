@@ -59,6 +59,8 @@ impl Chat {
             core: core.clone(),
             approvals: approvals.clone(),
             scope: scope.clone(),
+            terminals: skopos_core::agents::terminal::AgentTerminals::new(),
+            work_dir: std::env::temp_dir(),
         });
         let (proposal_cards, proposals) = mpsc::channel(64);
         let tabs = EditorTabs::new(proposal_cards);

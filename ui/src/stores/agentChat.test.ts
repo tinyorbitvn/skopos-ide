@@ -307,6 +307,7 @@ test("Undo ends the standing approval of the card's cluster by id", async () => 
     result: null,
     rollout: null,
     output: null,
+    terminal: null,
   };
   act(() =>
     useAgentChat.setState({

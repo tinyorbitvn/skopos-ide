@@ -18,6 +18,7 @@ use skopos_core::agents::tabs::ProposalState;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::{CoreResult, ErrorCode};
 use skopos_core::kubeconfig::ClusterId;
+use skopos_core::prefs::{AgentChanges, ClusterAgentSettings, ClusterSettings, Prefs};
 use skopos_fakekube::{FakeKube, FakeKubeConfig};
 use support::connected_fake;
 use tempfile::TempDir;
@@ -1564,4 +1565,59 @@ async fn starting_the_app_removes_the_run_folders_a_crash_left() {
     let _core = AppCore::start(paths).await.unwrap();
     assert!(!stale.exists());
     assert!(root.path().join("app/data/agents/run").is_dir());
+}
+/// Lets the agent use the cluster's terminal, with a shell every OS has.
+fn terminal_bench_settings(bench: &Bench, changes: AgentChanges) {
+    bench
+        .core
+        .prefs_set(Prefs {
+            terminal_shell: Some(if cfg!(windows) { "cmd.exe" } else { "/bin/sh" }.to_owned()),
+            ..bench.core.prefs_get()
+        })
+        .unwrap();
+    let settings = ClusterSettings {
+        agent: ClusterAgentSettings {
+            changes,
+            terminal: true,
+            ..ClusterAgentSettings::default()
+        },
+        ..bench.core.cluster_settings_get(&bench.cluster)
+    };
+    bench
+        .core
+        .cluster_settings_set(&bench.cluster, settings)
+        .unwrap();
+}
+
+#[tokio::test]
+async fn the_fake_agent_runs_a_terminal_command() {
+    let bench = Bench::new(script(vec![turn(vec![tool(
+        "run_in_terminal",
+        json!({ "command": "echo skopos-terminal" }),
+    )])]))
+    .await;
+    terminal_bench_settings(&bench, AgentChanges::DontAsk);
+    let (info, mut events) = bench.start(MAIN).await;
+    bench.ask(&info.chat_id, "go").await;
+    let texts = agent_texts(&events.items());
+    assert!(
+        texts[0].starts_with("tool:run_in_terminal:exit 0"),
+        "{texts:?}"
+    );
+    let done = events.items().into_iter().find_map(|item| match item.body {
+        ChatItemBody::Change { card } if card.terminal.is_some() => Some(card),
+        _ => None,
+    });
+    let done = done.expect("no terminal card");
+    assert_eq!(
+        done.state,
+        ChangeState::AppliedWithoutAsking { standing: false }
+    );
+    assert_eq!(done.terminal.as_ref(), Some(&bench.cluster));
+    // The fake agent reports only the first line of a result, so the output shows on the card.
+    assert!(done
+        .output
+        .as_deref()
+        .unwrap_or_default()
+        .contains("skopos-terminal"));
 }

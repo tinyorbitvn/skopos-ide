@@ -2,7 +2,7 @@
 //! runs with `run_in_terminal`, one at a time, each in a PTY of its own, and the scrollback the
 //! dock tab `Agent · <cluster>` shows.
 
-// No tool or tab uses the runner yet (Tasks 3 and 4 do); drop this then.
+// The tab (Task 4) still has to use the rest of the runner; drop this then.
 #![allow(dead_code)]
 
 pub(crate) mod output;

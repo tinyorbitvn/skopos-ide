@@ -185,6 +185,7 @@ mod running {
     use crate::agents::registry::{default_agent, sign_in_hint, AgentSpec, AgentState};
     use crate::agents::spawn::{self, TOKEN_VAR};
     use crate::agents::tabs::{AttachedTab, EditorTabs, ProposalCard};
+    use crate::agents::terminal::AgentTerminals;
     use crate::app_core::AppCore;
     use crate::error::{CoreResult, ErrorCode, IpcError};
     use crate::kubeconfig::ClusterId;
@@ -303,7 +304,7 @@ mod running {
         let agent_dir = chats.dir.join(WORK).join(&agent.id);
         create_private_dir(&agent_dir)?;
         let run_folder = RunFolder::create(chats.dir.join(RUN).join(&id))?;
-        let wiring = wire(core, &clusters, scope.global).await?;
+        let wiring = wire(core, &clusters, scope.global, &agent_dir).await?;
         let app_binary = chats.app_binary()?;
         // Native agents spec §4.2: the person's own process, with the app's environment.
         let kubeconfig = run_folder.path.join(kubeconfig::CHAT_KUBECONFIG);
@@ -412,6 +413,7 @@ mod running {
         let (feed, feed_receiver) = mpsc::channel(FEED_BACKLOG);
         let Wiring {
             approvals,
+            terminals,
             cards,
             changes,
             tabs,
@@ -432,6 +434,7 @@ mod running {
             global: scope.global,
             session: Mutex::new(Some(Arc::new(session))),
             approvals,
+            terminals,
             permissions,
             tabs,
             feed,
@@ -633,6 +636,8 @@ mod running {
         /// `None` once the chat closes.
         session: Mutex<Option<Arc<AcpSession>>>,
         approvals: Arc<Approvals>,
+        /// The Agent terminals of the chat's clusters (native agents spec §5.3).
+        terminals: Arc<AgentTerminals>,
         /// The agent's own permission requests that wait for the person.
         permissions: Arc<Permissions>,
         /// The YAML tab of this chat and its proposals.
@@ -775,9 +780,11 @@ mod running {
         }
 
         /// Spec §4.3: Stop answers waiting approvals as stopped, the agent's waiting permission
-        /// requests as cancelled (native agents spec §4.2), and sends `session/cancel`.
+        /// requests as cancelled (native agents spec §4.2), ends the running terminal commands (native
+        /// agents spec §5.3), and sends `session/cancel`.
         fn stop(&self) {
             self.approvals.stop_all();
+            self.terminals.stop_all();
             self.permissions.cancel_all();
             if self.working.load(Ordering::SeqCst) {
                 self.stop_requested.store(true, Ordering::SeqCst);
@@ -939,6 +946,7 @@ mod running {
         if exited {
             // Spec §8: waiting approvals close as stopped, waiting permission cards cancelled.
             chat.approvals.stop_all();
+            chat.terminals.stop_all();
             chat.permissions.cancel_all();
             *lock(&chat.close_reason) = notice.as_ref().map(ChatNotice::text);
         }
@@ -1180,6 +1188,7 @@ mod running {
         /// The MCP endpoint's port on `127.0.0.1`.
         mcp_port: u16,
         approvals: Arc<Approvals>,
+        terminals: Arc<AgentTerminals>,
         cards: mpsc::Receiver<ToolCard>,
         changes: mpsc::Receiver<ChangeCard>,
         tabs: Arc<EditorTabs>,
@@ -1191,7 +1200,12 @@ mod running {
     }
 
     /// Native agents spec §4.2: the MCP endpoint listens on an ephemeral `127.0.0.1` port.
-    async fn wire(core: &AppCore, clusters: &[ScopeCluster], global: bool) -> CoreResult<Wiring> {
+    async fn wire(
+        core: &AppCore,
+        clusters: &[ScopeCluster],
+        global: bool,
+        work_dir: &Path,
+    ) -> CoreResult<Wiring> {
         let tools_endpoint = Endpoint::bind(Listen::Tcp).await?;
         let mcp_port = tools_endpoint.port();
         let token = new_token();
@@ -1203,10 +1217,13 @@ mod running {
             clusters: clusters.to_vec(),
             global,
         };
+        let terminals = AgentTerminals::new();
         let gate = Arc::new(ChatGate {
             core: core.clone(),
             approvals: approvals.clone(),
             scope: scope.clone(),
+            terminals: terminals.clone(),
+            work_dir: work_dir.to_path_buf(),
         });
         let (card_sender, cards) = mpsc::channel(CARD_BACKLOG);
         let (proposal_sender, proposals) = mpsc::channel(CARD_BACKLOG);
@@ -1228,6 +1245,7 @@ mod running {
             token,
             mcp_port,
             approvals,
+            terminals,
             cards,
             changes,
             tabs,
