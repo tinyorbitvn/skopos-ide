@@ -74,8 +74,10 @@ pub(crate) fn ssh_args(fields: &SshFields<'_>, options: &ArgOptions<'_>) -> Vec<
     args
 }
 
-/// Reads `ssh -V` (OpenSSH writes it to stderr): OpenSSH 8.4 or later is needed for
-/// `SSH_ASKPASS_REQUIRE` (spec §6.5). `Err` is what the tunnel shows.
+/// Reads `ssh -V` (OpenSSH writes it to stderr): OpenSSH 8.5 or later is needed. 8.4 added
+/// `SSH_ASKPASS_REQUIRE` (spec §6.5); 8.5 starts every keyboard-interactive prompt with
+/// `(user@host) `, so a server cannot send the exact text of `ssh`'s own passphrase or password
+/// prompt and get a remembered answer back. `Err` is what the tunnel shows.
 pub(crate) fn check_version(output: &str) -> Result<(), String> {
     let word = output
         .split_whitespace()
@@ -86,12 +88,12 @@ pub(crate) fn check_version(output: &str) -> Result<(), String> {
         .strip_prefix("OpenSSH_for_Windows_")
         .or_else(|| word.strip_prefix("OpenSSH_"))
         .and_then(major_minor)
-        .is_some_and(|version| version >= (8, 4));
+        .is_some_and(|version| version >= (8, 5));
     if new_enough {
         Ok(())
     } else {
         Err(format!(
-            "This ssh is {word}; SSH tunnels need OpenSSH 8.4 or later"
+            "This ssh is {word}; SSH tunnels need OpenSSH 8.5 or later"
         ))
     }
 }
@@ -287,10 +289,10 @@ mod tests {
     }
 
     #[test]
-    fn openssh_8_4_and_later_pass_the_version_check() {
+    fn openssh_8_5_and_later_pass_the_version_check() {
         for output in [
             "OpenSSH_9.6p1 Ubuntu-3ubuntu13, OpenSSL 3.0.13 30 Jan 2024",
-            "OpenSSH_8.4p1, LibreSSL 2.8.3",
+            "OpenSSH_8.5p1, LibreSSL 2.8.3",
             "OpenSSH_for_Windows_9.5p1, LibreSSL 3.8.2",
             "OpenSSH_10.0p2, OpenSSL 3.5.0 8 Apr 2025",
         ] {
@@ -302,7 +304,7 @@ mod tests {
     fn an_older_or_other_ssh_is_named() {
         let too_old = |word: &str| -> Result<(), String> {
             Err(format!(
-                "This ssh is {word}; SSH tunnels need OpenSSH 8.4 or later"
+                "This ssh is {word}; SSH tunnels need OpenSSH 8.5 or later"
             ))
         };
         assert_eq!(
@@ -312,6 +314,11 @@ mod tests {
         assert_eq!(
             check_version("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2"),
             too_old("OpenSSH_for_Windows_8.1p1")
+        );
+        // 8.4 has SSH_ASKPASS_REQUIRE but not the `(user@host) ` prefix on server prompts.
+        assert_eq!(
+            check_version("OpenSSH_8.4p1 Debian-5+deb11u3, OpenSSL 1.1.1w"),
+            too_old("OpenSSH_8.4p1")
         );
         assert_eq!(check_version("dropbear v2022.83"), too_old("dropbear"));
         assert_eq!(check_version(""), too_old("unknown"));

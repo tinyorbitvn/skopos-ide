@@ -48,14 +48,17 @@ pub struct TunnelPrompt {
 }
 
 /// What `ssh`'s prompt is (spec §6.3). `hint` is `SSH_ASKPASS_PROMPT`.
+///
+/// A server's keyboard-interactive prompt starts with `(user@host) ` (OpenSSH 8.5 and later), so
+/// only `ssh`'s own text, at its start, reads as a passphrase or a host key question.
 pub(crate) fn classify(text: &str, hint: Option<&str>) -> PromptKind {
     if hint == Some("confirm") {
         return PromptKind::Confirm;
     }
-    if text.contains("Enter passphrase for") {
+    if text.starts_with("Enter passphrase for") {
         return PromptKind::Passphrase;
     }
-    if text.contains("continue connecting") {
+    if !text.starts_with('(') && text.contains("continue connecting") {
         return PromptKind::HostKey;
     }
     if text.trim_end().to_lowercase().ends_with("password:") {
@@ -185,6 +188,22 @@ mod tests {
             Confirm
         );
         assert_eq!(classify("Verification code: ", None), Other);
+        // A server's keyboard-interactive text never reads as ssh's own passphrase or host key
+        // prompt.
+        assert_eq!(
+            classify(
+                "(me@bastion) Enter passphrase for key '/home/me/.ssh/id_ed25519': ",
+                None
+            ),
+            Other
+        );
+        assert_eq!(
+            classify(
+                "(me@bastion) Are you sure you want to continue connecting? ",
+                None
+            ),
+            Other
+        );
         assert!(Passphrase.can_remember() && Password.can_remember());
         assert!(!HostKey.can_remember() && !Confirm.can_remember() && !Other.can_remember());
     }

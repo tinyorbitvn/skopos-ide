@@ -318,7 +318,7 @@ async fn an_old_ssh_is_refused() {
     let view = f.core.tunnel_start(&f.id).await.unwrap();
     assert_eq!(
         view.state,
-        failed("This ssh is OpenSSH_8.2p1; SSH tunnels need OpenSSH 8.4 or later")
+        failed("This ssh is OpenSSH_8.2p1; SSH tunnels need OpenSSH 8.5 or later")
     );
     assert_eq!(f.runs(), 0);
 }

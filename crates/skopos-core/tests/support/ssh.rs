@@ -47,7 +47,7 @@ pub fn system_ssh() -> Option<PathBuf> {
     if cfg!(windows) {
         let output = std::process::Command::new(&ssh).arg("-V").output().unwrap();
         let text = String::from_utf8_lossy(&output.stderr).into_owned();
-        if !WINDOWS_ASKPASS || version_of(&text).is_none_or(|v| v < (8, 4)) {
+        if !WINDOWS_ASKPASS || version_of(&text).is_none_or(|v| v < (8, 5)) {
             eprintln!("not run: {} ({text}) runs in batch mode", ssh.display());
             return None;
         }

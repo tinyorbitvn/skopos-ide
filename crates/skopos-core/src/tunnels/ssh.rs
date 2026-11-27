@@ -33,7 +33,7 @@ use crate::process::{self, Output, ProcessSpec};
 use crate::secrets::Secret;
 use crate::tools::{find_on_path, is_executable};
 
-/// Whether Windows `ssh.exe` gets the askpass bridge when `ssh -V` says 8.4 or later (spec
+/// Whether Windows `ssh.exe` gets the askpass bridge when `ssh -V` says 8.5 or later (spec
 /// §6.5). The Windows CI job decides: `false` always runs it with `-o BatchMode=yes`, so any
 /// prompt fails with `CANNOT_ASK`.
 pub const WINDOWS_ASKPASS: bool = true;
@@ -54,7 +54,7 @@ pub(crate) const STOPPED: &str = "The tunnel was stopped";
 const WAITS_FOR_ANSWER: &str = "a prompt waits for an answer";
 
 /// Whether `ssh` runs with `-o BatchMode=yes`: on Windows, when the bridge is off or the
-/// `ssh` is older than `SSH_ASKPASS_REQUIRE` (8.4). Elsewhere an old `ssh` fails instead.
+/// `ssh` is older than 8.5 (`check_version`). Elsewhere an old `ssh` fails instead.
 pub(crate) fn ssh_batch(version: &Result<(), String>) -> bool {
     cfg!(windows) && (!WINDOWS_ASKPASS || version.is_err())
 }
