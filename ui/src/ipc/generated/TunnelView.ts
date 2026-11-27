@@ -18,4 +18,8 @@ passwordNote: string | null, state: TunnelState,
 /**
  * The oldest SSH prompt that waits for the person (spec §6.3).
  */
-prompt: TunnelPrompt | null, };
+prompt: TunnelPrompt | null, 
+/**
+ * The last lines `ssh` wrote to stderr; empty for a proxy tunnel (spec §6.1).
+ */
+log: Array<string>, };

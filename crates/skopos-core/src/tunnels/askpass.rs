@@ -2,8 +2,6 @@
 //! connects with the supervisor's token and relays `ssh`'s prompt. A remembered answer goes
 //! back at once; anything else waits for the person in `Prompts`.
 
-#![allow(dead_code)] // Used by tunnels::ssh from Task 5.
-
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};

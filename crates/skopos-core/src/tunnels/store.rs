@@ -34,6 +34,8 @@ pub struct TunnelView {
     pub state: TunnelState,
     /// The oldest SSH prompt that waits for the person (spec §6.3).
     pub prompt: Option<TunnelPrompt>,
+    /// The last lines `ssh` wrote to stderr; empty for a proxy tunnel (spec §6.1).
+    pub log: Vec<String>,
 }
 
 impl AppCore {
@@ -139,6 +141,7 @@ impl AppCore {
             password_note,
             state: self.tunnel_state(&def.id),
             prompt: self.tunnel_runtime().prompts.first(&def.id),
+            log: self.tunnel_runtime().ssh.log_lines(&def.id),
         }
     }
 }

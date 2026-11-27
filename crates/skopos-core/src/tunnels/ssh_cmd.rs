@@ -1,8 +1,6 @@
 //! What the SSH supervisor needs that runs no process (tunnels spec §6.2, §6.4, §6.5): the
 //! argument array, the `ssh -V` check, how an exit reads, and the stderr ring.
 
-#![allow(dead_code)] // Used by tunnels::ssh from Task 5.
-
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::Path;
@@ -158,6 +156,7 @@ pub(crate) fn exit_message(lines: &[String], code: Option<i32>, batch: bool) -> 
 
 /// The far side's reason in the `channel N: open failed: <reason>` line `ssh` writes when a
 /// forward is refused.
+#[allow(dead_code)] // Used by the gateway in a later task.
 pub(crate) fn open_failure(line: &str) -> Option<&str> {
     line.split_once("open failed: ")
         .map(|(_, reason)| reason.trim())

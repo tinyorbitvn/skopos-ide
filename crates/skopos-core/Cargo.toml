@@ -12,6 +12,10 @@ path = "src/bin/skopos-agent-host.rs"
 name = "skopos-fakeagent"
 path = "src/bin/skopos-fakeagent.rs"
 
+[[bin]]
+name = "skopos-fakessh"
+path = "src/bin/skopos-fakessh.rs"
+
 [dependencies]
 agent-client-protocol = { workspace = true, features = ["stdio"] }
 base64 = "0.22"

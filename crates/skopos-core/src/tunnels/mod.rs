@@ -16,6 +16,7 @@ pub mod prompts;
 pub(crate) mod route;
 pub(crate) mod runtime;
 pub mod secrets;
+pub(crate) mod ssh;
 pub(crate) mod ssh_cmd;
 pub mod state;
 pub mod store;
@@ -24,6 +25,8 @@ pub(crate) mod upstream;
 
 pub use model::{TunnelInput, TunnelKind};
 pub use prompts::{PromptKind, TunnelPrompt};
+pub use runtime::TunnelHold;
+pub use ssh::{SshTestHooks, WINDOWS_ASKPASS};
 pub use state::TunnelState;
 pub use store::TunnelView;
 pub use timings::TunnelTimings;

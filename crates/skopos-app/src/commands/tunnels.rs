@@ -37,7 +37,7 @@ pub async fn tunnel_test(state: State<'_, AppState>, id: String) -> Result<Tunne
 
 #[tauri::command]
 pub async fn tunnel_stop(state: State<'_, AppState>, id: String) -> Result<TunnelView, IpcError> {
-    state.core.tunnel_stop(&id)
+    state.core.tunnel_stop(&id).await
 }
 
 /// The only command a tunnel secret crosses IPC in.

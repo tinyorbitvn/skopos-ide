@@ -29,6 +29,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 pub(crate) enum DialError {
     Failed(String),
     TimedOut,
+    /// An SSH tunnel whose `ssh` is reconnecting; the last error (spec §6.4).
+    Reconnecting(String),
 }
 
 impl DialError {
@@ -36,6 +38,7 @@ impl DialError {
         match self {
             DialError::Failed(reason) => reason.clone(),
             DialError::TimedOut => format!("no answer within {} s", DIAL_LIMIT.as_secs()),
+            DialError::Reconnecting(last) => format!("ssh is reconnecting ({last})"),
         }
     }
 }

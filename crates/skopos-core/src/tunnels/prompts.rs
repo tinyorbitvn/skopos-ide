@@ -139,7 +139,6 @@ impl Prompts {
 
     /// The person acted on the tunnel: its prompts open at once (spec §6.1). `true` when one
     /// changed.
-    #[allow(dead_code)] // Used by tunnels::ssh from Task 5.
     pub(crate) fn open_at_once(&self, tunnel: &str) -> bool {
         let mut changed = false;
         for pending in self

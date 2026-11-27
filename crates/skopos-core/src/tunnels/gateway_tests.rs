@@ -176,7 +176,7 @@ async fn stop_ends_open_connections_and_test_reports_the_state() {
     let url = s.core.tunnel_url(&s.tunnel).unwrap();
     let target = format!("127.0.0.1:{}", s.echo.addr.port());
     let (mut stream, _) = connect(url.expose(), &target, None).await;
-    let view = s.core.tunnel_stop(&s.tunnel.id).unwrap();
+    let view = s.core.tunnel_stop(&s.tunnel.id).await.unwrap();
     assert_eq!(view.state, TunnelState::Idle);
     let mut rest = Vec::new();
     tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut rest))

@@ -34,7 +34,6 @@ impl Default for TunnelTimings {
 
 impl TunnelTimings {
     /// The delay before reconnect attempt `attempt`, counted from 1.
-    #[allow(dead_code)] // Used by tunnels::ssh from Task 5.
     pub(crate) fn backoff_for(&self, attempt: u32) -> Duration {
         let at = usize::try_from(attempt.saturating_sub(1)).unwrap_or(usize::MAX);
         self.backoff

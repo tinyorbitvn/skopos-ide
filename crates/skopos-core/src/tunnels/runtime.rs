@@ -13,13 +13,16 @@ use url::Url;
 
 use super::model::{TunnelDef, TunnelKind};
 use super::prompts::Prompts;
+use super::ssh::{Origin, SshTunnels};
 use super::state::TunnelState;
 use super::store::{gone, TunnelView};
 use super::timings::TunnelTimings;
 use super::upstream::{DialError, ProxyUpstream, Stream};
 use crate::agents::endpoint::{new_token, same_bytes};
 use crate::app_core::{AppCore, CoreEvent};
+use crate::cluster::ConnectionState;
 use crate::error::{CoreResult, ErrorCode, IpcError};
+use crate::kubeconfig::ClusterId;
 use crate::metrics::MetricsProviderSetting;
 use crate::secrets::Secret;
 
@@ -44,6 +47,7 @@ pub(crate) struct TunnelRuntime {
     shutdown: CancellationToken,
     /// The SSH prompts that wait for the person.
     pub(crate) prompts: Prompts,
+    pub(crate) ssh: SshTunnels,
     pub(crate) timings: Mutex<TunnelTimings>,
 }
 
@@ -73,6 +77,7 @@ impl TunnelRuntime {
             cancels: DashMap::new(),
             shutdown: CancellationToken::new(),
             prompts: Prompts::default(),
+            ssh: SshTunnels::default(),
             timings: Mutex::new(TunnelTimings::default()),
         }
     }
@@ -87,7 +92,12 @@ impl TunnelRuntime {
         OpenGuard(count)
     }
 
-    fn open_count(&self, id: &str) -> usize {
+    /// A token that ends with the core, for the tunnel's `ssh`.
+    pub(crate) fn shutdown_child(&self) -> CancellationToken {
+        self.shutdown.child_token()
+    }
+
+    pub(crate) fn open_count(&self, id: &str) -> usize {
         self.open
             .get(id)
             .map_or(0, |count| count.load(Ordering::Relaxed))
@@ -95,6 +105,7 @@ impl TunnelRuntime {
 
     /// Ends the tunnel's gateway connections and makes it `Idle`; the next use starts it.
     pub(crate) fn reset(&self, id: &str) {
+        self.ssh.cancel(id);
         if let Some((_, token)) = self.cancels.remove(id) {
             token.cancel();
         }
@@ -103,6 +114,7 @@ impl TunnelRuntime {
 
     /// Forgets a deleted tunnel: its token stops working at once.
     pub(crate) fn forget(&self, id: &str) {
+        self.ssh.forget(id);
         self.reset(id);
         self.tokens.remove(id);
         self.open.remove(id);
@@ -211,7 +223,9 @@ impl AppCore {
         let kept = runtime.states.get(id).map(|entry| entry.value().clone());
         match kept {
             Some((TunnelState::Up { .. }, at))
-                if at.elapsed() >= IDLE_AFTER && runtime.open_count(id) == 0 =>
+                if !runtime.ssh.running(id)
+                    && at.elapsed() >= IDLE_AFTER
+                    && runtime.open_count(id) == 0 =>
             {
                 TunnelState::Idle
             }
@@ -322,13 +336,69 @@ impl AppCore {
         Ok(self.tunnel_view(&def))
     }
 
-    /// `Stop` (spec §5.1): ends the tunnel's gateway connections. The next use starts it.
-    pub fn tunnel_stop(&self, id: &str) -> CoreResult<TunnelView> {
+    /// The clusters that picked the tunnel and are connected or connecting.
+    pub(crate) fn tunnel_clusters_in_use(&self, id: &str) -> Vec<ClusterId> {
+        self.cluster_settings_store()
+            .get()
+            .iter()
+            .filter(|(_, own)| own.tunnel.as_deref() == Some(id))
+            .map(|(cluster, _)| cluster.clone())
+            .filter(|cluster| {
+                matches!(
+                    self.cluster_state(cluster),
+                    ConnectionState::Connected { .. } | ConnectionState::Connecting
+                )
+            })
+            .collect()
+    }
+
+    /// In use: a connected cluster uses it, or the gateway holds a connection for it (spec
+    /// §6.4).
+    pub(crate) fn tunnel_in_use(&self, id: &str) -> bool {
+        self.tunnel_runtime().open_count(id) > 0 || !self.tunnel_clusters_in_use(id).is_empty()
+    }
+
+    /// Holds a gateway connection's place, so the tunnel counts as in use (tests).
+    pub fn tunnel_hold_for_test(&self, id: &str) -> TunnelHold {
+        TunnelHold {
+            _guard: self.tunnel_runtime().open_guard(id),
+        }
+    }
+
+    /// `Start` (spec §5.1): starts an SSH tunnel and waits until it is up or failed. Its
+    /// prompts open at once.
+    pub async fn tunnel_start(&self, id: &str) -> CoreResult<TunnelView> {
         let def = self.tunnel_def(id).ok_or_else(gone)?;
+        if !def.kind.is_ssh() {
+            return Err(IpcError::new(
+                ErrorCode::Unsupported,
+                "A proxy tunnel starts when a cluster uses it.",
+            ));
+        }
+        // The outcome is in the state the view carries.
+        let _ = self.ssh_ensure_up(&def, Origin::Person).await;
+        Ok(self.tunnel_view(&def))
+    }
+
+    /// `Stop` (spec §5.1; the 2026-11-27 ruling): disconnects the clusters that use the
+    /// tunnel, ends its `ssh` and its gateway connections. Nothing starts it again by itself.
+    pub async fn tunnel_stop(&self, id: &str) -> CoreResult<TunnelView> {
+        let def = self.tunnel_def(id).ok_or_else(gone)?;
+        for cluster in self.tunnel_clusters_in_use(id) {
+            if let Err(e) = self.cluster_disconnect(&cluster).await {
+                tracing::warn!("Stop could not disconnect a cluster: {}", e.message);
+            }
+        }
+        self.ssh_stop(id).await;
         self.tunnel_runtime().reset(id);
         self.emit(CoreEvent::TunnelsChanged);
         Ok(self.tunnel_view(&def))
     }
+}
+
+/// What `tunnel_hold_for_test` gives: the tunnel is in use until it drops.
+pub struct TunnelHold {
+    _guard: OpenGuard,
 }
 
 #[cfg(test)]
