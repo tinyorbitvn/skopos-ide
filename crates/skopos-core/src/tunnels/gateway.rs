@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::http::{authority, read_head, status_reason};
 use super::runtime::OpenGuard;
+use super::ssh::Origin;
 use super::upstream::{DialError, Stream};
 use crate::app_core::{AppCore, WeakCore};
 
@@ -213,7 +214,10 @@ impl AppCore {
         }
         let cancel = self.tunnel_runtime().cancel_token(id);
         let open = self.tunnel_runtime().open_guard(id);
-        match self.tunnel_dial(&def, &request.host, request.port).await {
+        match self
+            .tunnel_dial(&def, &request.host, request.port, Origin::Gateway)
+            .await
+        {
             Ok(upstream) => {
                 tracing::debug!("tunnel {}: opened {target}", def.name);
                 Ok(Admitted {
@@ -227,6 +231,13 @@ impl AppCore {
                 Err(format!(
                     "504 {}",
                     status_reason(&format!("Tunnel \"{}\" timed out", def.name))
+                ))
+            }
+            Err(DialError::Reconnecting(_)) => {
+                tracing::info!("tunnel {}: {target} waits for a reconnect", def.name);
+                Err(format!(
+                    "503 {}",
+                    status_reason(&format!("Tunnel \"{}\" is reconnecting", def.name))
                 ))
             }
             Err(e) => {

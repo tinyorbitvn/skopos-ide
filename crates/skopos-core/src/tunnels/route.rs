@@ -2,6 +2,7 @@
 
 use super::model::TunnelDef;
 use super::runtime::host_port;
+use super::ssh::Origin;
 use crate::app_core::AppCore;
 use crate::error::CoreResult;
 use crate::kubeconfig::ClusterId;
@@ -39,7 +40,21 @@ impl TunnelRoute {
             return Ok(());
         };
         self.core
-            .tunnel_dial(&self.def, &host, port)
+            .tunnel_dial(&self.def, &host, port, Origin::Person)
+            .await
+            .map(drop)
+            .map_err(|e| e.reason())
+    }
+
+    /// Starts an SSH tunnel's `ssh` and waits until it is up, before the connect's deadline
+    /// starts: a prompt may wait for the person longer than that (spec §6.1, §6.2). A proxy
+    /// tunnel has nothing to start. `Err` is the reason.
+    pub(crate) async fn warm_up(&self) -> Result<(), String> {
+        if !self.def.kind.is_ssh() {
+            return Ok(());
+        }
+        self.core
+            .ssh_ensure_up(&self.def, Origin::Person)
             .await
             .map(drop)
             .map_err(|e| e.reason())

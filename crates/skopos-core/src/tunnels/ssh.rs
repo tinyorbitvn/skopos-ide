@@ -19,13 +19,15 @@ use tokio_util::sync::CancellationToken;
 
 use super::askpass::{AskState, Refusal, PROMPT_CANCELLED, PROMPT_UNANSWERED};
 use super::askpass_mode::{ASKPASS_ADDR_VAR, ASKPASS_TOKEN_VAR};
+use super::http::authority;
 use super::model::TunnelDef;
 use super::ssh_cmd::{
-    check_version, classify_exit, exit_message, ssh_args, ArgOptions, ExitKind, LogRing,
+    check_version, classify_exit, exit_message, open_failure, ssh_args, ArgOptions, ExitKind,
+    LogRing,
 };
 use super::state::TunnelState;
 use super::timings::TunnelTimings;
-use super::upstream::DialError;
+use super::upstream::{DialError, ProxyUpstream, Stream};
 use crate::app_core::{AppCore, CoreEvent, WeakCore};
 use crate::process::{self, Output, ProcessSpec};
 use crate::secrets::Secret;
@@ -35,6 +37,8 @@ use crate::tools::{find_on_path, is_executable};
 /// §6.5). The Windows CI job decides: `false` always runs it with `-o BatchMode=yes`, so any
 /// prompt fails with `CANNOT_ASK`.
 pub const WINDOWS_ASKPASS: bool = true;
+/// How long a refused dial waits for the `open failed` line `ssh` writes (spec §6.2).
+const OPEN_FAILURE_WAIT: Duration = Duration::from_millis(200);
 /// A taken `-D` port starts `ssh` again at once, this many times in a row (spec §6.2).
 const PORT_RETRIES: u32 = 3;
 /// How often the supervisor looks whether `ssh` came up.
@@ -449,6 +453,44 @@ async fn supervise(core: WeakCore, def: TunnelDef, supervisor: Arc<Supervisor>) 
 }
 
 impl AppCore {
+    /// Dials `host:port` through the tunnel's `ssh -D`: SOCKS5 without authentication, the
+    /// name resolved on the far side (spec §6.2). A refusal carries the far side's reason.
+    pub(crate) async fn ssh_dial(
+        &self,
+        def: &TunnelDef,
+        host: &str,
+        port: u16,
+        origin: Origin,
+    ) -> Result<Box<dyn Stream>, DialError> {
+        let local = self.ssh_ensure_up(def, origin).await?;
+        let ssh = &self.tunnel_runtime().ssh;
+        let mark = ssh.log_mark(&def.id);
+        let upstream = ProxyUpstream::new(&format!("socks5://127.0.0.1:{local}"), None)?;
+        match upstream.dial(host, port).await {
+            Ok(stream) => Ok(stream),
+            Err(DialError::TimedOut) => Err(DialError::TimedOut),
+            Err(_) => {
+                let target = authority(host, port);
+                let started = Instant::now();
+                loop {
+                    let reason = ssh
+                        .log_since(&def.id, mark)
+                        .iter()
+                        .find_map(|line| open_failure(line).map(str::to_owned));
+                    if let Some(reason) = reason {
+                        return Err(DialError::Failed(format!(
+                            "ssh could not open {target}: {reason}"
+                        )));
+                    }
+                    if started.elapsed() >= OPEN_FAILURE_WAIT {
+                        return Err(DialError::Failed(format!("ssh could not open {target}")));
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        }
+    }
+
     pub fn set_ssh_test_hooks(&self, hooks: SshTestHooks) {
         *lock(&self.tunnel_runtime().ssh.hooks) = hooks;
     }

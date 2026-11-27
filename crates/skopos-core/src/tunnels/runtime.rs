@@ -260,7 +260,13 @@ impl AppCore {
         def: &TunnelDef,
         host: &str,
         port: u16,
+        origin: Origin,
     ) -> Result<Box<dyn Stream>, DialError> {
+        if def.kind.is_ssh() {
+            // The supervisor keeps an SSH tunnel's state (spec §6.4): a refused target is
+            // not the tunnel failing.
+            return self.ssh_dial(def, host, port, origin).await;
+        }
         if !self.tunnel_state(&def.id).is_up() {
             self.tunnel_set_state(&def.id, TunnelState::Starting);
         }
@@ -290,9 +296,9 @@ impl AppCore {
                 };
                 ProxyUpstream::new(url, credentials)
             }
-            TunnelKind::Ssh { .. } => {
-                Err(DialError::Failed("SSH tunnels cannot start yet".to_owned()))
-            }
+            TunnelKind::Ssh { .. } => Err(DialError::Failed(
+                "an SSH tunnel has no proxy upstream".to_owned(),
+            )),
         }
     }
 
@@ -305,8 +311,8 @@ impl AppCore {
         self.tunnel_upstream(def).await?.dial(host, port).await
     }
 
-    /// `Test connection` (spec §5.1): dials the API server of a cluster that uses the tunnel,
-    /// or, when none does, reaches the proxy itself.
+    /// `Test connection` (spec §5.1, §6.1): dials the API server of a cluster that uses the
+    /// tunnel, or, when none does, reaches the proxy itself or starts `ssh`.
     pub async fn tunnel_test(&self, id: &str) -> CoreResult<TunnelView> {
         let def = self.tunnel_def(id).ok_or_else(gone)?;
         let mut targets: Vec<(String, u16)> = self.tunnel_api_targets(id).into_iter().collect();
@@ -314,9 +320,27 @@ impl AppCore {
             targets = self.tunnel_targets(id).into_iter().collect();
         }
         targets.sort();
+        if def.kind.is_ssh() {
+            match targets.first() {
+                Some((host, port)) => {
+                    let dialed = self.tunnel_dial(&def, host, *port, Origin::Person).await;
+                    if let Err(e) = dialed {
+                        // `ssh` is up but the far side refused: the state cannot say why.
+                        if self.tunnel_state(&def.id).is_up() {
+                            return Err(IpcError::new(ErrorCode::Unreachable, e.reason()));
+                        }
+                    }
+                }
+                None => {
+                    // The outcome is in the state the view carries.
+                    let _ = self.ssh_ensure_up(&def, Origin::Person).await;
+                }
+            }
+            return Ok(self.tunnel_view(&def));
+        }
         if let Some((host, port)) = targets.first() {
             // The outcome is in the state the view carries.
-            let _ = self.tunnel_dial(&def, host, *port).await;
+            let _ = self.tunnel_dial(&def, host, *port, Origin::Person).await;
         } else {
             self.tunnel_set_state(&def.id, TunnelState::Starting);
             let outcome = match self.tunnel_upstream(&def).await {

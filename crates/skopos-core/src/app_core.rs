@@ -988,6 +988,8 @@ impl AppCore {
         quit.step("sessions idle");
         self.inner.connections.disconnect_all();
         quit.step("clusters disconnected");
+        self.ssh_stop_all().await;
+        quit.step("ssh tunnels stopped");
         let sync = lock(&self.inner.sync).take();
         let sync_events = lock(&self.inner.sync_events).take();
         let stopped = async {
