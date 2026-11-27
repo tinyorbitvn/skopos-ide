@@ -8,7 +8,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
 ## Product
 
 - **Catalog and clusters:** kubeconfig files are watched and synced into a catalog with folders
-  and a hotbar; several clusters connect at once, one failing never affects another. A cluster can reach its API server through a named proxy tunnel.
+  and a hotbar; several clusters connect at once, one failing never affects another. A cluster can reach its API server through a named proxy or SSH tunnel.
 - **Shell:** sidebar, tabs across several windows (restored on restart), command palette, dock.
 - **Resources:** live tables per kind (columns, status badges, filter by any column), a detail
   drawer with actions, a YAML editor to edit and create, cluster and section overviews, a
@@ -78,7 +78,10 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   `127.0.0.1`, with a per-run token per tunnel and an allowlist of each cluster's API server and
   metrics host. The `kube` client, `{id}.yaml` and chat kubeconfigs use the gateway as their
   `proxy-url`; exports keep the source's own `proxy-url`. Passwords live in the keychain service
-  `SkoposIDE tunnels`.
+  `SkoposIDE tunnels`. SSH tunnels run the system `ssh -N -D 127.0.0.1:<port>` under a supervisor
+  (`tunnels/ssh.rs`) that reconnects while a cluster uses it; `ssh` asks through the app binary's
+  askpass mode (told apart by `SKOPOS_ASKPASS_TOKEN`), and the prompt reaches the windows as
+  `TunnelView.prompt`. Remembered answers use the same keychain service.
 - Security: CSP with no remote scripts, fonts and Monaco bundled; URLs leave the app only through
   `external_url.rs`; a system dialog picks save paths, never the page; errors and logs never quote
   kubeconfig, store or Secret values; destructive actions confirm and name the target.
@@ -87,10 +90,11 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   `Read only`, `Don't ask`), namespace limits and hidden Secret values run in core on every call. `run_in_terminal` runs one shell command per PTY with the cluster's kubeconfig (`agents/terminal/`), one at a time per chat and cluster, shown in an `Agent · <cluster>` dock tab. The chat's model comes from the agent's ACP `model` config option (`agents/model.rs`); the person's last pick per agent is saved in `AgentPrefs.agents`.
 - Agents run natively (no sandbox) with the app's environment, `KUBECONFIG` set to the chat's
   own kubeconfig and the MCP token; on Windows a Job object holds the agent's process tree. The
-  app binary's hidden `--agent-mcp` mode is parsed in `main.rs` before Tauri starts.
+  app binary's hidden `--agent-mcp` and askpass modes are parsed in `main.rs` before Tauri starts.
 - Test doubles: `skopos-fakekube` is a fake API server for core tests and the smoke e2e;
-  `skopos-fakeagent` is a scripted ACP agent and `skopos-agent-host` stands in for the app
-  binary as `--agent-mcp` in tests. None ship.
+  `skopos-fakeagent` is a scripted ACP agent, `skopos-agent-host` stands in for the app
+  binary as `--agent-mcp` and as `SSH_ASKPASS` in tests, `skopos-fakessh` is a scripted `ssh`,
+  and `skopos-fakesshd` is an SSH server (russh) for the real `ssh`. None ship.
 - E2E: WebdriverIO with `tauri-plugin-wdio-webdriver`, compiled only under the Cargo feature
   `e2e`; `SKOPOS_E2E_SPEC_SET` picks `full`, `smoke` or `screens`.
 - UI: TinyOrbit tokens (`ui/src/design/tinyorbit.css`), semantic tokens only in product CSS, CSS
