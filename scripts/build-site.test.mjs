@@ -614,6 +614,23 @@ describe("page", () => {
   });
   after(() => fs.rmSync(out, { recursive: true, force: true }));
 
+  test("shows Microsoft's own Store badge, served by the site, linking to the Store listing", () => {
+    const { storeId } = JSON.parse(
+      fs.readFileSync(path.join(ROOT, "crates", "skopos-app", "msix", "store.json"), "utf8"),
+    );
+    const href = `href="https://apps.microsoft.com/detail/${storeId}"`;
+    const img = '<img src="images/ms-store-badge.svg" alt="Download from the Microsoft Store" width="161" height="44">';
+    assert.ok(html.includes(`<a class="store-badge store-badge--sm" ${href}>${img}</a>`), "the Windows row");
+    for (const id of ["hero-store", "cta-store"]) {
+      // Hidden until site.js sees a Windows visitor.
+      assert.ok(html.includes(`<a class="store-badge" id="${id}" ${href} hidden>${img}</a>`), id);
+    }
+    const badge = fs.readFileSync(path.join(out, "images", "ms-store-badge.svg"), "utf8");
+    assert.match(badge, /^<svg width="161" height="44" viewBox="0 0 161 44"/);
+    assert.doesNotMatch(badge, /<script|<foreignObject|\son[a-z]+=/i);
+    assert.doesNotMatch(html, /get\.microsoft\.com/, "no request to Microsoft's servers");
+  });
+
   test("has one h1, the landmarks and a skip link", () => {
     assert.equal(html.match(/<h1[\s>]/g)?.length, 1);
     for (const part of ['<header class="nav">', '<main id="main">', '<footer class="footer">']) {

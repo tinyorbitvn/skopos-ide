@@ -86,12 +86,22 @@
     link.classList.add("button--primary");
   }
 
+  // Windows visitors also get the Microsoft Store badge beside the Download buttons: the Store
+  // signs the app, so Windows shows no SmartScreen warning.
+  function showStore(doc) {
+    for (const id of ["hero-store", "cta-store"]) {
+      const badge = doc.getElementById(id);
+      if (badge) badge.hidden = false;
+    }
+  }
+
   function init(doc, nav) {
     const os = detectOs(nav);
     if (!os) return Promise.resolve(null);
     return detectArch(nav).then((arch) => {
       const pick = pickDownload(os, arch);
       const link = (suffix) => doc.querySelector(`#download a[data-asset="${suffix}"]`);
+      if (os === "windows") showStore(doc);
       const target = pick && link(pick.primary);
       if (!target) return null;
       for (const each of [doc.getElementById("hero-download"), doc.getElementById("cta-download")]) {

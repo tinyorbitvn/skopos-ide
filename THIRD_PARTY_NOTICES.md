@@ -70,6 +70,18 @@ shapes and colours are unchanged; the Helm files lose only their editor's layer 
 are trademarks of The Linux Foundation; their use here does not imply that The Linux Foundation or
 its projects sponsor or endorse SkoposIDE.
 
+## Microsoft Store badge
+
+- Source: https://get.microsoft.com/images/en-us%20dark.svg, the English badge for dark pages that
+  Microsoft's badge generator (https://apps.microsoft.com/badge) serves, downloaded on 2026-11-27
+- Terms: Microsoft offers the badge to apps in the Microsoft Store to link to their listing
+  (https://learn.microsoft.com/windows/apps/publish/faq/leverage-developer-tools); it states no
+  copyright license.
+
+The project site shows it as `site/images/ms-store-badge.svg`, unchanged, only as the link to
+SkoposIDE's Store listing. Microsoft and the Microsoft Store badge are trademarks of the Microsoft
+group of companies; their use here does not imply that Microsoft sponsors or endorses SkoposIDE.
+
 ## Reading the reference locally
 
 Reference code is not part of this repository. Clone it into `tmp/reference/`, which git

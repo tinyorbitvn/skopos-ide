@@ -352,6 +352,23 @@ a:hover {
   box-shadow: none;
 }
 
+/* Microsoft's own "Download from the Microsoft Store" badge (images/ms-store-badge.svg),
+   unchanged and at its proportions: as tall as a button beside it. */
+.store-badge {
+  display: inline-flex;
+  border-radius: var(--radius-xs);
+}
+
+.store-badge img {
+  display: block;
+  width: auto;
+  height: 46px;
+}
+
+.store-badge--sm img {
+  height: 40px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

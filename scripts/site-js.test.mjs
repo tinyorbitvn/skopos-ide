@@ -94,10 +94,21 @@ function page({ withoutAssets = [], withoutHero = false, withoutCta = false, wit
   const file = element();
   const alt = element();
   alt.hidden = true;
-  const ids = { "hero-download": button, "cta-download": cta, "hero-file": file, "hero-alt": alt };
+  const store = { hero: element(), cta: element() };
+  store.hero.hidden = true;
+  store.cta.hidden = true;
+  const ids = {
+    "hero-download": button,
+    "cta-download": cta,
+    "hero-file": file,
+    "hero-alt": alt,
+    "hero-store": withoutHero ? null : store.hero,
+    "cta-store": withoutCta ? null : store.cta,
+  };
   return {
     button,
     cta,
+    store,
     links,
     cards,
     file,
@@ -295,6 +306,24 @@ describe("site.js", () => {
       }
     });
   }
+
+  for (const c of [...CASES, ...NO_INSTALLER]) {
+    const windows = OS[c.label] === "windows";
+    test(`${c.name}: the Microsoft Store badges are ${windows ? "shown" : "hidden"}`, async () => {
+      const doc = page();
+      await loadSite().init(doc, c.nav);
+      assert.equal(doc.store.hero.hidden, !windows);
+      assert.equal(doc.store.cta.hidden, !windows);
+    });
+  }
+
+  test("Windows shows the Store badges even without the installer's link", async () => {
+    const doc = page({ withoutAssets: ["x64-setup.exe"] });
+    const windows = CASES.find((c) => OS[c.label] === "windows");
+    assert.equal(await loadSite().init(doc, windows.nav), null);
+    assert.equal(doc.store.hero.hidden, false);
+    assert.equal(doc.store.cta.hidden, false);
+  });
 
   test("a page without the call to action or the cards still points the hero", async () => {
     const doc = page({ withoutCta: true, withoutCards: true });
