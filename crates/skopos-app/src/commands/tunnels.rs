@@ -1,5 +1,5 @@
-//! Tunnels (tunnels spec §5.2). A proxy password crosses IPC inward only, in
-//! `tunnel_set_password` (spec T1).
+//! Tunnels (tunnels spec §5.2, §6). A proxy password crosses IPC inward only, in
+//! `tunnel_set_password`, and an SSH answer only in `tunnel_prompt_answer` (spec T1).
 
 use skopos_core::blocking::blocking;
 use skopos_core::error::IpcError;
@@ -36,6 +36,11 @@ pub async fn tunnel_test(state: State<'_, AppState>, id: String) -> Result<Tunne
 }
 
 #[tauri::command]
+pub async fn tunnel_start(state: State<'_, AppState>, id: String) -> Result<TunnelView, IpcError> {
+    state.core.tunnel_start(&id).await
+}
+
+#[tauri::command]
 pub async fn tunnel_stop(state: State<'_, AppState>, id: String) -> Result<TunnelView, IpcError> {
     state.core.tunnel_stop(&id).await
 }
@@ -58,4 +63,25 @@ pub async fn tunnel_clear_password(
 ) -> Result<TunnelView, IpcError> {
     let core = state.core.clone();
     blocking(move || core.tunnel_clear_password(&id)).await
+}
+
+/// The only command an SSH answer crosses IPC in, inward (spec §6.3, T1).
+#[tauri::command]
+pub async fn tunnel_prompt_answer(
+    state: State<'_, AppState>,
+    prompt_id: String,
+    answer: Secret,
+    remember: bool,
+) -> Result<(), IpcError> {
+    state
+        .core
+        .tunnel_prompt_answer(&prompt_id, answer, remember)
+}
+
+#[tauri::command]
+pub async fn tunnel_prompt_cancel(
+    state: State<'_, AppState>,
+    prompt_id: String,
+) -> Result<(), IpcError> {
+    state.core.tunnel_prompt_cancel(&prompt_id)
 }

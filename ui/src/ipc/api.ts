@@ -235,7 +235,13 @@ export const api = {
     call<TunnelView>("tunnel_save", { tunnel }),
   tunnelDelete: (id: string) => call<void>("tunnel_delete", { id }),
   tunnelTest: (id: string) => call<TunnelView>("tunnel_test", { id }),
+  tunnelStart: (id: string) => call<TunnelView>("tunnel_start", { id }),
   tunnelStop: (id: string) => call<TunnelView>("tunnel_stop", { id }),
+  /** The only call an SSH answer crosses IPC in, inward (tunnels spec T1). */
+  tunnelPromptAnswer: (promptId: string, answer: string, remember: boolean) =>
+    call<void>("tunnel_prompt_answer", { promptId, answer, remember }),
+  tunnelPromptCancel: (promptId: string) =>
+    call<void>("tunnel_prompt_cancel", { promptId }),
   /** The only call a tunnel password crosses IPC in, inward (tunnels spec T1). */
   tunnelSetPassword: (id: string, password: string) =>
     call<TunnelView>("tunnel_set_password", { id, password }),
