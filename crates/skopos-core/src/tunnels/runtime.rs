@@ -110,6 +110,8 @@ impl TunnelRuntime {
             token.cancel();
         }
         self.states.remove(id);
+        // The cancelled wait drops its future before it can close its prompt.
+        self.prompts.clear_tunnel(id);
     }
 
     /// Forgets a deleted tunnel: its token stops working at once.
@@ -441,5 +443,19 @@ mod tests {
             Some(("mimir.internal".into(), 80))
         );
         assert_eq!(host_port("not a url"), None);
+    }
+
+    #[tokio::test]
+    async fn reset_drops_the_waiting_prompt() {
+        let runtime = TunnelRuntime::new(Handle::current());
+        let (_, waiting) = runtime.prompts.open(
+            "t1",
+            super::super::prompts::PromptKind::Password,
+            "Password: ",
+            false,
+        );
+        runtime.reset("t1");
+        assert_eq!(runtime.prompts.first("t1"), None);
+        assert!(waiting.await.is_err());
     }
 }
