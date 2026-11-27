@@ -12,6 +12,7 @@ pub(crate) mod http;
 pub(crate) mod migrate;
 pub mod model;
 pub(crate) mod no_proxy;
+pub(crate) mod port_owner;
 pub mod prompts;
 pub(crate) mod route;
 pub(crate) mod runtime;

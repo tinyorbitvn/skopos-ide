@@ -21,6 +21,7 @@ use super::askpass::{AskState, Refusal, PROMPT_CANCELLED, PROMPT_UNANSWERED};
 use super::askpass_mode::{ASKPASS_ADDR_VAR, ASKPASS_TOKEN_VAR};
 use super::http::authority;
 use super::model::TunnelDef;
+use super::port_owner::listener_is_ours;
 use super::ssh_cmd::{
     check_version, classify_exit, exit_message, open_failure, ssh_args, ArgOptions, ExitKind,
     LogRing,
@@ -51,6 +52,10 @@ const VERSION_LIMIT: Duration = Duration::from_secs(10);
 pub(crate) const SSH_MISSING: &str =
     "ssh was not found on PATH. Install OpenSSH or set its path in Preferences › Tools";
 pub(crate) const STOPPED: &str = "The tunnel was stopped";
+
+fn port_not_ours(port: u16) -> String {
+    format!("Another user's program listens on 127.0.0.1:{port}, the tunnel's local port, so ssh was stopped")
+}
 const WAITS_FOR_ANSWER: &str = "a prompt waits for an answer";
 
 /// Whether `ssh` runs with `-o BatchMode=yes`: on Windows, when the bridge is off or the
@@ -185,6 +190,8 @@ enum End {
 /// How waiting for `ssh` to come up ended.
 enum Started {
     Up,
+    /// The port answers, but another user's program holds it (`port_owner`).
+    PortTaken,
     Stopped,
     TimedOut,
     Exited(Option<i32>),
@@ -246,7 +253,11 @@ async fn wait_up(
             () = tokio::time::sleep(UP_POLL) => {}
         }
         if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
-            return Started::Up;
+            return if listener_is_ours(port).await {
+                Started::Up
+            } else {
+                Started::PortTaken
+            };
         }
         if !supervisor.ask.waiting() {
             spent += UP_POLL;
@@ -375,6 +386,16 @@ async fn run_tunnel(core: &WeakCore, def: &TunnelDef, supervisor: &Arc<Superviso
             Started::Stopped => {
                 process::stop(&mut child, STOP_GRACE).await;
                 return End::Stopped;
+            }
+            Started::PortTaken => {
+                // Never the person's traffic to that program: `ssh` starts again on a new port.
+                process::stop(&mut child, STOP_GRACE).await;
+                let _ = tokio::time::timeout(STDERR_DRAIN, reader).await;
+                if port_retries < PORT_RETRIES {
+                    port_retries += 1;
+                    continue;
+                }
+                return End::Failed(port_not_ours(local_port));
             }
             Started::TimedOut => {
                 process::stop(&mut child, STOP_GRACE).await;
