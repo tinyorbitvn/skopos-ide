@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The Microsoft Store package of SkoposIDE (Store spec §2). scripts/msix.mjs fills in the
-     placeholder values. Write virtualization is off so the Store copy and setup.exe share AppData. -->
+     placeholder values. Write virtualization stays on: the Store refused unvirtualizedResources,
+     so files the Store copy creates under AppData and its HKCU writes stay in the package. -->
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
-         IgnorableNamespaces="uap rescap desktop6">
+         IgnorableNamespaces="uap rescap">
   <Identity Name="{{name}}" Publisher="{{publisher}}" Version="{{version}}" ProcessorArchitecture="x64"/>
   <Properties>
     <DisplayName>SkoposIDE</DisplayName>
     <PublisherDisplayName>{{publisherDisplayName}}</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
-    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
   </Properties>
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0"/>
@@ -29,6 +27,5 @@
   </Applications>
   <Capabilities>
     <rescap:Capability Name="runFullTrust"/>
-    <rescap:Capability Name="unvirtualizedResources"/>
   </Capabilities>
 </Package>

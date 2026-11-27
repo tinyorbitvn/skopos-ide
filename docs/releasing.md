@@ -269,8 +269,10 @@ Store signs the package. Pre-release tags skip the job.
   identity page; it is public. The package's logos come from `crates/skopos-app/icons/`.
 - The first submission is manual: download the `msix` artifact and follow
   [docs/store-listing.md](store-listing.md).
-- If the Store refuses `unvirtualizedResources`, stop submitting (`STORE_SUBMIT=false`) and
-  revisit the design: without it the Store copy's AppData is separate from `setup.exe`'s.
+- The package keeps write virtualization on: the Store refused `unvirtualizedResources` on the
+  first submission. Files the Store copy creates under %APPDATA% and its HKCU writes stay in the
+  package, so its settings are apart from `setup.exe`'s; `~/.kube` and other folders outside
+  AppData are shared.
 
 ## Project site
 

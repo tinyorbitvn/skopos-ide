@@ -13,6 +13,9 @@ The text to paste into Partner Center for the first submission, and the answers 
 - Copyright: Copyright Nguyen Van Long
 - License terms: https://github.com/tinyorbitvn/skopos-ide/blob/main/LICENSE (PolyForm Shield 1.0.0)
 
+The Store reviewers check the website and the support contact: give the site's own domain, not the
+GitHub Pages address that forwards to it.
+
 ## Short description
 
 Desktop Kubernetes IDE: every kubeconfig in one catalog, live resource tables, logs, shells, Helm and Argo CD.
@@ -59,11 +62,11 @@ YAML tab and Preferences.
 - `runFullTrust`: SkoposIDE is a Win32 desktop app. It runs the kubectl exec credential plugins
   the person configured, local terminals, and the helm and kubectl tools, which needs a
   full-trust desktop process.
-- `unvirtualizedResources`: the app's terminals run the person's own command-line tools, such as
-  kubectl, helm, az or gcloud. Their configuration and sign-in caches live under %APPDATA% and
-  HKCU and must stay shared with the same tools outside the app and with the SkoposIDE build
-  downloaded from GitHub. With write virtualization these writes would land in a private copy that
-  the person's other tools never see.
+
+The package asks for no other restricted capability. The first submission also asked for
+`unvirtualizedResources`, and the Store refused it (policy 10.6.3), so write virtualization stays
+on: files the Store copy creates under %APPDATA% and its HKCU writes stay in the package, apart
+from the GitHub build's.
 
 ## Age rating (IARC questionnaire)
 

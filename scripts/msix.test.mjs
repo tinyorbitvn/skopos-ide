@@ -57,15 +57,15 @@ test("identity values are escaped, non-ASCII text passes through", () => {
   assert.match(xml, /Publisher="CN=Nguyễn &amp; Co, O=&quot;X&quot;"/);
 });
 
-test("the manifest names the package, the exe, full trust and unvirtualized writes", () => {
+test("the manifest names the package, the exe and full trust, and keeps write virtualization", () => {
   const xml = renderManifest(TEMPLATE, values());
   assert.doesNotMatch(xml, /\{\{/);
   assert.match(xml, /<Identity Name="SkoposIDE\.Test" Publisher="CN=SkoposIDE Test" Version="0\.13\.1\.0" ProcessorArchitecture="x64"\/>/);
   assert.match(xml, /<Application Id="SkoposIDE" Executable="SkoposIDE\.exe" EntryPoint="Windows\.FullTrustApplication">/);
   assert.match(xml, /<rescap:Capability Name="runFullTrust"\/>/);
-  assert.match(xml, /<rescap:Capability Name="unvirtualizedResources"\/>/);
-  assert.match(xml, /<desktop6:FileSystemWriteVirtualization>disabled<\/desktop6:FileSystemWriteVirtualization>/);
-  assert.match(xml, /<desktop6:RegistryWriteVirtualization>disabled<\/desktop6:RegistryWriteVirtualization>/);
+  // The Store refused unvirtualizedResources (policy 10.6.3) on the first submission.
+  assert.doesNotMatch(xml, /<rescap:Capability Name="unvirtualizedResources"/);
+  assert.doesNotMatch(xml, /desktop6:/);
   assert.match(xml, /MinVersion="10\.0\.19041\.0"/);
 });
 

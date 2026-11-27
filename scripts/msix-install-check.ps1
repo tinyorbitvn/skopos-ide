@@ -2,7 +2,8 @@
 .SYNOPSIS
 Installs an MSIX for a check (Store spec, section 4): signs a copy with a throwaway
 certificate, installs it, starts the app and checks that it logs its Microsoft Store channel to
-the real %APPDATA%, then removes everything. It never touches an already installed copy.
+the package's private copy of %APPDATA% (write virtualization is on), then removes everything. It
+never touches an already installed copy.
 
 Run it with Windows PowerShell 5.1 (powershell.exe): PowerShell 7 can't load the Appx module
 on windows-2022. Keep the file ASCII, which 5.1 reads the same without a byte order mark.
@@ -82,22 +83,29 @@ try {
     $package = Get-AppxPackage -Name $name
     Start-Process "shell:AppsFolder\$($package.PackageFamilyName)!SkoposIDE"
 
-    # 5. The channel line in a log written after the start, under the real %APPDATA%.
-    $logs = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'skopos\SkoposIDE\data\logs'
-    $virtual = Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalCache\Roaming\skopos"
+    # 5. The channel line in a log written after the start. With write virtualization on, a log
+    # file the app creates under %APPDATA% lands in the package's private copy of Roaming, and one
+    # that already existed in the real %APPDATA% is written in place, so look in both.
+    $relative = 'skopos\SkoposIDE\data\logs'
+    $logs = @(
+        (Join-Path $env:LOCALAPPDATA "Packages\$($package.PackageFamilyName)\LocalCache\Roaming\$relative"),
+        (Join-Path ([Environment]::GetFolderPath('ApplicationData')) $relative)
+    )
     $deadline = $started.AddSeconds($TimeoutSeconds)
-    $found = $false
+    $found = $null
     while (-not $found -and (Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 2
-        if (Test-Path $virtual) { throw "writes are still virtualized: $virtual exists" }
-        if (Test-Path $logs) {
-            $found = [bool](Get-ChildItem $logs -Filter 'skopos.*.log' |
-                Where-Object { $_.LastWriteTime -ge $started } |
-                Select-String -SimpleMatch 'install channel: microsoft-store')
+        foreach ($dir in $logs) {
+            if ($found -or -not (Test-Path $dir)) { continue }
+            if (Get-ChildItem $dir -Filter 'skopos.*.log' |
+                    Where-Object { $_.LastWriteTime -ge $started } |
+                    Select-String -SimpleMatch 'install channel: microsoft-store') {
+                $found = $dir
+            }
         }
     }
-    if (-not $found) { throw "no 'install channel: microsoft-store' line under $logs within $TimeoutSeconds s" }
-    Write-Host "MSIX check passed: $name logs its Store channel under $logs"
+    if (-not $found) { throw "no 'install channel: microsoft-store' line under $($logs -join ' or ') within $TimeoutSeconds s" }
+    Write-Host "MSIX check passed: $name logs its Store channel under $found"
 } finally {
     # 6. Remove everything, also on failure.
     if ($package) {
