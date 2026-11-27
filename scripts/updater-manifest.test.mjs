@@ -19,6 +19,7 @@ const UPDATER_FILES = [
   "SkoposIDE_x64.app.tar.gz",
   `SkoposIDE_${VERSION}_amd64.AppImage`,
   `SkoposIDE_${VERSION}_amd64.deb`,
+  `SkoposIDE-${VERSION}-1.x86_64.rpm`,
   `SkoposIDE_${VERSION}_x64-setup.exe`,
 ];
 // What a draft holds after the four builds.
@@ -75,6 +76,10 @@ describe("buildManifest", () => {
       "linux-x86_64-deb": {
         signature: `sig-of-SkoposIDE_${VERSION}_amd64.deb`,
         url: download(`SkoposIDE_${VERSION}_amd64.deb`),
+      },
+      "linux-x86_64-rpm": {
+        signature: `sig-of-SkoposIDE-${VERSION}-1.x86_64.rpm`,
+        url: download(`SkoposIDE-${VERSION}-1.x86_64.rpm`),
       },
       "windows-x86_64-nsis": {
         signature: `sig-of-SkoposIDE_${VERSION}_x64-setup.exe`,

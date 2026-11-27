@@ -190,6 +190,11 @@ jobs:
           # latest.json is built once, by the publish job, from all four builds.
           includeUpdaterJson: false
           args: ${{ matrix.args }} --config crates/skopos-app/tauri.conf.json --config crates/skopos-app/tauri.updater.conf.json
+      # Fedora has WebKitGTK 4.1; RHEL 10 and its rebuilds take it from EPEL (docs/releasing.md).
+      - name: Install the rpm on Fedora and AlmaLinux
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: scripts/check-rpm.sh target/release/bundle/rpm/*.rpm
       - name: Keep the exe for the Microsoft Store
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -297,11 +302,15 @@ jobs:
             name="SkoposIDE_${version}_${suffix}"
             grep -qxF "$name" <<<"$names" || missing+=("$name")
           done
+          # Tauri names the rpm unlike the others.
+          rpm="SkoposIDE-${version}-1.x86_64.rpm"
+          grep -qxF "$rpm" <<<"$names" || missing+=("$rpm")
           sbom="SkoposIDE_${version}.cdx.json"
           grep -qxF "$sbom" <<<"$names" || missing+=("$sbom")
           updater=(
             "SkoposIDE_${version}_amd64.AppImage.sig"
             "SkoposIDE_${version}_amd64.deb.sig"
+            "${rpm}.sig"
             "SkoposIDE_${version}_x64-setup.exe.sig"
             "SkoposIDE_aarch64.app.tar.gz"
             "SkoposIDE_aarch64.app.tar.gz.sig"

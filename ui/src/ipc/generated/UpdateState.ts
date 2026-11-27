@@ -15,7 +15,7 @@ current: string,
  */
 blocker: string | null, 
 /**
- * How this copy was installed: `app`, `nsis`, `appimage` or `deb`; `None` when unknown.
+ * How this copy was installed: `app`, `nsis`, `appimage`, `deb` or `rpm`; `None` when unknown.
  */
 installer: string | null, 
 /**

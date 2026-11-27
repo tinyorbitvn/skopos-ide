@@ -8,6 +8,7 @@ release notes (see `docs/releasing.md`).
 
 - **SkoposIDE is on the Microsoft Store:** on Windows you can install it from the Microsoft Store, which signs it, so Windows shows no SmartScreen warning, and the Store keeps it up to date. The Store copy keeps its own settings, apart from those of the installer on the releases page; both use the same `~/.kube`.
 - **SSH tunnels:** a tunnel can go through an SSH bastion, a jump host, a VS Code Remote-SSH host or a Coder workspace, using the system's `ssh` and `~/.ssh/config`. The app asks for passphrases, passwords, codes and new host keys, can remember passphrases and passwords in the keychain, and reconnects when the connection drops. SSH tunnels need OpenSSH 8.5 or later.
+- **RPM package for Fedora and RHEL:** each release has an rpm for Fedora, RHEL 10, Rocky Linux 10 and AlmaLinux 10, beside the AppImage and the deb. RHEL 10 and its rebuilds need EPEL enabled, for WebKitGTK and the tray library; RHEL 9 is not supported. The rpm updates itself like the deb, asking for your password.
 - **Kiro CLI as an agent:** Preferences › Agents lists Kiro CLI after Gemini CLI. With `kiro-cli` installed and signed in (`kiro-cli login`), a chat can use it, and the chat header shows its models.
 
 ## [0.16.0] - 2026-11-27

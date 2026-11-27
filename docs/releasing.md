@@ -49,16 +49,17 @@ the dependency advisories each change adds; see
       notarizes and staples the dmg, checks the dmg, the app inside it and the app in the
       updater archive, and replaces the dmg in the draft (see
       [macOS signing and notarization](#macos-signing-and-notarization)). Each build signs its
-      updater files with the updater key: the AppImage, the deb and the Windows setup exe get a
-      `.sig`, and each macOS build adds `SkoposIDE_aarch64.app.tar.gz` or
+      updater files with the updater key: the AppImage, the deb, the rpm and the Windows setup exe
+      get a `.sig`, and each macOS build adds `SkoposIDE_aarch64.app.tar.gz` or
       `SkoposIDE_x64.app.tar.gz` and its `.sig`. A build stops at once when the updater key's
-      secret, or on macOS an Apple secret, is not set.
+      secret, or on macOS an Apple secret, is not set. The Linux build then installs its rpm in
+      Fedora and AlmaLinux 10 containers with `scripts/check-rpm.sh` (see [RPM](#rpm)).
    5. **sbom:** once the draft exists, `make sbom` builds the SBOM and uploads it to the draft as
       `SkoposIDE_<version>.cdx.json` (see [SBOM](#sbom)).
    6. **publish:** once all four builds and the SBOM pass, `scripts/updater-manifest.mjs` builds
       `latest.json` from the draft's updater files and signatures and uploads it to the draft.
-      The draft must then hold the five installers (AppImage, deb, arm64 and x64 dmg, Windows
-      setup exe), the updater files, `latest.json` and the SBOM; then it is published and marked
+      The draft must then hold the six installers (AppImage, deb, rpm, arm64 and x64 dmg,
+      Windows setup exe), the updater files, `latest.json` and the SBOM; then it is published and marked
       Latest.
       A tag with a pre-release suffix, such as `v0.7.0-rc.1`, is published as a pre-release,
       which installed copies are not offered. For a stable release, the job then checks that
@@ -157,16 +158,38 @@ release build sets `APPLE_SIGNING_IDENTITY`. The app needs no entitlements.
 Do this for the first release that includes the updater, and again whenever the updater or the
 release workflow changes.
 
-1. Install the release by hand on macOS (arm64, and x64 where possible), Windows, the AppImage
-   and the deb.
+1. Install the release by hand on macOS (arm64, and x64 where possible), Windows, the AppImage,
+   the deb and the rpm.
 2. Publish the next release.
 3. In each copy, choose Help > Check for Updates…, then Install and Restart. Check that the app
    restarts into the new version with its windows and tabs as they were.
 4. On macOS, check that no Gatekeeper prompt appears. The first update from an ad-hoc signed
    release to a Developer ID signed one may ask once for the passwords SkoposIDE keeps in the
    Keychain; later updates must not ask.
-5. On the deb, check that cancelling the password prompt shows "The package was not installed.
+5. On the deb and the rpm, check that cancelling the password prompt shows "The package was not installed.
    If you cancelled the password prompt, try again." and that Try Again works.
+
+## RPM
+
+The Linux build makes `SkoposIDE-<version>-1.x86_64.rpm`, named by Tauri unlike the other
+installers, with its updater `.sig`; `latest.json` offers it as `linux-x86_64-rpm`. It needs
+WebKitGTK 4.1 (`libwebkit2gtk-4.1.so.0`), the tray library (`libayatana-appindicator3.so.1`)
+and the glibc of the Ubuntu 24.04 runner, 2.39. Fedora has all three. RHEL 10, Rocky Linux 10
+and AlmaLinux 10 have the glibc and take the two libraries from EPEL; without EPEL, `dnf` refuses
+the rpm. RHEL 9 has neither WebKitGTK 4.1 nor the glibc, so it is not supported.
+
+`scripts/check-rpm.sh <rpm>` installs the rpm in a Fedora container and in an AlmaLinux 10
+container with EPEL, and fails when the install fails or a binary in `/usr/bin` links a library
+that is not installed. It needs Docker; the release's Linux build runs it on its rpm. Run it by
+hand after changing the bundle settings:
+
+```sh
+pnpm tauri build --bundles rpm --config crates/skopos-app/tauri.conf.json
+scripts/check-rpm.sh target/release/bundle/rpm/*.rpm
+```
+
+The site shows the rpm in the Linux card only while the latest release has it
+(`OPTIONAL_ASSETS` in `scripts/build-site.mjs`), since 0.16.0 and earlier have none.
 
 ## SBOM
 

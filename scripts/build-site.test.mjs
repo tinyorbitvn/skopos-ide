@@ -6,6 +6,7 @@ import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   ASSET_SUFFIXES,
+  OPTIONAL_ASSETS,
   assertSafeOut,
   build,
   cli,
@@ -33,6 +34,18 @@ const SIZES = {
   "x64.dmg": 14640351,
   "x64-setup.exe": 9762270,
 };
+
+const RPM = "SkoposIDE-0.6.1-1.x86_64.rpm";
+
+// The same release with the rpm, which releases after 0.16.0 publish.
+function withRpm(json) {
+  json.assets.push({
+    name: RPM,
+    size: 17031524,
+    browser_download_url: `${REPO_URL}/releases/download/v0.6.1/${RPM}`,
+  });
+  return json;
+}
 
 // Shaped like the answer of GET /repos/{owner}/{repo}/releases/latest.
 function releaseJson(overrides = {}) {
@@ -116,6 +129,16 @@ describe("parseRelease", () => {
     assert.equal(release.assets["x64-setup.exe"].size, "9.8 MB");
   });
 
+  test("reads the rpm when the release has it, and leaves it out otherwise", () => {
+    assert.deepEqual(parseRelease(withRpm(releaseJson())).assets["x86_64.rpm"], {
+      name: RPM,
+      url: `${REPO_URL}/releases/download/v0.6.1/${RPM}`,
+      size: "17.0 MB",
+    });
+    assert.equal(Object.hasOwn(parseRelease(releaseJson()).assets, "x86_64.rpm"), false);
+    assert.deepEqual(Object.keys(OPTIONAL_ASSETS), ["x86_64.rpm"]);
+  });
+
   test("names every missing installer", () => {
     const gone = ["SkoposIDE_0.6.1_x64.dmg", "SkoposIDE_0.6.1_amd64.deb"];
     const json = releaseJson();
@@ -150,6 +173,7 @@ describe("parseRelease", () => {
     const download = (name) => `${REPO_URL}/releases/download/v0.6.1/${name}`;
     for (const name of [
       "SkoposIDE_0.6.1_amd64.deb.sig",
+      `${RPM}.sig`,
       "SkoposIDE_0.6.1_x64-setup.exe.sig",
       "SkoposIDE_aarch64.app.tar.gz",
       "SkoposIDE_aarch64.app.tar.gz.sig",
@@ -194,6 +218,24 @@ describe("render", () => {
         "9.8 MB",
         '<img src="images/shot.png" width="1440" height="900">',
       ].join("|"),
+    );
+  });
+
+  test("keeps an optional installer's block only while the release has the file", () => {
+    const page = "a{{#asset:x86_64.rpm}}[{{asset:x86_64.rpm:name}}]{{/asset:x86_64.rpm}}b";
+    assert.equal(render(page, { release, images }), "ab");
+    const withIt = parseRelease(withRpm(releaseJson()));
+    assert.equal(render(page, { release: withIt, images }), `a[${RPM}]b`);
+  });
+
+  test("stops on a block of an installer that is not optional, or one left open", () => {
+    assert.throws(
+      () => render("{{#asset:x64.dmg}}x{{/asset:x64.dmg}}", { release, images }),
+      /\{\{#asset:x64\.dmg\}\} is not an optional installer/,
+    );
+    assert.throws(
+      () => render("{{#asset:x86_64.rpm}}x", { release, images }),
+      /unknown placeholder \{\{#asset:x86_64\.rpm\}\}/,
     );
   });
 
@@ -440,6 +482,21 @@ describe("build", () => {
       assert.ok(tag.includes(`data-name="${asset.name}"`), tag);
       assert.ok(tag.includes(`data-size="${asset.size}"`), tag);
     }
+  });
+
+  test("offers the rpm in the Linux card only once the release has it", (t) => {
+    assert.ok(!html.includes("x86_64.rpm"));
+    const rpmOut = tempOut();
+    t.after(() => fs.rmSync(rpmOut, { recursive: true, force: true }));
+    const withIt = parseRelease(withRpm(releaseJson()));
+    build({ release: withIt, out: rpmOut, root: ROOT });
+    const page = fs.readFileSync(path.join(rpmOut, "index.html"), "utf8");
+    const links = [...page.matchAll(/<a\s[^>]*data-asset="([^"]+)"[^>]*>/g)].map((m) => m[1]);
+    assert.deepEqual(links.sort(), [...ASSET_SUFFIXES, "x86_64.rpm"].sort());
+    const linux = /<article class="platform" data-os="linux">[\s\S]*?<\/article>/.exec(page)[0];
+    assert.ok(linux.includes(`href="${withIt.assets["x86_64.rpm"].url}"`), linux);
+    assert.ok(linux.includes("Fedora and RHEL package"), linux);
+    assert.ok(linux.includes("EPEL"), linux);
   });
 
   test("every image has alt text and the size of its file", () => {

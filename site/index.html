@@ -388,10 +388,15 @@
             <span class="file__text"><span class="file__label">Debian and Ubuntu package</span><span class="file__meta">{{asset:amd64.deb:name}} · {{asset:amd64.deb:size}}</span></span>
             <a class="button button--line button--sm" href="{{asset:amd64.deb:url}}" data-asset="amd64.deb" data-name="{{asset:amd64.deb:name}}" data-size="{{asset:amd64.deb:size}}" aria-label="Download {{asset:amd64.deb:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
           </li>
+          {{#asset:x86_64.rpm}}<li class="file">
+            <span class="file__text"><span class="file__label">Fedora and RHEL package</span><span class="file__meta">{{asset:x86_64.rpm:name}} · {{asset:x86_64.rpm:size}}</span></span>
+            <a class="button button--line button--sm" href="{{asset:x86_64.rpm:url}}" data-asset="x86_64.rpm" data-name="{{asset:x86_64.rpm:name}}" data-size="{{asset:x86_64.rpm:size}}" aria-label="Download {{asset:x86_64.rpm:name}}"><svg class="icon icon--sm" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </li>{{/asset:x86_64.rpm}}
         </ul>
         <div class="first-run">
           <p><strong>First run.</strong> Mark the AppImage executable, then run it:</p>
           <code>chmod +x {{asset:amd64.AppImage:name}}</code>
+          {{#asset:x86_64.rpm}}<p><strong>RHEL 10, Rocky Linux 10 or AlmaLinux 10.</strong> Enable EPEL first: the rpm takes WebKitGTK and the tray library from it. RHEL 9 is not supported.</p>{{/asset:x86_64.rpm}}
         </div>
       </article>
     </div>

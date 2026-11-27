@@ -9,8 +9,9 @@ export const REPO_URL = "https://github.com/tinyorbitvn/skopos-ide";
 
 /**
  * Each platform key of latest.json and the end of its file's name. The plugin looks up
- * `{os}-{arch}-{installer}` first, then `{os}-{arch}`, so a deb install gets the deb and
- * an AppImage the AppImage.
+ * `{os}-{arch}-{installer}` first, then `{os}-{arch}`, so a deb install gets the deb, an rpm
+ * install the rpm and an AppImage the AppImage. Tauri names the rpm
+ * `SkoposIDE-<version>-1.x86_64.rpm`, unlike the others.
  */
 export const PLATFORMS = [
   ["darwin-aarch64-app", "_aarch64.app.tar.gz"],
@@ -20,6 +21,7 @@ export const PLATFORMS = [
   ["linux-x86_64-appimage", "_amd64.AppImage"],
   ["linux-x86_64", "_amd64.AppImage"],
   ["linux-x86_64-deb", "_amd64.deb"],
+  ["linux-x86_64-rpm", ".x86_64.rpm"],
   ["windows-x86_64-nsis", "_x64-setup.exe"],
   ["windows-x86_64", "_x64-setup.exe"],
 ];

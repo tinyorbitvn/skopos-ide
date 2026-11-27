@@ -77,7 +77,7 @@ test("an available release shows its notes, its date and the three choices", asy
     "Install and Restart",
   ]);
   expect(screen.queryByTestId("update-will-stop")).toBeNull();
-  expect(screen.queryByTestId("update-deb")).toBeNull();
+  expect(screen.queryByTestId("update-package")).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Full release notes" }));
   await act(flush);
@@ -120,12 +120,15 @@ test("it says what a restart stops in this window", () => {
   );
 });
 
-test("a deb install warns about the password prompt", () => {
-  show({ ...available, installer: "deb" });
-  expect(screen.getByTestId("update-deb").textContent).toBe(
-    "You'll be asked for your password to install the package.",
-  );
-});
+test.each(["deb", "rpm"])(
+  "a %s install warns about the password prompt",
+  (installer) => {
+    show({ ...available, installer });
+    expect(screen.getByTestId("update-package").textContent).toBe(
+      "You'll be asked for your password to install the package.",
+    );
+  },
+);
 
 test("a copy that cannot update itself says why and offers the download page", async () => {
   const backend = show({
