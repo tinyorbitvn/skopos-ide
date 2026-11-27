@@ -238,7 +238,7 @@ runs on a schedule.
 The `store` job of `release.yml` publishes each stable release to the Microsoft Store as an MSIX
 (Store spec in the local specs). It packs the exe that `build (windows)` made for `setup.exe`
 with `scripts/msix.mjs`, checks the package with `scripts/msix-install-check.ps1` (install,
-start, the `install channel: microsoft-store` log line under the real `%APPDATA%`, no Visual C++
+start, the `install channel: microsoft-store` log line in the package's copy of `%APPDATA%`, no Visual C++
 runtime import), keeps the unsigned `.msix` as the workflow artifact `msix` for 30 days, and,
 when the repository variable `STORE_SUBMIT` is `true`, submits it with `msstore publish`. The
 Store signs the package. Pre-release tags skip the job.

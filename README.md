@@ -143,8 +143,8 @@ make e2e-smoke  # smoke end-to-end tests, no Docker
 - **macOS**: builds are signed with a Developer ID certificate and notarized by Apple. Drag the app to Applications and open it.
 - **Windows**: install SkoposIDE from the [Microsoft Store](https://apps.microsoft.com/detail/9PC8GNRRQB5Q),
   which signs it, so Windows shows no warning. The installer from the releases page is not signed
-  yet: in SmartScreen choose "More info", then "Run anyway". Install one of the two: both use the
-  same settings.
+  yet: in SmartScreen choose "More info", then "Run anyway". Install one of the two: the Store copy
+  keeps its own settings, apart from the installer's, and both use the same `~/.kube`.
 - **Linux**: mark the AppImage executable with `chmod +x` and run it.
 
 ## Updates
