@@ -81,7 +81,11 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   `SkoposIDE tunnels`. SSH tunnels run the system `ssh -N -D 127.0.0.1:<port>` under a supervisor
   (`tunnels/ssh.rs`) that reconnects while a cluster uses it; `ssh` asks through the app binary's
   askpass mode (told apart by `SKOPOS_ASKPASS_TOKEN`), and the prompt reaches the windows as
-  `TunnelView.prompt`. Remembered answers use the same keychain service.
+  `TunnelView.prompt`. Remembered answers use the same keychain service and are forgotten when
+  the destination changes. OpenSSH 8.5 or later is required: it starts a server's prompts with
+  `(user@host) `, so a server cannot imitate `ssh`'s own. The `-D` port has no authentication
+  (accepted, spec §11, and the SSH dialog says so); on Linux `tunnels/port_owner.rs` refuses a
+  listener another user holds.
 - Security: CSP with no remote scripts, fonts and Monaco bundled; URLs leave the app only through
   `external_url.rs`; a system dialog picks save paths, never the page; errors and logs never quote
   kubeconfig, store or Secret values; destructive actions confirm and name the target.
