@@ -11,6 +11,7 @@ pub(crate) mod no_proxy;
 pub(crate) mod route;
 pub(crate) mod runtime;
 pub mod secrets;
+pub(crate) mod ssh_cmd;
 pub mod state;
 pub mod store;
 pub(crate) mod upstream;
