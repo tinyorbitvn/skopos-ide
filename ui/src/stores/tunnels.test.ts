@@ -1,7 +1,13 @@
 import { beforeEach, expect, test } from "vitest";
+import type { TunnelPrompt } from "../ipc/generated/TunnelPrompt";
 import { emitEvent, mockBackend } from "../test/ipc";
 import { tunnel } from "../test/tunnels";
-import { resetTunnelsForTest, tunnelOf, useTunnels } from "./tunnels";
+import {
+  promptToShow,
+  resetTunnelsForTest,
+  tunnelOf,
+  useTunnels,
+} from "./tunnels";
 
 beforeEach(() => resetTunnelsForTest());
 
@@ -45,4 +51,46 @@ test("tunnelOf finds the tunnel a cluster picked", () => {
   expect(tunnelOf([tunnel()], "gone")).toBeNull();
   expect(tunnelOf(null, "t1")).toBeNull();
   expect(tunnelOf([tunnel()], null)).toBeNull();
+});
+
+function prompt(partial: Partial<TunnelPrompt> = {}): TunnelPrompt {
+  return {
+    id: "p1",
+    tunnel: "t1",
+    kind: "password",
+    text: "me@bastion's password: ",
+    canRemember: true,
+    opensAtOnce: false,
+    ...partial,
+  };
+}
+
+test("promptToShow takes the chosen prompt, else one that opens at once, never an answered one", () => {
+  const quiet = tunnel({ prompt: prompt() });
+  const loud = tunnel({
+    id: "t2",
+    name: "edge",
+    prompt: prompt({ id: "p2", tunnel: "t2", opensAtOnce: true }),
+  });
+  const tunnels = [quiet, loud];
+  expect(promptToShow({ tunnels, asking: null, answered: [] })?.prompt.id).toBe(
+    "p2",
+  );
+  expect(promptToShow({ tunnels, asking: "p1", answered: [] })?.prompt.id).toBe(
+    "p1",
+  );
+  expect(promptToShow({ tunnels, asking: null, answered: ["p2"] })).toBeNull();
+  expect(
+    promptToShow({ tunnels: null, asking: "p1", answered: [] }),
+  ).toBeNull();
+});
+
+test("finishPrompt hides the prompt and ends the choice", () => {
+  useTunnels.getState().ask("p1");
+  expect(useTunnels.getState().asking).toBe("p1");
+  useTunnels.getState().finishPrompt("p1");
+  expect(useTunnels.getState()).toMatchObject({
+    asking: null,
+    answered: ["p1"],
+  });
 });

@@ -26,6 +26,7 @@ import { SidebarColumn } from "./SidebarColumn";
 import { StatusBar } from "./StatusBar";
 import { installShellKeys } from "./shellKeys";
 import { IS_MAC } from "./shortcuts";
+import { TunnelPrompts } from "./TunnelPrompts";
 import { installHashMirror } from "./tabs/hashMirror";
 import { screenLinkHandlers } from "./tabs/navigation";
 import { Panes } from "./tabs/Panes";
@@ -212,6 +213,7 @@ export function Shell() {
         <AboutDialog />
         <UpdateDialog />
         <ExecConsentDialog />
+        <TunnelPrompts />
       </ShellRouter>
     </div>
   );

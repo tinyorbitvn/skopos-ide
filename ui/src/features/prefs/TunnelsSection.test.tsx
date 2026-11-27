@@ -5,7 +5,7 @@ import { toast } from "../../design";
 import type { ClusterInfo } from "../../ipc/generated/ClusterInfo";
 import type { TunnelKind } from "../../ipc/generated/TunnelKind";
 import { resetCatalogForTest, useCatalog } from "../../stores/catalog";
-import { resetTunnelsForTest } from "../../stores/tunnels";
+import { resetTunnelsForTest, useTunnels } from "../../stores/tunnels";
 import { clusterEntry, flush, mockBackend } from "../../test/ipc";
 import { tunnel } from "../../test/tunnels";
 import { TunnelsSection } from "./TunnelsSection";
@@ -419,4 +419,25 @@ test("the Log shows what ssh wrote, or says it wrote nothing", async () => {
   expect(screen.getByTestId("prefs-tunnel-log-t2").textContent).toContain(
     "No output from ssh yet",
   );
+});
+
+test("Answer… opens the tunnel's prompt", async () => {
+  await show({
+    tunnel_list: () => [
+      tunnel({
+        ...SSH,
+        state: { status: "needsInput", promptId: "p1" },
+        prompt: {
+          id: "p1",
+          tunnel: "t1",
+          kind: "password",
+          text: "me@bastion's password: ",
+          canRemember: true,
+          opensAtOnce: false,
+        },
+      }),
+    ],
+  });
+  fireEvent.click(screen.getByTestId("prefs-tunnel-answer-t1"));
+  expect(useTunnels.getState().asking).toBe("p1");
 });

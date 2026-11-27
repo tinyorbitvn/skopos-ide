@@ -25,6 +25,7 @@ test("a connected cluster whose tunnel failed gets the badge with the reason", (
     label: "Tunnel failed",
     tone: "danger",
     detail: 'Tunnel "corp": the proxy answered 403 Forbidden',
+    promptId: null,
   });
 });
 
@@ -51,4 +52,37 @@ test("no badge while disconnected, without a tunnel, or while the tunnel is not 
       ]),
     ).toBeNull();
   }
+});
+
+test("a reconnecting tunnel names its last error, and one that needs input names its prompt", () => {
+  const cluster = clusterEntry({
+    tunnel: "t1",
+    state: { status: "connected", info: INFO },
+  });
+  expect(
+    tunnelProblem(cluster, [
+      tunnel({
+        state: {
+          status: "reconnecting",
+          attempt: 2,
+          lastError: "Connection reset by 10.0.0.1 port 22",
+        },
+      }),
+    ]),
+  ).toEqual({
+    label: "Tunnel reconnecting",
+    tone: "warn",
+    detail: 'Tunnel "corp": Connection reset by 10.0.0.1 port 22',
+    promptId: null,
+  });
+  expect(
+    tunnelProblem(cluster, [
+      tunnel({ state: { status: "needsInput", promptId: "p1" } }),
+    ]),
+  ).toEqual({
+    label: "Tunnel needs input",
+    tone: "warn",
+    detail: 'Tunnel "corp" waits for an answer',
+    promptId: "p1",
+  });
 });

@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import { clusterStatus } from "../../app/clusterStatus";
 import { connectionNotes } from "../../app/connectionNotes";
+import { TunnelBadge } from "../../app/TunnelBadge";
 import { tunnelProblem } from "../../app/tunnelProblem";
 import {
   Badge,
@@ -494,9 +495,7 @@ function ClusterRow(props: {
           <StatusDot tone={status.tone} label={status.label} />
           <span>{status.label}</span>
           {problem !== null ? (
-            <span title={problem.detail} data-testid={`catalog-tunnel-${c.id}`}>
-              <Badge tone={problem.tone}>{problem.label}</Badge>
-            </span>
+            <TunnelBadge problem={problem} testId={`catalog-tunnel-${c.id}`} />
           ) : null}
           {detail ? (
             <span className={styles.detail} title={detail}>

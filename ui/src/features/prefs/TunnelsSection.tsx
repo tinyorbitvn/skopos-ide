@@ -55,6 +55,20 @@ function stateReason(state: TunnelState): string | undefined {
   return undefined;
 }
 
+function AnswerButton(props: { tunnelId: string; promptId: string }) {
+  const ask = useTunnels((s) => s.ask);
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => ask(props.promptId)}
+      data-testid={`prefs-tunnel-answer-${props.tunnelId}`}
+    >
+      Answer…
+    </Button>
+  );
+}
+
 function StateBadge(props: { state: TunnelState }) {
   const { label, tone } = STATES[props.state.status];
   return (
@@ -217,6 +231,9 @@ export function TunnelsSection() {
             >
               Test connection
             </Button>
+            {t.prompt !== null ? (
+              <AnswerButton tunnelId={t.id} promptId={t.prompt.id} />
+            ) : null}
             {t.kind.type === "ssh" &&
             (t.state.status === "idle" || t.state.status === "failed") ? (
               <Button
