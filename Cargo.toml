@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/skopos-core", "crates/skopos-app", "crates/skopos-fakekube"]
+members = ["crates/skopos-core", "crates/skopos-app", "crates/skopos-fakekube", "crates/skopos-fakesshd"]
 
 # Tauri and kube debug builds with full debuginfo exceed 20 GB. Line tables for our
 # crates are enough for backtraces, and incremental caches add about 4 GB on top.

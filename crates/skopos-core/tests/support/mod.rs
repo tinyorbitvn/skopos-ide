@@ -24,6 +24,8 @@ use skopos_core::secrets::{MemorySecretStore, SecretStore};
 use skopos_fakekube::{FakeKube, FakeKubeConfig};
 use tempfile::TempDir;
 
+pub mod ssh;
+
 const FAKE_CONTEXT: &str = "fake";
 const KIND_CONTEXT: &str = "kind-skopos-e2e";
 const CATALOG_WAIT: Duration = Duration::from_secs(30);
