@@ -6152,7 +6152,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-fakesshd"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "russh",
  "tokio",
