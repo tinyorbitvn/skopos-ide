@@ -21,7 +21,7 @@ use super::askpass::{AskState, Refusal, PROMPT_CANCELLED, PROMPT_UNANSWERED};
 use super::askpass_mode::{ASKPASS_ADDR_VAR, ASKPASS_TOKEN_VAR};
 use super::http::authority;
 use super::model::TunnelDef;
-use super::port_owner::listener_is_ours;
+use super::port_owner::{listener_on, Listener};
 use super::ssh_cmd::{
     check_version, classify_exit, exit_message, open_failure, ssh_args, ArgOptions, ExitKind,
     LogRing,
@@ -252,12 +252,16 @@ async fn wait_up(
             }
             () = tokio::time::sleep(UP_POLL) => {}
         }
-        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
-            return if listener_is_ours(port).await {
-                Started::Up
-            } else {
-                Started::PortTaken
-            };
+        // The owner is checked before anything connects: a port another user holds never
+        // counts as `ssh`'s, and one with no listener seen is not up yet.
+        match listener_on(port).await {
+            Listener::Other => return Started::PortTaken,
+            Listener::Missing => {}
+            Listener::Ours | Listener::Unknown => {
+                if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+                    return Started::Up;
+                }
+            }
         }
         if !supervisor.ask.waiting() {
             spent += UP_POLL;
