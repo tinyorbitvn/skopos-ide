@@ -344,6 +344,14 @@ async fn an_old_ssh_is_refused() {
     let env = vec![("SKOPOS_FAKESSH_VERSION".into(), "OpenSSH_8.2p1 fake".into())];
     let f = fake_with(&["listen ; wait"], env, timings()).await;
     let view = f.core.tunnel_start(&f.id).await.unwrap();
+    if cfg!(windows) {
+        // On Windows an old `ssh` runs with no prompts instead (`ssh_batch`, spec §6.5).
+        assert!(view.state.is_up(), "{:?}", view.state);
+        let args = f.args().pop().unwrap();
+        assert!(args.contains("-o BatchMode=yes"), "{args}");
+        f.core.tunnel_stop(&f.id).await.unwrap();
+        return;
+    }
     assert_eq!(
         view.state,
         failed("This ssh is OpenSSH_8.2p1; SSH tunnels need OpenSSH 8.5 or later")
