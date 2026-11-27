@@ -231,7 +231,9 @@ test("a connected cluster whose tunnel failed shows Tunnel failed with the reaso
 });
 
 test("a cluster whose tunnel is up shows no tunnel badge", async () => {
-  useTunnels.setState({ tunnels: [tunnel({ state: { status: "up" } })] });
+  useTunnels.setState({
+    tunnels: [tunnel({ state: { status: "up", since: 0 } })],
+  });
   await show(["/cluster/c1"], [{ ...PROD, tunnel: "t1" }, STAGING]);
   expect(screen.queryByTestId("header-tunnel")).toBeNull();
 });

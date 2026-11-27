@@ -5,6 +5,7 @@ import {
   PROXY_USERINFO_ERROR,
   placeTunnelFailure,
   proxyUrlProblem,
+  targetText,
 } from "./tunnelForm";
 
 test("proxy URLs need http, https or socks5, a host, and nothing else", () => {
@@ -76,4 +77,30 @@ test("a refusal shows under the field it names", () => {
   ).toEqual({
     form: "This tunnel no longer exists.",
   });
+});
+
+test("targetText names the proxy URL or the SSH target", () => {
+  expect(
+    targetText({ type: "proxy", url: "http://proxy:3128", username: null }),
+  ).toBe("Proxy · http://proxy:3128");
+  expect(
+    targetText({
+      type: "ssh",
+      host: "bastion",
+      user: "me",
+      port: 2222,
+      jump: "jump.corp",
+      identityFile: null,
+    }),
+  ).toBe("SSH · me@bastion:2222 via jump.corp");
+  expect(
+    targetText({
+      type: "ssh",
+      host: "coder.ws",
+      user: null,
+      port: null,
+      jump: null,
+      identityFile: null,
+    }),
+  ).toBe("SSH · coder.ws");
 });

@@ -11,7 +11,7 @@ use skopos_core::kubeconfig::ClusterId;
 use skopos_core::paths::AppPaths;
 use skopos_core::prefs::ClusterSettings;
 use skopos_core::secrets::Secret;
-use skopos_core::tunnels::{TunnelInput, TunnelKind, TunnelState};
+use skopos_core::tunnels::{TunnelInput, TunnelKind};
 use skopos_fakekube::proxy::{http_proxy, socks5_proxy, ProxyOptions};
 use skopos_fakekube::{FakeKube, FakeKubeConfig, FakeResource};
 use tempfile::TempDir;
@@ -132,7 +132,7 @@ async fn a_cluster_with_a_proxy_tunnel_connects_through_the_gateway() {
         "the file names the tunnel"
     );
     assert!(proxy_url.contains("@127.0.0.1:"));
-    assert_eq!(core.tunnel_list()[0].state, TunnelState::Up);
+    assert!(core.tunnel_list()[0].state.is_up());
 }
 
 #[tokio::test]

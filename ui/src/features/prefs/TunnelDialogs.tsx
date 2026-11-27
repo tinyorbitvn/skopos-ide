@@ -19,10 +19,12 @@ export function TunnelDialog(props: {
   onSaved?(view: TunnelView): void;
 }) {
   const { tunnel } = props;
+  const kind = tunnel?.kind;
+  const proxy = kind?.type === "proxy" ? kind : null;
   const [fields, setFields] = useState<TunnelFields>({
     name: tunnel?.name ?? "",
-    url: tunnel?.kind.url ?? "",
-    username: tunnel?.kind.username ?? "",
+    url: proxy?.url ?? "",
+    username: proxy?.username ?? "",
     password: "",
   });
   // Set once saved, so a retry after a refused password edits instead of adding again.

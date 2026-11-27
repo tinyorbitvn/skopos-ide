@@ -17,6 +17,7 @@ import type { TunnelView } from "../../ipc/generated/TunnelView";
 import { useTunnels } from "../../stores/tunnels";
 import styles from "./PreferencesScreen.module.css";
 import { TunnelDeleteDialog, TunnelDialog } from "./TunnelDialogs";
+import { targetText } from "./tunnelForm";
 
 /** The anchor cluster settings and a failed connect open Preferences at. */
 export const TUNNELS_ANCHOR = "tunnels";
@@ -25,6 +26,8 @@ const STATES: Record<TunnelState["status"], { label: string; tone: Tone }> = {
   idle: { label: "Idle", tone: "neutral" },
   starting: { label: "Starting", tone: "info" },
   up: { label: "Up", tone: "ok" },
+  reconnecting: { label: "Reconnecting", tone: "warn" },
+  needsInput: { label: "Needs input", tone: "warn" },
   failed: { label: "Failed", tone: "danger" },
 };
 
@@ -33,12 +36,16 @@ function usedBy(count: number): string {
   return count === 1 ? "Used by 1 cluster" : `Used by ${count} clusters`;
 }
 
+function stateReason(state: TunnelState): string | undefined {
+  if (state.status === "failed") return state.message;
+  if (state.status === "reconnecting") return state.lastError;
+  return undefined;
+}
+
 function StateBadge(props: { state: TunnelState }) {
   const { label, tone } = STATES[props.state.status];
-  const reason =
-    props.state.status === "failed" ? props.state.message : undefined;
   return (
-    <span title={reason}>
+    <span title={stateReason(props.state)}>
       <Badge tone={tone}>{label}</Badge>
     </span>
   );
@@ -119,8 +126,8 @@ export function TunnelsSection() {
             data-testid={`prefs-tunnel-${t.id}`}
           >
             <span className={styles.repoName}>{t.name}</span>
-            <span className={styles.path} title={t.kind.url}>
-              Proxy · {t.kind.url}
+            <span className={styles.path} title={targetText(t.kind)}>
+              {targetText(t.kind)}
             </span>
             <StateBadge state={t.state} />
             <span className={styles.muted}>{usedBy(t.clusterCount)}</span>

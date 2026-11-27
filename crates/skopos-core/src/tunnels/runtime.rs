@@ -202,7 +202,7 @@ impl AppCore {
         let runtime = self.tunnel_runtime();
         let kept = runtime.states.get(id).map(|entry| entry.value().clone());
         match kept {
-            Some((TunnelState::Up, at))
+            Some((TunnelState::Up { .. }, at))
                 if at.elapsed() >= IDLE_AFTER && runtime.open_count(id) == 0 =>
             {
                 TunnelState::Idle
@@ -213,7 +213,7 @@ impl AppCore {
     }
 
     /// Keeps the state and the time; tells the windows only when the state changed.
-    fn tunnel_set_state(&self, id: &str, state: TunnelState) {
+    pub(crate) fn tunnel_set_state(&self, id: &str, state: TunnelState) {
         let before = self.tunnel_state(id);
         self.tunnel_runtime()
             .states
@@ -223,6 +223,15 @@ impl AppCore {
         }
     }
 
+    /// `Up`, keeping `since` while it stays up, and refreshing when it was last used.
+    pub(crate) fn tunnel_mark_up(&self, id: &str) {
+        let state = match self.tunnel_state(id) {
+            up @ TunnelState::Up { .. } => up,
+            _ => TunnelState::up_now(),
+        };
+        self.tunnel_set_state(id, state);
+    }
+
     /// Dials `host:port` through the tunnel and keeps its state (spec §5.6, §5.9).
     pub(crate) async fn tunnel_dial(
         &self,
@@ -230,17 +239,19 @@ impl AppCore {
         host: &str,
         port: u16,
     ) -> Result<Box<dyn Stream>, DialError> {
-        if self.tunnel_state(&def.id) != TunnelState::Up {
+        if !self.tunnel_state(&def.id).is_up() {
             self.tunnel_set_state(&def.id, TunnelState::Starting);
         }
         let outcome = self.tunnel_dial_now(def, host, port).await;
-        let state = match &outcome {
-            Ok(_) => TunnelState::Up,
-            Err(e) => TunnelState::Failed {
-                message: e.reason(),
-            },
-        };
-        self.tunnel_set_state(&def.id, state);
+        match &outcome {
+            Ok(_) => self.tunnel_mark_up(&def.id),
+            Err(e) => self.tunnel_set_state(
+                &def.id,
+                TunnelState::Failed {
+                    message: e.reason(),
+                },
+            ),
+        }
         outcome
     }
 
@@ -256,6 +267,9 @@ impl AppCore {
                     },
                 };
                 ProxyUpstream::new(url, credentials)
+            }
+            TunnelKind::Ssh { .. } => {
+                Err(DialError::Failed("SSH tunnels cannot start yet".to_owned()))
             }
         }
     }
@@ -287,13 +301,15 @@ impl AppCore {
                 Ok(upstream) => upstream.reach_proxy().await,
                 Err(e) => Err(e),
             };
-            let state = match outcome {
-                Ok(()) => TunnelState::Up,
-                Err(e) => TunnelState::Failed {
-                    message: e.reason(),
-                },
-            };
-            self.tunnel_set_state(&def.id, state);
+            match outcome {
+                Ok(()) => self.tunnel_mark_up(&def.id),
+                Err(e) => self.tunnel_set_state(
+                    &def.id,
+                    TunnelState::Failed {
+                        message: e.reason(),
+                    },
+                ),
+            }
         }
         Ok(self.tunnel_view(&def))
     }

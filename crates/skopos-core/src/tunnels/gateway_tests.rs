@@ -123,7 +123,7 @@ async fn the_gateway_carries_an_allowed_target_through_the_proxy() {
     stream.read_exact(&mut buf).await.unwrap();
     assert_eq!(&buf, b"ping");
     assert_eq!(s.proxy.seen.targets(), [target]);
-    assert_eq!(s.core.tunnel_state(&s.tunnel.id), TunnelState::Up);
+    assert!(s.core.tunnel_state(&s.tunnel.id).is_up());
 }
 
 #[tokio::test]
@@ -184,7 +184,7 @@ async fn stop_ends_open_connections_and_test_reports_the_state() {
         .expect("Stop closes the connection")
         .unwrap();
     let view = s.core.tunnel_test(&s.tunnel.id).await.unwrap();
-    assert_eq!(view.state, TunnelState::Up);
+    assert!(view.state.is_up(), "{:?}", view.state);
 }
 
 #[tokio::test]

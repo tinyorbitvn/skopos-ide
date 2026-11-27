@@ -17,6 +17,10 @@ terminalShell?: string | null,
  */
 helmPath?: string | null, kubectlPath?: string | null, 
 /**
+ * The `ssh` SSH tunnels run (tunnels spec §5.2). `None`: `ssh` on `PATH`.
+ */
+sshPath?: string | null, 
+/**
  * For downloads and helm, such as `http://proxy.example:3128`. `None`: the system proxy.
  */
 httpProxy?: string | null, 

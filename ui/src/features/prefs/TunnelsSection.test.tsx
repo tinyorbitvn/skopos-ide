@@ -184,7 +184,7 @@ test("Delete names the clusters that use the tunnel", async () => {
 test("Test connection toasts the outcome, and Stop shows while it is up", async () => {
   const success = vi.spyOn(toast, "success");
   const failed = vi.spyOn(toast, "error");
-  let answer = tunnel({ state: { status: "up" } });
+  let answer = tunnel({ state: { status: "up", since: 0 } });
   const backend = await show({
     tunnel_test: () => answer,
     tunnel_stop: () => tunnel(),
@@ -206,10 +206,38 @@ test("Test connection toasts the outcome, and Stop shows while it is up", async 
 
 test("Stop ends an up tunnel", async () => {
   const backend = await show({
-    tunnel_list: () => [tunnel({ state: { status: "up" } })],
+    tunnel_list: () => [tunnel({ state: { status: "up", since: 0 } })],
     tunnel_stop: () => tunnel(),
   });
   fireEvent.click(screen.getByTestId("prefs-tunnel-stop-t1"));
   await act(flush);
   expect(backend.callsTo("tunnel_stop")).toEqual([{ id: "t1" }]);
+});
+
+test("an SSH row shows its target, and Reconnecting shows the last error", async () => {
+  await show({
+    tunnel_list: () => [
+      tunnel({
+        kind: {
+          type: "ssh",
+          host: "bastion",
+          user: "me",
+          port: null,
+          jump: null,
+          identityFile: null,
+        },
+        state: {
+          status: "reconnecting",
+          attempt: 2,
+          lastError: "Connection closed by 10.0.0.1 port 22",
+        },
+      }),
+    ],
+  });
+  const row = screen.getByTestId("prefs-tunnel-t1");
+  expect(row.textContent).toContain("SSH · me@bastion");
+  const badge = within(row).getByText("Reconnecting");
+  expect(badge.closest("[title]")?.getAttribute("title")).toBe(
+    "Connection closed by 10.0.0.1 port 22",
+  );
 });

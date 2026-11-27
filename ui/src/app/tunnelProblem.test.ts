@@ -43,7 +43,7 @@ test("no badge while disconnected, without a tunnel, or while the tunnel is not 
   for (const state of [
     { status: "idle" },
     { status: "starting" },
-    { status: "up" },
+    { status: "up", since: 0 },
   ] as const) {
     expect(
       tunnelProblem(clusterEntry({ tunnel: "t1", state: connected }), [

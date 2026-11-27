@@ -1,4 +1,5 @@
 import { failureMessage } from "../../ipc/client";
+import type { TunnelKind } from "../../ipc/generated/TunnelKind";
 
 /** The core's own texts (tunnels spec §5.1), so a refusal reads the same either way. */
 export const PROXY_URL_ERROR =
@@ -70,4 +71,13 @@ export function placeTunnelFailure(error: unknown): TunnelProblems {
   }
   if (message.startsWith("Enter a password")) return { password: message };
   return { form: message };
+}
+
+/** A row's kind and target: `Proxy · <url>` or `SSH · user@host:port via jump`. */
+export function targetText(kind: TunnelKind): string {
+  if (kind.type === "proxy") return `Proxy · ${kind.url}`;
+  const user = kind.user ? `${kind.user}@` : "";
+  const port = kind.port ? `:${kind.port}` : "";
+  const via = kind.jump ? ` via ${kind.jump}` : "";
+  return `SSH · ${user}${kind.host}${port}${via}`;
 }
