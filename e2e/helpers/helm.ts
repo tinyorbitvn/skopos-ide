@@ -60,7 +60,14 @@ export async function releaseMenuItems(namespace: string, name: string): Promise
 
 /** Picks an option of a Radix select by its text. */
 export async function pickOption(selectId: string, label: string): Promise<void> {
-  await pointerClick(await shown(selectId));
+  const select = await shown(selectId);
+  // `pointerClick` clicks where the select is on screen, so a select below the fold (the
+  // Network section of a cluster's settings) must be scrolled into view first.
+  await browser.execute(
+    (el: Element) => el.scrollIntoView({ block: "center" }),
+    select as unknown as Element,
+  );
+  await pointerClick(select);
   const option = browser.$(`//*[@role="option"][normalize-space()="${label}"]`);
   await option.waitForDisplayed({ timeout: 15000 });
   await option.click();
