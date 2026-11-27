@@ -25,6 +25,7 @@ use skopos_fakekube::{FakeKube, FakeKubeConfig};
 use tempfile::TempDir;
 
 pub mod ssh;
+pub mod tunnel;
 
 const FAKE_CONTEXT: &str = "fake";
 const KIND_CONTEXT: &str = "kind-skopos-e2e";
