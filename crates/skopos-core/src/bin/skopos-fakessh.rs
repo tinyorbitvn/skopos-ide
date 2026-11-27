@@ -10,7 +10,9 @@
 //!   `me@bastion: Permission denied (password).` and exits 255;
 //! - `listen`: serves SOCKS5 without authentication on the `-D` address; a target it cannot
 //!   reach gets `channel N: open failed: connect failed: <reason>` on stderr, as `ssh` writes;
-//! - `sleep <ms>`, `exit <code>`, `wait` (until killed).
+//! - `sleep <ms>`, `exit <code>`, `wait` (until killed);
+//! - `linger <ms>`: starts a child that holds stderr open for `<ms>` after this run exits, as
+//!   a `-J` hop or a `ProxyCommand` can.
 //!
 //! Each run appends its arguments, space-joined, as one line to `<plan>.args` and a line to
 //! `<plan>.runs`.
@@ -23,6 +25,12 @@ use std::time::Duration;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, ms] = args.as_slice() {
+        if flag == "--linger" {
+            std::thread::sleep(Duration::from_millis(ms.parse().unwrap_or(0)));
+            return;
+        }
+    }
     if args.iter().any(|arg| arg == "-V") {
         let version = std::env::var("SKOPOS_FAKESSH_VERSION")
             .unwrap_or_else(|_| "OpenSSH_9.6p1 fake".to_owned());
@@ -68,6 +76,12 @@ fn main() {
             }
             "listen" => listen(forward.as_deref()),
             "sleep" => std::thread::sleep(Duration::from_millis(rest.parse().unwrap_or(0))),
+            "linger" => {
+                // The child inherits stderr, so the pipe stays open after this run exits.
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = Command::new(exe).args(["--linger", rest]).spawn();
+                }
+            }
             "exit" => std::process::exit(rest.parse().unwrap_or(255)),
             "wait" => loop {
                 std::thread::sleep(Duration::from_secs(3600));

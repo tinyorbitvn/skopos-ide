@@ -260,6 +260,34 @@ async fn a_start_during_a_reconnect_tries_again_at_once() {
 }
 
 #[tokio::test]
+async fn a_start_right_after_ssh_exits_waits_for_the_next_run() {
+    // The child keeps stderr open, so the exited run's stderr drains for its full 500 ms.
+    let f = fake(&[
+        "listen ; sleep 1000 ; linger 3000 ; exit 255",
+        "listen ; wait",
+    ])
+    .await;
+    let _hold = f.core.tunnel_hold_for_test(&f.id);
+    assert!(f.core.tunnel_start(&f.id).await.unwrap().state.is_up());
+    let first = f.port();
+    let started = Instant::now();
+    while listening(first) {
+        assert!(started.elapsed() < LIMIT, "ssh never exited");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // Long enough for the supervisor to see the exit, well within the drain.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let view = f.core.tunnel_start(&f.id).await.unwrap();
+    assert!(view.state.is_up(), "{:?}", view.state);
+    assert_eq!(
+        f.runs(),
+        2,
+        "Start was handed the port of the ssh that exited"
+    );
+    f.core.tunnel_stop(&f.id).await.unwrap();
+}
+
+#[tokio::test]
 async fn a_drop_while_unused_goes_idle() {
     let f = fake(&["listen ; sleep 1500 ; exit 255", "listen ; wait"]).await;
     assert!(f.core.tunnel_start(&f.id).await.unwrap().state.is_up());

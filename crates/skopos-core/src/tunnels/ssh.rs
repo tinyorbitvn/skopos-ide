@@ -53,8 +53,11 @@ pub(crate) const SSH_MISSING: &str =
     "ssh was not found on PATH. Install OpenSSH or set its path in Preferences › Tools";
 pub(crate) const STOPPED: &str = "The tunnel was stopped";
 
+fn port_taken(port: u16) -> String {
+    format!("Another user's program listens on 127.0.0.1:{port}, the tunnel's local port")
+}
 fn port_not_ours(port: u16) -> String {
-    format!("Another user's program listens on 127.0.0.1:{port}, the tunnel's local port, so ssh was stopped")
+    format!("{}, so ssh was stopped", port_taken(port))
 }
 const WAITS_FOR_ANSWER: &str = "a prompt waits for an answer";
 
@@ -217,6 +220,19 @@ fn set(core: &WeakCore, supervisor: &Supervisor, id: &str, phase: Phase, state: 
     }
     app.tunnel_set_state(id, state);
     supervisor.phase.send_replace(phase);
+}
+
+/// Stops handing out the `-D` port of an `ssh` that exited: the system freed it, and another
+/// user's program may bind it while the run's stderr drains. Only `Up` is replaced, so a
+/// `Stop` that wrote `Stopped` stays.
+fn withdraw_port(supervisor: &Supervisor) {
+    supervisor.phase.send_if_modified(|phase| {
+        let up = matches!(phase, Phase::Up(_));
+        if up {
+            *phase = Phase::Starting;
+        }
+        up
+    });
 }
 
 /// Reads `ssh`'s stderr into the tunnel's log until it closes.
@@ -384,7 +400,10 @@ async fn run_tunnel(core: &WeakCore, def: &TunnelDef, supervisor: &Arc<Superviso
                         process::stop(&mut child, STOP_GRACE).await;
                         return End::Idle;
                     }
-                    Held::Exited(code) => Some(code),
+                    Held::Exited(code) => {
+                        withdraw_port(supervisor);
+                        Some(code)
+                    }
                 }
             }
             Started::Stopped => {
@@ -488,6 +507,11 @@ impl AppCore {
         origin: Origin,
     ) -> Result<Box<dyn Stream>, DialError> {
         let local = self.ssh_ensure_up(def, origin).await?;
+        // `ssh` may have exited since its port was handed out, and another user's program
+        // bound the freed port: the owner is checked again right before the connect.
+        if listener_on(local).await == Listener::Other {
+            return Err(DialError::Failed(port_taken(local)));
+        }
         let ssh = &self.tunnel_runtime().ssh;
         let mark = ssh.log_mark(&def.id);
         let upstream = ProxyUpstream::new(&format!("socks5://127.0.0.1:{local}"), None)?;
