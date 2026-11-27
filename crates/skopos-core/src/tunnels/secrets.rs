@@ -154,6 +154,16 @@ impl AppCore {
         self.tunnel_secrets().forget_memory(&format!("{}:", def.id));
     }
 
+    /// Forgets the tunnel's remembered SSH answers: `accounts` from its `remembered` list, and
+    /// those this run kept in memory only. Blocks on the keychain.
+    pub(crate) fn tunnel_forget_ssh_answers(&self, id: &str, accounts: &[String]) {
+        for account in accounts {
+            self.tunnel_secrets().delete(account);
+        }
+        self.tunnel_secrets()
+            .forget_memory(&super::askpass::ssh_answers_prefix(id));
+    }
+
     /// Whether the tunnel has a password, and the note when it lives in memory only.
     pub(crate) fn tunnel_password_state(&self, def: &TunnelDef) -> (bool, Option<String>) {
         let account = proxy_password_account(&def.id);

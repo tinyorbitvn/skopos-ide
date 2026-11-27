@@ -37,7 +37,12 @@ pub(crate) fn ssh_answer_account(tunnel: &str, prompt: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    format!("{tunnel}:ssh:{hex}")
+    format!("{}{hex}", ssh_answers_prefix(tunnel))
+}
+
+/// What every remembered-answer account of the tunnel starts with.
+pub(crate) fn ssh_answers_prefix(tunnel: &str) -> String {
+    format!("{tunnel}:ssh:")
 }
 
 /// Why an `ssh` run fails although `ssh` may go on asking.

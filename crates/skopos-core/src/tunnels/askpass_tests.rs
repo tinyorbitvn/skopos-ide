@@ -134,6 +134,50 @@ async fn a_remembered_answer_is_replayed_and_a_repeat_asks_again() {
     assert_eq!(text(asking.await.unwrap()).as_deref(), Some("right"));
 }
 
+fn ssh_input(id: &str, name: &str, port: Option<u16>) -> TunnelInput {
+    TunnelInput {
+        id: Some(id.to_owned()),
+        name: name.into(),
+        kind: TunnelKind::Ssh {
+            host: "bastion".into(),
+            user: None,
+            port,
+            jump: None,
+            identity_file: None,
+        },
+    }
+}
+
+#[tokio::test]
+async fn a_new_destination_forgets_the_remembered_answers() {
+    let (core, id, _root) = core_with_ssh_tunnel().await;
+    let state = AskState::new(&id, true);
+    // The password prompt names user and host, not the port.
+    let password = "me@bastion's password: ";
+    let account = ssh_answer_account(&id, password);
+    let asking = spawn_ask(&core, &state, request(password));
+    let prompt = prompt_of(&core, &id).await;
+    core.tunnel_prompt_answer(&prompt.id, Secret::new("hunter2"), true)
+        .unwrap();
+    assert_eq!(text(asking.await.unwrap()).as_deref(), Some("hunter2"));
+
+    // A new name keeps it.
+    core.tunnel_save(ssh_input(&id, "jump box", None)).unwrap();
+    assert!(core.tunnel_def(&id).unwrap().remembered.contains(&account));
+
+    // Another port is another server: the answer never goes there.
+    core.tunnel_save(ssh_input(&id, "jump box", Some(2222)))
+        .unwrap();
+    assert!(core.tunnel_def(&id).unwrap().remembered.is_empty());
+    assert!(matches!(core.tunnel_secrets().get(&account), Ok(None)));
+    state.new_run();
+    let asking = spawn_ask(&core, &state, request(password));
+    let prompt = prompt_of(&core, &id).await;
+    core.tunnel_prompt_answer(&prompt.id, Secret::new("other"), false)
+        .unwrap();
+    assert_eq!(text(asking.await.unwrap()).as_deref(), Some("other"));
+}
+
 #[tokio::test]
 async fn a_cancel_refuses_this_and_later_prompts() {
     let (core, id, _root) = core_with_ssh_tunnel().await;
