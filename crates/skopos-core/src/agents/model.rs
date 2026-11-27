@@ -1,5 +1,5 @@
 //! The agent's model choice (native agents spec §6.2): the first `select` session config
-//! option with category `model`.
+//! option with category `model`, else the uncategorized one with id `model`.
 
 use std::collections::HashSet;
 
@@ -42,14 +42,22 @@ impl ModelChoice {
     }
 }
 
-/// The model choice among `options`: the first `select` option with category `model`, when
-/// it has at least one value. Other categories, a missing category and boolean options are
-/// not models.
+/// The model choice among `options`: the first `select` option with category `model`, else
+/// the `select` option with id `model` and no category (Kiro CLI documents only the id), when
+/// it has at least one value. Other categories and boolean options are not models.
 pub fn model_choice(options: &[SessionConfigOption]) -> Option<ModelChoice> {
-    let option = options.iter().find(|option| {
-        option.category == Some(SessionConfigOptionCategory::Model)
-            && matches!(option.kind, SessionConfigKind::Select(_))
-    })?;
+    let select =
+        |option: &&SessionConfigOption| matches!(option.kind, SessionConfigKind::Select(_));
+    let option = options
+        .iter()
+        .filter(select)
+        .find(|option| option.category == Some(SessionConfigOptionCategory::Model))
+        .or_else(|| {
+            options
+                .iter()
+                .filter(select)
+                .find(|option| option.category.is_none() && option.id.0.as_ref() == "model")
+        })?;
     let SessionConfigKind::Select(select) = &option.kind else {
         return None;
     };
@@ -175,11 +183,25 @@ mod tests {
     #[test]
     fn no_model_option_or_an_empty_list_gives_no_choice() {
         assert_eq!(model_choice(&[]), None);
-        let unnamed = options(json!([
-            { "id": "model", "name": "Model", "type": "select", "currentValue": "a",
+        let uncategorized = options(json!([
+            { "id": "models", "name": "Model", "type": "select", "currentValue": "a",
               "options": [{ "value": "a", "name": "A" }] }
         ]));
-        assert_eq!(model_choice(&unnamed), None);
+        assert_eq!(model_choice(&uncategorized), None);
+        let named_otherwise = options(json!([
+            { "id": "model", "name": "Model", "category": "_custom", "type": "select",
+              "currentValue": "a", "options": [{ "value": "a", "name": "A" }] }
+        ]));
+        assert_eq!(model_choice(&named_otherwise), None);
+        let not_a_select = options(json!([
+            { "id": "model", "name": "Model", "type": "boolean", "currentValue": true }
+        ]));
+        assert_eq!(model_choice(&not_a_select), None);
+        let model_config = options(json!([
+            { "id": "model", "name": "Model", "category": "model_config", "type": "select",
+              "currentValue": "a", "options": [{ "value": "a", "name": "A" }] }
+        ]));
+        assert_eq!(model_choice(&model_config), None);
         let other = options(json!([
             { "id": "effort", "name": "Effort", "category": "thought_level", "type": "select",
               "currentValue": "a", "options": [{ "value": "a", "name": "A" }] },
@@ -194,6 +216,33 @@ mod tests {
               "currentValue": "a", "options": [] }
         ]));
         assert_eq!(model_choice(&empty), None);
+    }
+
+    #[test]
+    fn with_no_model_category_the_uncategorized_select_named_model_is_the_choice() {
+        // Kiro CLI documents only the option's id, `model`.
+        let kiro = options(json!([
+            { "id": "effortLevel", "name": "Effort", "type": "select", "currentValue": "high",
+              "options": [{ "value": "high", "name": "High" }] },
+            { "id": "model", "name": "Model", "type": "select", "currentValue": "auto",
+              "options": [
+                  { "value": "auto", "name": "Auto" },
+                  { "value": "claude-sonnet", "name": "Claude Sonnet" }
+              ] }
+        ]));
+        let choice = model_choice(&kiro).unwrap();
+        assert_eq!(choice.option_id, "model");
+        assert_eq!(choice.current, "auto");
+        assert_eq!(ids(&choice), ["auto", "claude-sonnet"]);
+
+        // An option with the category wins over one that only has the id.
+        let both = options(json!([
+            { "id": "model", "name": "Model", "type": "select", "currentValue": "a",
+              "options": [{ "value": "a", "name": "A" }] },
+            { "id": "llm", "name": "LLM", "category": "model", "type": "select",
+              "currentValue": "b", "options": [{ "value": "b", "name": "B" }] }
+        ]));
+        assert_eq!(model_choice(&both).unwrap().option_id, "llm");
     }
 
     #[test]

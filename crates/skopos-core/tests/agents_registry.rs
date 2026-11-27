@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use skopos_core::agents::registry::AgentState;
 use skopos_core::agents::registry::AgentStatus;
+use skopos_core::agents::registry::BUILTIN_AGENTS;
 use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::paths::AppPaths;
@@ -134,7 +135,14 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
     let ids: Vec<&str> = statuses.iter().map(|status| status.id.as_str()).collect();
     assert_eq!(
         ids,
-        ["claude", "codex", "opencode", "gemini", mine.id.as_str()]
+        [
+            "claude",
+            "codex",
+            "opencode",
+            "gemini",
+            "kiro",
+            mine.id.as_str()
+        ]
     );
     let claude = row(&statuses, "claude");
     assert_eq!(claude.name, "Claude");
@@ -167,6 +175,13 @@ async fn the_status_lists_the_built_in_agents_then_the_custom_ones_and_runs_none
     assert_eq!(
         gemini.hint.as_deref(),
         Some("Install Gemini CLI, then check again.")
+    );
+    let kiro = row(&statuses, "kiro");
+    assert_eq!(kiro.name, "Kiro CLI");
+    assert_eq!(kiro.state, AgentState::NotInstalled);
+    assert_eq!(
+        kiro.hint.as_deref(),
+        Some("Install Kiro CLI, then check again.")
     );
     assert_eq!(row(&statuses, &mine.id), &mine);
     assert_eq!(mine.name, "Mine");
@@ -310,10 +325,11 @@ async fn an_agent_without_its_cli_gets_no_cli_variable() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn opencode_and_gemini_run_their_own_acp_mode() {
+async fn opencode_gemini_and_kiro_run_their_own_acp_mode() {
     let fixture = Fixture::new();
     let opencode = fixture.install("opencode");
     let gemini = fixture.install("gemini");
+    let kiro = fixture.install("kiro-cli");
     let core = fixture.core().await;
 
     let spec = core.agent_spec("opencode").unwrap();
@@ -329,6 +345,13 @@ async fn opencode_and_gemini_run_their_own_acp_mode() {
     assert_eq!(spec.args, ["--acp"]);
     assert!(spec.env.is_empty());
     assert_eq!(spec.detail, "~/bin/gemini · built-in ACP");
+
+    let spec = core.agent_spec("kiro").unwrap();
+    assert_eq!(spec.name, "Kiro CLI");
+    assert_eq!(spec.program, real(&kiro));
+    assert_eq!(spec.args, ["acp", "--agent-engine=v3"]);
+    assert!(spec.env.is_empty());
+    assert_eq!(spec.detail, "~/bin/kiro-cli · built-in ACP");
     assert!(fixture.nothing_ran());
     core.shutdown().await;
 }
@@ -352,6 +375,7 @@ async fn an_unknown_or_missing_agent_has_no_spec() {
         ),
         ("gemini", "Install Gemini CLI, then check again."),
         ("opencode", "Install OpenCode, then check again."),
+        ("kiro", "Install Kiro CLI, then check again."),
     ];
     for (id, hint) in cases {
         let error = core.agent_spec(id).unwrap_err();
@@ -507,7 +531,7 @@ async fn custom_agents_and_the_default_are_saved_and_a_removed_default_is_forgot
     assert_eq!(prefs.default_agent, None);
     assert!(prefs.custom.is_empty());
     let statuses = core.agents_status().unwrap();
-    assert_eq!(statuses.len(), 4);
+    assert_eq!(statuses.len(), BUILTIN_AGENTS.len());
     assert!(statuses.iter().all(|status| !status.is_default));
     let again = core.agent_custom_remove(&mine.id).unwrap_err();
     assert_eq!(again.code, ErrorCode::NotFound);

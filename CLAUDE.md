@@ -23,7 +23,7 @@ Specs (Milestone A and one per later feature) are kept locally, not in git. Late
   not list are hidden), and ServiceAccount kubeconfigs.
 - **Tools and updates:** managed `helm` and `kubectl` downloads; signed in-app updates.
 - **AI agents:** chats with the agent CLIs the person installed (Claude Code, Codex, OpenCode,
-  Gemini CLI, custom) over ACP, natively as the person, with a per-chat kubeconfig and the agent's model picked in the chat.
+  Gemini CLI, Kiro CLI, custom) over ACP, natively as the person, with a per-chat kubeconfig and the agent's model picked in the chat.
   The panel beside the page, Preferences and each cluster's Agent card drive it.
 
 ## Binding rules
