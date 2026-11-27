@@ -33,7 +33,7 @@ import {
   youHaveText,
 } from "./updateText";
 
-const DEB_PASSWORD =
+const PACKAGE_PASSWORD =
   "You'll be asked for your password to install the package.";
 
 function openPage(url: string): void {
@@ -153,9 +153,9 @@ function Available(props: {
               {willStop}
             </p>
           )}
-          {state.installer === "deb" ? (
-            <p className={styles.note} data-testid="update-deb">
-              {DEB_PASSWORD}
+          {state.installer === "deb" || state.installer === "rpm" ? (
+            <p className={styles.note} data-testid="update-package">
+              {PACKAGE_PASSWORD}
             </p>
           ) : null}
         </>

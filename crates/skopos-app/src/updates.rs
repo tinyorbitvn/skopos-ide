@@ -23,20 +23,21 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const CANNOT_SELF_UPDATE: &str = "This copy can't update itself.";
 const MOVE_TO_APPLICATIONS: &str = "Move SkoposIDE to Applications to update it.";
 const SIGNATURE_MISMATCH: &str = "The update's signature doesn't match, so it wasn't installed.";
-const DEB_NOT_INSTALLED: &str =
+const PACKAGE_NOT_INSTALLED: &str =
     "The package was not installed. If you cancelled the password prompt, try again.";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// `app`, `nsis`, `appimage` or `deb` for a bundle the plugin can update; `None` otherwise.
+/// `app`, `nsis`, `appimage`, `deb` or `rpm` for a bundle the plugin can update; `None` otherwise.
 fn installer_name(bundle: Option<BundleType>) -> Option<&'static str> {
     match bundle? {
         BundleType::App | BundleType::Dmg => Some("app"),
         BundleType::Nsis => Some("nsis"),
         BundleType::AppImage => Some("appimage"),
         BundleType::Deb => Some("deb"),
+        BundleType::Rpm => Some("rpm"),
         _ => None,
     }
 }
@@ -75,10 +76,10 @@ fn chain(err: &(dyn std::error::Error + 'static)) -> String {
     text
 }
 
-/// The plugin cannot tell a cancelled `pkexec` prompt from a failed `dpkg` (R6).
+/// The plugin cannot tell a cancelled `pkexec` prompt from a failed `dpkg` or `rpm` (R6).
 fn install_failure_message(installer: Option<&str>, detail: &str) -> String {
-    if installer == Some("deb") {
-        DEB_NOT_INSTALLED.to_owned()
+    if matches!(installer, Some("deb" | "rpm")) {
+        PACKAGE_NOT_INSTALLED.to_owned()
     } else {
         format!("the update could not be installed: {detail}")
     }
@@ -271,7 +272,7 @@ mod tests {
         assert_eq!(installer_name(Some(BundleType::Nsis)), Some("nsis"));
         assert_eq!(installer_name(Some(BundleType::AppImage)), Some("appimage"));
         assert_eq!(installer_name(Some(BundleType::Deb)), Some("deb"));
-        assert_eq!(installer_name(Some(BundleType::Rpm)), None);
+        assert_eq!(installer_name(Some(BundleType::Rpm)), Some("rpm"));
         assert_eq!(installer_name(Some(BundleType::Msi)), None);
         assert_eq!(installer_name(None), None);
     }
@@ -315,7 +316,7 @@ mod tests {
         );
         assert_eq!(
             blocker_for(Some(BundleType::Rpm), Path::new("/usr/bin/skopos-app")),
-            Some(CANNOT_SELF_UPDATE)
+            None
         );
     }
 
@@ -331,11 +332,13 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_deb_install_points_at_the_password_prompt() {
-        assert_eq!(
-            install_failure_message(Some("deb"), "dpkg exited with 1"),
-            "The package was not installed. If you cancelled the password prompt, try again."
-        );
+    fn a_failed_package_install_points_at_the_password_prompt() {
+        for (installer, detail) in [("deb", "dpkg exited with 1"), ("rpm", "rpm exited with 1")] {
+            assert_eq!(
+                install_failure_message(Some(installer), detail),
+                "The package was not installed. If you cancelled the password prompt, try again."
+            );
+        }
         assert_eq!(
             install_failure_message(Some("appimage"), "permission denied"),
             "the update could not be installed: permission denied"

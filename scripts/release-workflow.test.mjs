@@ -89,6 +89,8 @@ test("the draft must hold every updater file and latest.json before it is publis
   for (const name of [
     '"SkoposIDE_${version}_amd64.AppImage.sig"',
     '"SkoposIDE_${version}_amd64.deb.sig"',
+    'rpm="SkoposIDE-${version}-1.x86_64.rpm"',
+    '"${rpm}.sig"',
     '"SkoposIDE_${version}_x64-setup.exe.sig"',
     '"SkoposIDE_aarch64.app.tar.gz"',
     '"SkoposIDE_aarch64.app.tar.gz.sig"',
@@ -99,6 +101,20 @@ test("the draft must hold every updater file and latest.json before it is publis
   ]) {
     assert.ok(publish.includes(name), name);
   }
+});
+
+test("the Linux build installs its rpm on Fedora and AlmaLinux after building it", () => {
+  const build = job("build");
+  inOrder(build, [
+    "uses: tauri-apps/tauri-action@",
+    "- name: Install the rpm on Fedora and AlmaLinux",
+    "if: runner.os == 'Linux'",
+    "run: scripts/check-rpm.sh target/release/bundle/rpm/*.rpm",
+  ]);
+  const script = fs.readFileSync(path.join(ROOT, "scripts", "check-rpm.sh"), "utf8");
+  assert.match(script, /^FEDORA_IMAGE="\$\{FEDORA_IMAGE:-fedora:\d+\}"$/m);
+  assert.match(script, /^EL_IMAGE="\$\{EL_IMAGE:-almalinux:10\}"$/m);
+  assert.ok(script.includes("dnf install -y -q epel-release"));
 });
 
 test("the release uploads the SBOM to the draft, and publish waits for it", () => {

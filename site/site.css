@@ -1161,6 +1161,11 @@ html:has(.lightbox[open]) {
   margin: 0;
 }
 
+/* A second note, such as the rpm's on the Linux card. */
+.first-run code + p {
+  margin-top: 12px;
+}
+
 .first-run strong {
   font-weight: 500;
   color: var(--text-primary);

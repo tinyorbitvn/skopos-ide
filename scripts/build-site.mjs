@@ -40,6 +40,15 @@ export const ASSET_SUFFIXES = [
   "x64-setup.exe",
 ];
 
+/**
+ * Installers that only later releases publish, and their file names. A page puts each one's
+ * row in a `{{#asset:<suffix>}}…{{/asset:<suffix>}}` block, which the build drops while the
+ * latest release lacks the file. The rpm came after 0.16.0; Tauri names it unlike the others.
+ */
+export const OPTIONAL_ASSETS = {
+  "x86_64.rpm": (version) => `SkoposIDE-${version}-1.x86_64.rpm`,
+};
+
 const MONTHS = [
   "January",
   "February",
@@ -123,6 +132,16 @@ export function parseRelease(json) {
   if (missing.length > 0) {
     throw new Error(`release ${tag}: missing assets: ${missing.join(", ")}`);
   }
+  for (const [suffix, fileName] of Object.entries(OPTIONAL_ASSETS)) {
+    const name = fileName(version);
+    const asset = list.find((item) => item && item.name === name);
+    if (!asset) continue;
+    assets[suffix] = {
+      name,
+      url: httpsUrl(asset.browser_download_url, name),
+      size: formatSize(asset.size),
+    };
+  }
   return { version, tag, date, isoDate, url, assets };
 }
 
@@ -141,12 +160,22 @@ export function pngSize(buf) {
 /**
  * Fills a page's placeholders:
  *   {{release.version|tag|date|isoDate|url}}, {{asset:<suffix>:name|url|size}},
- *   and {{image:<file>.png}} (src, width and height).
+ *   and {{image:<file>.png}} (src, width and height). A {{#asset:<suffix>}}…{{/asset:<suffix>}}
+ *   block of an optional installer stays only while the release has the file.
  * `base` leads image paths back to the site's root from a page in a folder, such as "../";
  * `page` names the page in errors. An unknown key or a placeholder left open is an error.
  */
 export function render(template, { release, images, base = "", page = "index.html" }) {
-  const html = template.replace(/\{\{([^{}]*)\}\}/g, (_, key) => {
+  const kept = template.replace(
+    /\{\{#asset:([\w.-]+)\}\}([\s\S]*?)\{\{\/asset:\1\}\}/g,
+    (_, suffix, inner) => {
+      if (!Object.hasOwn(OPTIONAL_ASSETS, suffix)) {
+        throw new Error(`site/${page}: {{#asset:${suffix}}} is not an optional installer`);
+      }
+      return Object.hasOwn(release.assets, suffix) ? inner : "";
+    },
+  );
+  const html = kept.replace(/\{\{([^{}]*)\}\}/g, (_, key) => {
     let match = /^release\.(\w+)$/.exec(key);
     if (match && RELEASE_KEYS.has(match[1])) return escapeHtml(release[match[1]]);
     match = /^asset:([\w.-]+):(name|url|size)$/.exec(key);

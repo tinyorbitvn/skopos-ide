@@ -74,7 +74,7 @@ pub struct UpdateState {
     /// Why this copy cannot install an update itself, in words for the user; `None` when
     /// it can.
     pub blocker: Option<String>,
-    /// How this copy was installed: `app`, `nsis`, `appimage` or `deb`; `None` when unknown.
+    /// How this copy was installed: `app`, `nsis`, `appimage`, `deb` or `rpm`; `None` when unknown.
     pub installer: Option<String>,
     /// The version the user chose to skip.
     pub skipped: Option<String>,
@@ -116,7 +116,7 @@ pub trait UpdateSource: Send + Sync + 'static {
     fn install(&self, package: Package) -> CoreResult<()>;
     /// Why this copy cannot update itself, in words for the user; `None` when it can.
     fn blocker(&self) -> Option<String>;
-    /// `app`, `nsis`, `appimage` or `deb`; `None` when the copy was not installed from one.
+    /// `app`, `nsis`, `appimage`, `deb` or `rpm`; `None` when the copy was not installed from one.
     fn installer(&self) -> Option<String>;
 }
 

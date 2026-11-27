@@ -145,7 +145,10 @@ make e2e-smoke  # smoke end-to-end tests, no Docker
   which signs it, so Windows shows no warning. The installer from the releases page is not signed
   yet: in SmartScreen choose "More info", then "Run anyway". Install one of the two: the Store copy
   keeps its own settings, apart from the installer's, and both use the same `~/.kube`.
-- **Linux**: mark the AppImage executable with `chmod +x` and run it.
+- **Linux**: mark the AppImage executable with `chmod +x` and run it, or install the deb on
+  Debian and Ubuntu, or the rpm on Fedora, RHEL 10, Rocky Linux 10 and AlmaLinux 10. On RHEL 10
+  and its rebuilds, enable EPEL first: the rpm takes WebKitGTK 4.1 and the tray library from it.
+  RHEL 9 is not supported: it has no WebKitGTK 4.1.
 
 ## Updates
 
@@ -162,8 +165,8 @@ checks its signature, installs it and restarts SkoposIDE with its windows and ta
   the build from the releases page, the installer closes SkoposIDE, installs the update and
   starts it. If the installer fails after SkoposIDE has closed, start SkoposIDE again: the old
   version is still installed.
-- **Linux**: the AppImage replaces itself. The deb asks for your password to install the
-  package. Other packages can't update themselves.
+- **Linux**: the AppImage replaces itself. The deb and the rpm ask for your password to install
+  the package. Other packages can't update themselves.
 
 ## License
 
