@@ -4,7 +4,7 @@ use skopos_core::app_core::AppCore;
 use skopos_core::error::ErrorCode;
 use skopos_core::paths::AppPaths;
 use skopos_core::prefs::ClusterSettings;
-use skopos_core::tunnels::{TunnelInput, TunnelKind};
+use skopos_core::tunnels::{TunnelInput, TunnelKind, TunnelState};
 use tempfile::TempDir;
 
 async fn start(root: &TempDir) -> AppCore {
@@ -175,4 +175,48 @@ async fn deleting_a_tunnel_deletes_its_password() {
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn an_ssh_tunnel_is_saved_with_its_fields() {
+    let root = tempfile::tempdir().unwrap();
+    let core = start(&root).await;
+    let saved = core
+        .tunnel_save(TunnelInput {
+            id: None,
+            name: "bastion".into(),
+            kind: TunnelKind::Ssh {
+                host: " bastion.corp ".into(),
+                user: Some("me".into()),
+                port: Some(2222),
+                jump: None,
+                identity_file: None,
+            },
+        })
+        .unwrap();
+    let expected = TunnelKind::Ssh {
+        host: "bastion.corp".into(),
+        user: Some("me".into()),
+        port: Some(2222),
+        jump: None,
+        identity_file: None,
+    };
+    assert_eq!(saved.kind, expected);
+    assert_eq!(saved.state, TunnelState::Idle);
+    assert_eq!(core.tunnel_list()[0].kind, expected);
+    let refused = core
+        .tunnel_save(TunnelInput {
+            id: Some(saved.id.clone()),
+            name: "bastion".into(),
+            kind: TunnelKind::Ssh {
+                host: "-oProxyCommand=x".into(),
+                user: None,
+                port: None,
+                jump: None,
+                identity_file: None,
+            },
+        })
+        .unwrap_err();
+    assert!(refused.message.starts_with("The host cannot start with"));
+    assert_eq!(core.tunnel_list()[0].kind, expected);
 }

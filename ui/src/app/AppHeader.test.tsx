@@ -231,7 +231,22 @@ test("a connected cluster whose tunnel failed shows Tunnel failed with the reaso
 });
 
 test("a cluster whose tunnel is up shows no tunnel badge", async () => {
-  useTunnels.setState({ tunnels: [tunnel({ state: { status: "up" } })] });
+  useTunnels.setState({
+    tunnels: [tunnel({ state: { status: "up", since: 0 } })],
+  });
   await show(["/cluster/c1"], [{ ...PROD, tunnel: "t1" }, STAGING]);
   expect(screen.queryByTestId("header-tunnel")).toBeNull();
+});
+
+test("Tunnel needs input is a button that opens the prompt", async () => {
+  useTunnels.setState({
+    tunnels: [tunnel({ state: { status: "needsInput", promptId: "p1" } })],
+  });
+  await show(["/cluster/c1"], [{ ...PROD, tunnel: "t1" }, STAGING]);
+  const badge = screen.getByTestId("header-tunnel");
+  expect(badge.tagName).toBe("BUTTON");
+  expect(badge.textContent).toBe("Tunnel needs input");
+  expect(badge.getAttribute("title")).toBe('Tunnel "corp" waits for an answer');
+  fireEvent.click(badge);
+  expect(useTunnels.getState().asking).toBe("p1");
 });

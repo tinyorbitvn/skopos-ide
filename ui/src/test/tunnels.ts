@@ -10,6 +10,8 @@ export function tunnel(partial: Partial<TunnelView> = {}): TunnelView {
     hasPassword: false,
     passwordNote: null,
     state: { status: "idle" },
+    prompt: null,
+    log: [],
     ...partial,
   };
 }

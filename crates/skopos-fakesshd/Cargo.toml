@@ -1,0 +1,9 @@
+[package]
+name = "skopos-fakesshd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+russh = { version = "=0.65.4", default-features = false, features = ["ring"] }
+tokio.workspace = true

@@ -419,10 +419,18 @@ async fn establish_routed(
     timeouts: &ConnectTimeouts,
     route: Option<&TunnelRoute>,
 ) -> Result<Established, Failure> {
+    if let Some(route) = route {
+        handle.log(LogLevel::Info, format!("opening tunnel {}", route.name()));
+        if let Err(reason) = route.warm_up().await {
+            return Err(Failure::new(
+                FailureKind::Tunnel,
+                format!("Tunnel \"{}\": {reason}", route.name()),
+            ));
+        }
+    }
     let limit = connect_limit(entry, timeouts);
     let deadline = tokio::time::Instant::now() + limit;
     if let Some(route) = route {
-        handle.log(LogLevel::Info, format!("opening tunnel {}", route.name()));
         let probed = tokio::time::timeout_at(deadline, route.probe(entry.server.as_deref()))
             .await
             .unwrap_or_else(|_| Err(format!("timed out after {}s", limit.as_secs())));

@@ -169,6 +169,9 @@ pub struct Prefs {
     pub helm_path: Option<String>,
     #[ts(optional = nullable)]
     pub kubectl_path: Option<String>,
+    /// The `ssh` SSH tunnels run (tunnels spec §5.2). `None`: `ssh` on `PATH`.
+    #[ts(optional = nullable)]
+    pub ssh_path: Option<String>,
     /// For downloads and helm, such as `http://proxy.example:3128`. `None`: the system proxy.
     #[ts(optional = nullable)]
     pub http_proxy: Option<String>,
@@ -188,6 +191,7 @@ impl Default for Prefs {
             terminal_shell: None,
             helm_path: None,
             kubectl_path: None,
+            ssh_path: None,
             http_proxy: None,
             update_check: true,
             agents: AgentPrefs::default(),
@@ -202,6 +206,7 @@ impl Prefs {
         for field in [
             &mut self.helm_path,
             &mut self.kubectl_path,
+            &mut self.ssh_path,
             &mut self.http_proxy,
         ] {
             *field = field
@@ -259,6 +264,23 @@ mod tests {
             Some("/usr/local/bin/kubectl")
         );
         assert_eq!(prefs.http_proxy, None);
+    }
+
+    #[test]
+    fn the_ssh_path_is_trimmed_and_blank_means_path() {
+        let blank = Prefs {
+            ssh_path: Some("  ".into()),
+            ..Prefs::default()
+        };
+        assert_eq!(blank.normalized().unwrap().ssh_path, None);
+        let set = Prefs {
+            ssh_path: Some(" /usr/bin/ssh ".into()),
+            ..Prefs::default()
+        };
+        assert_eq!(
+            set.normalized().unwrap().ssh_path.as_deref(),
+            Some("/usr/bin/ssh")
+        );
     }
 
     #[test]

@@ -3,7 +3,9 @@
 use serde::Serialize;
 use ts_rs::TS;
 
+use super::askpass::ssh_answers_prefix;
 use super::model::{invalid, tunnel_name, TunnelDef, TunnelInput, TunnelKind};
+use super::prompts::TunnelPrompt;
 use super::state::TunnelState;
 use crate::agents::endpoint::new_token;
 use crate::app_core::{AppCore, CoreEvent};
@@ -31,6 +33,10 @@ pub struct TunnelView {
     /// Set when the password lives in memory only (spec §5.3).
     pub password_note: Option<String>,
     pub state: TunnelState,
+    /// The oldest SSH prompt that waits for the person (spec §6.3).
+    pub prompt: Option<TunnelPrompt>,
+    /// The last lines `ssh` wrote to stderr; empty for a proxy tunnel (spec §6.1).
+    pub log: Vec<String>,
 }
 
 impl AppCore {
@@ -50,7 +56,7 @@ impl AppCore {
     pub fn tunnel_save(&self, input: TunnelInput) -> CoreResult<TunnelView> {
         let name = tunnel_name(&input.name)?;
         let kind = input.kind.normalized()?;
-        let (saved, changed) = self.tunnels_store().try_update(|all| {
+        let (saved, changed, forgotten) = self.tunnels_store().try_update(|all| {
             let lower = name.to_lowercase();
             let taken = all
                 .iter()
@@ -66,7 +72,20 @@ impl AppCore {
                     let changed = def.kind != kind;
                     def.name = name.clone();
                     def.kind = kind.clone();
-                    Ok((def.clone(), changed))
+                    let mut forgotten = Vec::new();
+                    if changed {
+                        // A new host, user, port, jump or key may be another server: the
+                        // remembered SSH answers never go there.
+                        let prefix = ssh_answers_prefix(id);
+                        def.remembered.retain(|account| {
+                            let ssh = account.starts_with(&prefix);
+                            if ssh {
+                                forgotten.push(account.clone());
+                            }
+                            !ssh
+                        });
+                    }
+                    Ok((def.clone(), changed, forgotten))
                 }
                 None => {
                     let def = TunnelDef {
@@ -76,11 +95,12 @@ impl AppCore {
                         remembered: Vec::new(),
                     };
                     all.push(def.clone());
-                    Ok((def, false))
+                    Ok((def, false, Vec::new()))
                 }
             }
         })?;
         if changed {
+            self.tunnel_forget_ssh_answers(&saved.id, &forgotten);
             self.tunnel_runtime().reset(&saved.id);
         }
         self.emit(CoreEvent::TunnelsChanged);
@@ -135,6 +155,8 @@ impl AppCore {
             has_password,
             password_note,
             state: self.tunnel_state(&def.id),
+            prompt: self.tunnel_runtime().prompts.first(&def.id),
+            log: self.tunnel_runtime().ssh.log_lines(&def.id),
         }
     }
 }

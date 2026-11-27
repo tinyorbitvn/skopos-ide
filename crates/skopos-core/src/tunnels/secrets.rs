@@ -73,6 +73,12 @@ impl TunnelSecrets {
         refused.map_or(Ok(()), Err)
     }
 
+    /// Forgets the secrets held in memory whose account starts with `prefix`: the answers a
+    /// deleted tunnel kept without the keychain. The keychain ones are in `remembered`.
+    pub(crate) fn forget_memory(&self, prefix: &str) {
+        self.kept.retain(|account, _| !account.starts_with(prefix));
+    }
+
     /// Forgets the secret. A store that cannot delete it only logs. Blocks.
     pub(crate) fn delete(&self, account: &str) {
         self.kept.remove(account);
@@ -145,6 +151,17 @@ impl AppCore {
         }
         self.tunnel_secrets()
             .delete(&proxy_password_account(&def.id));
+        self.tunnel_secrets().forget_memory(&format!("{}:", def.id));
+    }
+
+    /// Forgets the tunnel's remembered SSH answers: `accounts` from its `remembered` list, and
+    /// those this run kept in memory only. Blocks on the keychain.
+    pub(crate) fn tunnel_forget_ssh_answers(&self, id: &str, accounts: &[String]) {
+        for account in accounts {
+            self.tunnel_secrets().delete(account);
+        }
+        self.tunnel_secrets()
+            .forget_memory(&super::askpass::ssh_answers_prefix(id));
     }
 
     /// Whether the tunnel has a password, and the note when it lives in memory only.

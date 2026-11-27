@@ -123,7 +123,7 @@ async fn the_gateway_carries_an_allowed_target_through_the_proxy() {
     stream.read_exact(&mut buf).await.unwrap();
     assert_eq!(&buf, b"ping");
     assert_eq!(s.proxy.seen.targets(), [target]);
-    assert_eq!(s.core.tunnel_state(&s.tunnel.id), TunnelState::Up);
+    assert!(s.core.tunnel_state(&s.tunnel.id).is_up());
 }
 
 #[tokio::test]
@@ -176,7 +176,7 @@ async fn stop_ends_open_connections_and_test_reports_the_state() {
     let url = s.core.tunnel_url(&s.tunnel).unwrap();
     let target = format!("127.0.0.1:{}", s.echo.addr.port());
     let (mut stream, _) = connect(url.expose(), &target, None).await;
-    let view = s.core.tunnel_stop(&s.tunnel.id).unwrap();
+    let view = s.core.tunnel_stop(&s.tunnel.id).await.unwrap();
     assert_eq!(view.state, TunnelState::Idle);
     let mut rest = Vec::new();
     tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut rest))
@@ -184,7 +184,7 @@ async fn stop_ends_open_connections_and_test_reports_the_state() {
         .expect("Stop closes the connection")
         .unwrap();
     let view = s.core.tunnel_test(&s.tunnel.id).await.unwrap();
-    assert_eq!(view.state, TunnelState::Up);
+    assert!(view.state.is_up(), "{:?}", view.state);
 }
 
 #[tokio::test]
@@ -196,4 +196,51 @@ async fn the_gateway_url_keeps_its_port_and_each_tunnel_its_token() {
     assert_eq!(first.host_str(), Some("127.0.0.1"));
     assert_eq!(first.username(), s.tunnel.id);
     assert_eq!(first.password().map(str::len), Some(32));
+}
+
+#[tokio::test]
+async fn gateway_traffic_never_restarts_a_failed_ssh_tunnel() {
+    let echo = echo_server().await;
+    let (core, id, _root) =
+        core_with_cluster(&format!("https://127.0.0.1:{}", echo.addr.port())).await;
+    let view = core
+        .tunnel_save(TunnelInput {
+            id: None,
+            name: "bastion".into(),
+            kind: TunnelKind::Ssh {
+                host: "bastion".into(),
+                user: None,
+                port: None,
+                jump: None,
+                identity_file: None,
+            },
+        })
+        .unwrap();
+    core.cluster_settings_set(
+        &id,
+        ClusterSettings {
+            tunnel: Some(view.id.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let failed = TunnelState::Failed {
+        message: "me@bastion: Permission denied (password).".into(),
+    };
+    core.tunnel_set_state(&view.id, failed.clone());
+    let tunnel = core.tunnel_def(&view.id).unwrap();
+    let url = core.tunnel_url(&tunnel).unwrap();
+    let target = format!("127.0.0.1:{}", echo.addr.port());
+
+    let (_, status) = connect(url.expose(), &target, None).await;
+
+    assert_eq!(
+        status,
+        "HTTP/1.1 502 Tunnel \"bastion\": me@bastion: Permission denied (password)."
+    );
+    assert!(
+        !core.tunnel_runtime().ssh.running(&view.id),
+        "a wrong password would be sent again"
+    );
+    assert_eq!(core.tunnel_state(&view.id), failed);
 }

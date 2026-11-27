@@ -1,8 +1,9 @@
-import { useEffect } from "react";
-import { ErrorNotice, Spinner, StatusDot } from "../../design";
+import { useEffect, useState } from "react";
+import { ErrorNotice, Input, Spinner, StatusDot } from "../../design";
 import type { ToolName } from "../../ipc/generated/ToolName";
 import type { ToolStatus } from "../../ipc/generated/ToolStatus";
 import { useHelm } from "../../stores/helm";
+import { usePrefs } from "../../stores/prefs";
 import { ToolDownload } from "../helm/ToolDownload";
 import { toolView } from "../helm/toolView";
 import styles from "./PreferencesScreen.module.css";
@@ -35,12 +36,47 @@ function ToolRow({ status }: { status: ToolStatus }) {
   );
 }
 
-/** Preferences › Tools (spec §12.1): helm, then kubectl. */
+/** The ssh SSH tunnels run (tunnels spec §6.1): a path, or empty for ssh on PATH. */
+function SshRow() {
+  const prefs = usePrefs((s) => s.prefs);
+  const setSshPath = usePrefs((s) => s.setSshPath);
+  const saved = prefs?.sshPath ?? "";
+  const [text, setText] = useState(saved);
+  useEffect(() => setText(saved), [saved]);
+  if (prefs === null) return null;
+  const commit = () => {
+    const path = text.trim();
+    if (path === saved) return;
+    void setSshPath(path === "" ? null : path);
+  };
+  return (
+    <li className={styles.row} data-testid="pref-tool-ssh">
+      <div className={styles.toolText}>
+        <Input
+          label="ssh"
+          help="Empty uses ssh on PATH"
+          placeholder="/usr/bin/ssh"
+          className={styles.monoInput}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+          }}
+          data-testid="pref-tool-ssh-path"
+        />
+      </div>
+    </li>
+  );
+}
+
+/** Preferences › Tools (spec §12.1): helm, then kubectl, then the ssh path. */
 export function ToolsSection() {
   const status = useHelm((s) => s.tools.status);
   const error = useHelm((s) => s.tools.error);
   const ensureTools = useHelm((s) => s.ensureTools);
   const loadTools = useHelm((s) => s.loadTools);
+  const hasPrefs = usePrefs((s) => s.prefs !== null);
 
   useEffect(() => {
     void ensureTools();
@@ -74,6 +110,11 @@ export function ToolsSection() {
     <section className={styles.section} data-testid="pref-tools">
       <h3 className={styles.heading}>Tools</h3>
       {body}
+      {hasPrefs ? (
+        <ul className={styles.rows}>
+          <SshRow />
+        </ul>
+      ) : null}
     </section>
   );
 }

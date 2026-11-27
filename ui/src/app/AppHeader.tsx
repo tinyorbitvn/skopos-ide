@@ -18,6 +18,7 @@ import styles from "./AppHeader.module.css";
 import { clusterStatus } from "./clusterStatus";
 import { runCommand, useCommandContext } from "./commands";
 import { IS_MAC, shortKeys } from "./shortcuts";
+import { TunnelBadge } from "./TunnelBadge";
 import { focusedTab } from "./tabs/layout";
 import { tabInfo } from "./tabs/routes";
 import { useFocusedPath } from "./tabs/ShellRouter";
@@ -104,9 +105,7 @@ export function AppHeader() {
         </span>
       ) : null}
       {problem !== null ? (
-        <span data-testid="header-tunnel" title={problem.detail}>
-          <Badge tone={problem.tone}>{problem.label}</Badge>
-        </span>
+        <TunnelBadge problem={problem} testId="header-tunnel" />
       ) : null}
       {info !== null ? (
         <span className={styles.distribution} data-testid="header-distribution">

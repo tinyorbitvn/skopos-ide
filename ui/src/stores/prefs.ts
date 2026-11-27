@@ -13,6 +13,8 @@ export interface PrefsState {
   load(): Promise<void>;
   setTheme(theme: Theme): Promise<void>;
   setUpdateCheck(on: boolean): Promise<void>;
+  /** Preferences › Tools › ssh (tunnels spec §6.1); `null` runs ssh from PATH. */
+  setSshPath(path: string | null): Promise<void>;
   addSource(source: SyncSource): Promise<void>;
   removeSource(path: string): Promise<void>;
 }
@@ -60,6 +62,11 @@ export const usePrefs = create<PrefsState>((set, get) => {
       const { prefs } = get();
       if (!prefs) return;
       await save({ ...prefs, updateCheck: on });
+    },
+    async setSshPath(path) {
+      const { prefs } = get();
+      if (!prefs) return;
+      await save({ ...prefs, sshPath: path });
     },
     async addSource(source) {
       const { prefs } = get();

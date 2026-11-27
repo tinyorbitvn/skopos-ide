@@ -1,14 +1,17 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { toast } from "../../design";
+import type { Prefs } from "../../ipc/generated/Prefs";
 import type { ToolStatus } from "../../ipc/generated/ToolStatus";
 import { resetHelmForTest } from "../../stores/helm";
+import { resetPrefsForTest, usePrefs } from "../../stores/prefs";
 import { toolStatus } from "../../test/helm";
 import { emitEvent, flush, mockBackend } from "../../test/ipc";
 import { ToolsSection } from "./ToolsSection";
 
 beforeEach(() => {
   resetHelmForTest();
+  resetPrefsForTest();
   vi.restoreAllMocks();
 });
 
@@ -140,4 +143,53 @@ test("a status that cannot be read shows the error with Retry", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await act(flush);
   expect(screen.getByTestId("pref-tool-helm")).toBeTruthy();
+});
+
+const PREFS: Prefs = {
+  theme: "system",
+  syncSources: [],
+  updateCheck: true,
+  agents: { defaultAgent: null, custom: [], agents: {} },
+};
+
+test("the ssh path saves on Enter and an emptied field goes back to PATH", async () => {
+  usePrefs.setState({ prefs: PREFS, loading: false, error: null });
+  const backend = await show({
+    tools_status: () => [KUBECTL, toolStatus({ tool: "helm" })],
+    prefs_set: () => null,
+  });
+  const field = screen.getByTestId("pref-tool-ssh-path") as HTMLInputElement;
+  expect(screen.getByTestId("pref-tool-ssh").textContent).toContain(
+    "Empty uses ssh on PATH",
+  );
+  fireEvent.change(field, { target: { value: " /opt/openssh/bin/ssh " } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  await act(flush);
+  expect(backend.callsTo("prefs_set")).toEqual([
+    { prefs: { ...PREFS, sshPath: "/opt/openssh/bin/ssh" } },
+  ]);
+
+  fireEvent.change(field, { target: { value: "" } });
+  fireEvent.blur(field);
+  await act(flush);
+  expect(backend.callsTo("prefs_set")[1]).toEqual({
+    prefs: { ...PREFS, sshPath: null },
+  });
+});
+
+test("an unchanged ssh path is not saved again", async () => {
+  usePrefs.setState({
+    prefs: { ...PREFS, sshPath: "/usr/bin/ssh" },
+    loading: false,
+    error: null,
+  });
+  const backend = await show({
+    tools_status: () => [KUBECTL, toolStatus({ tool: "helm" })],
+    prefs_set: () => null,
+  });
+  const field = screen.getByTestId("pref-tool-ssh-path") as HTMLInputElement;
+  expect(field.value).toBe("/usr/bin/ssh");
+  fireEvent.blur(field);
+  await act(flush);
+  expect(backend.callsTo("prefs_set")).toEqual([]);
 });

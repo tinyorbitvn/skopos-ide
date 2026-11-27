@@ -316,7 +316,7 @@ async fn capture(mut reader: impl AsyncRead + Unpin, limit: usize, into: Shared)
     }
 }
 
-async fn stream_lines(
+pub(crate) async fn stream_lines(
     mut reader: impl AsyncRead + Unpin,
     stream: Stream,
     lines: mpsc::Sender<OutputLine>,
