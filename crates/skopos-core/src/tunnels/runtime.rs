@@ -12,8 +12,10 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use super::model::{TunnelDef, TunnelKind};
+use super::prompts::Prompts;
 use super::state::TunnelState;
 use super::store::{gone, TunnelView};
+use super::timings::TunnelTimings;
 use super::upstream::{DialError, ProxyUpstream, Stream};
 use crate::agents::endpoint::{new_token, same_bytes};
 use crate::app_core::{AppCore, CoreEvent};
@@ -40,6 +42,9 @@ pub(crate) struct TunnelRuntime {
     cancels: DashMap<String, CancellationToken>,
     /// Ends the gateway when the core goes.
     shutdown: CancellationToken,
+    /// The SSH prompts that wait for the person.
+    pub(crate) prompts: Prompts,
+    pub(crate) timings: Mutex<TunnelTimings>,
 }
 
 impl Drop for TunnelRuntime {
@@ -67,6 +72,8 @@ impl TunnelRuntime {
             open: DashMap::new(),
             cancels: DashMap::new(),
             shutdown: CancellationToken::new(),
+            prompts: Prompts::default(),
+            timings: Mutex::new(TunnelTimings::default()),
         }
     }
 
@@ -99,6 +106,7 @@ impl TunnelRuntime {
         self.reset(id);
         self.tokens.remove(id);
         self.open.remove(id);
+        self.prompts.clear_tunnel(id);
     }
 }
 

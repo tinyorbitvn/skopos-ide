@@ -4,6 +4,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use super::model::{invalid, tunnel_name, TunnelDef, TunnelInput, TunnelKind};
+use super::prompts::TunnelPrompt;
 use super::state::TunnelState;
 use crate::agents::endpoint::new_token;
 use crate::app_core::{AppCore, CoreEvent};
@@ -31,6 +32,8 @@ pub struct TunnelView {
     /// Set when the password lives in memory only (spec §5.3).
     pub password_note: Option<String>,
     pub state: TunnelState,
+    /// The oldest SSH prompt that waits for the person (spec §6.3).
+    pub prompt: Option<TunnelPrompt>,
 }
 
 impl AppCore {
@@ -135,6 +138,7 @@ impl AppCore {
             has_password,
             password_note,
             state: self.tunnel_state(&def.id),
+            prompt: self.tunnel_runtime().prompts.first(&def.id),
         }
     }
 }
