@@ -1,4 +1,4 @@
-//! The agents SkoposIDE runs (agents spec §3.5): the four built-in ones and the ones the
+//! The agents SkoposIDE runs (agents spec §3.5): the five built-in ones and the ones the
 //! person adds by command, found on PATH, else in the known install folders. Finding an agent
 //! runs nothing; its probe (spec §4.2) gives its state.
 
@@ -33,7 +33,7 @@ pub struct AgentDef {
 }
 
 /// The built-in agents in the order Preferences → Agents lists them.
-pub const BUILTIN_AGENTS: [AgentDef; 4] = [
+pub const BUILTIN_AGENTS: [AgentDef; 5] = [
     AgentDef {
         id: "claude",
         name: "Claude",
@@ -81,6 +81,20 @@ pub const BUILTIN_AGENTS: [AgentDef; 4] = [
         extra_env: &[],
         install_hint: "Install Gemini CLI, then check again.",
         sign_in_hint: "Run gemini in a terminal and sign in, then check again.",
+    },
+    // Kiro's guide for ACP clients starts its V3 engine by name: V3 has the `model` config
+    // option and names MCP tools in `_meta`.
+    AgentDef {
+        id: "kiro",
+        name: "Kiro CLI",
+        program: "kiro-cli",
+        args: &["acp", "--agent-engine=v3"],
+        cli: None,
+        cli_env: None,
+        adapter: None,
+        extra_env: &[],
+        install_hint: "Install Kiro CLI, then check again.",
+        sign_in_hint: "Run kiro-cli login in a terminal, then check again.",
     },
 ];
 
@@ -531,9 +545,12 @@ mod tests {
     #[test]
     fn the_built_in_agents_are_the_spec_table_in_its_order() {
         let ids: Vec<&str> = BUILTIN_AGENTS.iter().map(|def| def.id).collect();
-        assert_eq!(ids, ["claude", "codex", "opencode", "gemini"]);
+        assert_eq!(ids, ["claude", "codex", "opencode", "gemini", "kiro"]);
         let names: Vec<&str> = BUILTIN_AGENTS.iter().map(|def| def.name).collect();
-        assert_eq!(names, ["Claude", "Codex", "OpenCode", "Gemini CLI"]);
+        assert_eq!(
+            names,
+            ["Claude", "Codex", "OpenCode", "Gemini CLI", "Kiro CLI"]
+        );
 
         let claude = builtin("claude");
         assert_eq!(claude.program, "claude-agent-acp");
@@ -552,15 +569,21 @@ mod tests {
         assert_eq!(codex.adapter, Some("codex-acp"));
         assert!(codex.extra_env.is_empty());
         for (id, program, args) in [
-            ("opencode", "opencode", "acp"),
-            ("gemini", "gemini", "--acp"),
+            ("opencode", "opencode", &["acp"][..]),
+            ("gemini", "gemini", &["--acp"][..]),
+            // Kiro's guide for ACP clients starts its V3 engine by name.
+            ("kiro", "kiro-cli", &["acp", "--agent-engine=v3"][..]),
         ] {
             let def = builtin(id);
             assert_eq!(def.program, program);
-            assert_eq!(def.args, [args]);
+            assert_eq!(def.args, args);
             assert_eq!((def.cli, def.cli_env, def.adapter), (None, None, None));
             assert!(def.extra_env.is_empty());
         }
+        assert_eq!(
+            builtin("kiro").sign_in_hint,
+            "Run kiro-cli login in a terminal, then check again."
+        );
         for def in &BUILTIN_AGENTS {
             assert!(
                 def.install_hint.ends_with(", then check again."),

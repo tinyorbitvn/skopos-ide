@@ -702,21 +702,34 @@ impl StderrTail {
 /// - Codex (`codex-acp`): `Tool: skopos/<tool>`, and a `rawInput` with `server` and `tool`;
 /// - OpenCode: `skopos_<tool>`;
 /// - Gemini CLI: `<tool> (skopos MCP Server)`, and `<tool> (skopos)`;
+/// - Kiro CLI: `@skopos/<tool>`, and a `_meta.kiro.mcpTool.identity` with `serverName` and
+///   `toolName`, whatever the title;
 /// - the dotted `skopos.<tool>` and the bare `skopos/<tool>`.
 ///
 /// `<tool>` is one of `SKOPOS_TOOLS`. A `rawInput` names the server and the tool as `server` /
 /// `serverName` / `server_name` and `tool` / `toolName` / `tool_name`.
-pub fn is_skopos_tool(title: &str, raw_input: Option<&Value>) -> bool {
+pub fn is_skopos_tool(title: &str, raw_input: Option<&Value>, meta: Option<&wire::Meta>) -> bool {
     let title = title.trim();
     let title = title.strip_prefix("Tool: ").unwrap_or(title).trim();
     if SKOPOS_TOOLS.iter().any(|tool| title_names(title, tool)) {
         return true;
     }
-    raw_input.is_some_and(|raw| {
-        string_field(raw, &["server", "serverName", "server_name"]) == Some(SKOPOS_SERVER)
-            && string_field(raw, &["tool", "toolName", "tool_name"])
-                .is_some_and(|tool| SKOPOS_TOOLS.contains(&tool))
-    })
+    let names_skopos_tool = |raw: &Value, servers: &[&str], tools: &[&str]| {
+        string_field(raw, servers) == Some(SKOPOS_SERVER)
+            && string_field(raw, tools).is_some_and(|tool| SKOPOS_TOOLS.contains(&tool))
+    };
+    let raw_names = raw_input.is_some_and(|raw| {
+        names_skopos_tool(
+            raw,
+            &["server", "serverName", "server_name"],
+            &["tool", "toolName", "tool_name"],
+        )
+    });
+    let kiro_names = meta
+        .and_then(|meta| meta.get("kiro"))
+        .and_then(|kiro| kiro.pointer("/mcpTool/identity"))
+        .is_some_and(|identity| names_skopos_tool(identity, &["serverName"], &["toolName"]));
+    raw_names || kiro_names
 }
 
 fn title_names(title: &str, tool: &str) -> bool {
@@ -727,6 +740,7 @@ fn title_names(title: &str, tool: &str) -> bool {
         format!("{SKOPOS_SERVER}_{tool}"),
         format!("{tool} ({SKOPOS_SERVER})"),
         format!("{tool} ({SKOPOS_SERVER} MCP Server)"),
+        format!("@{SKOPOS_SERVER}/{tool}"),
     ]
     .iter()
     .any(|form| form == title)
@@ -763,7 +777,7 @@ impl Tracker {
             )),
             SessionUpdate::ToolCall(call) => {
                 let id = call.tool_call_id.0.to_string();
-                if is_skopos_tool(&call.title, call.raw_input.as_ref()) {
+                if is_skopos_tool(&call.title, call.raw_input.as_ref(), call.meta.as_ref()) {
                     self.hidden.insert(id);
                     return Some(AcpUpdate::HiddenTool);
                 }
@@ -788,6 +802,7 @@ impl Tracker {
                     && is_skopos_tool(
                         fields.title.as_deref().unwrap_or_default(),
                         fields.raw_input.as_ref(),
+                        update.meta.as_ref(),
                     )
                 {
                     self.hidden.insert(id);
@@ -982,13 +997,14 @@ mod tests {
             "skopos_patch_object",
             "get_object (skopos)",
             "get_object (skopos MCP Server)",
+            "@skopos/get_logs",
             "  mcp__skopos__exec  ",
         ] {
-            assert!(is_skopos_tool(title, None), "{title}");
+            assert!(is_skopos_tool(title, None, None), "{title}");
         }
         for name in SKOPOS_TOOLS {
             assert!(
-                is_skopos_tool(&format!("mcp__skopos__{name}"), None),
+                is_skopos_tool(&format!("mcp__skopos__{name}"), None, None),
                 "{name}"
             );
         }
@@ -1003,10 +1019,13 @@ mod tests {
             "skopos/unknown_tool",
             "Tool: other/get_logs",
             "get_object (other)",
+            "@other/get_logs",
+            "@skopos/unknown_tool",
+            "@skopos/",
             "mcp__skopos__",
             "",
         ] {
-            assert!(!is_skopos_tool(title, None), "{title}");
+            assert!(!is_skopos_tool(title, None, None), "{title}");
         }
         for raw in [
             json!({ "server": "skopos" }),
@@ -1014,7 +1033,7 @@ mod tests {
             json!({ "server": "skopos", "tool": "rm" }),
             json!("skopos/get_logs"),
         ] {
-            assert!(!is_skopos_tool("Run tool", Some(&raw)), "{raw}");
+            assert!(!is_skopos_tool("Run tool", Some(&raw), None), "{raw}");
         }
     }
 
@@ -1025,7 +1044,39 @@ mod tests {
             json!({ "serverName": "skopos", "toolName": "scale" }),
             json!({ "server_name": "skopos", "tool_name": "exec", "arguments": { "pod": "api" } }),
         ] {
-            assert!(is_skopos_tool("Run tool", Some(&raw)), "{raw}");
+            assert!(is_skopos_tool("Run tool", Some(&raw), None), "{raw}");
+        }
+    }
+
+    /// Kiro's `_meta` for a call to an MCP server's tool.
+    fn kiro_meta(server: &str, tool: &str) -> wire::Meta {
+        let meta = json!({ "kiro": { "mcpTool": {
+            "version": 1,
+            "identity": { "serverName": server, "toolName": tool }
+        } } });
+        meta.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn kiro_s_tool_identity_names_a_skopos_tool_whatever_the_title() {
+        let skopos = kiro_meta("skopos", "get_logs");
+        assert!(is_skopos_tool("Get logs", None, Some(&skopos)));
+        // The title alone is enough, whatever another server's identity says.
+        let other = kiro_meta("github", "get_logs");
+        assert!(is_skopos_tool("@skopos/get_logs", None, Some(&other)));
+        for meta in [
+            kiro_meta("github", "get_logs"),
+            kiro_meta("skopos", "rm"),
+            json!({ "kiro": { "consent": true } })
+                .as_object()
+                .unwrap()
+                .clone(),
+            json!({ "kiro": { "mcpTool": { "identity": "skopos/get_logs" } } })
+                .as_object()
+                .unwrap()
+                .clone(),
+        ] {
+            assert!(!is_skopos_tool("Get logs", None, Some(&meta)), "{meta:?}");
         }
     }
 
@@ -1145,6 +1196,20 @@ mod tests {
         }));
         assert_eq!(
             tracker.apply(SessionUpdate::ToolCall(codex)),
+            Some(AcpUpdate::HiddenTool)
+        );
+
+        // Kiro names the server and the tool in the call's `_meta`, not its title.
+        let kiro = ToolCall::new("s4", "Get logs").meta(kiro_meta("skopos", "get_logs"));
+        assert_eq!(
+            tracker.apply(SessionUpdate::ToolCall(kiro)),
+            Some(AcpUpdate::HiddenTool)
+        );
+        let kiro_first =
+            ToolCallUpdate::new("s5", ToolCallUpdateFields::new().title("Scale".to_owned()))
+                .meta(kiro_meta("skopos", "scale"));
+        assert_eq!(
+            tracker.apply(SessionUpdate::ToolCallUpdate(kiro_first)),
             Some(AcpUpdate::HiddenTool)
         );
     }

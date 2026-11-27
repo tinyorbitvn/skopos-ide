@@ -97,7 +97,7 @@ added. Today it provides:
 - **Access control:** RBAC kinds, checks of the verbs your account may use, and ServiceAccount
   kubeconfigs.
 - **AI agents:** chats with the agent CLIs you installed (Claude Code, Codex, OpenCode, Gemini
-  CLI or your own) over ACP. Agents run the installed CLIs as you on Linux, macOS and Windows,
+  CLI, Kiro CLI or your own) over ACP. Agents run the installed CLIs as you on Linux, macOS and Windows,
   and each chat gets a kubeconfig with only its clusters. The app's own tools ask before each
   change by default, and the agent asks in the chat before it runs its own commands.
 - **Tools and updates:** managed `helm` and `kubectl` downloads, and signed in-app updates.
