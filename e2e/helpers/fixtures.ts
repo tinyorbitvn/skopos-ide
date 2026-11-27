@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fakeAgentPrefs } from "./fakeagent";
+import { SSHD_PASSWORD_VAR, SSHD_PORT_VAR, startFakeSshd } from "./fakesshd";
 import { startFakeKube } from "./fakekube";
 import { findHelm } from "./helmCharts";
 import { kubectl } from "./kube";
@@ -457,6 +458,74 @@ async function startUpdatesFixture() {
   };
 }
 
+const KIND_INTERNAL_SERVER = "skopos-e2e-control-plane:6443";
+const SSH_CONFIG_VAR = "SKOPOS_E2E_SSH_CONFIG";
+
+/**
+ * The kind cluster behind an SSH tunnel (tunnels spec §6.6). Its kubeconfig names the API
+ * server as inside the kind network, which this host cannot resolve; only skopos-fakesshd
+ * resolves it, to the address kind publishes, so the cluster answers through the tunnel
+ * alone. ssh finds the account's home from the system, not from HOME, so the e2e build
+ * passes this fixture's config to ssh (`SKOPOS_E2E_SSH_CONFIG`) and ssh never reads ~/.ssh.
+ * Its known_hosts starts empty: the spec trusts the host key in the prompt dialog.
+ */
+async function startTunnelsFixture() {
+  const kind = fs.readFileSync(KIND_KUBECONFIG, "utf8");
+  const published = /server: https:\/\/(127\.0\.0\.1:\d+)/.exec(kind)?.[1];
+  if (published === undefined) {
+    throw new Error(`${KIND_KUBECONFIG} names no https://127.0.0.1:<port> server`);
+  }
+  const password = `e2e-${process.pid}`;
+  const sshd = await startFakeSshd({
+    user: "me",
+    password,
+    hosts: { [KIND_INTERNAL_SERVER]: published },
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "skopos-e2e-ssh-"));
+  const knownHosts = path.join(dir, "known_hosts");
+  const globalKnownHosts = path.join(dir, "global_known_hosts");
+  fs.writeFileSync(knownHosts, "");
+  fs.writeFileSync(globalKnownHosts, "");
+  const config = path.join(dir, "ssh_config");
+  fs.writeFileSync(
+    config,
+    [
+      "Host *",
+      `  UserKnownHostsFile "${knownHosts}"`,
+      `  GlobalKnownHostsFile "${globalKnownHosts}"`,
+      "  HashKnownHosts no",
+      "  IdentityAgent none",
+      "  PubkeyAuthentication no",
+      "  IdentitiesOnly yes",
+      "  PreferredAuthentications keyboard-interactive,password",
+      "  StrictHostKeyChecking ask",
+      "  UpdateHostKeys no",
+      "  ConnectTimeout 5",
+      "",
+    ].join("\n"),
+  );
+  // The app and the spec inherit these from the launcher, which starts them next. Later
+  // specs inherit them too; only SSH tunnels read them.
+  process.env[SSH_CONFIG_VAR] = config;
+  process.env[SSHD_PORT_VAR] = String(sshd.port);
+  process.env[SSHD_PASSWORD_VAR] = password;
+  return {
+    kubeconfigs: {
+      kind: kind.replace(
+        `server: https://${published}`,
+        `server: https://${KIND_INTERNAL_SERVER}`,
+      ),
+    },
+    async stop() {
+      for (const name of [SSH_CONFIG_VAR, SSHD_PORT_VAR, SSHD_PASSWORD_VAR]) {
+        delete process.env[name];
+      }
+      await sshd.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 const FIXTURES: Record<string, SpecFixture> = {
   catalog: { kubeconfigs: { config: kubeconfig(["alpha", "beta"]) } },
   "hotbar-restart-1-save": {
@@ -526,6 +595,7 @@ const FIXTURES: Record<string, SpecFixture> = {
   "tabs-restart-2-verify": { kubeconfigs: {}, envGroup: "tabs-restart" },
   windows: { kubeconfigs: {}, start: startKindFixture },
   updates: { kubeconfigs: {}, start: startUpdatesFixture },
+  tunnels: { kubeconfigs: {}, start: startTunnelsFixture },
   "catalog-folders": {
     kubeconfigs: { config: kubeconfig(["alpha", "beta", "gamma"]) },
   },

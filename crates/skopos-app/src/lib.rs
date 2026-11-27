@@ -127,6 +127,15 @@ fn run_app(
     context: Context<Wry>,
     channel: install_channel::InstallChannel,
 ) {
+    // The e2e suite hands ssh a config of its own (tunnels spec §6.6): ssh finds the
+    // account's home from the system, not from HOME. Release builds lack this.
+    #[cfg(feature = "e2e")]
+    if let Some(config) = std::env::var_os("SKOPOS_E2E_SSH_CONFIG") {
+        core.set_ssh_test_hooks(skopos_core::tunnels::SshTestHooks {
+            config_file: Some(config.into()),
+            ..skopos_core::tunnels::SshTestHooks::default()
+        });
+    }
     let builder = tauri::Builder::default();
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
