@@ -15,9 +15,24 @@ export interface TunnelFields {
   password: string;
 }
 
+/** The SSH tunnel dialog's fields, as typed (tunnels spec §6.1). */
+export interface SshTunnelFields {
+  name: string;
+  host: string;
+  user: string;
+  port: string;
+  jump: string;
+  identityFile: string;
+}
+
 export type TunnelProblems = Partial<
-  Record<keyof TunnelFields | "form", string>
+  Record<keyof TunnelFields | keyof SshTunnelFields | "form", string>
 >;
+
+/** The core's own texts for SSH fields (tunnels spec §6.2). */
+export const SSH_HOST_NEEDED = "A host is needed.";
+export const SSH_PORT_ERROR = "The port is a number from 1 to 65535.";
+export const SSH_IDENTITY_ERROR = "The identity file must be an absolute path.";
 
 /** What is wrong with a proxy URL, or `null`. The core checks it again on save. */
 export function proxyUrlProblem(text: string): string | null {
@@ -43,20 +58,85 @@ function badUserChar(char: string): boolean {
   return char === ":" || code < 0x20 || (code >= 0x7f && code <= 0x9f);
 }
 
+function nameProblem(text: string): string | null {
+  const name = text.trim();
+  if (name === "") return "A name is needed.";
+  if ([...name].length > NAME_MAX) {
+    return `A name has at most ${NAME_MAX} characters.`;
+  }
+  return null;
+}
+
 /** The checks that run once Save was pressed. */
 export function checkTunnel(fields: TunnelFields): TunnelProblems {
   const problems: TunnelProblems = {};
-  const name = fields.name.trim();
-  if (name === "") problems.name = "A name is needed.";
-  else if ([...name].length > NAME_MAX) {
-    problems.name = `A name has at most ${NAME_MAX} characters.`;
-  }
+  const name = nameProblem(fields.name);
+  if (name !== null) problems.name = name;
   const url = proxyUrlProblem(fields.url);
   if (url !== null) problems.url = url;
   if ([...fields.username.trim()].some(badUserChar)) {
     problems.username = 'A user name cannot hold ":" or control characters.';
   }
   return problems;
+}
+
+/** Rust's `char::is_whitespace` or `char::is_control`. */
+function badSshChar(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return /\s/u.test(char) || code < 0x20 || (code >= 0x7f && code <= 0x9f);
+}
+
+/** A host, user or jump host ssh would read as an option (spec T5). */
+function sshWordProblem(text: string, label: string): string | null {
+  if (text.startsWith("-") || [...text].some(badSshChar)) {
+    return `${label} cannot start with "-" or hold spaces or control characters.`;
+  }
+  return null;
+}
+
+function isAbsolutePath(path: string): boolean {
+  return (
+    path.startsWith("/") ||
+    path.startsWith("\\\\") ||
+    /^[A-Za-z]:[\\/]/.test(path)
+  );
+}
+
+/** The SSH checks that run once Save was pressed. The core checks them again. */
+export function checkSshTunnel(fields: SshTunnelFields): TunnelProblems {
+  const problems: TunnelProblems = {};
+  const name = nameProblem(fields.name);
+  if (name !== null) problems.name = name;
+  const host = fields.host.trim();
+  const hostProblem =
+    host === "" ? SSH_HOST_NEEDED : sshWordProblem(host, "The host");
+  if (hostProblem !== null) problems.host = hostProblem;
+  const user = sshWordProblem(fields.user.trim(), "The user");
+  if (user !== null) problems.user = user;
+  const jump = sshWordProblem(fields.jump.trim(), "The jump host");
+  if (jump !== null) problems.jump = jump;
+  const port = fields.port.trim();
+  const portOk =
+    /^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535;
+  if (port !== "" && !portOk) problems.port = SSH_PORT_ERROR;
+  if (fields.identityFile !== "" && !isAbsolutePath(fields.identityFile)) {
+    problems.identityFile = SSH_IDENTITY_ERROR;
+  }
+  return problems;
+}
+
+/** The kind `tunnel_save` takes. Empty fields are `null`, so `~/.ssh/config` fills them. */
+export function sshKindOf(fields: SshTunnelFields): TunnelKind {
+  const text = (value: string) => (value.trim() === "" ? null : value.trim());
+  const port = fields.port.trim();
+  return {
+    type: "ssh",
+    host: fields.host.trim(),
+    user: text(fields.user),
+    port: port === "" ? null : Number(port),
+    jump: text(fields.jump),
+    identityFile: fields.identityFile === "" ? null : fields.identityFile,
+  };
 }
 
 /** Where a refusal of `tunnel_save` or `tunnel_set_password` shows. */
@@ -70,6 +150,13 @@ export function placeTunnelFailure(error: unknown): TunnelProblems {
     return { name: message };
   }
   if (message.startsWith("Enter a password")) return { password: message };
+  if (message === SSH_HOST_NEEDED || message.startsWith("The host cannot")) {
+    return { host: message };
+  }
+  if (message.startsWith("The user cannot")) return { user: message };
+  if (message.startsWith("The jump host")) return { jump: message };
+  if (message === SSH_PORT_ERROR) return { port: message };
+  if (message === SSH_IDENTITY_ERROR) return { identityFile: message };
   return { form: message };
 }
 

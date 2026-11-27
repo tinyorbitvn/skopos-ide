@@ -1,10 +1,15 @@
 import { expect, test } from "vitest";
 import {
+  checkSshTunnel,
   checkTunnel,
   PROXY_URL_ERROR,
   PROXY_USERINFO_ERROR,
   placeTunnelFailure,
   proxyUrlProblem,
+  SSH_HOST_NEEDED,
+  SSH_IDENTITY_ERROR,
+  SSH_PORT_ERROR,
+  sshKindOf,
   targetText,
 } from "./tunnelForm";
 
@@ -103,4 +108,79 @@ test("targetText names the proxy URL or the SSH target", () => {
       identityFile: null,
     }),
   ).toBe("SSH · coder.ws");
+});
+
+const SSH_FIELDS = {
+  name: "bastion",
+  host: "bastion.corp",
+  user: "",
+  port: "",
+  jump: "",
+  identityFile: "",
+};
+
+test("checkSshTunnel refuses what ssh would read as an option", () => {
+  expect(checkSshTunnel(SSH_FIELDS)).toEqual({});
+  expect(checkSshTunnel({ ...SSH_FIELDS, host: "  " })).toEqual({
+    host: SSH_HOST_NEEDED,
+  });
+  expect(
+    checkSshTunnel({
+      ...SSH_FIELDS,
+      host: "-oProxyCommand=evil",
+      user: "a b",
+      jump: "-J",
+      port: "70000",
+      identityFile: "keys/id",
+    }),
+  ).toEqual({
+    host: 'The host cannot start with "-" or hold spaces or control characters.',
+    user: 'The user cannot start with "-" or hold spaces or control characters.',
+    jump: 'The jump host cannot start with "-" or hold spaces or control characters.',
+    port: SSH_PORT_ERROR,
+    identityFile: SSH_IDENTITY_ERROR,
+  });
+  for (const port of ["0", "1.5", "22a", "-1"]) {
+    expect(checkSshTunnel({ ...SSH_FIELDS, port }).port).toBe(SSH_PORT_ERROR);
+  }
+  expect(
+    checkSshTunnel({ ...SSH_FIELDS, identityFile: "C:\\Users\\me\\.ssh\\id" }),
+  ).toEqual({});
+});
+
+test("sshKindOf trims the fields and sends empty ones as null", () => {
+  expect(
+    sshKindOf({
+      ...SSH_FIELDS,
+      host: " bastion.corp ",
+      user: " me ",
+      port: " 2222 ",
+      identityFile: "/home/me/.ssh/id",
+    }),
+  ).toEqual({
+    type: "ssh",
+    host: "bastion.corp",
+    user: "me",
+    port: 2222,
+    jump: null,
+    identityFile: "/home/me/.ssh/id",
+  });
+});
+
+test("an SSH refusal shows under the field it names", () => {
+  expect(placeTunnelFailure(new Error(SSH_HOST_NEEDED))).toEqual({
+    host: SSH_HOST_NEEDED,
+  });
+  expect(
+    placeTunnelFailure(new Error('The jump host cannot start with "-"')),
+  ).toEqual({ jump: 'The jump host cannot start with "-"' });
+  expect(
+    placeTunnelFailure(new Error('The user cannot start with "-"')),
+  ).toEqual({ user: 'The user cannot start with "-"' });
+  expect(placeTunnelFailure(new Error(SSH_PORT_ERROR))).toEqual({
+    port: SSH_PORT_ERROR,
+  });
+  expect(placeTunnelFailure(new Error(SSH_IDENTITY_ERROR))).toEqual({
+    identityFile: SSH_IDENTITY_ERROR,
+  });
 });

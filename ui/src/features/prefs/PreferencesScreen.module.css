@@ -225,3 +225,52 @@
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+
+.tunnelRow {
+  flex-wrap: wrap;
+}
+
+.log {
+  flex-basis: 100%;
+}
+
+.log summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: var(--radius-control);
+}
+
+.log summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.logLines {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4);
+  max-height: 240px;
+  overflow: auto;
+  font: var(--type-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-control);
+  background: var(--surface-sunken);
+  user-select: text;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.identityLabel {
+  font: var(--type-label);
+  color: var(--text-primary);
+}
+
+.identityRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
