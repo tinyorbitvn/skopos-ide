@@ -6,6 +6,8 @@ release notes (see `docs/releasing.md`).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-27
+
 - **Tunnels:** Preferences has a Tunnels list of named HTTP, HTTPS and SOCKS5 proxies, each with its own user name and a password kept in the keychain. A cluster picks one under Settings › Network, and its tables, logs, shells, port forwards, `helm`, the cluster's terminal, the agent's kubeconfig and a remote metrics URL over https all go through it. A failed tunnel shows a badge on the cluster with the reason, and a failed connect offers Open tunnel settings.
 - **Proxy URLs became tunnels:** each cluster's Proxy URL setting is moved into a tunnel at the first start; a password in the URL moves to the keychain.
 - **SOCKS5 proxies with a password** now work.
