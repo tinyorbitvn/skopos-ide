@@ -1,6 +1,7 @@
 //! Named tunnels (tunnels spec): how a cluster's API server is reached through a proxy, and the
 //! local gateway every consumer goes through.
 
+pub mod askpass_mode;
 pub(crate) mod gateway;
 #[cfg(test)]
 mod gateway_tests;

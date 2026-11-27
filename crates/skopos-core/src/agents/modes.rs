@@ -1,9 +1,11 @@
-//! The app binary's hidden mode (spec §4.1), parsed before anything else starts: `--agent-mcp
-//! <host:port>`. It starts no tokio runtime: it runs on plain threads with `std::net`.
+//! The app binary's hidden modes (spec §4.1), parsed before anything else starts: `--agent-mcp
+//! <host:port>`, and the askpass mode of a tunnel's `ssh` (tunnels spec §6.3). They start no
+//! tokio runtime: they run on plain threads with `std::net`.
 
 use std::ffi::OsString;
 
 use crate::agents::bridge::run_agent_mcp;
+use crate::tunnels::askpass_mode::{askpass_requested, run_askpass};
 
 /// The mode that bridges an agent's `skopos` MCP server to its chat.
 pub const AGENT_MCP: &str = "--agent-mcp";
@@ -12,14 +14,18 @@ pub const TOKEN_VAR: &str = "SKOPOS_AGENT_TOKEN";
 /// The exit code of a mode called the wrong way.
 pub const USAGE: i32 = 2;
 
-/// Runs the hidden mode the second argument names and gives its exit code; `None` when it names
-/// none, and the app starts as usual.
+/// Runs the hidden mode the arguments or the environment name and gives its exit code; `None`
+/// when they name none, and the app starts as usual.
 pub fn run(args: impl Iterator<Item = OsString>) -> Option<i32> {
-    let mut args = args.skip(1);
-    let mode = args.next()?;
-    let rest: Vec<OsString> = args.collect();
+    let args: Vec<OsString> = args.skip(1).collect();
+    // A tunnel's `ssh` runs the binary with the prompt as its only argument: only the
+    // environment tells the askpass mode apart.
+    if askpass_requested() {
+        return Some(run_askpass(&args));
+    }
+    let (mode, rest) = args.split_first()?;
     match mode.to_str() {
-        Some(AGENT_MCP) => Some(agent_mcp(&rest)),
+        Some(AGENT_MCP) => Some(agent_mcp(rest)),
         _ => None,
     }
 }
